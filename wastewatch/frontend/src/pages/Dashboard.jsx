@@ -18,6 +18,8 @@ import api from '../api/client'
 export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const [activeTab, setActiveTab] = useState("schedule");
+  const [activeTab1, setActiveTab1] = useState("hotspots");
 
   const [reports, setReports]   = useState([])
   const [stats,   setStats]     = useState({ total: 0, pending_approval: 0, resolved: 0, rejected: 0 })
@@ -78,22 +80,53 @@ export default function Dashboard() {
         </div>
 
         {/* ── Stat Cards ── */}
-        <div className="stat-grid" style={{ marginBottom: 24 }}>
-          <div className="stat-card">
-            <div className="label">Total Reports</div>
-            <div className="value">{stats.total}</div>
-          </div>
-          <div className="stat-card">
-            <div className="label">Pending Approval</div>
-            <div className="value" style={{ color: 'var(--warning)' }}>{stats.pending_approval}</div>
-          </div>
-          <div className="stat-card">
-            <div className="label">Resolved</div>
-            <div className="value" style={{ color: 'var(--accent)' }}>{stats.resolved}</div>
-          </div>
-          <div className="stat-card">
-            <div className="label">Rejected</div>
-            <div className="value" style={{ color: 'var(--danger)' }}>{stats.rejected}</div>
+        <div
+          style={{
+            overflowX: "auto",
+            marginBottom: 24,
+
+            /* Firefox */
+            scrollbarWidth: "none",
+
+            /* IE/Edge */
+            msOverflowStyle: "none",
+          }}
+        >
+          <div
+            className="stat-grid"
+            style={{
+              display: "flex",
+              gap: "16px",
+              minWidth: "max-content",
+            }}
+          >
+            
+            <div className="stat-card">
+              <div className="label">Total Reports</div>
+              <div className="value">{stats.total}</div>
+            </div>
+
+            <div className="stat-card">
+              <div className="label">Pending Approval</div>
+              <div className="value" style={{ color: 'var(--warning)' }}>
+                {stats.pending_approval}
+              </div>
+            </div>
+
+            <div className="stat-card">
+              <div className="label">Resolved</div>
+              <div className="value" style={{ color: 'var(--accent)' }}>
+                {stats.resolved}
+              </div>
+            </div>
+
+            <div className="stat-card">
+              <div className="label">Rejected</div>
+              <div className="value" style={{ color: 'var(--danger)' }}>
+                {stats.rejected}
+              </div>
+            </div>
+
           </div>
         </div>
 
@@ -116,69 +149,144 @@ export default function Dashboard() {
         </div>
 
         {/* ── My Reports ── */}
+        
         <h3 className="section-title">My Reports</h3>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <button onClick={() => setActiveTab1("reports")}
+              style={{
+                padding: "8px 16px",
+                borderRadius: 8,
+                border: "none",
+                cursor: "pointer",
+                background: activeTab1 === "reports" ? "var(--accent)" : "#eee",
+                color: activeTab1 === "reports" ? "#fff" : "#000000"
+              }}
+              >
+              My Reports
+            </button>
+            <button onClick={() => setActiveTab1("hotspots")}
+              style={{
+                padding: "8px 16px",
+                borderRadius: 8,
+                border: "none",
+                cursor: "pointer",
+                background: activeTab1 === "hotspots" ? "var(--accent)" : "#eee",
+                color: activeTab1 === "hotspots" ? "#fff" : "#333"
+              }}
+              >
+              Hotspots         
+            </button>
+        </div>
+
         <div className="card" style={{ padding: 16 }}>
-          {loading ? (
-            <div className="spinner" />
-          ) : reports.length === 0 ? (
-            <p className="text-muted text-sm text-center" style={{ padding: '20px 0' }}>
-              No reports yet.{' '}
-              <span
-                style={{ color: 'var(--accent)', cursor: 'pointer' }}
-                onClick={() => navigate('/report/submit')}
-              >
-                Submit your first report
-              </span>
-            </p>
+          {activeTab1 === "reports" ? (
+            loading ? (
+              <div className="spinner" />
+            ) : reports.length === 0 ? (
+              <p className="text-muted text-sm text-center" style={{ padding: '20px 0' }}>
+                No reports yet.{" "}
+                <span
+                  style={{ color: "var(--accent)", cursor: "pointer" }}
+                  onClick={() => navigate("/report/submit")}
+                >
+                  Submit your first report
+                </span>
+              </p>
+            ) : (
+              reports.slice(0, 10).map(report => (
+                <div
+                  key={report.id}
+                  className="report-item"
+                  onClick={() => navigate(`/report/${report.id}`)}
+                >
+                  <div className="report-pin">📍</div>
+                  <div className="report-info">
+                    <div className="report-type">
+                      {report.issue_type_display}
+                      <span className={badgeClass(report.status)}>
+                        {report.status}
+                      </span>
+                    </div>
+                    <div className="report-location">
+                      {report.barangay_name || "Unknown location"}
+                    </div>
+                  </div>
+                  <div className="report-date">
+                    Reported on {report.created_at?.slice(0, 10)}
+                  </div>
+                </div>
+              ))
+            )
           ) : (
-            reports.slice(0, 10).map(report => (
-              <div
-                key={report.id}
-                className="report-item"
-                onClick={() => navigate(`/report/${report.id}`)}
-              >
-                <div className="report-pin">📍</div>
-                <div className="report-info">
-                  <div className="report-type">
-                    {report.issue_type_display}
-                    <span className={badgeClass(report.status)}>{report.status}</span>
-                  </div>
-                  <div className="report-location">
-                    {report.barangay_name || 'Unknown location'}
-                  </div>
-                </div>
-                <div className="report-date">
-                  Reported on {report.created_at?.slice(0, 10)}
-                </div>
-              </div>
-            ))
+            <div>
+              {/* 👉 HOTSPOTS TAB */}
+              <p className="text-muted text-sm text-center" style={{ padding: '20px 0' }}>
+                Nearby Hotspots (you can add map or data here)
+              </p>
+            </div>
           )}
         </div>
 
         {/* ── Collection Schedule ── */}
-        <h3 className="section-title">Your Collection Schedule</h3>
+         <h3 className="section-title">Your Collection Schedule</h3>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <button
+            onClick={() => setActiveTab("schedule")}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 8,
+              border: "none",
+              cursor: "pointer",
+              background: activeTab === "schedule" ? "var(--accent)" : "#eee",
+              color: activeTab === "schedule" ? "#fff" : "#333"
+            }}
+          >
+            Schedule
+          </button>
+
+          <button
+            onClick={() => setActiveTab("other")}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 8,
+              border: "none",
+              cursor: "pointer",
+              background: activeTab === "other" ? "var(--accent)" : "#eee",
+              color: activeTab === "other" ? "#fff" : "#333"
+            }}
+          >
+            Other
+          </button>
+        </div>
         <div className="card" style={{ padding: 16 }}>
-          {user?.barangay_name ? (
-            <>
-              {[
-                { day: 'Monday',    time: '6:00 AM – 10:00 AM' },
-                { day: 'Wednesday', time: 'N/A' },
-                { day: 'Monday',    time: '6:00 AM – 10:00 AM' },
-              ].map((sched, i) => (
-                <div key={i} className="report-item">
-                  <div className="report-pin">📅</div>
-                  <div className="report-info">
-                    <div className="report-type">{sched.day}</div>
-                    <div className="report-location">{user.barangay_name}</div>
+          {activeTab === "schedule" ? (
+            user?.barangay_name ? (
+              <>
+                {[
+                  { day: 'Monday', time: '6:00 AM – 10:00 AM' },
+                  { day: 'Wednesday', time: 'N/A' },
+                  { day: 'Monday', time: '6:00 AM – 10:00 AM' },
+                ].map((sched, i) => (
+                  <div key={i} className="report-item">
+                    <div className="report-pin">📅</div>
+                    <div className="report-info">
+                      <div className="report-type">{sched.day}</div>
+                      <div className="report-location">{user.barangay_name}</div>
+                    </div>
+                    <div className="report-date">{sched.time}</div>
                   </div>
-                  <div className="report-date">{sched.time}</div>
-                </div>
-              ))}
-            </>
+                ))}
+              </>
+            ) : (
+              <p className="text-muted text-sm text-center" style={{ padding: '12px 0' }}>
+                No barangay assigned. Contact your administrator.
+              </p>
+            )
           ) : (
-            <p className="text-muted text-sm text-center" style={{ padding: '12px 0' }}>
-              No barangay assigned. Contact your administrator.
-            </p>
+            <div>
+              {/* 👉 Future content goes here */}
+              <p>Other tab content (you can add anything here later)</p>
+            </div>
           )}
         </div>
 
