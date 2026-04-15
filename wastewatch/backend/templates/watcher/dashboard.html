@@ -1,0 +1,123 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard — WasteWatch{% endblock %}
+
+{% block content %}
+<div class="page">
+
+  <!-- Page Header -->
+  <div style="margin-bottom:20px;">
+    <h2 style="font-family:var(--font-head);font-size:22px;font-weight:800;">Waste Collection</h2>
+    <p class="text-muted text-sm">Stay updated on garbage collection in your area</p>
+  </div>
+
+  <!-- ── Report a Garbage Issue Banner ── -->
+  <div class="card card-dark" style="background:var(--surface-2);text-align:center;padding:28px 20px;margin-bottom:20px;">
+    <h3 style="font-family:var(--font-head);font-size:18px;font-weight:700;margin-bottom:6px;">
+      Report a Garbage Issue
+    </h3>
+    <p class="text-muted text-sm" style="margin-bottom:20px;">
+      See uncollected waste or illegal dumping? let us know
+    </p>
+    <div class="btn-row" style="justify-content:center;">
+      <a href="{% url 'watcher:submit_report' %}" class="btn btn-outline">
+        🗂 Submit Report
+      </a>
+      <a href="{% url 'watcher:confirm_collection' %}" class="btn btn-primary">
+        ✅ Confirm Collection
+      </a>
+    </div>
+  </div>
+
+  <!-- ── Stat Cards ── -->
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="label">Total Reports</div>
+      <div class="value">{{ stats.total }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Pending Approval</div>
+      <div class="value" style="color:var(--warning)">{{ stats.pending_approval }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Resolved</div>
+      <div class="value" style="color:var(--accent)">{{ stats.resolved }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Rejected</div>
+      <div class="value" style="color:var(--danger)">{{ stats.rejected }}</div>
+    </div>
+  </div>
+
+  <!-- ── Nearby Collection Points (Map placeholder) ── -->
+  <h3 class="section-title">Nearby Collection Points</h3>
+  <div class="card" style="padding:12px;margin-bottom:24px;">
+    <div class="map-placeholder">
+      <div class="map-pill">
+        📍 Active Trucks: 2<br>
+        ⚠️ Hotspots Nearby: 3
+      </div>
+    </div>
+    <button class="btn btn-outline btn-sm" style="width:100%;margin-top:8px;" disabled>
+      🗺 Interactive Map View (coming soon)
+    </button>
+  </div>
+
+  <!-- ── My Reports ── -->
+  <h3 class="section-title">My Reports</h3>
+  <div class="card" style="padding:16px;">
+    {% if reports %}
+      {% for report in reports %}
+        <a href="{% url 'watcher:report_detail' report.id %}" style="text-decoration:none;color:inherit;">
+          <div class="report-item">
+            <div class="report-pin">📍</div>
+            <div class="report-info">
+              <div class="report-type">
+                {{ report.get_issue_type_display }}
+                <span class="badge badge-{{ report.status }}">{{ report.status }}</span>
+              </div>
+              <div class="report-location">
+                {% if report.barangay %}{{ report.barangay.name }}{% else %}Unknown location{% endif %}
+              </div>
+            </div>
+            <div class="report-date">
+              Reported on {{ report.created_at|date:"Y-m-d" }}
+            </div>
+          </div>
+        </a>
+      {% endfor %}
+    {% else %}
+      <p class="text-muted text-sm" style="text-align:center;padding:20px 0;">
+        No reports yet. <a href="{% url 'watcher:submit_report' %}" style="color:var(--accent);">Submit your first report</a>
+      </p>
+    {% endif %}
+  </div>
+
+  <!-- ── Collection Schedule (placeholder) ── -->
+  <h3 class="section-title">Your Collection Schedule</h3>
+  <div class="card" style="padding:16px;">
+    {% if user.barangay %}
+      <div class="report-item">
+        <div class="report-pin">📅</div>
+        <div class="report-info">
+          <div class="report-type">Monday</div>
+          <div class="report-location">{{ user.barangay.name }}</div>
+        </div>
+        <div class="report-date">6:00 AM – 10:00 AM</div>
+      </div>
+      <div class="report-item">
+        <div class="report-pin">📅</div>
+        <div class="report-info">
+          <div class="report-type">Wednesday</div>
+          <div class="report-location">{{ user.barangay.name }}</div>
+        </div>
+        <div class="report-date text-muted">N/A</div>
+      </div>
+    {% else %}
+      <p class="text-muted text-sm" style="text-align:center;padding:12px 0;">
+        No barangay assigned. Contact your administrator.
+      </p>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

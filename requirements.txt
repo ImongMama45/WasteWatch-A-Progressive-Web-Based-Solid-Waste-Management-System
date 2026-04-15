@@ -1,0 +1,4 @@
+Django>=4.2,<5.0
+psycopg2-binary>=2.9       # PostgreSQL adapter
+Pillow>=10.0               # Image field support (for report photos)
+django-cors-headers>=4.3   # Allow React Vite to call Django API

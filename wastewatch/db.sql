@@ -1,0 +1,1 @@
+GRANT ALL PRIVILEGES ON DATABASE wastewatch_db TO wastewatch_user;

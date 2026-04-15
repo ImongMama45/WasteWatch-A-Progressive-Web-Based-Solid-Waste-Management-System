@@ -1,0 +1,128 @@
+"""
+accounts/models.py
+------------------
+Core user system for WasteWatch.
+
+Two models live here:
+  1. Barangay  — the smallest admin unit (a village/district)
+  2. User      — custom user that extends Django's AbstractUser
+
+Why AbstractUser instead of AbstractBaseUser?
+  AbstractUser keeps all of Django's built-in auth goodness (sessions,
+  permissions, admin integration) while letting us add our own fields.
+  AbstractBaseUser gives more control but requires rebuilding everything
+  from scratch — overkill for a student project.
+"""
+
+from django.db import models
+from django.contrib.auth.models import AbstractUser
+
+
+# ---------------------------------------------------------------------------
+# 1. Barangay
+#    Simple lookup table.  Add more fields later (e.g. coordinates, zone).
+# ---------------------------------------------------------------------------
+class Barangay(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+
+    class Meta:
+        verbose_name_plural = 'Barangays'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+# ---------------------------------------------------------------------------
+# 2. User roles
+#    Defined as a plain Python class so they can be imported anywhere without
+#    triggering model imports.  Add new roles here — nothing else needs changing.
+# ---------------------------------------------------------------------------
+class UserRole(models.TextChoices):
+    ADMIN             = 'admin',             'Admin'
+    BARANGAY_OFFICIAL = 'barangay_official', 'Barangay Official'
+    WATCHER           = 'watcher',           'Watcher'
+    DRIVER            = 'driver',            'Driver'
+    CITIZEN           = 'citizen',           'Citizen'
+
+
+# ---------------------------------------------------------------------------
+# 3. Custom User model
+# ---------------------------------------------------------------------------
+class User(AbstractUser):
+    """
+    Replaces Django's default User.
+    - Login is done with EMAIL, not username.
+    - Each user belongs to one Barangay (optional at registration).
+    - Role controls what the user can see/do in the system.
+    """
+
+    # We keep username in the DB (AbstractUser requires it) but we don't
+    # use it for login.  Set it to a blank string by default.
+    username = models.CharField(max_length=150, unique=True, blank=True)
+
+    full_name = models.CharField(max_length=255)
+
+    # Email is the login identifier — must be unique
+    email = models.EmailField(unique=True)
+
+    role = models.CharField(
+        max_length=20,
+        choices=UserRole.choices,
+        default=UserRole.CITIZEN,   # Safe default — least privilege
+        # NOTE: The role field is intentionally hidden from the public
+        # registration form.  Only admins can change roles via /admin/.
+    )
+
+    barangay = models.ForeignKey(
+        Barangay,
+        on_delete=models.SET_NULL,  # If a barangay is deleted, keep the user
+        null=True,
+        blank=True,
+        related_name='residents',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # Tell Django to use email as the login field
+    USERNAME_FIELD = 'email'
+
+    # These fields are prompted when running: python manage.py createsuperuser
+    REQUIRED_FIELDS = ['username', 'full_name']
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.full_name} ({self.email}) — {self.role}'
+
+    # -----------------------------------------------------------------------
+    # Helper properties — use these in templates and views instead of
+    # comparing role strings directly (easier to refactor later)
+    # -----------------------------------------------------------------------
+    @property
+    def is_watcher(self):
+        return self.role == UserRole.WATCHER
+
+    @property
+    def is_driver(self):
+        return self.role == UserRole.DRIVER
+
+    @property
+    def is_barangay_official(self):
+        return self.role == UserRole.BARANGAY_OFFICIAL
+
+    @property
+    def is_admin_role(self):
+        """Separate from Django's is_staff/is_superuser — app-level admin."""
+        return self.role == UserRole.ADMIN
+
+    # -----------------------------------------------------------------------
+    # Override save() to auto-generate a username from email so AbstractUser
+    # doesn't complain about a blank unique field.
+    # -----------------------------------------------------------------------
+    def save(self, *args, **kwargs):
+        if not self.username:
+            # Use the part before @ as username, e.g. "juan.dela.cruz"
+            self.username = self.email.split('@')[0]
+        super().save(*args, **kwargs)

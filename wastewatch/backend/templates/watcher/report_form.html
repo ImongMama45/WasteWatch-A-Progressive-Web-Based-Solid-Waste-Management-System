@@ -1,0 +1,127 @@
+{% extends 'base.html' %}
+{% block title %}Submit Report — WasteWatch{% endblock %}
+
+{% block content %}
+<div class="page">
+
+  <!-- Header -->
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;">
+    <a href="{% url 'watcher:dashboard' %}" class="btn btn-outline btn-sm">← Back</a>
+    <div>
+      <h2 style="font-family:var(--font-head);font-size:20px;font-weight:800;">Submit Report</h2>
+      <p class="text-muted text-sm">Report a garbage issue in your area</p>
+    </div>
+  </div>
+
+  <form method="post" enctype="multipart/form-data" novalidate>
+    {% csrf_token %}
+
+    <!-- Issue Type -->
+    <div class="form-group">
+      <label class="form-label" for="{{ form.issue_type.id_for_label }}">Issue Type</label>
+      {{ form.issue_type }}
+      {{ form.issue_type.errors }}
+    </div>
+
+    <!-- Severity -->
+    <div class="form-group">
+      <label class="form-label" for="{{ form.severity.id_for_label }}">Severity</label>
+      {{ form.severity }}
+      {{ form.severity.errors }}
+    </div>
+
+    <!-- Barangay -->
+    <div class="form-group">
+      <label class="form-label" for="{{ form.barangay.id_for_label }}">Barangay</label>
+      {{ form.barangay }}
+      {{ form.barangay.errors }}
+    </div>
+
+    <!-- Location Coordinates -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="form-group">
+        <label class="form-label" for="{{ form.latitude.id_for_label }}">Latitude</label>
+        {{ form.latitude }}
+        {{ form.latitude.errors }}
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="{{ form.longitude.id_for_label }}">Longitude</label>
+        {{ form.longitude }}
+        {{ form.longitude.errors }}
+      </div>
+    </div>
+
+    <!-- Auto-fill GPS button -->
+    <button type="button" class="btn btn-outline btn-sm btn-full mb-16" id="gps-btn" onclick="fillGPS()">
+      📍 Use My Current Location
+    </button>
+
+    <!-- Description -->
+    <div class="form-group">
+      <label class="form-label" for="{{ form.description.id_for_label }}">Description</label>
+      {{ form.description }}
+      {{ form.description.errors }}
+    </div>
+
+    <!-- Image Upload -->
+    <div class="form-group">
+      <label class="form-label" for="{{ form.image.id_for_label }}">Photo Evidence (optional)</label>
+      <div style="border:2px dashed var(--border);border-radius:8px;padding:20px;text-align:center;cursor:pointer;"
+           onclick="document.getElementById('{{ form.image.id_for_label }}').click()">
+        <div id="preview-container" style="display:none;margin-bottom:8px;">
+          <img id="image-preview" src="" alt="Preview" style="max-height:160px;border-radius:8px;" />
+        </div>
+        <div id="upload-prompt">
+          <div style="font-size:28px;margin-bottom:6px;">📷</div>
+          <p class="text-muted text-sm">Tap to upload a photo</p>
+        </div>
+        {{ form.image }}
+      </div>
+      {{ form.image.errors }}
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-full" style="margin-top:8px;">
+      🗂 Submit Report
+    </button>
+  </form>
+
+</div>
+
+<script>
+  /* Hide the actual file input — we styled a custom tap zone above */
+  document.getElementById('{{ form.image.id_for_label }}').style.display = 'none';
+
+  /* Show image preview when a file is chosen */
+  document.getElementById('{{ form.image.id_for_label }}').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(ev) {
+      document.getElementById('image-preview').src = ev.target.result;
+      document.getElementById('preview-container').style.display = 'block';
+      document.getElementById('upload-prompt').style.display = 'none';
+    };
+    reader.readAsDataURL(file);
+  });
+
+  /* Fill GPS coordinates from the browser */
+  function fillGPS() {
+    const btn = document.getElementById('gps-btn');
+    btn.textContent = '⏳ Getting location...';
+    btn.disabled = true;
+
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        document.getElementById('{{ form.latitude.id_for_label }}').value  = pos.coords.latitude.toFixed(6);
+        document.getElementById('{{ form.longitude.id_for_label }}').value = pos.coords.longitude.toFixed(6);
+        btn.textContent = '✅ Location filled';
+      },
+      function(err) {
+        btn.textContent = '📍 Use My Current Location';
+        btn.disabled = false;
+        alert('Could not get location: ' + err.message);
+      }
+    );
+  }
+</script>
+{% endblock %}

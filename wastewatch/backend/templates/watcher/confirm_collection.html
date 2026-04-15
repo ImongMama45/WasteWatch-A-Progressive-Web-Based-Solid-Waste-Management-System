@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+{% block title %}Confirm Collection — WasteWatch{% endblock %}
+
+{% block content %}
+<div class="page">
+
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;">
+    <a href="{% url 'watcher:dashboard' %}" class="btn btn-outline btn-sm">← Back</a>
+    <div>
+      <h2 style="font-family:var(--font-head);font-size:20px;font-weight:800;">Confirm Collection</h2>
+      <p class="text-muted text-sm">Confirm that a truck has collected waste at a site</p>
+    </div>
+  </div>
+
+  <!-- Info banner -->
+  <div style="background:#1a3a2a;border:1px solid #27ae60;border-radius:var(--radius);padding:14px 16px;margin-bottom:20px;">
+    <p style="font-size:13px;color:var(--accent);">
+      ✅ Use this form when you personally witness a garbage truck completing a collection.
+      If the report is linked, it will automatically be marked as <strong>Resolved</strong>.
+    </p>
+  </div>
+
+  <form method="post" novalidate>
+    {% csrf_token %}
+
+    <div class="form-group">
+      <label class="form-label" for="{{ form.barangay.id_for_label }}">Barangay</label>
+      {{ form.barangay }}
+      {{ form.barangay.errors }}
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="{{ form.report.id_for_label }}">
+        Linked Report <span class="text-muted">(optional)</span>
+      </label>
+      {{ form.report }}
+      {{ form.report.errors }}
+      <p class="text-muted" style="font-size:11px;margin-top:4px;">
+        Link to an existing report to mark it resolved automatically.
+      </p>
+    </div>
+
+    <!-- GPS Coordinates -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="form-group">
+        <label class="form-label" for="{{ form.latitude.id_for_label }}">Latitude</label>
+        {{ form.latitude }}
+        {{ form.latitude.errors }}
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="{{ form.longitude.id_for_label }}">Longitude</label>
+        {{ form.longitude }}
+        {{ form.longitude.errors }}
+      </div>
+    </div>
+
+    <button type="button" class="btn btn-outline btn-sm btn-full mb-16" onclick="fillGPS()">
+      📍 Use My Current Location
+    </button>
+
+    <div class="form-group">
+      <label class="form-label" for="{{ form.notes.id_for_label }}">Notes <span class="text-muted">(optional)</span></label>
+      {{ form.notes }}
+      {{ form.notes.errors }}
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-full" style="margin-top:8px;">
+      ✅ Confirm Collection
+    </button>
+  </form>
+
+</div>
+
+<script>
+  function fillGPS() {
+    navigator.geolocation.getCurrentPosition(function(pos) {
+      document.getElementById('{{ form.latitude.id_for_label }}').value  = pos.coords.latitude.toFixed(6);
+      document.getElementById('{{ form.longitude.id_for_label }}').value = pos.coords.longitude.toFixed(6);
+    }, function(err) {
+      alert('Could not get location: ' + err.message);
+    });
+  }
+</script>
+{% endblock %}
