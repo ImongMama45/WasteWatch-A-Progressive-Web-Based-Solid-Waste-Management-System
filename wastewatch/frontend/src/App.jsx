@@ -1,72 +1,60 @@
-/**
- * App.jsx
- * -------
- * Root component — sets up React Router routes and wraps everything
- * in <AuthProvider> so every page can access the logged-in user.
- *
- * Route structure:
- *   /login             — public
- *   /register          — public
- *   /dashboard         — private (requires login)
- *   /report/submit     — private
- *   /report/:id        — private
- *   /collection/confirm — private
- *   /                  — redirects to /dashboard
- */
-
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import PrivateRoute from './components/PrivateRoute'
+import MobileOnlyRoute from './components/MobileOnlyRoute'
 
 // Pages
-import Login      from './pages/Login'
-import Register   from './pages/Register'
-import Dashboard  from './pages/Dashboard'
-import ReportForm from './pages/ReportForm'
-
-// Lazy-loaded future pages (imported here when you build them):
-// import ReportDetail       from './pages/ReportDetail'
-// import ConfirmCollection  from './pages/ConfirmCollection'
+import Login             from './pages/Login'
+import Register          from './pages/Register'
+import Dashboard         from './pages/Dashboard'
+import ReportForm        from './pages/ReportForm'
+import ConfirmCollection from './pages/ConfirmCollection'
+import VerificationTasks from './pages/VerificationTasks'
+import MapView           from './pages/MapView'
 
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          {/* Public routes */}
+          {/* Public */}
           <Route path="/login"    element={<Login />} />
           <Route path="/register" element={<Register />} />
 
-          {/* Protected routes — all wrapped in <PrivateRoute> */}
+          {/* Protected — available on all screen sizes */}
           <Route path="/dashboard" element={
             <PrivateRoute><Dashboard /></PrivateRoute>
           } />
 
-          <Route path="/report/submit" element={
-            <PrivateRoute><ReportForm /></PrivateRoute>
+          <Route path="/map" element={
+            <PrivateRoute><MapView /></PrivateRoute>
           } />
 
-          {/*
-            Add more protected routes here as you build them:
+          <Route path="/verification-tasks" element={
+            <PrivateRoute><VerificationTasks /></PrivateRoute>
+          } />
 
-            <Route path="/report/:id" element={
-              <PrivateRoute><ReportDetail /></PrivateRoute>
-            } />
+          {/* Protected — mobile only (camera + GPS required) */}
+          <Route path="/report/submit" element={
+            <PrivateRoute>
+              <MobileOnlyRoute>
+                <ReportForm />
+              </MobileOnlyRoute>
+            </PrivateRoute>
+          } />
 
-            <Route path="/collection/confirm" element={
-              <PrivateRoute><ConfirmCollection /></PrivateRoute>
-            } />
+          <Route path="/collection/confirm" element={
+            <PrivateRoute>
+              <MobileOnlyRoute>
+                <ConfirmCollection />
+              </MobileOnlyRoute>
+            </PrivateRoute>
+          } />
 
-            Future role-based routes:
-            <Route path="/driver/routes" element={
-              <PrivateRoute requiredRole="driver"><DriverRoutes /></PrivateRoute>
-            } />
-          */}
-
-          {/* Redirect root to dashboard */}
+          {/* Redirect root → dashboard */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-          {/* 404 fallback */}
+          {/* 404 */}
           <Route path="*" element={
             <div style={{
               minHeight: '100vh', display: 'flex', flexDirection: 'column',

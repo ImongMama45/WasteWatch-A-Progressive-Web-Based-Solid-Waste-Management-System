@@ -1,48 +1,65 @@
 /**
- * pages/ReportForm.jsx
- * --------------------
- * Form to submit a new garbage report.
- * Supports GPS auto-fill and image preview.
+ * ReportForm.jsx — Report Garbage Issue
+ * ---------------------------------------
+ * GPS is captured silently on mount — user cannot edit it.
+ * Photo is supporting evidence only.
+ * Matches Report_a_Problem__1_.png design.
  */
 
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'
+import BottomNav from '../components/BottomNav'
 import { useAuth } from '../context/AuthContext'
 import api from '../api/client'
 
 const ISSUE_TYPES = [
-  { value: 'overflow',        label: 'Overflow' },
-  { value: 'missed',          label: 'Missed Collection' },
-  { value: 'illegal_dumping', label: 'Illegal Dumping' },
+  { value: '',               label: 'Select Issue Type' },
+  { value: 'overflow',       label: 'Overflow' },
+  { value: 'missed',         label: 'Missed Collection' },
+  { value: 'illegal_dumping',label: 'Illegal Dumping' },
 ]
 
-const SEVERITIES = [
-  { value: 'low',    label: '🟢 Low' },
-  { value: 'medium', label: '🟡 Medium' },
-  { value: 'high',   label: '🔴 High' },
-]
+const ALL_TAGS = ['Near School', 'Near market', 'Side Road', 'Residential', 'Highway', 'Near River']
 
 export default function ReportForm() {
-  const { user }  = useAuth()
-  const navigate  = useNavigate()
-  const fileRef   = useRef(null)
+  const { user }   = useAuth()
+  const navigate   = useNavigate()
+  const fileRef    = useRef(null)
+
+  // ── GPS state — captured silently, never editable ──
+  const [gps, setGps]           = useState({ lat: null, lng: null, status: 'detecting' })
+  // status: 'detecting' | 'ready' | 'error'
 
   const [barangays, setBarangays] = useState([])
   const [preview,   setPreview]   = useState(null)
-  const [gpsStatus, setGpsStatus] = useState('idle') // idle | loading | done | error
   const [submitting, setSubmitting] = useState(false)
   const [errors,    setErrors]    = useState({})
+  const [selectedTags, setSelectedTags] = useState([])
+  const [showMoreTags, setShowMoreTags] = useState(false)
 
   const [form, setForm] = useState({
-    barangay:    user?.barangay_id || '',
-    latitude:    '',
-    longitude:   '',
-    issue_type:  'overflow',
-    severity:    'medium',
+    issue_type:  '',
     description: '',
     image:       null,
   })
+
+  // ── Silently capture GPS on mount ──
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setGps({ lat: null, lng: null, status: 'error' })
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      pos => setGps({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        status: 'ready',
+      }),
+      () => setGps({ lat: null, lng: null, status: 'error' }),
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }, [])
 
   useEffect(() => {
     api.get('/api/barangays/').then(r => setBarangays(r.data)).catch(() => {})
@@ -54,6 +71,12 @@ export default function ReportForm() {
     setErrors(prev => ({ ...prev, [name]: '' }))
   }
 
+  function toggleTag(tag) {
+    setSelectedTags(prev =>
+      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+    )
+  }
+
   function handleFile(e) {
     const file = e.target.files[0]
     if (!file) return
@@ -63,130 +86,127 @@ export default function ReportForm() {
     reader.readAsDataURL(file)
   }
 
-  function fillGPS() {
-    setGpsStatus('loading')
-    navigator.geolocation.getCurrentPosition(
-      pos => {
-        setForm(prev => ({
-          ...prev,
-          latitude:  pos.coords.latitude.toFixed(6),
-          longitude: pos.coords.longitude.toFixed(6),
-        }))
-        setGpsStatus('done')
-      },
-      () => setGpsStatus('error')
-    )
-  }
+  async function handleSubmit() {
+    const errs = {}
+    if (!form.issue_type) errs.issue_type = 'Please select an issue type.'
+    if (gps.status !== 'ready') errs.gps = 'Location could not be detected. Please enable GPS and try again.'
+    if (Object.keys(errs).length) { setErrors(errs); return }
 
-  async function handleSubmit(e) {
-    e.preventDefault()
     setSubmitting(true)
-    setErrors({})
-
-    // Build FormData (required for file uploads)
     const fd = new FormData()
-    Object.entries(form).forEach(([k, v]) => {
-      if (v !== null && v !== '') fd.append(k, v)
-    })
+    fd.append('latitude',    gps.lat)
+    fd.append('longitude',   gps.lng)
+    fd.append('issue_type',  form.issue_type)
+    fd.append('description', form.description)
+    fd.append('tags',        selectedTags.join(','))
+    if (form.image) fd.append('image', form.image)
+    if (user?.barangay_id) fd.append('barangay', user.barangay_id)
 
     try {
       await api.post('/api/watcher/reports/', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
-      navigate('/dashboard', { state: { success: 'Report submitted successfully!' } })
+      navigate('/dashboard', { state: { success: 'Report submitted!' } })
     } catch (err) {
       const data = err.response?.data || {}
       const mapped = {}
-      for (const [k, v] of Object.entries(data)) {
-        mapped[k] = Array.isArray(v) ? v[0] : v
-      }
+      for (const [k, v] of Object.entries(data)) mapped[k] = Array.isArray(v) ? v[0] : v
       setErrors(mapped)
     } finally {
       setSubmitting(false)
     }
   }
 
-  const gpsLabel = {
-    idle:    '📍 Use My Current Location',
-    loading: '⏳ Getting location…',
-    done:    '✅ Location filled',
-    error:   '❌ Could not get location',
-  }[gpsStatus]
+  const visibleTags = showMoreTags ? ALL_TAGS : ALL_TAGS.slice(0, 3)
+
+  // Location display string
+  const locationDisplay = gps.status === 'ready'
+    ? `Auto-detected : N: ${gps.lat?.toFixed(4)}`
+    : gps.status === 'detecting'
+    ? 'Detecting your location…'
+    : 'Location unavailable — please enable GPS'
 
   return (
     <>
       <Navbar />
-      <div className="page">
+      <div className="page" style={{ maxWidth: 480 }}>
 
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
-          <button className="btn btn-outline btn-sm" onClick={() => navigate(-1)}>← Back</button>
-          <div>
-            <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 20, fontWeight: 800 }}>Submit Report</h2>
-            <p className="text-muted text-sm">Report a garbage issue in your area</p>
-          </div>
+        <button className="back-link" onClick={() => navigate(-1)}>‹ BACK</button>
+
+        <div style={{ marginBottom: 24 }}>
+          <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 22, fontWeight: 800 }}>
+            Report Garbage Issue
+          </h2>
+          <p className="text-muted text-sm">Help us keep the community clean</p>
         </div>
 
-        <form onSubmit={handleSubmit} noValidate>
+        <div className="card card-dark" style={{ padding: 24 }}>
+          <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 700, marginBottom: 20 }}>
+            Issue Details
+          </h3>
 
           {/* Issue Type */}
           <div className="form-group">
             <label className="form-label">Issue Type</label>
-            <select className="form-input" name="issue_type" value={form.issue_type} onChange={handleChange}>
-              {ISSUE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            <select
+              className={`form-input ${errors.issue_type ? 'error' : ''}`}
+              name="issue_type"
+              value={form.issue_type}
+              onChange={handleChange}
+            >
+              {ISSUE_TYPES.map(t => (
+                <option key={t.value} value={t.value} disabled={t.value === ''}>
+                  {t.label}
+                </option>
+              ))}
             </select>
+            {errors.issue_type && <p className="form-error">{errors.issue_type}</p>}
           </div>
 
-          {/* Severity */}
+          {/* Location — read-only, GPS only */}
           <div className="form-group">
-            <label className="form-label">Severity</label>
-            <select className="form-input" name="severity" value={form.severity} onChange={handleChange}>
-              {SEVERITIES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
+            <label className="form-label">Location</label>
+            <div className="gps-field">
+              <span className={`gps-dot ${gps.status}`} />
+              <span style={{ fontSize: 13, color: gps.status === 'ready' ? 'var(--text)' : 'var(--text-muted)' }}>
+                {locationDisplay}
+              </span>
+              {gps.status === 'detecting' && (
+                <span className="gps-spinner" />
+              )}
+            </div>
+            {errors.gps && <p className="form-error">{errors.gps}</p>}
           </div>
 
-          {/* Barangay */}
+          {/* Tags */}
           <div className="form-group">
-            <label className="form-label">Barangay</label>
-            <select className="form-input" name="barangay" value={form.barangay} onChange={handleChange}>
-              <option value="">— Select barangay —</option>
-              {barangays.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-            {errors.barangay && <p className="form-error">{errors.barangay}</p>}
-          </div>
-
-          {/* Coordinates */}
-          <div className="grid-2">
-            <div className="form-group">
-              <label className="form-label">Latitude</label>
-              <input
-                className={`form-input ${errors.latitude ? 'error' : ''}`}
-                type="number" name="latitude" step="0.000001"
-                value={form.latitude} onChange={handleChange}
-                placeholder="14.5995"
-              />
-              {errors.latitude && <p className="form-error">{errors.latitude}</p>}
-            </div>
-            <div className="form-group">
-              <label className="form-label">Longitude</label>
-              <input
-                className={`form-input ${errors.longitude ? 'error' : ''}`}
-                type="number" name="longitude" step="0.000001"
-                value={form.longitude} onChange={handleChange}
-                placeholder="120.9842"
-              />
-              {errors.longitude && <p className="form-error">{errors.longitude}</p>}
+            <label className="form-label">Tags</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {visibleTags.map(tag => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => toggleTag(tag)}
+                  className="tag-chip"
+                  style={{
+                    background: selectedTags.includes(tag) ? 'rgba(46,204,113,.15)' : 'transparent',
+                    borderColor: selectedTags.includes(tag) ? 'var(--accent)' : 'var(--border)',
+                    color: selectedTags.includes(tag) ? 'var(--accent)' : 'var(--text)',
+                  }}
+                >
+                  {tag}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="tag-chip"
+                onClick={() => setShowMoreTags(p => !p)}
+                style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+              >
+                {showMoreTags ? '▲' : '• • •'}
+              </button>
             </div>
           </div>
-
-          <button
-            type="button"
-            className="btn btn-outline btn-sm btn-full mb-16"
-            onClick={fillGPS}
-            disabled={gpsStatus === 'loading' || gpsStatus === 'done'}
-          >
-            {gpsLabel}
-          </button>
 
           {/* Description */}
           <div className="form-group">
@@ -194,56 +214,60 @@ export default function ReportForm() {
             <textarea
               className="form-input"
               name="description"
+              rows={4}
+              placeholder="Provide details about the issue.."
               value={form.description}
               onChange={handleChange}
-              placeholder="Describe the garbage issue..."
-              rows={4}
             />
           </div>
 
-          {/* Image Upload */}
-          <div className="form-group">
-            <label className="form-label">Photo Evidence <span className="text-muted">(optional)</span></label>
+          {/* Upload Photo */}
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Upload Photo</label>
             <div
-              style={{
-                border: '2px dashed var(--border)',
-                borderRadius: 8,
-                padding: 20,
-                textAlign: 'center',
-                cursor: 'pointer',
-              }}
+              className="photo-upload-zone"
               onClick={() => fileRef.current?.click()}
             >
               {preview ? (
-                <img src={preview} alt="Preview"
-                     style={{ maxHeight: 160, borderRadius: 8, marginBottom: 8 }} />
+                <>
+                  <img src={preview} alt="Preview"
+                       style={{ maxHeight: 160, borderRadius: 8, marginBottom: 8 }} />
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Tap to change</span>
+                </>
               ) : (
                 <>
-                  <div style={{ fontSize: 28, marginBottom: 6 }}>📷</div>
-                  <p className="text-muted text-sm">Tap to upload a photo</p>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>
+                    Take a photo
+                  </div>
+                  <button className="btn btn-outline btn-sm"
+                          onClick={e => { e.stopPropagation(); fileRef.current?.click() }}>
+                    Take Photo
+                  </button>
                 </>
               )}
             </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              style={{ display: 'none' }}
-              onChange={handleFile}
-            />
+            <input ref={fileRef} type="file" accept="image/*" capture="environment"
+                   style={{ display: 'none' }} onChange={handleFile} />
           </div>
+        </div>
 
-          <button
-            type="submit"
-            className="btn btn-primary btn-full"
-            style={{ marginTop: 8 }}
-            disabled={submitting}
-          >
-            {submitting ? 'Submitting…' : '🗂 Submit Report'}
+        {/* Bottom actions */}
+        <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+          <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => navigate(-1)}>
+            Cancel
           </button>
+          <button
+            className="btn btn-primary"
+            style={{ flex: 2, fontWeight: 700, letterSpacing: '.04em' }}
+            onClick={handleSubmit}
+            disabled={submitting || gps.status === 'detecting'}
+          >
+            {submitting ? 'Submitting…' : 'SUBMIT REPORT'}
+          </button>
+        </div>
 
-        </form>
       </div>
+      <BottomNav />
     </>
   )
 }

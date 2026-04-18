@@ -1,59 +1,38 @@
-/**
- * pages/Dashboard.jsx
- * --------------------
- * Main Watcher dashboard — mirrors the Home.png design:
- *   • "Report a Garbage Issue" banner with 2 CTAs
- *   • Stat cards (Total, Pending, Resolved, Rejected)
- *   • Map placeholder with active truck info
- *   • My Reports list
- *   • Collection schedule
- */
-
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'
+import BottomNav from '../components/BottomNav'
+import MiniMap from '../components/MiniMap'
 import { useAuth } from '../context/AuthContext'
 import api from '../api/client'
 
 export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState("schedule");
-  const [activeTab1, setActiveTab1] = useState("hotspots");
-
-  const [reports, setReports]   = useState([])
-  const [stats,   setStats]     = useState({ total: 0, pending_approval: 0, resolved: 0, rejected: 0 })
-  const [loading, setLoading]   = useState(true)
+  const [reports,   setReports]   = useState([])
+  const [stats,     setStats]     = useState({ total: 0, pending_approval: 0, resolved: 0, rejected: 0 })
+  const [loading,   setLoading]   = useState(true)
+  const [activeTab,  setActiveTab]  = useState('schedule')
+  const [activeTab1, setActiveTab1] = useState('reports')
 
   useEffect(() => {
     Promise.all([
       api.get('/api/watcher/reports/'),
       api.get('/api/watcher/stats/'),
     ])
-      .then(([reportsRes, statsRes]) => {
-        setReports(reportsRes.data)
-        setStats(statsRes.data)
-      })
+      .then(([r, s]) => { setReports(r.data); setStats(s.data) })
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [])
 
-  function badgeClass(status) {
-    return `badge badge-${status}`
-  }
-
-  function severityColor(s) {
-    if (s === 'high')   return 'var(--danger)'
-    if (s === 'medium') return 'var(--warning)'
-    return 'var(--accent)'
-  }
+  const badgeClass = (status) => `badge badge-${status}`
 
   return (
     <>
       <Navbar />
       <div className="page">
 
-        {/* ── Page Header ── */}
+        {/* Page Header */}
         <div style={{ marginBottom: 20 }}>
           <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 22, fontWeight: 800 }}>
             Waste Collection
@@ -61,236 +40,229 @@ export default function Dashboard() {
           <p className="text-muted text-sm">Stay updated on garbage collection in your area</p>
         </div>
 
-        {/* ── Report a Garbage Issue Banner ── */}
-        <div className="card card-dark" style={{ textAlign: 'center', padding: '28px 20px', marginBottom: 20 }}>
-          <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 700, marginBottom: 6 }}>
-            Report a Garbage Issue
-          </h3>
-          <p className="text-muted text-sm" style={{ marginBottom: 20 }}>
-            See uncollected waste or illegal dumping? let us know
-          </p>
-          <div className="btn-row" style={{ justifyContent: 'center' }}>
-            <button className="btn btn-outline" onClick={() => navigate('/report/submit')}>
-              🗂 Submit Report
-            </button>
-            <button className="btn btn-primary" onClick={() => navigate('/collection/confirm')}>
-              ✅ Confirm Collection
-            </button>
-          </div>
-        </div>
+        <div className="page-grid">
 
-        {/* ── Stat Cards ── */}
-        <div
-          style={{
-            overflowX: "auto",
-            marginBottom: 24,
+          {/* ── MAIN COLUMN ── */}
+          <div>
 
-            /* Firefox */
-            scrollbarWidth: "none",
-
-            /* IE/Edge */
-            msOverflowStyle: "none",
-          }}
-        >
-          <div
-            className="stat-grid"
-            style={{
-              display: "flex",
-              gap: "16px",
-              minWidth: "max-content",
-            }}
-          >
-            
-            <div className="stat-card">
-              <div className="label">Total Reports</div>
-              <div className="value">{stats.total}</div>
-            </div>
-
-            <div className="stat-card">
-              <div className="label">Pending Approval</div>
-              <div className="value" style={{ color: 'var(--warning)' }}>
-                {stats.pending_approval}
-              </div>
-            </div>
-
-            <div className="stat-card">
-              <div className="label">Resolved</div>
-              <div className="value" style={{ color: 'var(--accent)' }}>
-                {stats.resolved}
-              </div>
-            </div>
-
-            <div className="stat-card">
-              <div className="label">Rejected</div>
-              <div className="value" style={{ color: 'var(--danger)' }}>
-                {stats.rejected}
-              </div>
-            </div>
-
-          </div>
-        </div>
-
-        {/* ── Nearby Collection Points (Map Placeholder) ── */}
-        <h3 className="section-title">Nearby Collection Points</h3>
-        <div className="card" style={{ padding: 12, marginBottom: 24 }}>
-          <div className="map-placeholder">
-            <div className="map-pill">
-              📍 Active Trucks: 2<br />
-              ⚠️ Hotspots Nearby: 3
-            </div>
-          </div>
-          <button
-            className="btn btn-outline btn-sm btn-full"
-            style={{ marginTop: 8 }}
-            disabled
-          >
-            🗺 Interactive Map View (coming soon)
-          </button>
-        </div>
-
-        {/* ── My Reports ── */}
-        
-        <h3 className="section-title">My Reports</h3>
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            <button onClick={() => setActiveTab1("reports")}
-              style={{
-                padding: "8px 16px",
-                borderRadius: 8,
-                border: "none",
-                cursor: "pointer",
-                background: activeTab1 === "reports" ? "var(--accent)" : "#eee",
-                color: activeTab1 === "reports" ? "#fff" : "#000000"
-              }}
-              >
-              My Reports
-            </button>
-            <button onClick={() => setActiveTab1("hotspots")}
-              style={{
-                padding: "8px 16px",
-                borderRadius: 8,
-                border: "none",
-                cursor: "pointer",
-                background: activeTab1 === "hotspots" ? "var(--accent)" : "#eee",
-                color: activeTab1 === "hotspots" ? "#fff" : "#333"
-              }}
-              >
-              Hotspots         
-            </button>
-        </div>
-
-        <div className="card" style={{ padding: 16 }}>
-          {activeTab1 === "reports" ? (
-            loading ? (
-              <div className="spinner" />
-            ) : reports.length === 0 ? (
-              <p className="text-muted text-sm text-center" style={{ padding: '20px 0' }}>
-                No reports yet.{" "}
-                <span
-                  style={{ color: "var(--accent)", cursor: "pointer" }}
-                  onClick={() => navigate("/report/submit")}
-                >
-                  Submit your first report
-                </span>
-              </p>
-            ) : (
-              reports.slice(0, 10).map(report => (
-                <div
-                  key={report.id}
-                  className="report-item"
-                  onClick={() => navigate(`/report/${report.id}`)}
-                >
-                  <div className="report-pin">📍</div>
-                  <div className="report-info">
-                    <div className="report-type">
-                      {report.issue_type_display}
-                      <span className={badgeClass(report.status)}>
-                        {report.status}
-                      </span>
-                    </div>
-                    <div className="report-location">
-                      {report.barangay_name || "Unknown location"}
-                    </div>
-                  </div>
-                  <div className="report-date">
-                    Reported on {report.created_at?.slice(0, 10)}
-                  </div>
+            {/* Banner — hidden on desktop (sidebar Quick Actions handles this) */}
+            <div className="mobile-schedule">
+              <div className="card card-dark" style={{ textAlign: 'center', padding: '28px 20px' }}>
+                <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 700, marginBottom: 6 }}>
+                  Report a Garbage Issue
+                </h3>
+                <p className="text-muted text-sm" style={{ marginBottom: 20 }}>
+                  See uncollected waste or illegal dumping? Let us know
+                </p>
+                <div className="btn-row" style={{ justifyContent: 'center' }}>
+                  <button className="btn btn-outline" onClick={() => navigate('/report/submit')}>
+                    🗂 Submit Report
+                  </button>
+                  <button className="btn btn-primary" onClick={() => navigate('/collection/confirm')}>
+                    ✅ Confirm Collection
+                  </button>
                 </div>
-              ))
-            )
-          ) : (
-            <div>
-              {/* 👉 HOTSPOTS TAB */}
-              <p className="text-muted text-sm text-center" style={{ padding: '20px 0' }}>
-                Nearby Hotspots (you can add map or data here)
-              </p>
+              </div>
             </div>
-          )}
-        </div>
 
-        {/* ── Collection Schedule ── */}
-         <h3 className="section-title">Your Collection Schedule</h3>
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <button
-            onClick={() => setActiveTab("schedule")}
-            style={{
-              padding: "8px 16px",
-              borderRadius: 8,
-              border: "none",
-              cursor: "pointer",
-              background: activeTab === "schedule" ? "var(--accent)" : "#eee",
-              color: activeTab === "schedule" ? "#fff" : "#333"
-            }}
-          >
-            Schedule
-          </button>
+            {/* Stat Cards */}
+            <div className="stat-grid">
+              <div className="stat-card">
+                <div className="label">Total Reports</div>
+                <div className="value">{stats.total}</div>
+              </div>
+              <div className="stat-card">
+                <div className="label">Pending Approval</div>
+                <div className="value" style={{ color: 'var(--warning)' }}>{stats.pending_approval}</div>
+              </div>
+              <div className="stat-card">
+                <div className="label">Resolved</div>
+                <div className="value" style={{ color: 'var(--accent)' }}>{stats.resolved}</div>
+              </div>
+              <div className="stat-card">
+                <div className="label">Rejected</div>
+                <div className="value" style={{ color: 'var(--danger)' }}>{stats.rejected}</div>
+              </div>
+            </div>
 
-          <button
-            onClick={() => setActiveTab("other")}
-            style={{
-              padding: "8px 16px",
-              borderRadius: 8,
-              border: "none",
-              cursor: "pointer",
-              background: activeTab === "other" ? "var(--accent)" : "#eee",
-              color: activeTab === "other" ? "#fff" : "#333"
-            }}
-          >
-            Other
-          </button>
-        </div>
-        <div className="card" style={{ padding: 16 }}>
-          {activeTab === "schedule" ? (
-            user?.barangay_name ? (
-              <>
-                {[
-                  { day: 'Monday', time: '6:00 AM – 10:00 AM' },
+            {/* ── LIVE MAP WIDGET ── */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <h3 className="section-title" style={{ margin: 0 }}>Live Collection Map</h3>
+              <button
+                onClick={() => navigate('/map')}
+                style={{
+                  background: 'none', border: 'none',
+                  color: 'var(--accent)', fontSize: 12, fontWeight: 700,
+                  cursor: 'pointer', padding: '2px 0',
+                  display: 'flex', alignItems: 'center', gap: 4,
+                }}
+              >
+                Full View ›
+              </button>
+            </div>
+            <MiniMap />
+
+            {/* ── My Reports with tabs ── */}
+            <h3 className="section-title" style={{ marginTop: 20 }}>My Reports</h3>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <button onClick={() => setActiveTab1('reports')} className="tab-btn"
+                style={{ background: activeTab1 === 'reports' ? 'var(--accent)' : 'var(--surface-2)', color: activeTab1 === 'reports' ? '#0d1117' : 'var(--text)' }}>
+                My Reports
+              </button>
+              <button onClick={() => setActiveTab1('hotspots')} className="tab-btn"
+                style={{ background: activeTab1 === 'hotspots' ? 'var(--accent)' : 'var(--surface-2)', color: activeTab1 === 'hotspots' ? '#0d1117' : 'var(--text)' }}>
+                Hotspots
+              </button>
+            </div>
+
+            <div className="card" style={{ padding: 16 }}>
+              {activeTab1 === 'reports' ? (
+                loading ? (
+                  <div className="spinner" />
+                ) : reports.length === 0 ? (
+                  <p className="text-muted text-sm text-center" style={{ padding: '20px 0' }}>
+                    No reports yet.{' '}
+                    <span style={{ color: 'var(--accent)', cursor: 'pointer' }}
+                          onClick={() => navigate('/report/submit')}>
+                      Submit your first report
+                    </span>
+                  </p>
+                ) : (
+                  reports.slice(0, 10).map(report => (
+                    <div key={report.id} className="report-item"
+                         onClick={() => navigate(`/report/${report.id}`)}>
+                      <div className="report-pin">📍</div>
+                      <div className="report-info">
+                        <div className="report-type">
+                          {report.issue_type_display}
+                          <span className={badgeClass(report.status)}>{report.status}</span>
+                        </div>
+                        <div className="report-location">
+                          {report.barangay_name || 'Unknown location'}
+                        </div>
+                      </div>
+                      <div className="report-date">
+                        Reported on {report.created_at?.slice(0, 10)}
+                      </div>
+                    </div>
+                  ))
+                )
+              ) : (
+                <p className="text-muted text-sm text-center" style={{ padding: '20px 0' }}>
+                  Nearby hotspots coming soon.
+                </p>
+              )}
+            </div>
+
+            {/* ── Collection Schedule with tabs ── */}
+            <h3 className="section-title">Your Collection Schedule</h3>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <button onClick={() => setActiveTab('schedule')} className="tab-btn"
+                style={{ background: activeTab === 'schedule' ? 'var(--accent)' : 'var(--surface-2)', color: activeTab === 'schedule' ? '#0d1117' : 'var(--text)' }}>
+                Schedule
+              </button>
+              <button onClick={() => setActiveTab('other')} className="tab-btn"
+                style={{ background: activeTab === 'other' ? 'var(--accent)' : 'var(--surface-2)', color: activeTab === 'other' ? '#0d1117' : 'var(--text)' }}>
+                Other
+              </button>
+            </div>
+
+            <div className="card" style={{ padding: 16 }}>
+              {activeTab === 'schedule' ? (
+                user?.barangay_name ? (
+                  [
+                    { day: 'Monday',    time: '6:00 AM – 10:00 AM' },
+                    { day: 'Wednesday', time: 'N/A' },
+                    { day: 'Friday',    time: '6:00 AM – 10:00 AM' },
+                  ].map((s, i) => (
+                    <div key={i} className="report-item">
+                      <div className="report-pin">📅</div>
+                      <div className="report-info">
+                        <div className="report-type">{s.day}</div>
+                        <div className="report-location">{user.barangay_name}</div>
+                      </div>
+                      <div className="report-date">{s.time}</div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-muted text-sm text-center" style={{ padding: '12px 0' }}>
+                    No barangay assigned. Contact your administrator.
+                  </p>
+                )
+              ) : (
+                <p className="text-muted text-sm text-center" style={{ padding: '20px 0' }}>
+                  Other schedule info coming soon.
+                </p>
+              )}
+            </div>
+
+          </div>{/* end main column */}
+
+          {/* ── SIDEBAR (desktop only) ── */}
+          <div className="sidebar">
+            <div className="card">
+              <h3 className="section-title" style={{ marginBottom: 12 }}>Quick Actions</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button
+                  className="btn btn-full"
+                  onClick={() => navigate('/map')}
+                  style={{
+                    background: 'rgba(20,184,166,0.08)',
+                    border: '1px solid rgba(20,184,166,0.4)',
+                    color: 'var(--accent)',
+                    fontWeight: 700,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                  }}
+                >
+                  🗺 View Live Map
+                </button>
+              </div>
+            </div>
+
+            {/* Sidebar map preview */}
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={{ padding: '12px 14px 8px' }}>
+                <h3 className="section-title" style={{ margin: 0 }}>Live Map</h3>
+              </div>
+              <MiniMap />
+            </div>
+
+            <div className="card">
+              <h3 className="section-title" style={{ marginBottom: 12 }}>Collection Schedule</h3>
+              {user?.barangay_name ? (
+                [
+                  { day: 'Monday',    time: '6:00 AM – 10:00 AM' },
                   { day: 'Wednesday', time: 'N/A' },
-                  { day: 'Monday', time: '6:00 AM – 10:00 AM' },
-                ].map((sched, i) => (
+                  { day: 'Friday',    time: '6:00 AM – 10:00 AM' },
+                ].map((s, i) => (
                   <div key={i} className="report-item">
                     <div className="report-pin">📅</div>
                     <div className="report-info">
-                      <div className="report-type">{sched.day}</div>
+                      <div className="report-type">{s.day}</div>
                       <div className="report-location">{user.barangay_name}</div>
                     </div>
-                    <div className="report-date">{sched.time}</div>
+                    <div className="report-date">{s.time}</div>
                   </div>
-                ))}
-              </>
-            ) : (
-              <p className="text-muted text-sm text-center" style={{ padding: '12px 0' }}>
-                No barangay assigned. Contact your administrator.
-              </p>
-            )
-          ) : (
-            <div>
-              {/* 👉 Future content goes here */}
-              <p>Other tab content (you can add anything here later)</p>
+                ))
+              ) : (
+                <p className="text-muted text-sm">No barangay assigned.</p>
+              )}
             </div>
-          )}
-        </div>
 
+            <div className="card">
+              <h3 className="section-title" style={{ marginBottom: 12 }}>Your Profile</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div><div className="form-label">Name</div><div>{user?.full_name}</div></div>
+                <div><div className="form-label">Email</div><div className="text-muted text-sm">{user?.email}</div></div>
+                <div><div className="form-label">Barangay</div><div>{user?.barangay_name || '—'}</div></div>
+                <div><div className="form-label">Role</div><span className="badge badge-approved">{user?.role}</span></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
       </div>
+      <BottomNav />
     </>
   )
 }
