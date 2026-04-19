@@ -48,18 +48,18 @@ export default function Dashboard() {
             {/* Banner — hidden on desktop (sidebar Quick Actions handles this) */}
             <div className="mobile-schedule">
               <div className="card card-dark" style={{ textAlign: 'center', padding: '28px 20px' }}>
-                <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 700, marginBottom: 6 }}>
+                <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 700, marginBottom: 6, color:'white' }}>
                   Report a Garbage Issue
                 </h3>
-                <p className="text-muted text-sm" style={{ marginBottom: 20 }}>
+                <p className="text-muted text-sm" style={{ marginBottom: 20,color:'white' }}>
                   See uncollected waste or illegal dumping? Let us know
                 </p>
                 <div className="btn-row" style={{ justifyContent: 'center' }}>
-                  <button className="btn btn-outline" onClick={() => navigate('/report/submit')}>
-                    🗂 Submit Report
+                  <button className="btn btn-outline" style={{backgroundColor:'white'}} onClick={() => navigate('/report/submit')}>
+                    Submit Report
                   </button>
                   <button className="btn btn-primary" onClick={() => navigate('/collection/confirm')}>
-                    ✅ Confirm Collection
+                    Confirm Collection
                   </button>
                 </div>
               </div>
@@ -69,7 +69,7 @@ export default function Dashboard() {
             <div className="stat-grid">
               <div className="stat-card">
                 <div className="label">Total Reports</div>
-                <div className="value">{stats.total}</div>
+                <div className="value" style={{color:'white'}}>{stats.total}</div>
               </div>
               <div className="stat-card">
                 <div className="label">Pending Approval</div>
@@ -106,12 +106,12 @@ export default function Dashboard() {
             <h3 className="section-title" style={{ marginTop: 20 }}>My Reports</h3>
             <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
               <button onClick={() => setActiveTab1('reports')} className="tab-btn"
-                style={{ background: activeTab1 === 'reports' ? 'var(--accent)' : 'var(--surface-2)', color: activeTab1 === 'reports' ? '#0d1117' : 'var(--text)' }}>
+                style={{ background: activeTab1 === 'reports' ? 'var(--surface-3)' : 'var(--surface-2)', color: activeTab1 === 'reports' ? '#ffffff' : 'var(--text)' }}>
                 My Reports
               </button>
               <button onClick={() => setActiveTab1('hotspots')} className="tab-btn"
-                style={{ background: activeTab1 === 'hotspots' ? 'var(--accent)' : 'var(--surface-2)', color: activeTab1 === 'hotspots' ? '#0d1117' : 'var(--text)' }}>
-                Hotspots
+                style={{ background: activeTab1 === 'hotspots' ? 'var(--surface-3)' : 'var(--surface-2)', color: activeTab1 === 'hotspots' ? '#f5f5f5' : 'var(--text)' }}>
+                Nearby Issues
               </button>
             </div>
 
@@ -158,11 +158,11 @@ export default function Dashboard() {
             <h3 className="section-title">Your Collection Schedule</h3>
             <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
               <button onClick={() => setActiveTab('schedule')} className="tab-btn"
-                style={{ background: activeTab === 'schedule' ? 'var(--accent)' : 'var(--surface-2)', color: activeTab === 'schedule' ? '#0d1117' : 'var(--text)' }}>
+                style={{ background: activeTab === 'schedule' ? 'var(--surface-3)' : 'var(--surface-2)', color: activeTab === 'schedule' ? '#ffffff' : 'var(--text)' }}>
                 Schedule
               </button>
               <button onClick={() => setActiveTab('other')} className="tab-btn"
-                style={{ background: activeTab === 'other' ? 'var(--accent)' : 'var(--surface-2)', color: activeTab === 'other' ? '#0d1117' : 'var(--text)' }}>
+                style={{ background: activeTab === 'other' ? 'var(--surface-3)' : 'var(--surface-2)', color: activeTab === 'other' ? '#ffffff' : 'var(--text)' }}>
                 Other
               </button>
             </div>
@@ -220,12 +220,7 @@ export default function Dashboard() {
             </div>
 
             {/* Sidebar map preview */}
-            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-              <div style={{ padding: '12px 14px 8px' }}>
-                <h3 className="section-title" style={{ margin: 0 }}>Live Map</h3>
-              </div>
-              <MiniMap />
-            </div>
+           
 
             <div className="card">
               <h3 className="section-title" style={{ marginBottom: 12 }}>Collection Schedule</h3>

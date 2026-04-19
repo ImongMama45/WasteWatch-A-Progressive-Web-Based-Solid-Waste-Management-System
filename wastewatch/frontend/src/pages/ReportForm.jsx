@@ -2,8 +2,7 @@
  * ReportForm.jsx — Report Garbage Issue
  * ---------------------------------------
  * GPS is captured silently on mount — user cannot edit it.
- * Photo is supporting evidence only.
- * Matches Report_a_Problem__1_.png design.
+ * Photo must be taken via camera — gallery upload is not allowed.
  */
 
 import { useState, useEffect, useRef } from 'react'
@@ -14,10 +13,10 @@ import { useAuth } from '../context/AuthContext'
 import api from '../api/client'
 
 const ISSUE_TYPES = [
-  { value: '',               label: 'Select Issue Type' },
-  { value: 'overflow',       label: 'Overflow' },
-  { value: 'missed',         label: 'Missed Collection' },
-  { value: 'illegal_dumping',label: 'Illegal Dumping' },
+  { value: '',                label: 'Select Issue Type' },
+  { value: 'overflow',        label: 'Overflow' },
+  { value: 'missed',          label: 'Missed Collection' },
+  { value: 'illegal_dumping', label: 'Illegal Dumping' },
 ]
 
 const ALL_TAGS = ['Near School', 'Near market', 'Side Road', 'Residential', 'Highway', 'Near River']
@@ -27,10 +26,7 @@ export default function ReportForm() {
   const navigate   = useNavigate()
   const fileRef    = useRef(null)
 
-  // ── GPS state — captured silently, never editable ──
-  const [gps, setGps]           = useState({ lat: null, lng: null, status: 'detecting' })
-  // status: 'detecting' | 'ready' | 'error'
-
+  const [gps, setGps]             = useState({ lat: null, lng: null, status: 'detecting' })
   const [barangays, setBarangays] = useState([])
   const [preview,   setPreview]   = useState(null)
   const [submitting, setSubmitting] = useState(false)
@@ -44,19 +40,15 @@ export default function ReportForm() {
     image:       null,
   })
 
-  // ── Silently capture GPS on mount ──
+  // Silently capture GPS on mount
   useEffect(() => {
     if (!navigator.geolocation) {
       setGps({ lat: null, lng: null, status: 'error' })
       return
     }
     navigator.geolocation.getCurrentPosition(
-      pos => setGps({
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude,
-        status: 'ready',
-      }),
-      () => setGps({ lat: null, lng: null, status: 'error' }),
+      pos => setGps({ lat: pos.coords.latitude, lng: pos.coords.longitude, status: 'ready' }),
+      ()  => setGps({ lat: null, lng: null, status: 'error' }),
       { enableHighAccuracy: true, timeout: 10000 }
     )
   }, [])
@@ -117,10 +109,8 @@ export default function ReportForm() {
     }
   }
 
-  const visibleTags = showMoreTags ? ALL_TAGS : ALL_TAGS.slice(0, 3)
-
-  // Location display string
-  const locationDisplay = gps.status === 'ready'
+  const visibleTags      = showMoreTags ? ALL_TAGS : ALL_TAGS.slice(0, 3)
+  const locationDisplay  = gps.status === 'ready'
     ? `Auto-detected : N: ${gps.lat?.toFixed(4)}`
     : gps.status === 'detecting'
     ? 'Detecting your location…'
@@ -141,7 +131,7 @@ export default function ReportForm() {
         </div>
 
         <div className="card card-dark" style={{ padding: 24 }}>
-          <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 700, marginBottom: 20 }}>
+          <h3 style={{ fontFamily: 'var(--font-head)',color:'white',  fontSize: 17, fontWeight: 700, marginBottom: 20 }}>
             Issue Details
           </h3>
 
@@ -163,7 +153,7 @@ export default function ReportForm() {
             {errors.issue_type && <p className="form-error">{errors.issue_type}</p>}
           </div>
 
-          {/* Location — read-only, GPS only */}
+          {/* Location — read-only GPS */}
           <div className="form-group">
             <label className="form-label">Location</label>
             <div className="gps-field">
@@ -171,9 +161,7 @@ export default function ReportForm() {
               <span style={{ fontSize: 13, color: gps.status === 'ready' ? 'var(--text)' : 'var(--text-muted)' }}>
                 {locationDisplay}
               </span>
-              {gps.status === 'detecting' && (
-                <span className="gps-spinner" />
-              )}
+              {gps.status === 'detecting' && <span className="gps-spinner" />}
             </div>
             {errors.gps && <p className="form-error">{errors.gps}</p>}
           </div>
@@ -189,9 +177,10 @@ export default function ReportForm() {
                   onClick={() => toggleTag(tag)}
                   className="tag-chip"
                   style={{
-                    background: selectedTags.includes(tag) ? 'rgba(46,204,113,.15)' : 'transparent',
-                    borderColor: selectedTags.includes(tag) ? 'var(--accent)' : 'var(--border)',
-                    color: selectedTags.includes(tag) ? 'var(--accent)' : 'var(--text)',
+                    
+                    background:   selectedTags.includes(tag) ? 'rgba(46,204,113,.15)' : 'transparent',
+                    borderColor:  selectedTags.includes(tag) ? 'var(--accent)' : 'var(--border)',
+                    color:        selectedTags.includes(tag) ? 'var(--accent)' : 'white',
                   }}
                 >
                   {tag}
@@ -221,33 +210,54 @@ export default function ReportForm() {
             />
           </div>
 
-          {/* Upload Photo */}
+          {/* ── Capture Photo — camera only, no gallery ── */}
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Upload Photo</label>
+            <label className="form-label">Capture Photo</label>
             <div
               className="photo-upload-zone"
               onClick={() => fileRef.current?.click()}
             >
               {preview ? (
                 <>
-                  <img src={preview} alt="Preview"
-                       style={{ maxHeight: 160, borderRadius: 8, marginBottom: 8 }} />
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Tap to change</span>
+                  <img
+                    src={preview}
+                    alt="Captured"
+                    style={{ maxHeight: 160, borderRadius: 8, marginBottom: 8 }}
+                  />
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    📷 Tap to retake
+                  </span>
                 </>
               ) : (
                 <>
-                  <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>
-                    Take a photo
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>📷</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 , textAlign: 'center' }}>
+                    Tap to open camera, to capture a photo of the issue.
                   </div>
-                  <button className="btn btn-outline btn-sm"
-                          onClick={e => { e.stopPropagation(); fileRef.current?.click() }}>
-                    Take Photo
+                  <button
+                    className="btn btn-outline btn-sm"
+                    onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
+                  >
+                    Open Camera
                   </button>
                 </>
               )}
             </div>
-            <input ref={fileRef} type="file" accept="image/*" capture="environment"
-                   style={{ display: 'none' }} onChange={handleFile} />
+
+            {/*
+              capture="environment" = opens rear camera directly on mobile.
+              accept="image/*"      = restricts to images.
+              Together these prevent the "browse files / gallery" option
+              from appearing on most mobile browsers.
+            */}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              style={{ display: 'none' }}
+              onChange={handleFile}
+            />
           </div>
         </div>
 
