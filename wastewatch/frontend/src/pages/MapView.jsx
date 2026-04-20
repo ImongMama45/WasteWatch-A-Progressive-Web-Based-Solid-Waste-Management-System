@@ -371,27 +371,27 @@ export default function MapView() {
         )}
 
         {/* ── FAB (bottom right) ── */}
-        <div style={{ position:"absolute", right:16, bottom:24, zIndex:400 }}>
+        <div style={{position:"absolute", right:16, bottom:24, zIndex:400 }}>
           <div style={{
-            display:"flex", flexDirection:"column", gap:10, marginBottom:10,
+            flexDirection:"column", gap:10, marginBottom:10,
             transform:fabOpen?"translateY(0)":"translateY(40px)",
             opacity:fabOpen?1:0, pointerEvents:fabOpen?"auto":"none",
             transition:"all 0.25s ease",
           }}>
-            <button className="ww-btn" title="Report Issue"
+            <button className="ww-btn mobile-only" onClick={() => navigate("/report/submit")} title="Report Issue"
               style={{ width:50,height:50,borderRadius:"50%",background:"#ef4444",border:"none",
                 fontSize:22,boxShadow:"0 4px 16px rgba(239,68,68,0.4)",
-                display:"flex",alignItems:"center",justifyContent:"center" }}>⚠️</button>
-            <button className="ww-btn" title="Confirm Collection"
+                alignItems:"center",justifyContent:"center" }}>⚠️</button>
+            <button className="ww-btn mobile-only" onClick={() => navigate("/collection/confirm")} title="Confirm Collection"
               style={{ width:50,height:50,borderRadius:"50%",background:"#22c55e",border:"none",
                 fontSize:22,boxShadow:"0 4px 16px rgba(34,197,94,0.4)",
-                display:"flex",alignItems:"center",justifyContent:"center" }}>✅</button>
+                alignItems:"center",justifyContent:"center" }}>✅</button>
           </div>
-          <button className="ww-btn" onClick={() => setFabOpen(o=>!o)}
+          <button className="ww-btn mobile-only" onClick={() => setFabOpen(o=>!o)}
             style={{ width:50,height:50,borderRadius:"50%",background:"rgba(20,184,166,0.9)",
               border:"none",fontSize:22,fontWeight:700,color:"white",
               boxShadow:"0 4px 16px rgba(20,184,166,0.4)",
-              display:"flex",alignItems:"center",justifyContent:"center",
+              alignItems:"center",justifyContent:"center",
               transform:fabOpen?"rotate(45deg)":"rotate(0deg)",transition:"transform 0.2s" }}>
             +
           </button>
