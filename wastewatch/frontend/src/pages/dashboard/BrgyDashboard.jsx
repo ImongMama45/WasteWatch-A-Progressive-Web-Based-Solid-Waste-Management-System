@@ -705,7 +705,6 @@ export default function BrgyDashboard() {
               SIDEBAR (desktop only)
           ════════════════════════════════════════ */}
           <div className="sidebar">
-
             <div className="card">
               <h3 className="section-title" style={{ marginBottom:12, fontSize:15 }}>Quick Actions</h3>
               <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
