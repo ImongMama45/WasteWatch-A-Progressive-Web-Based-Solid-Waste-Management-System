@@ -10,13 +10,14 @@
  *  - Status badges on schedule
  */
 
-import { useState, useEffect } from 'react'
+import { useState,useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Navbar from '../../components/Navbar'
 import BottomNav from '../../components/BottomNav'
 import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
+
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,7 @@ const STATUS_LABELS = { collecting: 'Collecting', en_route: 'En Route', idle: 'I
 
 export default function BrgyDashboard() {
   const { user } = useAuth()
+  const trucksRef = useRef(null);
   const navigate  = useNavigate()
 
   const [stats,          setStats]          = useState({ approved: 0, rejected: 0 })
@@ -112,6 +114,14 @@ export default function BrgyDashboard() {
     setTrucks(prev => prev.map(t => t.id === truckId ? { ...t, flagged: true } : t))
     showToast('🚩 Truck flagged. Admin has been notified.')
   }
+
+  useEffect(() => {
+  if (activeMainTab !== "trucks") return
+  const timer = setTimeout(() => {
+    trucksRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }, 80)
+  return () => clearTimeout(timer)
+}, [activeMainTab])
 
   const pendingCount = pendingReports.length
   const missedCount  = trucks.filter(t => t.missedYesterday).length
@@ -438,7 +448,7 @@ export default function BrgyDashboard() {
                 TAB 2 — TRUCK MONITOR
             ════════════════════════════════════════ */}
             {activeMainTab === 'trucks' && (
-              <div style={{ animation:'slideDown .2s' }}>
+              <div ref={trucksRef} style={{ animation:'slideDown .2s' }}>
                 <button onClick={() => navigate('/')}
                       style={{
                         display:'block',

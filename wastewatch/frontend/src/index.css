@@ -180,10 +180,14 @@ a { color: inherit; text-decoration: none; }
 }
 .card-dark {
   background: var(--surface-3);
-  border-color: transparent;
+  border-color: transparent; }
+
+.new-rptr-btn {
+  display: inline-flex;
 }
 @media (min-width: 1024px) {
   .card { margin-bottom: 20px; }
+  .new-rptr-btn { display: none;}
 }
 
 /* ================================================================

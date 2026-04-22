@@ -307,7 +307,7 @@ export default function CitizenDashboard() {
             <div id="my-reports-section" style={{ marginBottom:20 }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
                 <h3 className="section-title" style={{ margin:0 }}>My Reports</h3>
-                <button onClick={() => navigate('/report/submit')}
+                <button className="new-rptr-btn" onClick={() => navigate('/report/submit')}
                   style={{ background:'none', border:'none', color:'var(--accent)',
                     fontSize:12, fontWeight:700, cursor:'pointer' }}>
                   + New Report
@@ -415,7 +415,7 @@ export default function CitizenDashboard() {
               {/* Next collection highlight */}
               {nextDay && (
                 <div style={{
-                  background:'rgba(46,204,113,0.08)',
+                  background:'#1e2633',
                   border:'1.5px solid rgba(46,204,113,0.28)',
                   borderRadius:14, padding:'14px 16px', marginBottom:12,
                   display:'flex', alignItems:'center', gap:14,
@@ -428,7 +428,7 @@ export default function CitizenDashboard() {
                   <div style={{ flex:1 }}>
                     <div style={{ fontSize:10, fontWeight:700, color:'var(--accent)',
                       letterSpacing:'.07em', marginBottom:2 }}>NEXT COLLECTION</div>
-                    <div style={{ fontWeight:800, fontSize:16, fontFamily:'var(--font-head)', marginBottom:1 }}>
+                    <div style={{ fontWeight:800,color:"#ffffff", fontSize:16, fontFamily:'var(--font-head)', marginBottom:1 }}>
                       {nextDay.day}
                     </div>
                     <div style={{ fontSize:12, color:'var(--text-muted)' }}>
