@@ -4,15 +4,15 @@ import PrivateRoute from './components/PrivateRoute'
 import MobileOnlyRoute from './components/MobileOnlyRoute'
 
 // Pages
-import Login             from './pages/Login'
-import Register          from './pages/Register'
-import DashboardRouter   from './pages/dashboard/DashboardRouter'
-import ReportForm        from './pages/ReportForm'
+import Login from './pages/Login'
+import Register from './pages/Register'
+import DashboardRouter from './pages/dashboard/DashboardRouter'
+import ReportForm from './pages/ReportForm'
 import ConfirmCollection from './pages/ConfirmCollection'
 import VerificationTasks from './pages/VerificationTasks'
-import MapView           from './pages/MapView'
-import EscalateToAdmin   from './pages/EscalateToAdmin'
-import ValidateReports   from './pages/ValidateReports'
+import MapView from './pages/MapView'
+import EscalateToAdmin from './pages/EscalateToAdmin'
+import ValidateReports from './pages/ValidateReports'
 
 export default function App() {
   return (
@@ -20,7 +20,7 @@ export default function App() {
       <AuthProvider>
         <Routes>
           {/* Public */}
-          <Route path="/login"    element={<Login />} />
+          <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
 
           {/* Protected — available on all screen sizes */}
