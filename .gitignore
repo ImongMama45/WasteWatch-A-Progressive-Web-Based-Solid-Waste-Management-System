@@ -1,35 +1,41 @@
+# =====================
 # Python
+# =====================
 venv/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Environment variables
+# =====================
+# Django
+# =====================
+media/
+db.sqlite3
 .env
 
-# Node / Vite
-node_modules/
-dist/
-
-# Logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# VS Code
-.vscode/
+# =====================
+# Node / React / Vite
+# =====================
 node_modules/
 dist/
 .vite/
-.env
 
-node_modules/
-dist/
-__pycache__/
-*.pyc
-.env
+# =====================
+# Logs
+# =====================
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# =====================
+# OS files
+# =====================
+.DS_Store
+Thumbs.db
+
+# =====================
+# VS Code
+# =====================
+.vscode/
