@@ -115,22 +115,49 @@ MEDIA_ROOT = BASE_DIR / 'media'   # Where uploaded report images are saved
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # ---------------------------------------------------------------------------
+# Dynamic LAN IP detection for mobile/network testing
+# ---------------------------------------------------------------------------
+import socket
+def get_lan_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80)) # Connect to an external IP to find local IP route
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return None
+
+lan_ip = get_lan_ip()
+
+# ---------------------------------------------------------------------------
 # CORS — allow React Vite dev server to call Django API
 # ---------------------------------------------------------------------------
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:3000',   # Vite default dev port
     'http://127.0.0.1:3000',
+    'https://localhost:3000',
+    'https://127.0.0.1:3000',
 ]
+if lan_ip:
+    CORS_ALLOWED_ORIGINS.append(f'http://{lan_ip}:3000')
+    CORS_ALLOWED_ORIGINS.append(f'https://{lan_ip}:3000')
+
 CORS_ALLOW_CREDENTIALS = True   # Needed for session-based auth
 
 CSRF_TRUSTED_ORIGINS = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
+    'https://localhost:3000',
+    'https://127.0.0.1:3000',
 ]
+if lan_ip:
+    CSRF_TRUSTED_ORIGINS.append(f'http://{lan_ip}:3000')
+    CSRF_TRUSTED_ORIGINS.append(f'https://{lan_ip}:3000')
 
 # ---------------------------------------------------------------------------
-# Session / Login config
+# Session config
 # ---------------------------------------------------------------------------
-LOGIN_URL = '/accounts/login/'
-LOGIN_REDIRECT_URL = '/watcher/dashboard/'
-LOGOUT_REDIRECT_URL = '/accounts/login/'
+# No LOGIN_URL / REDIRECT settings — the backend is API-only.
+# All auth is handled by the React frontend via /api/auth/login/ etc.
+# Unauthenticated API requests return HTTP 401 JSON, not a redirect.

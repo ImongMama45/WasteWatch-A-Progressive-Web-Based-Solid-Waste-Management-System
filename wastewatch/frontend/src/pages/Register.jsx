@@ -11,7 +11,7 @@ import api from '../api/client'
 
 export default function Register() {
   const { register } = useAuth()
-  const navigate     = useNavigate()
+  const navigate = useNavigate()
 
   const [barangays, setBarangays] = useState([])
   const [form, setForm] = useState({
@@ -21,14 +21,14 @@ export default function Register() {
     password: '',
     password2: '',
   })
-  const [errors, setErrors]   = useState({})
+  const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
 
   // Load barangays for the dropdown
   useEffect(() => {
     api.get('/api/barangays/')
       .then(res => setBarangays(res.data))
-      .catch(() => {})   // Silently fail — barangay is optional
+      .catch(() => { })   // Silently fail — barangay is optional
   }, [])
 
   function handleChange(e) {
@@ -40,8 +40,8 @@ export default function Register() {
   // Client-side validation before hitting the API
   function validate() {
     const errs = {}
-    if (!form.full_name.trim())  errs.full_name = 'Full name is required.'
-    if (!form.email.trim())      errs.email     = 'Email is required.'
+    if (!form.full_name.trim()) errs.full_name = 'Full name is required.'
+    if (!form.email.trim()) errs.email = 'Email is required.'
     if (form.password.length < 8) errs.password = 'Password must be at least 8 characters.'
     if (form.password !== form.password2) errs.password2 = 'Passwords do not match.'
     return errs

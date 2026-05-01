@@ -10,8 +10,11 @@ function getCsrfToken() {
   return null
 }
 
+// baseURL is intentionally empty — all requests go through the Vite dev proxy
+// (see vite.config.js). This avoids CORS entirely: the browser only ever talks
+// to localhost:3000, and Vite forwards /api/* to Django at localhost:8000.
 const api = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: '',
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json',

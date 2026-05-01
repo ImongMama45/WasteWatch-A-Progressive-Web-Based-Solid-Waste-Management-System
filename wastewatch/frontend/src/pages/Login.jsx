@@ -1,19 +1,22 @@
 /**
  * pages/Login.jsx
  * ---------------
- * Login page — email + password, calls Django session auth.
+ * PWA Login — after successful auth, redirects to ?next= or dashboard.
+ * Shows a "Back to Home" link so users aren't trapped.
  */
 
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 export default function Login() {
   const { login } = useAuth()
-  const navigate  = useNavigate()
+  const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const nextUrl = params.get('next') || '/dashboard'
 
-  const [form, setForm]     = useState({ email: '', password: '' })
-  const [error, setError]   = useState('')
+  const [form, setForm] = useState({ email: '', password: '' })
+  const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
   function handleChange(e) {
@@ -26,7 +29,7 @@ export default function Login() {
     setLoading(true)
     try {
       await login(form.email, form.password)
-      navigate('/dashboard')
+      navigate(nextUrl)         // Return to where they were going
     } catch (err) {
       setError(err.response?.data?.error || 'Invalid email or password.')
     } finally {
@@ -38,7 +41,18 @@ export default function Login() {
     <div className="auth-page">
       <div className="auth-card">
 
-        {/* Logo */}
+        {/* Back to home — don't trap users */}
+        <button
+          onClick={() => navigate('/')}
+          style={{
+            background: 'none', border: 'none', color: 'var(--text-muted)',
+            fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font-body)',
+            marginBottom: 16, padding: 0, display: 'flex', alignItems: 'center', gap: 4,
+          }}
+        >
+          ‹ Back to Home
+        </button>
+
         <div className="auth-logo">
           <div className="logo-icon">🗑️</div>
           <h1>WasteWatch</h1>
@@ -52,12 +66,9 @@ export default function Login() {
             <label className="form-label">Email</label>
             <input
               className="form-input"
-              type="email"
-              name="email"
-              value={form.email}
-              onChange={handleChange}
-              placeholder="juan@example.com"
-              required
+              type="email" name="email"
+              value={form.email} onChange={handleChange}
+              placeholder="juan@example.com" required
             />
           </div>
 
@@ -65,12 +76,9 @@ export default function Login() {
             <label className="form-label">Password</label>
             <input
               className="form-input"
-              type="password"
-              name="password"
-              value={form.password}
-              onChange={handleChange}
-              placeholder="••••••••"
-              required
+              type="password" name="password"
+              value={form.password} onChange={handleChange}
+              placeholder="••••••••" required
             />
           </div>
 

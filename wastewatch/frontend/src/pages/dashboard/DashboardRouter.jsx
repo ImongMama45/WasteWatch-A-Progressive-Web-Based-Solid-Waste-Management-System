@@ -1,4 +1,5 @@
 import { useAuth } from "../../context/AuthContext";
+import DashboardLayout from "../../components/DashboardLayout";
 import WatcherDashboard from "./WatcherDashboard";
 import DriverDashboard from "./DriverDashboard";
 import AdminDashboard from "./AdminDashboard";
@@ -9,18 +10,26 @@ export default function DashboardRouter() {
   const { user } = useAuth();
   const role = user?.role?.toLowerCase();
 
+  let content;
   switch (role) {
     case "watcher":
-      return <WatcherDashboard />;
+      content = <WatcherDashboard />;
+      break;
     case "driver":
-      return <DriverDashboard />;
+      content = <DriverDashboard />;
+      break;
     case "admin":
-      return <AdminDashboard />;
+      content = <AdminDashboard />;
+      break;
     case "citizen":
-      return <CitizenDashboard />;
+      content = <CitizenDashboard />;
+      break;
     case "barangay_official":
-      return <BrgyDashboard />;
+      content = <BrgyDashboard />;
+      break;
     default:
-      return <div>Unauthorized</div>;
+      content = <div>Unauthorized</div>;
   }
+
+  return <DashboardLayout>{content}</DashboardLayout>;
 }

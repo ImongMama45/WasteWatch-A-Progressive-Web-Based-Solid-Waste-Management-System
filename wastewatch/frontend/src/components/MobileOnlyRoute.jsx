@@ -1,14 +1,41 @@
 // MobileOnlyRoute.jsx
-// Wraps routes that require a mobile device (camera-dependent actions).
-// On desktop (≥1024px), renders a restriction screen instead of the page.
-// Drop into: src/components/MobileOnlyRoute.jsx
+// -------------------
+// Wraps routes that require a mobile/tablet device (camera + GPS).
+// On desktop, renders a restriction screen instead of the page.
+//
+// Detection goes beyond screen size — uses pointer type, hover
+// capability, and touch support to reliably distinguish desktops
+// from phones/tablets.
 
 import { useNavigate } from 'react-router-dom'
 
+/**
+ * Detect whether the current device is a desktop/laptop.
+ *
+ * Combines multiple browser signals:
+ *  1. pointer: fine   — primary input is a mouse/trackpad (not touch)
+ *  2. hover: hover    — primary input can hover (mouse can, finger can't)
+ *  3. maxTouchPoints  — desktops typically report 0
+ *  4. screen width    — fallback: ≥1024 px
+ *
+ * Returns true when the majority of signals (≥3 of 4) point to desktop.
+ * This correctly handles:
+ *  - Large tablets  → wide screen but touch  → NOT desktop
+ *  - Small laptops  → narrow but mouse+hover → desktop
+ */
 function useIsDesktop() {
-  // We use matchMedia so it's synchronous — no flash of content
   if (typeof window === 'undefined') return false
-  return window.matchMedia('(min-width: 1024px)').matches
+
+  const finePointer = window.matchMedia('(pointer: fine)').matches
+  const canHover    = window.matchMedia('(hover: hover)').matches
+  const noTouch     = navigator.maxTouchPoints === 0
+  const wideScreen  = window.matchMedia('(min-width: 1024px)').matches
+
+  // Count how many signals indicate desktop
+  const score = [finePointer, canHover, noTouch, wideScreen].filter(Boolean).length
+
+  // 3+ out of 4 signals agree → desktop
+  return score >= 3
 }
 
 export default function MobileOnlyRoute({ children }) {

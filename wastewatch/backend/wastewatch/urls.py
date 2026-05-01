@@ -1,8 +1,12 @@
 """
 WasteWatch — Root URL Configuration
 ------------------------------------
-All app routes are registered here. Each app has its own urls.py
-so that new modules (driver, admin_panel, etc.) can be plugged in easily.
+All template-based routes have been removed.
+The React Vite frontend is the only client.
+
+Active routes:
+  /admin/   — Django admin panel (superuser only)
+  /api/     — JSON API consumed by the React frontend
 """
 
 from django.contrib import admin
@@ -25,19 +29,13 @@ urlpatterns = [
     # Django built-in admin (useful for superusers / debugging)
     path('admin/', admin.site.urls),
 
-    # Accounts: login, register, logout
-    path('accounts/', include('accounts.urls')),
-
-    # Watcher module: dashboard, reports, collection confirm
-    path('watcher/', include('watcher.urls')),
-
     # JSON API — consumed by the React Vite frontend
     path('api/', include('wastewatch.api_urls')),
 
     # -----------------------------------------------------------------------
-    # Future modules — uncomment and create their urls.py when ready:
-    # path('driver/',    include('driver.urls')),
-    # path('barangay/',  include('barangay_official.urls')),
+    # Future modules — uncomment and create their api_urls when ready:
+    # path('api/driver/',    include('driver.api_urls')),
+    # path('api/barangay/',  include('barangay_official.api_urls')),
     # -----------------------------------------------------------------------
 ]
 

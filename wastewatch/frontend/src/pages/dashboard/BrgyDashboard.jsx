@@ -12,8 +12,6 @@
 
 import { useState,useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import Navbar from '../../components/Navbar'
-import BottomNav from '../../components/BottomNav'
 import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
@@ -128,7 +126,6 @@ export default function BrgyDashboard() {
 
   return (
     <>
-      <Navbar />
 
       <style>{`
         @keyframes fadeSlideIn {
@@ -805,7 +802,6 @@ export default function BrgyDashboard() {
           </div>
         </div>
       </div>
-      <BottomNav />
     </>
   )
 }

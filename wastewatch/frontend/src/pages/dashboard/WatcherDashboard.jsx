@@ -1,7 +1,5 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import Navbar from '../../components/Navbar'
-import BottomNav from '../../components/BottomNav'
 import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
@@ -29,7 +27,6 @@ export default function Dashboard() {
 
   return (
     <>
-      <Navbar />
       <div className="page">
 
         {/* Page Header */}
@@ -257,7 +254,6 @@ export default function Dashboard() {
 
         </div>
       </div>
-      <BottomNav />
     </>
   )
 }

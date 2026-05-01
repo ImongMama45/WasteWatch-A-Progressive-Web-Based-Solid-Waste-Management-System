@@ -14,22 +14,23 @@ Endpoints:
 import json
 from django.http                    import JsonResponse
 from django.views.decorators.http   import require_http_methods
-from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import ensure_csrf_cookie, csrf_exempt
 
 from .models import GarbageReport, CollectionConfirmation, ReportStatus
 from accounts.models import Barangay
 
 
-@csrf_exempt
-@require_http_methods(['POST'])
-def api_register_view(request):
-    ...
+# ── Helper: require authenticated session, return 401 JSON if not ─────────────
+def _require_auth(request):
+    """
+    Returns a JsonResponse(401) if the user is not authenticated, else None.
+    Use instead of @login_required so unauthenticated API calls get JSON, not
+    a redirect to a Django login page that no longer exists.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Authentication required.'}, status=401)
+    return None
 
-@csrf_exempt
-@require_http_methods(['POST'])
-def api_login_view(request):
-    ...
 
 # ── Helper: serialize a report ───────────────────────────────────────────────
 def report_to_dict(r):
@@ -51,8 +52,11 @@ def report_to_dict(r):
 
 
 # ── GET + POST /api/watcher/reports/ ─────────────────────────────────────────
-@login_required
 def reports_view(request):
+    auth_error = _require_auth(request)
+    if auth_error:
+        return auth_error
+
     if request.method == 'GET':
         reports = GarbageReport.objects.filter(user=request.user).select_related('barangay')
         return JsonResponse([report_to_dict(r) for r in reports], safe=False)
@@ -93,8 +97,11 @@ def reports_view(request):
 
 
 # ── GET /api/watcher/reports/<id>/ ───────────────────────────────────────────
-@login_required
 def report_detail_view(request, report_id):
+    auth_error = _require_auth(request)
+    if auth_error:
+        return auth_error
+
     try:
         report = GarbageReport.objects.get(id=report_id, user=request.user)
     except GarbageReport.DoesNotExist:
@@ -104,10 +111,13 @@ def report_detail_view(request, report_id):
 
 
 # ── GET /api/watcher/stats/ ──────────────────────────────────────────────────
-@login_required
 @require_http_methods(['GET'])
 def stats_view(request):
     """Dashboard stat card counts for the logged-in user."""
+    auth_error = _require_auth(request)
+    if auth_error:
+        return auth_error
+
     qs = GarbageReport.objects.filter(user=request.user)
     return JsonResponse({
         'total':            qs.count(),
@@ -118,9 +128,12 @@ def stats_view(request):
 
 
 # ── POST /api/watcher/confirm/ ───────────────────────────────────────────────
-@login_required
 @require_http_methods(['POST'])
 def confirm_collection_view(request):
+    auth_error = _require_auth(request)
+    if auth_error:
+        return auth_error
+
     data = json.loads(request.body)
 
     barangay = None
