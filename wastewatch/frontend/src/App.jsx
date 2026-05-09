@@ -14,6 +14,7 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-route
 import { AuthProvider } from './context/AuthContext'
 import PrivateRoute from './components/PrivateRoute'
 import MobileOnlyRoute from './components/MobileOnlyRoute'
+import DashboardLayout from './components/DashboardLayout'
 
 // Public pages
 import PublicDashboard from './pages/dashboard/PublicDashboard'
@@ -31,9 +32,6 @@ import Profile from './pages/Profile'
 import CollectionSchedule from './pages/CollectionSchedule'
 
 // These may not exist yet — uncomment when ready:
-import MapView from './pages/MapView'
-import EscalateToAdmin from './pages/EscalateToAdmin'
-import ValidateReports from './pages/ValidateReports'
 import TruckManagement from './pages/admin/TruckManagement'
 import UserManagement from './pages/admin/UserManagement'
 import DumpsiteManagement from './pages/admin/DumpsiteManagement'
@@ -43,6 +41,39 @@ import PerformanceAnalytics from './pages/admin/PerformanceAnalytics'
 import HotspotDetection from './pages/admin/HotspotDetection'
 import NotificationCenter from './pages/admin/NotificationCenter'
 import ActivityLog from './pages/admin/ActivityLog'
+
+import RouteOverview from './pages/driver/RouteOverview'
+import DriverAnalytics from './pages/driver/DriverAnalytics'
+import DriverCollectionLog from './pages/driver/DriverCollectionLog'
+import DriverHotspotAlert from './pages/driver/DriverHotspotAlert'
+import DriverStatusPanel from './pages/driver/DriverStatusPanel'
+import DriverRouteFlow from './pages/driver/DriverRouteFlow'
+import Navbar from './components/Navbar'
+
+// Placeholder for upcoming driver pages
+function DriverComingSoon({ title }) {
+  const navigate = useNavigate()
+  return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', padding: 24,
+      fontFamily: 'var(--font-head)', background: 'var(--bg)',
+    }}>
+      <div style={{ fontSize: 48, marginBottom: 16 }}>🚛</div>
+      <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>{title}</h1>
+      <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 24 }}>
+        This page is coming in the next sprint.
+      </p>
+      <button onClick={() => navigate('/dashboard')}
+        style={{
+          background: 'var(--accent)', color: '#0d1117', border: 'none',
+          padding: '10px 22px', borderRadius: 10, fontWeight: 700, cursor: 'pointer', fontSize: 14
+        }}>
+        ← Back to Dashboard
+      </button>
+    </div>
+  )
+}
 
 function AuthOverlay({ mode }) {
   const navigate = useNavigate()
@@ -70,10 +101,12 @@ export default function App() {
             <PrivateRoute><DashboardRouter /></PrivateRoute>
           } />
 
+          {/* WATCHER PAGE */}
           <Route path="/verification-tasks" element={
             <PrivateRoute><VerificationTasks /></PrivateRoute>
           } />
 
+          {/* General Page*/}
           <Route path="/profile" element={
             <PrivateRoute><Profile /></PrivateRoute>
           } />
@@ -86,6 +119,7 @@ export default function App() {
             <PrivateRoute><MapView /></PrivateRoute>
           } />
 
+          {/* BARANGAY OFFICIAL PAGE */}
           <Route path="/brgy/escalate" element={
             <PrivateRoute><EscalateToAdmin /></PrivateRoute>
           } />
@@ -94,7 +128,7 @@ export default function App() {
             <PrivateRoute><ValidateReports /></PrivateRoute>
           } />
 
-
+          {/* ADMIN PAGE */}
           <Route path="/admin/trucks" element={
             <PrivateRoute><TruckManagement /></PrivateRoute>
           } />
@@ -129,6 +163,59 @@ export default function App() {
 
           <Route path="/admin/activity-log" element={
             <PrivateRoute><ActivityLog /></PrivateRoute>
+          } />
+
+          {/* ── DRIVER MODULE ── */}
+          <Route path="/driver/flow" element={
+            <PrivateRoute>
+              <MobileOnlyRoute>
+                <DriverRouteFlow />
+              </MobileOnlyRoute>
+            </PrivateRoute>
+          } />
+
+          <Route
+            path="/driver/route"
+            element={
+              <PrivateRoute>
+                <DashboardLayout>
+                  <RouteOverview />
+                </DashboardLayout>
+              </PrivateRoute>
+            }
+          />
+
+          <Route path="/driver/log" element={
+            <PrivateRoute>
+              <DashboardLayout>
+                <DriverCollectionLog />
+              </DashboardLayout>
+            </PrivateRoute>
+          } />
+
+          <Route path="/driver/hotspots" element={
+            <PrivateRoute>
+              <DashboardLayout>
+                <DriverHotspotAlert />
+              </DashboardLayout>
+            </PrivateRoute>
+          } />
+
+          <Route path="/driver/status" element={
+            <PrivateRoute>
+              <DashboardLayout>
+                <DriverStatusPanel />
+              </DashboardLayout>
+            </PrivateRoute>
+          } />
+
+          <Route path="/driver/analytics" element={
+            <PrivateRoute>
+              <DashboardLayout>
+                <DriverAnalytics />
+              </DashboardLayout>
+            </PrivateRoute>
+
           } />
 
           {/* ── PROTECTED + MOBILE ONLY (camera + GPS) ── */}

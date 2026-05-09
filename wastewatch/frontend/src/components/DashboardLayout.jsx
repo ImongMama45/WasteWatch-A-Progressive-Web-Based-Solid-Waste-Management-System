@@ -56,10 +56,14 @@ export const SIDEBAR_NAV = {
     { path: '/map', label: 'Live Map', icon: '🗺️' },
   ],
   driver: [
-    { path: '/', label: 'Home', icon: '🏠' },
-    { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-    { path: '/schedule', label: 'Schedule', icon: '📅' },
-    { path: '/map', label: 'Live Map', icon: '🗺️' },
+    { path: '/dashboard',        label: 'Home',           icon: '🏠' },
+    { path: '/driver/route',     label: 'My Route',       icon: '🗺️' },
+    { path: '/driver/log',       label: 'Collection Log', icon: '📋' },
+    { path: '/driver/analytics', label: 'Analytics',      icon: '📈' },
+    { path: '/driver/hotspots',  label: 'Hotspot Alerts', icon: '🔥' },
+    { path: '/driver/status',    label: 'Shift & Truck',  icon: '🚛' },
+    { path: '/map',              label: 'Live Map',       icon: '📍' },
+    { path: '/profile',          label: 'Profile',        icon: '👤' },
   ],
 }
 

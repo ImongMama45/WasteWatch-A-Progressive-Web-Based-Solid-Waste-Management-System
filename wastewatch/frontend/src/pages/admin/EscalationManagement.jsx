@@ -132,6 +132,7 @@ export default function EscalationManagement() {
 
   return (
     <DashboardLayout>
+
       {toast && (
         <div style={{ position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', background: '#0f172a', color: '#fff', padding: '10px 22px', borderRadius: 12, zIndex: 9999, fontSize: 13, fontWeight: 600, border: '1px solid rgba(46,204,113,0.3)', whiteSpace: 'nowrap' }}>{toast}</div>
       )}
@@ -147,7 +148,7 @@ export default function EscalationManagement() {
         .esc-act:hover { opacity: .82; transform: scale(.97); }
       `}</style>
 
-      <div className="page">
+      <div className="page" style={{ maxWidth: 1000, margin: '0 auto', paddingBottom: 0 }}>
 
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>

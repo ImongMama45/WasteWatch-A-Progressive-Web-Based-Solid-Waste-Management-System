@@ -159,10 +159,10 @@ export default function ConfirmCollection() {
  */
 function PendingVerificationForm({ item, onBack }) {
   const navigate = useNavigate()
-  const [gps, setGps]               = useState({ lat: null, lng: null, status: 'detecting' })
+  const [gps, setGps] = useState({ lat: null, lng: null, status: 'detecting' })
   const [description, setDescription] = useState('')
-  const [photo, setPhoto]           = useState(null)
-  const [preview, setPreview]       = useState(null)
+  const [photo, setPhoto] = useState(null)
+  const [preview, setPreview] = useState(null)
   const [submitting, setSubmitting] = useState(false)
 
   // Silent GPS capture on mount — no manual override
@@ -224,8 +224,8 @@ function PendingVerificationForm({ item, onBack }) {
                 {gps.status === 'ready'
                   ? `Auto-detected : N: ${gps.lat?.toFixed(4)}`
                   : gps.status === 'detecting'
-                  ? 'Detecting your location…'
-                  : 'Location unavailable — enable GPS'}
+                    ? 'Detecting your location…'
+                    : 'Location unavailable — enable GPS'}
               </span>
               {gps.status === 'detecting' && <span className="gps-spinner" />}
             </div>
@@ -257,14 +257,14 @@ function PendingVerificationForm({ item, onBack }) {
             >
               {preview ? (
                 <img src={preview} alt="Preview"
-                     style={{ maxHeight: 160, borderRadius: 8 }} />
+                  style={{ maxHeight: 160, borderRadius: 8 }} />
               ) : (
                 <>
                   <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>
                     Take a photo
                   </div>
                   <button className="btn btn-outline btn-sm"
-                          onClick={e => { e.stopPropagation(); document.getElementById('vf-photo').click() }}>
+                    onClick={e => { e.stopPropagation(); document.getElementById('vf-photo').click() }}>
                     Take Photo
                   </button>
                 </>
