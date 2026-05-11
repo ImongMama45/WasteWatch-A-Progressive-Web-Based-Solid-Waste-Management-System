@@ -38,7 +38,6 @@ export default function Navbar() {
   const mobileNavItems = user
     ? [
       ...baseItems.map(item => ({ path: item.path, label: `${item.icon}  ${item.label}` })),
-      { path: '/report/submit', label: '🗂  Submit Report' },
       ...(role === 'driver' ? [{ path: '/collection/confirm', label: '✅  Confirm Collection' }] : [])
     ]
     : [
@@ -67,7 +66,9 @@ export default function Navbar() {
             onClick={e => { e.preventDefault(); navTo('/') }}
             className="navbar-brand"
           >
-            <span className="logo"></span>
+            <span className="logo">
+              <img src="../../../Logo.svg" alt="logo-svg" />
+            </span>
           </a>
         </div>
 

@@ -77,9 +77,9 @@ const NOTE_PRESETS = [
 
 const CATEGORY_COLORS = {
   'Biodegradable': '#2ecc71',
-  'Recyclable':    '#3b82f6',
-  'Mixed Waste':   '#f59e0b',
-  'Hazardous':     '#ef4444',
+  'Recyclable': '#3b82f6',
+  'Mixed Waste': '#f59e0b',
+  'Hazardous': '#ef4444',
 }
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ function CurrentStopCard({ stop }) {
             {stop.category.toUpperCase()}
           </span>
           <span className="text-muted text-xs" style={{ marginLeft: 'auto' }}>
-            📍 {stop.distance}
+            {stop.distance}
           </span>
         </div>
 
@@ -153,9 +153,9 @@ function CurrentStopCard({ stop }) {
 // ─── COLLECTION FORM ──────────────────────────────────────────────────────────
 
 function CollectionForm({ stop, onCollected }) {
-  const [note,       setNote]       = useState('')
+  const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [done,       setDone]       = useState(false)
+  const [done, setDone] = useState(false)
 
   function selectPreset(preset) {
     setNote(prev => prev ? `${prev}, ${preset}` : preset)
@@ -164,8 +164,8 @@ function CollectionForm({ stop, onCollected }) {
   async function handleCollect() {
     setSubmitting(true)
     const payload = {
-      stop_id:      stop.id,
-      note:         note.trim() || null,
+      stop_id: stop.id,
+      note: note.trim() || null,
       collected_at: new Date().toISOString(),
       // photo_proof: null   // TODO: attach when photo feature is ready
     }
@@ -195,85 +195,6 @@ function CollectionForm({ stop, onCollected }) {
     )
   }
 
-  return (
-    <div style={{ marginBottom: 16 }}>
-      {/* Note presets (large tap targets) */}
-      <div className="form-label" style={{ marginBottom: 8 }}>QUICK NOTES</div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-        {NOTE_PRESETS.map(p => (
-          <button key={p} onClick={() => selectPreset(p)} style={{
-            padding: '8px 14px', borderRadius: 20, border: '1px solid var(--border)',
-            background: note.includes(p) ? 'var(--accent)' : 'var(--surface)',
-            color: note.includes(p) ? '#0d1117' : 'var(--text)',
-            fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all .15s',
-          }}>
-            {p}
-          </button>
-        ))}
-      </div>
-
-      {/* Free-text note */}
-      <div className="form-group" style={{ marginBottom: 14 }}>
-        <label className="form-label">
-          Additional Note{' '}
-          <span style={{ textTransform: 'none', fontWeight: 400, color: 'var(--text-muted)' }}>(optional)</span>
-        </label>
-        <textarea
-          className="form-input"
-          rows={2}
-          maxLength={200}
-          placeholder="e.g. No bins outside, area inaccessible…"
-          value={note}
-          onChange={e => setNote(e.target.value)}
-        />
-      </div>
-
-      {/* ── PHOTO PROOF PLACEHOLDER ──────────────────────────────────────────────
-       *  TODO (Future Sprint): Implement camera capture + upload
-       *  - Use <input type="file" accept="image/*" capture="environment"> on mobile
-       *  - Preview thumbnail after selection
-       *  - Upload to /api/driver/stops/<id>/photo/ or attach in collect payload
-       */}
-      <div style={{
-        border: '1.5px dashed var(--border)', borderRadius: 12,
-        padding: '18px 16px', marginBottom: 14, textAlign: 'center',
-        background: 'var(--bg)',
-      }}>
-        <div style={{ fontSize: 28, marginBottom: 6 }}>📷</div>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Photo Proof</div>
-        <div className="text-muted text-xs">Camera upload coming in a future update</div>
-        {/* Uncomment when ready:
-        <input id="photo-proof-input" type="file" accept="image/*"
-          capture="environment" style={{ display: 'none' }} onChange={handlePhoto} />
-        <button className="btn btn-outline btn-sm" style={{ marginTop: 10 }}
-          onClick={() => document.getElementById('photo-proof-input').click()}>
-          Take Photo
-        </button>
-        */}
-      </div>
-
-      {/* Mark Collected — large, prominent button */}
-      <button
-        id="mark-collected-btn"
-        onClick={handleCollect}
-        disabled={submitting}
-        style={{
-          width: '100%', padding: '18px', borderRadius: 14,
-          background: submitting
-            ? 'var(--bg)'
-            : 'linear-gradient(135deg,#2ecc71,#27ae60)',
-          color: submitting ? 'var(--text-muted)' : '#0d1117',
-          border: 'none', fontFamily: 'var(--font-head)',
-          fontSize: 17, fontWeight: 800, cursor: submitting ? 'not-allowed' : 'pointer',
-          boxShadow: submitting ? 'none' : '0 6px 20px rgba(46,204,113,0.35)',
-          transition: 'all .2s',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-        }}
-      >
-        {submitting ? 'Saving…' : '✅  Mark as Collected'}
-      </button>
-    </div>
-  )
 }
 
 // ─── HISTORY CARD ─────────────────────────────────────────────────────────────
@@ -305,7 +226,7 @@ function HistoryCard({ entry, index }) {
             background: 'var(--bg)', borderRadius: 6, padding: '3px 8px',
             display: 'inline-block', marginTop: 2,
           }}>
-            📝 {entry.note}
+            {entry.note}
           </div>
         )}
       </div>
@@ -316,12 +237,12 @@ function HistoryCard({ entry, index }) {
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
 export default function DriverCollectionLog() {
-  const { user }  = useAuth()
-  const navigate  = useNavigate()
+  const { user } = useAuth()
+  const navigate = useNavigate()
 
   const [currentStop, setCurrentStop] = useState(MOCK_CURRENT_STOP)
-  const [history,     setHistory]     = useState(MOCK_HISTORY)
-  const [loading,     setLoading]     = useState(true)
+  const [history, setHistory] = useState(MOCK_HISTORY)
+  const [loading, setLoading] = useState(true)
   const [noMoreStops, setNoMoreStops] = useState(false)
 
   useEffect(() => {
@@ -329,7 +250,7 @@ export default function DriverCollectionLog() {
       api.get('/api/driver/stops/current/').catch(() => ({ data: null })),
       api.get('/api/driver/stops/history/today/').catch(() => ({ data: null })),
     ]).then(([curRes, histRes]) => {
-      if (curRes.data)  setCurrentStop(curRes.data)
+      if (curRes.data) setCurrentStop(curRes.data)
       if (histRes.data) setHistory(histRes.data)
     }).finally(() => setLoading(false))
   }, [])
@@ -361,17 +282,7 @@ export default function DriverCollectionLog() {
 
         {/* ── HEADER ── */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-          <button onClick={() => navigate('/driver/route')} style={{
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 10, width: 36, height: 36,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', flexShrink: 0,
-          }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-              strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-          </button>
+
           <div style={{ flex: 1 }}>
             <h1 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: 0 }}>
               Collection Log

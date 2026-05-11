@@ -80,14 +80,14 @@ const MOCK_ALERTS = [
 // ─── SEVERITY CONFIG ──────────────────────────────────────────────────────────
 
 const SEVERITY = {
-  high:   { label: 'HIGH',   color: '#ef4444', bg: 'rgba(239,68,68,0.10)',   icon: '🔴', rank: 1 },
+  high: { label: 'HIGH', color: '#ef4444', bg: 'rgba(239,68,68,0.10)', icon: '🔴', rank: 1 },
   medium: { label: 'MEDIUM', color: '#f59e0b', bg: 'rgba(245,158,11,0.10)', icon: '🟡', rank: 2 },
-  low:    { label: 'LOW',    color: '#2ecc71', bg: 'rgba(46,204,113,0.10)', icon: '🟢', rank: 3 },
+  low: { label: 'LOW', color: '#2ecc71', bg: 'rgba(46,204,113,0.10)', icon: '🟢', rank: 3 },
 }
 
 const TYPE_LABELS = {
-  overflow:          'Overflow',
-  illegal_dumping:   'Illegal Dumping',
+  overflow: 'Overflow',
+  illegal_dumping: 'Illegal Dumping',
   missed_collection: 'Missed Collection',
 }
 
@@ -95,20 +95,20 @@ const TYPE_LABELS = {
 
 const SORT_OPTIONS = [
   { key: 'proximity', label: 'By Proximity' },
-  { key: 'severity',  label: 'By Severity'  },
+  { key: 'severity', label: 'By Severity' },
 ]
 
 // ─── ALERT CARD ───────────────────────────────────────────────────────────────
 
 function AlertCard({ alert, onNoted, onAddToRoute }) {
-  const sev    = SEVERITY[alert.severity]
-  const [noted,   setNoted]   = useState(false)
-  const [added,   setAdded]   = useState(false)
+  const sev = SEVERITY[alert.severity]
+  const [noted, setNoted] = useState(false)
+  const [added, setAdded] = useState(false)
   const [loading, setLoading] = useState(null)   // 'noted' | 'route' | null
 
   async function handleNoted() {
     setLoading('noted')
-    try { await api.post(`/api/driver/hotspots/${alert.id}/noted/`) } catch {}
+    try { await api.post(`/api/driver/hotspots/${alert.id}/noted/`) } catch { }
     setLoading(null)
     setNoted(true)
     onNoted?.(alert.id)
@@ -116,7 +116,7 @@ function AlertCard({ alert, onNoted, onAddToRoute }) {
 
   async function handleAddToRoute() {
     setLoading('route')
-    try { await api.post(`/api/driver/hotspots/${alert.id}/add-to-route/`) } catch {}
+    try { await api.post(`/api/driver/hotspots/${alert.id}/add-to-route/`) } catch { }
     setLoading(null)
     setAdded(true)
     onAddToRoute?.(alert.id)
@@ -200,7 +200,7 @@ function AlertCard({ alert, onNoted, onAddToRoute }) {
               fontSize: 12, fontWeight: 700, transition: 'all .15s',
             }}
           >
-            {loading === 'noted' ? '…' : noted ? '✓ Noted' : '👍 Mark Noted'}
+            {loading === 'noted' ? '…' : noted ? '✓ Noted' : 'Mark Noted'}
           </button>
 
           <button
@@ -215,7 +215,7 @@ function AlertCard({ alert, onNoted, onAddToRoute }) {
               fontSize: 12, fontWeight: 700, transition: 'all .15s',
             }}
           >
-            {loading === 'route' ? '…' : added ? '✓ Added' : '➕ Add to Route'}
+            {loading === 'route' ? '…' : added ? '✓ Added' : '+  Add to Route'}
           </button>
         </div>
       </div>
@@ -263,9 +263,9 @@ export default function DriverHotspotAlert() {
   const { user } = useAuth()
   const navigate = useNavigate()
 
-  const [alerts,   setAlerts]   = useState(MOCK_ALERTS)
-  const [sortBy,   setSortBy]   = useState('proximity')
-  const [loading,  setLoading]  = useState(true)
+  const [alerts, setAlerts] = useState(MOCK_ALERTS)
+  const [sortBy, setSortBy] = useState('proximity')
+  const [loading, setLoading] = useState(true)
   const [showNoted, setShowNoted] = useState(false)   // toggle to show/hide noted alerts
 
   // GPS for real distance calculation when backend is ready
@@ -274,7 +274,7 @@ export default function DriverHotspotAlert() {
   useEffect(() => {
     api.get('/api/driver/hotspots/nearby/')
       .then(res => { if (res.data) setAlerts(res.data) })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false))
   }, [])
 
@@ -289,7 +289,7 @@ export default function DriverHotspotAlert() {
 
   // Counts
   const activeCount = displayedAlerts.length
-  const highCount   = alerts.filter(a => a.severity === 'high').length
+  const highCount = alerts.filter(a => a.severity === 'high').length
 
   return (
     <>
@@ -305,23 +305,13 @@ export default function DriverHotspotAlert() {
 
         {/* ── HEADER ── */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-          <button onClick={() => navigate('/dashboard')} style={{
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 10, width: 36, height: 36,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', flexShrink: 0,
-          }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-              strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-          </button>
+
           <div style={{ flex: 1 }}>
             <h1 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: 0 }}>
               Hotspot Alerts
             </h1>
             <p className="text-muted text-xs" style={{ marginTop: 2 }}>
-              {isTracking ? '📍 Using live location' : 'Near your route'}
+              {isTracking ? ' Using live location' : 'Near your route'}
             </p>
           </div>
           {/* High-priority badge */}

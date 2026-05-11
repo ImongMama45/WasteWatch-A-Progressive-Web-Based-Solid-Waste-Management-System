@@ -45,7 +45,7 @@ export default function CollectionSchedule() {
         .stop-item:last-child .stop-line { display: none; }
       `}</style>
 
-      <div className="page" style={{ maxWidth: 800, margin: '0 auto' }}>
+      <div className="page" style={{ maxWidth: 1200, margin: '0 auto' }}>
 
         {/* 1. Header Section */}
         <div style={{ marginBottom: 24 }}>
@@ -74,14 +74,12 @@ export default function CollectionSchedule() {
           {todaySchedule ? (
             <div style={{ display: 'grid', gap: 12, background: 'var(--surface-2)', padding: 16, borderRadius: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 18 }}>⏰</span>
                 <div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.05em' }}>TIME</div>
                   <div style={{ fontWeight: 600, fontSize: 14 }}>{todaySchedule.time}</div>
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 18 }}>🗺️</span>
                 <div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.05em' }}>ROUTE</div>
                   <div style={{ fontWeight: 600, fontSize: 14 }}>{todaySchedule.routeName}</div>
@@ -89,7 +87,6 @@ export default function CollectionSchedule() {
               </div>
               {showDetails && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 18 }}>🚛</span>
                   <div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.05em' }}>ASSIGNED TRUCK</div>
                     <div style={{ fontWeight: 600, fontSize: 14 }}>{todaySchedule.truck} {isDriver && <span style={{ color: '#5dade2', fontSize: 12 }}>(You)</span>}</div>
@@ -119,7 +116,6 @@ export default function CollectionSchedule() {
                 <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16 }}>
                   <div style={{ width: 48, height: 48, borderRadius: 12, background: item.isToday ? 'rgba(46,204,113,0.1)' : 'var(--surface-2)', border: `1px solid ${item.isToday ? 'rgba(46,204,113,0.3)' : 'var(--border)'}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <div style={{ fontSize: 10, fontWeight: 800, color: item.isToday ? '#2ecc71' : 'var(--text-muted)', textTransform: 'uppercase' }}>{item.day.slice(0, 3)}</div>
-                    <div style={{ fontSize: 16 }}>📅</div>
                   </div>
 
                   <div style={{ flex: 1 }}>
@@ -128,9 +124,9 @@ export default function CollectionSchedule() {
                       {item.isToday && <span className="sched-day-badge">Today</span>}
                     </div>
                     <div style={{ fontSize: 13, color: 'var(--text-muted)', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                      <span>⏰ {item.time}</span>
-                      <span>🗺️ {item.routeName}</span>
-                      {showDetails && <span>🚛 {item.truck}</span>}
+                      <span>{item.time}</span>
+                      <span>{item.routeName}</span>
+                      {showDetails && <span>{item.truck}</span>}
                     </div>
                   </div>
 
@@ -172,7 +168,7 @@ export default function CollectionSchedule() {
 
                     {/* 5. Map Preview Button */}
                     <button className="btn btn-outline" style={{ width: '100%', marginTop: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                      <span>🗺️</span> View Route on Map
+                      View Route on Map
                     </button>
                   </div>
                 )}

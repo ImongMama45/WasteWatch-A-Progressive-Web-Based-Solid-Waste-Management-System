@@ -96,9 +96,9 @@ const STATUS_META = {
 const SEVERITY_COLORS = { high: '#ef4444', medium: '#f59e0b', low: '#22c55e' }
 
 const TABS = [
-  { key: 'pending', label: 'Pending', icon: '📋' },
-  { key: 'approved', label: 'Approved', icon: '✅' },
-  { key: 'history', label: 'History', icon: '🗂️' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'approved', label: 'Approved' },
+  { key: 'history', label: 'History' },
 ]
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
@@ -499,7 +499,7 @@ export default function ValidateReports() {
       {/* ════════════════════════════════════════════════════
           MAIN PAGE
       ════════════════════════════════════════════════════ */}
-      <div className="page" style={{ maxWidth: 900 }}>
+      <div className="page" style={{ maxWidth: 1200 }}>
 
 
 
@@ -522,7 +522,6 @@ export default function ValidateReports() {
             background: 'var(--surface)', border: '1px solid var(--border)',
             borderRadius: 10, padding: '8px 14px',
           }}>
-            <span style={{ fontSize: 14 }}>🏛️</span>
             <div>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.06em' }}>
                 YOUR BARANGAY
@@ -626,7 +625,6 @@ export default function ValidateReports() {
         {filtered.length === 0 ? (
           <div className="card" style={{ textAlign: 'center', padding: '48px 20px' }}>
             <div style={{ fontSize: 44, marginBottom: 12 }}>
-              {activeTab === 'pending' ? '📭' : activeTab === 'approved' ? '✅' : '🗂️'}
             </div>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>
               {activeTab === 'pending' ? 'No pending reports' :
@@ -736,7 +734,7 @@ export default function ValidateReports() {
                           flex: 2, padding: '10px', background: 'rgba(46,204,113,0.06)',
                           border: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 700,
                         }}>
-                        ✅ Approve &amp; Publish to Map
+                        Approve &amp; Publish to Map
                       </button>
                     </div>
                   )}

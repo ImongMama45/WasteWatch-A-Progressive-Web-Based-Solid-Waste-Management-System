@@ -13,6 +13,7 @@ import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import Navbar from './Navbar'
+import { useOnline } from '../hooks/useOnline'
 import BottomNav from './BottomNav'
 
 // ─── Role-based sidebar nav items ─────────────────────────────────────────────
@@ -56,14 +57,15 @@ export const SIDEBAR_NAV = {
     { path: '/map', label: 'Live Map', icon: '🗺️' },
   ],
   driver: [
-    { path: '/dashboard',        label: 'Home',           icon: '🏠' },
-    { path: '/driver/route',     label: 'My Route',       icon: '🗺️' },
-    { path: '/driver/log',       label: 'Collection Log', icon: '📋' },
-    { path: '/driver/analytics', label: 'Analytics',      icon: '📈' },
-    { path: '/driver/hotspots',  label: 'Hotspot Alerts', icon: '🔥' },
-    { path: '/driver/status',    label: 'Shift & Truck',  icon: '🚛' },
-    { path: '/map',              label: 'Live Map',       icon: '📍' },
-    { path: '/profile',          label: 'Profile',        icon: '👤' },
+    { path: '/', label: 'Home', icon: '🏠' },
+    { path: '/dashboard', label: 'Dashboard', icon: '📊' },
+    { path: '/driver/route', label: 'My Route', icon: '🗺️' },
+    { path: '/driver/log', label: 'Collection Log', icon: '📋' },
+    { path: '/driver/analytics', label: 'Analytics', icon: '📈' },
+    { path: '/driver/hotspots', label: 'Hotspot Alerts', icon: '🔥' },
+    { path: '/driver/status', label: 'Shift & Truck', icon: '🚛' },
+    { path: '/map', label: 'Live Map', icon: '📍' },
+    { path: '/profile', label: 'Profile', icon: '👤' },
   ],
 }
 
@@ -128,6 +130,9 @@ export default function DashboardLayout({ children }) {
   const navigate = useNavigate()
   const location = useLocation()
   const [searchVal, setSearchVal] = useState('')
+  const [notifOpen, setNotifOpen] = useState(false)
+  const isOnline = useOnline()
+
 
   const role = user?.role?.toLowerCase() || 'citizen'
   const navItems = SIDEBAR_NAV[role] || SIDEBAR_NAV.citizen
@@ -207,7 +212,18 @@ export default function DashboardLayout({ children }) {
           </div>
 
           <div className="desktop-topbar-right">
+            <button
+              className="notif-btn"
+              onClick={() => { setNotifOpen(o => !o) }}
+              aria-label="Notifications"
+            >
+              🔔
+              <span className="notif-dot" style={{
+                background: isOnline ? 'var(--danger)' : 'var(--warning)',
+              }} />
+            </button>
             {/* User avatar */}
+
             <div className="desktop-topbar-user" onClick={() => navigate('/profile')}>
               <div className="desktop-topbar-avatar">
                 {user?.full_name?.[0]?.toUpperCase() || '?'}
@@ -220,6 +236,43 @@ export default function DashboardLayout({ children }) {
           </div>
         </header>
       </div>
+      {notifOpen && (
+        <div className="notif-dropdown">
+          <div className="notif-header">
+            <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>
+              Notifications
+              {!isOnline && (
+                <span style={{ fontSize: 10, color: 'var(--warning)', marginLeft: 8, fontWeight: 400 }}>
+                  (offline — cached)
+                </span>
+              )}
+            </span>
+            <button onClick={() => setNotifOpen(false)}
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 18 }}>
+              ×
+            </button>
+          </div>
+          <div className="notif-item unread">
+            <div className="notif-dot-inline" />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>Report #3 resolved</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>2 hours ago</div>
+            </div>
+          </div>
+          <div className="notif-item">
+            <div style={{ width: 8 }} />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>Welcome to WasteWatch!</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>3 days ago</div>
+            </div>
+          </div>
+          <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)' }}>
+            <button style={{ width: '100%', background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font-body)' }}>
+              Mark all as read
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Main Content Area ── */}
       <main className="dashboard-main">
@@ -230,6 +283,12 @@ export default function DashboardLayout({ children }) {
       <div className="layout-mobile">
         <BottomNav />
       </div>
+
+      {/* Backdrop */}
+      {(notifOpen) && (
+        <div className="nav-backdrop"
+          onClick={() => { setNotifOpen(false) }} />
+      )}
     </>
   )
 }

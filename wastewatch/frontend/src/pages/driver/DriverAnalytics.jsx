@@ -34,7 +34,7 @@ const MOCK_WEEKLY = [
     { day: 'Sun', stops: 0 },
 ]
 
-const MOCK_TREND = [55, 50, 48, 44, 46, 41, 43, 42]
+const MOCK_TREND = [10, 50, 48, 44, 46, 41, 43, 42]
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -51,11 +51,6 @@ function StatCard({ label, value, unit, icon, color, sub }) {
         }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div className="form-label" style={{ marginBottom: 0 }}>{label}</div>
-                <span style={{
-                    width: 34, height: 34, borderRadius: 10, fontSize: 17,
-                    background: `${color}18`, border: `1px solid ${color}33`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>{icon}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
                 <span style={{ fontFamily: 'var(--font-head)', fontSize: 32, fontWeight: 800, color }}>
@@ -213,17 +208,7 @@ export default function DriverAnalytics() {
 
                 {/* ── HEADER ── */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-                    <button onClick={() => navigate('/dashboard')} style={{
-                        background: 'var(--surface)', border: '1px solid var(--border)',
-                        borderRadius: 10, width: 36, height: 36,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        cursor: 'pointer', flexShrink: 0,
-                    }}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                            strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
-                            <polyline points="15 18 9 12 15 6" />
-                        </svg>
-                    </button>
+
                     <div>
                         <h1 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: 0 }}>
                             My Analytics
@@ -251,10 +236,10 @@ export default function DriverAnalytics() {
                 {/* ── STAT CARDS 2×2 ── */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}
                     className="da-card">
-                    <StatCard label="Routes Done" value={fmt(summary.routesCompleted)} icon="🗺️" color="#2ecc71" sub="this month" />
-                    <StatCard label="Stops Done" value={fmt(summary.stopsCompleted)} icon="📍" color="#3b82f6" sub="this month" />
-                    <StatCard label="Working Time" value={summary.totalWorkingHours} unit="hrs" icon="⏱" color="#f59e0b" sub="total hours logged" />
-                    <StatCard label="Avg. Completion" value={summary.avgCompletionMins} unit="min" icon="⚡" color="#a78bfa" sub="per route" />
+                    <StatCard label="Routes Done" value={fmt(summary.routesCompleted)} color="#2ecc71" sub="this month" />
+                    <StatCard label="Stops Done" value={fmt(summary.stopsCompleted)} color="#3b82f6" sub="this month" />
+                    <StatCard label="Working Time" value={summary.totalWorkingHours} unit="hrs" color="#f59e0b" sub="total hours logged" />
+                    <StatCard label="Avg. Completion" value={summary.avgCompletionMins} unit="min" color="#a78bfa" sub="per route" />
                 </div>
 
                 {/* ── WEEKLY BAR CHART ── */}
@@ -304,7 +289,6 @@ export default function DriverAnalytics() {
                                 border: `1px solid ${faster ? 'rgba(46,204,113,0.25)' : 'rgba(245,158,11,0.25)'}`,
                                 display: 'flex', alignItems: 'center', gap: 8,
                             }}>
-                                <span style={{ fontSize: 16 }}>{faster ? '🚀' : '📈'}</span>
                                 <span style={{ fontSize: 13, fontWeight: 600, color: faster ? 'var(--accent)' : 'var(--warning)' }}>
                                     {faster
                                         ? `You're ${Math.abs(diff)} min faster than your first route!`

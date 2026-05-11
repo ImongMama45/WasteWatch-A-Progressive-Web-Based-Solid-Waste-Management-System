@@ -15,9 +15,12 @@ export default function OfflineBanner() {
   return (
     <div style={{
       position: 'fixed',
-      top: 0, left: 0, right: 0,
-      zIndex: 9999,
-      background: '#1a1a2e',
+      width: "400px",
+      borderRadius: "200px",
+      justifySelf: 'center',
+      top: 5, left: 0, right: 0,
+      zIndex: 8000,
+      background: '#000000e5',
       borderBottom: '1px solid rgba(243,156,18,.4)',
       padding: '8px 16px',
       display: 'flex',

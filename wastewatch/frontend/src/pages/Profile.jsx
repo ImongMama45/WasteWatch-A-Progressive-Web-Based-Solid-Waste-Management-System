@@ -65,7 +65,7 @@ export default function Profile() {
   function handleSaveProfile(e) {
     e.preventDefault()
     setIsEditing(false)
-    showToast('✅ Profile updated successfully.')
+    showToast('Profile updated successfully.')
   }
 
   function handleSavePassword(e) {
@@ -79,7 +79,7 @@ export default function Profile() {
       return
     }
     setPwd({ current: '', new: '', confirm: '' })
-    showToast('🔒 Password changed successfully.')
+    showToast('🔒Password changed successfully.')
   }
 
   return (
@@ -100,7 +100,7 @@ export default function Profile() {
         .role-badge { background: var(--accent); color: #0d1117; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 800; text-transform: uppercase; display: inline-block; }
       `}</style>
 
-      <div className="page" style={{ maxWidth: 800, margin: '0 auto' }}>
+      <div className="page" style={{ maxWidth: 1200, margin: '0 auto' }}>
 
         <div style={{ marginBottom: 24 }}>
           <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 24, fontWeight: 800, margin: '0 0 4px' }}>My Profile</h2>
@@ -128,7 +128,7 @@ export default function Profile() {
           {/* 2. Personal Information */}
           <div className="profile-card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <div className="section-title" style={{ margin: 0 }}>👤 Personal Information</div>
+              <div className="section-title" style={{ margin: 0 }}>Personal Information</div>
               {!isEditing && (
                 <button className="btn btn-outline btn-sm" onClick={() => setIsEditing(true)}>Edit Profile</button>
               )}
@@ -187,7 +187,7 @@ export default function Profile() {
 
           {/* 3. Role-Specific Information */}
           <div className="profile-card">
-            <div className="section-title">💼 Assignment Details</div>
+            <div className="section-title">Assignment Details</div>
 
             {role === 'admin' && (
               <div className="info-row">
@@ -237,7 +237,7 @@ export default function Profile() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
             {/* 4. Security Section */}
             <div className="profile-card">
-              <div className="section-title">🔒 Security</div>
+              <div className="section-title">Security</div>
               <form onSubmit={handleSavePassword}>
                 <div style={{ marginBottom: 12 }}>
                   <label className="form-label">Current Password</label>
@@ -257,7 +257,7 @@ export default function Profile() {
 
             {/* 5. Activity Summary */}
             <div className="profile-card">
-              <div className="section-title">📋 Recent Activity</div>
+              <div className="section-title">Recent Activity</div>
               {MOCK_ACTIVITIES.map((act, i) => (
                 <div key={act.id} style={{ display: 'flex', gap: 12, marginBottom: i === MOCK_ACTIVITIES.length - 1 ? 0 : 16 }}>
                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', marginTop: 6, flexShrink: 0 }} />

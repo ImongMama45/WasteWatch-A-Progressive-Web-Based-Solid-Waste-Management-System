@@ -165,7 +165,7 @@ export default function EscalateToAdmin() {
 
   return (
     <DashboardLayout>
-      <div className="page" style={{ maxWidth: 800 }}>
+      <div className="page" style={{ maxWidth: 1200 }}>
         <div style={{ marginBottom: 24 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
             <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 22, fontWeight: 800, margin: 0 }}>

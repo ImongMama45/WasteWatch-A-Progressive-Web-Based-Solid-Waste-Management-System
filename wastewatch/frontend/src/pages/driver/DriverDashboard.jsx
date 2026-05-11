@@ -63,10 +63,10 @@ export default function DriverDashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
 
-  const [route,      setRoute]      = useState(MOCK_ROUTE)
-  const [status,     setStatus]     = useState('on_route')
-  const [loading,    setLoading]    = useState(true)
-  const [issueOpen,  setIssueOpen]  = useState(false)
+  const [route, setRoute] = useState(MOCK_ROUTE)
+  const [status, setStatus] = useState('on_route')
+  const [loading, setLoading] = useState(true)
+  const [issueOpen, setIssueOpen] = useState(false)
 
   // ── Shift timer (persists across refreshes) ────────────────────────────────
   const { shiftActive, startTime, formattedTime, startShift, endShift } = useShiftTimer()
@@ -74,10 +74,10 @@ export default function DriverDashboard() {
   // ── GPS (for issue reports) ────────────────────────────────────────────
   const { position: gpsPosition } = useGpsTracking({ enabled: shiftActive })
 
-  const progress   = route.totalStops > 0 ? Math.round((route.completedStops / route.totalStops) * 100) : 0
+  const progress = route.totalStops > 0 ? Math.round((route.completedStops / route.totalStops) * 100) : 0
   const activeStatus = STATUSES.find(s => s.key === status) || STATUSES[0]
-  const firstName  = user?.full_name?.split(' ')[0] || 'Driver'
-  const stopsLeft  = route.totalStops - route.completedStops
+  const firstName = user?.full_name?.split(' ')[0] || 'Driver'
+  const stopsLeft = route.totalStops - route.completedStops
 
   useEffect(() => {
     Promise.all([
@@ -95,9 +95,9 @@ export default function DriverDashboard() {
       const result = endShift()
       api.post('/api/driver/shift/end/', {
         started_at: result.startTime?.toISOString(),
-        ended_at:   result.endTime?.toISOString(),
+        ended_at: result.endTime?.toISOString(),
         duration_ms: result.durationMs,
-      }).catch(() => {})
+      }).catch(() => { })
     }
   }
 
@@ -206,10 +206,10 @@ export default function DriverDashboard() {
             {/* ── STAT CARDS ── */}
             <div className="stat-grid" style={{ marginBottom: 20 }}>
               {[
-                { label: 'Stops Done', value: route.completedStops, color: 'var(--accent)', icon: '✅' },
-                { label: 'Stops Left', value: stopsLeft, color: 'var(--warning)', icon: '📍' },
-                { label: 'Distance', value: `${route.distanceKm}km`, color: 'var(--info)', icon: '🛣️' },
-                { label: 'Total Stops', value: route.totalStops, color: 'var(--text)', icon: '🗺️' },
+                { label: 'Stops Done', value: route.completedStops, },
+                { label: 'Stops Left', value: stopsLeft, },
+                { label: 'Distance', value: `${route.distanceKm}km`, },
+                { label: 'Total Stops', value: route.totalStops },
               ].map(s => (
                 <div key={s.label} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
                   <div style={{ position: 'absolute', top: 12, right: 14, fontSize: 18, opacity: .15 }}>{s.icon}</div>
@@ -263,105 +263,105 @@ export default function DriverDashboard() {
                 ))}
               </div>
             </div>
-
-            {/* ── STATUS TOGGLE ── */}
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                <h3 className="section-title" style={{ margin: 0 }}>Current Status</h3>
-                {!shiftActive && <span className="text-muted text-xs">Start shift to update</span>}
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
-                {STATUSES.map(s => {
-                  const isActive = status === s.key
-                  return (
-                    <button key={s.key} id={`status-${s.key}`} className="abtn"
-                      onClick={() => shiftActive && setStatus(s.key)}
-                      style={{
-                        padding: '11px 4px', borderRadius: 10,
-                        background: isActive ? s.bg : 'var(--surface)',
-                        border: `2px solid ${isActive ? s.color : 'var(--border)'}`,
-                        color: isActive ? s.color : 'var(--text-muted)',
-                        fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 700,
-                        opacity: shiftActive ? 1 : 0.45,
-                        cursor: shiftActive ? 'pointer' : 'not-allowed',
-                      }}>
-                      {s.label}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* ── CURRENT STOP (shift active only) ── */}
-            {shiftActive && (
-              <div style={{ marginBottom: 20, animation: 'slideDown .2s' }}>
+            <div className="status-card-mobile-only">
+              {/* ── STATUS TOGGLE ── */}
+              <div style={{ marginBottom: 20 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <h3 className="section-title" style={{ margin: 0 }}>Current Stop</h3>
-                  <button onClick={() => navigate('/driver/route')}
-                    style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                    Full Route ›
-                  </button>
+                  <h3 className="section-title" style={{ margin: 0 }}>Current Status</h3>
+                  {!shiftActive && <span className="text-muted text-xs">Start shift to update</span>}
                 </div>
-                <div className="dcard" style={{
-                  background: 'linear-gradient(135deg,#2ecc71,#27ae60)',
-                  borderRadius: 14, padding: '16px 14px', marginBottom: 10, position: 'relative', overflow: 'hidden',
-                }}>
-                  <div style={{ position: 'absolute', right: -16, top: -16, width: 70, height: 70, borderRadius: '50%', background: 'rgba(255,255,255,0.08)' }} />
-                  <div style={{ fontSize: 9, fontWeight: 800, color: 'rgba(0,0,0,0.5)', letterSpacing: '.07em', marginBottom: 4 }}>🔄 RUNNING STOP</div>
-                  <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 18, color: '#0d1117', marginBottom: 6 }}>
-                    {MOCK_CURRENT_STOP.address}
-                  </div>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <span style={{ background: 'rgba(0,0,0,0.12)', color: '#0d1117', fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 20 }}>
-                      📍 {MOCK_CURRENT_STOP.type}
-                    </span>
-                    <span style={{ fontSize: 11, color: 'rgba(0,0,0,0.6)', fontWeight: 600 }}>ETA: {MOCK_CURRENT_STOP.eta}</span>
-                  </div>
-                </div>
-                <div className="card dcard" style={{ padding: '12px 16px', cursor: 'pointer' }} onClick={() => navigate('/driver/route')}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div>
-                      <div className="form-label">NEXT STOP</div>
-                      <div style={{ fontSize: 14, fontWeight: 600, marginTop: 2 }}>{MOCK_NEXT_STOP.address}</div>
-                      <div className="text-muted text-sm" style={{ marginTop: 2 }}>📍 {MOCK_NEXT_STOP.distance}</div>
-                    </div>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                      strokeLinecap="round" strokeLinejoin="round" width="16" height="16"
-                      style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
-                      <polyline points="9 18 15 12 9 6" />
-                    </svg>
-                  </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
+                  {STATUSES.map(s => {
+                    const isActive = status === s.key
+                    return (
+                      <button key={s.key} id={`status-${s.key}`} className="abtn"
+                        onClick={() => shiftActive && setStatus(s.key)}
+                        style={{
+                          padding: '11px 4px', borderRadius: 10,
+                          background: isActive ? s.bg : 'var(--surface)',
+                          border: `2px solid ${isActive ? s.color : 'var(--border)'}`,
+                          color: isActive ? s.color : 'var(--text-muted)',
+                          fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 700,
+                          opacity: shiftActive ? 1 : 0.45,
+                          cursor: shiftActive ? 'pointer' : 'not-allowed',
+                        }}>
+                        {s.label}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
-            )}
 
-            {/* ── MAIN CTA ── */}
-            <div style={{ display: 'flex', gap: 10, marginBottom: 24 }}>
-              <button id="driver-main-cta" className="abtn btn"
-                onClick={handleShiftToggle}
-                style={{
-                  flex: 2, padding: '16px 20px', borderRadius: 14,
-                  fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 800,
-                  background: shiftActive ? 'linear-gradient(135deg,#2ecc71,#27ae60)' : 'linear-gradient(135deg,#3b82f6,#2563eb)',
-                  color: '#fff', border: 'none',
-                  boxShadow: shiftActive ? '0 4px 18px rgba(46,204,113,0.35)' : '0 4px 18px rgba(59,130,246,0.35)',
-                }}>
-                {shiftActive ? '🚛 Resume Route' : '▶ Start Duty'}
-              </button>
+              {/* ── CURRENT STOP (shift active only) ──
               {shiftActive && (
-                <button id="driver-end-shift" className="abtn btn"
-                  onClick={() => { setShiftActive(false); api.post('/api/driver/shift/end/').catch(() => { }) }}
-                  style={{
-                    flex: 1, padding: '16px 14px', borderRadius: 14,
-                    fontFamily: 'var(--font-head)', fontSize: 13, fontWeight: 700,
-                    background: 'rgba(239,68,68,0.1)', border: '1.5px solid rgba(239,68,68,0.3)',
-                    color: 'var(--danger)',
+                <div style={{ marginBottom: 20, animation: 'slideDown .2s' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <h3 className="section-title" style={{ margin: 0 }}>Current Stop</h3>
+                    <button onClick={() => navigate('/driver/route')}
+                      style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                      Full Route ›
+                    </button>
+                  </div>
+                  <div className="dcard" style={{
+                    background: 'linear-gradient(135deg,#2ecc71,#27ae60)',
+                    borderRadius: 14, padding: '16px 14px', marginBottom: 10, position: 'relative', overflow: 'hidden',
                   }}>
-                  End Shift
-                </button>
-              )}
-            </div>
+                    <div style={{ position: 'absolute', right: -16, top: -16, width: 70, height: 70, borderRadius: '50%', background: 'rgba(255,255,255,0.08)' }} />
+                    <div style={{ fontSize: 9, fontWeight: 800, color: 'rgba(0,0,0,0.5)', letterSpacing: '.07em', marginBottom: 4 }}>🔄 RUNNING STOP</div>
+                    <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 18, color: '#0d1117', marginBottom: 6 }}>
+                      {MOCK_CURRENT_STOP.address}
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                      <span style={{ background: 'rgba(0,0,0,0.12)', color: '#0d1117', fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 20 }}>
+                        📍 {MOCK_CURRENT_STOP.type}
+                      </span>
+                      <span style={{ fontSize: 11, color: 'rgba(0,0,0,0.6)', fontWeight: 600 }}>ETA: {MOCK_CURRENT_STOP.eta}</span>
+                    </div>
+                  </div>
+                  <div className="card dcard" style={{ padding: '12px 16px', cursor: 'pointer' }} onClick={() => navigate('/driver/route')}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <div className="form-label">NEXT STOP</div>
+                        <div style={{ fontSize: 14, fontWeight: 600, marginTop: 2 }}>{MOCK_NEXT_STOP.address}</div>
+                        <div className="text-muted text-sm" style={{ marginTop: 2 }}>📍 {MOCK_NEXT_STOP.distance}</div>
+                      </div>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                        strokeLinecap="round" strokeLinejoin="round" width="16" height="16"
+                        style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+              )} */}
 
+              {/* ── MAIN CTA ── */}
+              <div style={{ display: 'flex', gap: 10, marginBottom: 24 }}>
+                <button id="driver-main-cta" className="abtn btn"
+                  onClick={handleShiftToggle}
+                  style={{
+                    flex: 2, padding: '16px 20px', borderRadius: 14,
+                    fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 800,
+                    background: shiftActive ? 'linear-gradient(135deg,#2ecc71,#27ae60)' : 'linear-gradient(135deg,#3b82f6,#2563eb)',
+                    color: '#fff', border: 'none',
+                    boxShadow: shiftActive ? '0 4px 18px rgba(46,204,113,0.35)' : '0 4px 18px rgba(59,130,246,0.35)',
+                  }}>
+                  {shiftActive ? '🚛 Resume Route' : '▶ Start Duty'}
+                </button>
+                {shiftActive && (
+                  <button id="driver-end-shift" className="abtn btn"
+                    onClick={() => { setShiftActive(false); api.post('/api/driver/shift/end/').catch(() => { }) }}
+                    style={{
+                      flex: 1, padding: '16px 14px', borderRadius: 14,
+                      fontFamily: 'var(--font-head)', fontSize: 13, fontWeight: 700,
+                      background: 'rgba(239,68,68,0.1)', border: '1.5px solid rgba(239,68,68,0.3)',
+                      color: 'var(--danger)',
+                    }}>
+                    End Shift
+                  </button>
+                )}
+              </div>
+            </div>
             {/* ── LIVE MAP ── */}
             <div style={{ marginBottom: 24 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -422,16 +422,6 @@ export default function DriverDashboard() {
             <div className="card">
               <h3 className="section-title" style={{ marginBottom: 12, fontSize: 15 }}>Quick Actions</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button id="sidebar-shift-cta" className="abtn btn btn-full"
-                  onClick={handleShiftToggle}
-                  style={{
-                    background: shiftActive ? 'rgba(46,204,113,0.08)' : 'rgba(59,130,246,0.08)',
-                    border: `1px solid ${shiftActive ? 'rgba(46,204,113,0.35)' : 'rgba(59,130,246,0.35)'}`,
-                    color: shiftActive ? 'var(--accent)' : 'var(--info)', fontWeight: 700,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-                  }}>
-                  {shiftActive ? '🚛 Resume Route' : '▶ Start Duty'}
-                </button>
                 <button className="abtn btn btn-full" onClick={() => navigate('/driver/route')}
                   style={{
                     background: 'rgba(20,184,166,0.08)', border: '1px solid rgba(20,184,166,0.35)',
@@ -447,7 +437,7 @@ export default function DriverDashboard() {
                   }}>
                   📋 Collection Log
                 </button>
-                <button className="abtn btn btn-full" onClick={() => navigate('/report/submit')}
+                <button className="abtn btn btn-full mobile-only" onClick={() => navigate('/report/submit')}
                   style={{
                     background: 'rgba(231,76,60,0.06)', border: '1px solid rgba(231,76,60,0.35)',
                     color: 'var(--danger)', fontWeight: 700,
@@ -538,27 +528,29 @@ export default function DriverDashboard() {
 
           </div>
         </div>
-      </div>
+      </div >
 
       {/* ── FLOATING REPORT ISSUE BUTTON (visible during active shift) ── */}
-      {shiftActive && (
-        <button
-          id="floating-report-issue"
-          onClick={() => setIssueOpen(true)}
-          style={{
-            position: 'fixed', bottom: 80, right: 20, zIndex: 800,
-            background: 'linear-gradient(135deg,#ef4444,#dc2626)',
-            color: '#fff', border: 'none', borderRadius: '50%',
-            width: 54, height: 54, fontSize: 22,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 6px 20px rgba(239,68,68,0.45)',
-            cursor: 'pointer', transition: 'transform .15s',
-          }}
-          title="Report Issue"
-        >
-          ⚠
-        </button>
-      )}
+      {
+        shiftActive && (
+          <button
+            id="floating-report-issue"
+            onClick={() => setIssueOpen(true)}
+            style={{
+              position: 'fixed', bottom: 80, right: 20, zIndex: 800,
+              background: 'linear-gradient(135deg,#ef4444,#dc2626)',
+              color: '#fff', border: 'none', borderRadius: '50%',
+              width: 54, height: 54, fontSize: 22,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 6px 20px rgba(239,68,68,0.45)',
+              cursor: 'pointer', transition: 'transform .15s',
+            }}
+            title="Report Issue"
+          >
+            ⚠
+          </button>
+        )
+      }
 
       {/* ── ISSUE REPORTER BOTTOM SHEET ── */}
       <IssueReporter

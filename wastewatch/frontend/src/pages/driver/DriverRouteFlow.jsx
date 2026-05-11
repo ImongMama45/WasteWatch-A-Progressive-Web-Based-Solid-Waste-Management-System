@@ -26,8 +26,6 @@ import NavigationModule from './components/NavigationModule'
 import ArrivedModule from './components/ArrivedModule'
 import StopCompletedModule from './components/StopCompletedModule'
 import EndShiftModule from './components/EndShiftModule'
-import Navbar from '../../components/Navbar'
-import BottomNav from '../../components/BottomNav'
 
 export default function DriverRouteFlow() {
   const navigate = useNavigate()

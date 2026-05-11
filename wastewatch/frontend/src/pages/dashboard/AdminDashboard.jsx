@@ -208,7 +208,7 @@ export default function AdminDashboard() {
   function resolveEscalation(id) {
     setEscalations(prev => prev.filter(e => e.id !== id));
     setExpandedEsc(null);
-    showToast("✅ Escalation resolved. Barangay has been notified.");
+    showToast("Escalation resolved. Barangay has been notified.");
   }
 
   function dispatchTruck(id) {
@@ -219,7 +219,7 @@ export default function AdminDashboard() {
 
   function validateHotspot(id) {
     setHotspots(prev => prev.map(h => h.id === id ? { ...h, status: "validated" } : h));
-    showToast("✅ Hotspot validated. Added to driver schedule.");
+    showToast(" Hotspot validated. Added to driver schedule.");
   }
 
   function dismissHotspot(id) {
@@ -459,7 +459,6 @@ export default function AdminDashboard() {
 
               {escalations.length === 0 ? (
                 <div className="card" style={{ textAlign: "center", padding: "32px 20px" }}>
-                  <div style={{ fontSize: 36, marginBottom: 10 }}>✅</div>
                   <div style={{ fontWeight: 700, marginBottom: 4, color: "var(--text)" }}>No open escalations</div>
                   <div className="text-muted text-sm">All barangay issues have been resolved.</div>
                 </div>
@@ -653,8 +652,8 @@ export default function AdminDashboard() {
                           fontSize: 12, lineHeight: 1.5, color: "var(--text-muted)",
                         }}>
                           {d.status === "issue"
-                            ? <><strong style={{ color: "var(--danger)" }}>⚠️ Issue reported.</strong> Driver flagged a problem on this route.</>
-                            : <><strong style={{ color: "var(--accent)" }}>✅ On schedule.</strong> No issues on this route.</>
+                            ? <><strong style={{ color: "var(--danger)" }}>Issue reported.</strong> Driver flagged a problem on this route.</>
+                            : <><strong style={{ color: "var(--accent)" }}>On schedule.</strong> No issues on this route.</>
                           }
                         </div>
 

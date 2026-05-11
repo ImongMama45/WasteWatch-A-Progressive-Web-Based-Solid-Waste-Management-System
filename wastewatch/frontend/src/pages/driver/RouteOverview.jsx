@@ -228,13 +228,13 @@ function StopCard({ stop, isNext, onFocus, focused }) {
               }}>
                 {cfg.label.toUpperCase()}
               </span>
-              <span className="text-muted text-xs">📦 {stop.type}</span>
-              <span className="text-muted text-xs">📍 {stop.zone}</span>
+              <span style={{ color: "#000000", marginLeft: "10px" }} className="text-muted text-xs">{stop.type}</span>
+              <span style={{ color: "#5b5b5bff", marginLeft: "10px" }} className="text-muted text-xs">{stop.zone}</span>
               {stop.distance && (
-                <span className="text-muted text-xs">🛣 {stop.distance}</span>
+                <span style={{ color: "#ffffffff", marginLeft: "10px", fontWeight: 600, padding: 5, paddingLeft: 10, paddingRight: 10, borderRadius: 10, backgroundColor: "#4c6dffff" }} className="text-muted text-xs">{stop.distance}</span>
               )}
               {stop.completedAt && (
-                <span className="text-muted text-xs">⏱ {stop.completedAt}</span>
+                <span style={{ color: "#000000ff", marginLeft: "10px", fontWeight: 600, padding: 5, paddingLeft: 10, paddingRight: 10, borderRadius: 10, backgroundColor: "#00ff15ff" }} className="text-muted text-xs">{stop.completedAt}</span>
               )}
             </div>
           </div>
@@ -400,16 +400,6 @@ export default function RouteOverview() {
 
         {/* ── HEADER ── */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-          <button onClick={() => navigate('/dashboard')} style={{
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 10, width: 36, height: 36, display: 'flex',
-            alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0,
-          }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-              strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-          </button>
           <div style={{ flex: 1, minWidth: 0 }}>
             <h1 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: 0 }}>
               My Route

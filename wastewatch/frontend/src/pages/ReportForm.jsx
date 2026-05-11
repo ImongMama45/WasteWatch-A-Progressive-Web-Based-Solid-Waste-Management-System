@@ -13,31 +13,31 @@ import { useAuth } from '../context/AuthContext'
 import api from '../api/client'
 
 const ISSUE_TYPES = [
-  { value: '',                label: 'Select Issue Type' },
-  { value: 'overflow',        label: 'Overflow' },
-  { value: 'missed',          label: 'Missed Collection' },
+  { value: '', label: 'Select Issue Type' },
+  { value: 'overflow', label: 'Overflow' },
+  { value: 'missed', label: 'Missed Collection' },
   { value: 'illegal_dumping', label: 'Illegal Dumping' },
 ]
 
 const ALL_TAGS = ['Near School', 'Near market', 'Side Road', 'Residential', 'Highway', 'Near River']
 
 export default function ReportForm() {
-  const { user }   = useAuth()
-  const navigate   = useNavigate()
-  const fileRef    = useRef(null)
+  const { user } = useAuth()
+  const navigate = useNavigate()
+  const fileRef = useRef(null)
 
-  const [gps, setGps]             = useState({ lat: null, lng: null, status: 'detecting' })
+  const [gps, setGps] = useState({ lat: null, lng: null, status: 'detecting' })
   const [barangays, setBarangays] = useState([])
-  const [preview,   setPreview]   = useState(null)
+  const [preview, setPreview] = useState(null)
   const [submitting, setSubmitting] = useState(false)
-  const [errors,    setErrors]    = useState({})
+  const [errors, setErrors] = useState({})
   const [selectedTags, setSelectedTags] = useState([])
   const [showMoreTags, setShowMoreTags] = useState(false)
 
   const [form, setForm] = useState({
-    issue_type:  '',
+    issue_type: '',
     description: '',
-    image:       null,
+    image: null,
   })
 
   // Silently capture GPS on mount
@@ -48,13 +48,13 @@ export default function ReportForm() {
     }
     navigator.geolocation.getCurrentPosition(
       pos => setGps({ lat: pos.coords.latitude, lng: pos.coords.longitude, status: 'ready' }),
-      ()  => setGps({ lat: null, lng: null, status: 'error' }),
+      () => setGps({ lat: null, lng: null, status: 'error' }),
       { enableHighAccuracy: true, timeout: 10000 }
     )
   }, [])
 
   useEffect(() => {
-    api.get('/api/barangays/').then(r => setBarangays(r.data)).catch(() => {})
+    api.get('/api/barangays/').then(r => setBarangays(r.data)).catch(() => { })
   }, [])
 
   function handleChange(e) {
@@ -86,11 +86,11 @@ export default function ReportForm() {
 
     setSubmitting(true)
     const fd = new FormData()
-    fd.append('latitude',    gps.lat)
-    fd.append('longitude',   gps.lng)
-    fd.append('issue_type',  form.issue_type)
+    fd.append('latitude', gps.lat)
+    fd.append('longitude', gps.lng)
+    fd.append('issue_type', form.issue_type)
     fd.append('description', form.description)
-    fd.append('tags',        selectedTags.join(','))
+    fd.append('tags', selectedTags.join(','))
     if (form.image) fd.append('image', form.image)
     if (user?.barangay_id) fd.append('barangay', user.barangay_id)
 
@@ -109,19 +109,18 @@ export default function ReportForm() {
     }
   }
 
-  const visibleTags      = showMoreTags ? ALL_TAGS : ALL_TAGS.slice(0, 3)
-  const locationDisplay  = gps.status === 'ready'
+  const visibleTags = showMoreTags ? ALL_TAGS : ALL_TAGS.slice(0, 3)
+  const locationDisplay = gps.status === 'ready'
     ? `Auto-detected : N: ${gps.lat?.toFixed(4)}`
     : gps.status === 'detecting'
-    ? 'Detecting your location…'
-    : 'Location unavailable — please enable GPS'
+      ? 'Detecting your location…'
+      : 'Location unavailable — please enable GPS'
 
   return (
     <>
       <Navbar />
-      <div className="page" style={{ maxWidth: 480 }}>
+      <div className="page" style={{ maxWidth: 800 }}>
 
-        <button className="back-link" onClick={() => navigate(-1)}>‹ BACK</button>
 
         <div style={{ marginBottom: 24 }}>
           <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 22, fontWeight: 800 }}>
@@ -131,7 +130,7 @@ export default function ReportForm() {
         </div>
 
         <div className="card card-dark" style={{ padding: 24 }}>
-          <h3 style={{ fontFamily: 'var(--font-head)',color:'white',  fontSize: 17, fontWeight: 700, marginBottom: 20 }}>
+          <h3 style={{ fontFamily: 'var(--font-head)', color: 'white', fontSize: 17, fontWeight: 700, marginBottom: 20 }}>
             Issue Details
           </h3>
 
@@ -177,10 +176,10 @@ export default function ReportForm() {
                   onClick={() => toggleTag(tag)}
                   className="tag-chip"
                   style={{
-                    
-                    background:   selectedTags.includes(tag) ? 'rgba(46,204,113,.15)' : 'transparent',
-                    borderColor:  selectedTags.includes(tag) ? 'var(--accent)' : 'var(--border)',
-                    color:        selectedTags.includes(tag) ? 'var(--accent)' : 'white',
+
+                    background: selectedTags.includes(tag) ? 'rgba(46,204,113,.15)' : 'transparent',
+                    borderColor: selectedTags.includes(tag) ? 'var(--accent)' : 'var(--border)',
+                    color: selectedTags.includes(tag) ? 'var(--accent)' : 'white',
                   }}
                 >
                   {tag}
@@ -231,7 +230,7 @@ export default function ReportForm() {
               ) : (
                 <>
                   <div style={{ fontSize: 32, marginBottom: 8 }}>📷</div>
-                  <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 , textAlign: 'center' }}>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12, textAlign: 'center' }}>
                     Tap to open camera, to capture a photo of the issue.
                   </div>
                   <button

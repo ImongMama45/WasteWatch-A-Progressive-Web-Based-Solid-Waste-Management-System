@@ -39,10 +39,10 @@ const MOCK_ROUTE = {
 // ─── STATUS CONFIG ────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG = {
-  off_shift: { label: 'Off Shift',  color: '#64748b', bg: 'rgba(100,116,139,0.1)', icon: '⭕' },
-  on_shift:  { label: 'On Shift',   color: '#2ecc71', bg: 'rgba(46,204,113,0.1)',  icon: '🟢' },
-  on_route:  { label: 'On Route',   color: '#3b82f6', bg: 'rgba(59,130,246,0.1)',  icon: '🔵' },
-  delayed:   { label: 'Delayed',    color: '#f59e0b', bg: 'rgba(245,158,11,0.1)',  icon: '🟡' },
+  off_shift: { label: 'Off Shift', color: '#64748b', bg: 'rgba(100,116,139,0.1)', icon: '⭕' },
+  on_shift: { label: 'On Shift', color: '#2ecc71', bg: 'rgba(46,204,113,0.1)', icon: '🟢' },
+  on_route: { label: 'On Route', color: '#3b82f6', bg: 'rgba(59,130,246,0.1)', icon: '🔵' },
+  delayed: { label: 'Delayed', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', icon: '🟡' },
 }
 
 const STATUS_OPTIONS = ['on_shift', 'on_route', 'delayed']
@@ -116,14 +116,14 @@ function RouteProgress({ completed, total }) {
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
 export default function DriverStatusPanel() {
-  const { user }  = useAuth()
-  const navigate  = useNavigate()
+  const { user } = useAuth()
+  const navigate = useNavigate()
 
-  const [driver,   setDriver]   = useState(MOCK_DRIVER)
-  const [route,    setRoute]    = useState(MOCK_ROUTE)
+  const [driver, setDriver] = useState(MOCK_DRIVER)
+  const [route, setRoute] = useState(MOCK_ROUTE)
   const [opStatus, setOpStatus] = useState('off_shift')
-  const [loading,  setLoading]  = useState(true)
-  const [ending,   setEnding]   = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [ending, setEnding] = useState(false)
 
   // ── Shift timer (shared with DriverDashboard via localStorage) ────────────
   const {
@@ -160,18 +160,18 @@ export default function DriverStatusPanel() {
     setOpStatus('off_shift')
     try {
       await api.post('/api/driver/shift/end/', {
-        started_at:  result.startTime?.toISOString(),
-        ended_at:    result.endTime?.toISOString(),
+        started_at: result.startTime?.toISOString(),
+        ended_at: result.endTime?.toISOString(),
         duration_ms: result.durationMs,
       })
-    } catch {}
+    } catch { }
     setEnding(false)
   }
 
   function handleStatusChange(newStatus) {
     if (!shiftActive) return
     setOpStatus(newStatus)
-    api.post('/api/driver/shift/status/', { status: newStatus }).catch(() => {})
+    api.post('/api/driver/shift/status/', { status: newStatus }).catch(() => { })
   }
 
   const progress = route.totalStops > 0
@@ -193,17 +193,7 @@ export default function DriverStatusPanel() {
 
         {/* ── HEADER ── */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-          <button onClick={() => navigate('/dashboard')} style={{
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 10, width: 36, height: 36,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', flexShrink: 0,
-          }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-              strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-          </button>
+
           <div style={{ flex: 1 }}>
             <h1 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: 0 }}>
               Shift & Truck Status
@@ -235,7 +225,7 @@ export default function DriverStatusPanel() {
         </div>
 
         {/* ── SHIFT CONTROLS ── */}
-        <div className="dsp-section" style={{ marginBottom: 16 }}>
+        <div className="dsp-section mobile-only" style={{ marginBottom: 16 }}>
           {!shiftActive ? (
             /* OFF SHIFT — single Start Shift button */
             <button
@@ -324,9 +314,9 @@ export default function DriverStatusPanel() {
             {/* Stops stat row */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
               {[
-                { label: 'DONE',      value: route.completedStops,               color: '#2ecc71' },
+                { label: 'DONE', value: route.completedStops, color: '#2ecc71' },
                 { label: 'REMAINING', value: route.totalStops - route.completedStops, color: '#f59e0b' },
-                { label: 'TOTAL',     value: route.totalStops,                   color: 'var(--text-muted)' },
+                { label: 'TOTAL', value: route.totalStops, color: 'var(--text-muted)' },
               ].map(s => (
                 <div key={s.label} style={{
                   background: 'var(--bg)', borderRadius: 10, padding: '10px 0', textAlign: 'center',
@@ -358,17 +348,17 @@ export default function DriverStatusPanel() {
         {/* ── DRIVER INFORMATION ── */}
         <div className="card dsp-section" style={{ marginBottom: 16 }}>
           <h2 className="section-title" style={{ fontSize: 14, marginBottom: 4 }}>DRIVER INFORMATION</h2>
-          <InfoRow label="NAME"       value={driver.name}        icon="👤" />
-          <InfoRow label="EMPLOYEE ID" value={driver.employeeId}  icon="🪪" />
-          <InfoRow label="BARANGAY"   value={driver.barangay}    icon="📍" />
-          <InfoRow label="ROUTE"      value={driver.route}       icon="🗺️" />
+          <InfoRow label="NAME" value={driver.name} />
+          <InfoRow label="EMPLOYEE ID" value={driver.employeeId} />
+          <InfoRow label="BARANGAY" value={driver.barangay} />
+          <InfoRow label="ROUTE" value={driver.route} />
         </div>
 
         {/* ── TRUCK INFORMATION ── */}
         <div className="card dsp-section">
           <h2 className="section-title" style={{ fontSize: 14, marginBottom: 4 }}>TRUCK ASSIGNMENT</h2>
-          <InfoRow label="TRUCK NO."    value={driver.truck}        icon="🚛" />
-          <InfoRow label="PLATE NO."    value={driver.plateNumber}  icon="🔢" />
+          <InfoRow label="TRUCK NO." value={driver.truck} />
+          <InfoRow label="PLATE NO." value={driver.plateNumber} />
           <div style={{ padding: '11px 0' }}>
             <div className="form-label" style={{ marginBottom: 6 }}>VEHICLE STATUS</div>
             <div style={{ display: 'flex', gap: 8 }}>
