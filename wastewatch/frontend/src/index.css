@@ -6,7 +6,7 @@
    Desktop (1024px+): sidebar + main two-column layout
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100..900;1,100..900&display=swap');
 
 /* #1e2633; */
 
@@ -154,7 +154,7 @@ a {
   padding: 14px 20px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  position: sticky;
+  position: fixed;
   top: 0;
   z-index: 100;
 }
@@ -1580,6 +1580,13 @@ select.form-input {
 /* ── Dashboard Main Content ── */
 .dashboard-main {
   min-height: 100vh;
+}
+
+
+.pd-ann-card {
+  max-width: 900px;
+  min-height: 400px;
+  padding: 10px;
 }
 
 

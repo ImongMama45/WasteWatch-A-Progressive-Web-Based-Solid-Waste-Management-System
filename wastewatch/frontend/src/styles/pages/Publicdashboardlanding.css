@@ -1,0 +1,1123 @@
+/* ============================================================
+   Publicdashboardlanding.css  —  LIGHT MODE
+   Designed for normal Lucena City citizens:
+   high-contrast, readable, warm green palette.
+   Mobile-first, expands gracefully to desktop.
+
+   Import: '../../styles/pages/Publicdashboardlanding.css'
+
+   All tokens scoped to .ld-root so they never override the
+   global --border, --surface, --font-body, etc. used by
+   Navbar, BottomNav, and all shared components.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   DESIGN TOKENS  (all prefixed --ld- to avoid global collisions)
+───────────────────────────────────────────────────────────────────────────── */
+.ld-root {
+  /* Page backgrounds */
+  --ld-page:       #f8faf5;   /* warm off-white with a green tint             */
+  --ld-surface:    #ffffff;   /* card / section surface                       */
+  --ld-surface-2:  #f0f7ec;   /* slightly tinted surface for alternating secs */
+
+  /* Green brand palette */
+  --ld-green:      #2e7d32;   /* primary CTA, active states, accents          */
+  --ld-green-mid:  #388e3c;   /* hover state                                  */
+  --ld-green-dark: #1b5e20;   /* dark header bars, footer brand               */
+  --ld-green-deep: #1a2e1a;   /* footer bg                                    */
+  --ld-green-lt:   #e8f5e9;   /* tinted bg chips, badges                      */
+  --ld-green-bdr:  #c8e6c9;   /* subtle green borders                         */
+  --ld-green-bdr2: #a5d6a7;   /* medium green borders, outline btns           */
+
+  /* Amber — warnings / pending */
+  --ld-amber:      #e65100;
+  --ld-amber-lt:   #fff3e0;
+  --ld-amber-bdr:  #ffcc80;
+
+  /* Blue — info / offline */
+  --ld-blue:       #1565c0;
+  --ld-blue-lt:    #e3f2fd;
+  --ld-blue-bdr:   #90caf9;
+
+  /* Red — error / missed */
+  --ld-red:        #c62828;
+  --ld-red-lt:     #fce4e4;
+
+  /* Text */
+  --ld-text:       #1a2e1a;   /* primary — very dark green-tinted black       */
+  --ld-text-2:     #4a6741;   /* secondary body text                          */
+  --ld-text-3:     #6a8f6a;   /* muted captions                               */
+
+  /* Borders */
+  --ld-line:       #dce8d4;   /* standard section/card border                 */
+  --ld-line-inner: #eef3ea;   /* list-item dividers inside white cards        */
+
+  /* Typography */
+  --ld-display:    'Plus Jakarta Sans', sans-serif;
+  --ld-body:       'Plus Jakarta Sans', sans-serif;
+
+  /* Radii */
+  --ld-r-sm:  6px;
+  --ld-r-md:  10px;
+  --ld-r-lg:  14px;
+  --ld-r-xl:  20px;
+
+  /* Max layout width */
+  --ld-max: 1080px;
+}
+
+/* ─── Base ─────────────────────────────────────────────────────────────────── */
+.ld-root {
+  background:  var(--ld-page);
+  color:       var(--ld-text);
+  font-family: var(--ld-body);
+  min-height:  100vh;
+  overflow-x:  hidden;
+}
+
+.ld-root *,
+.ld-root *::before,
+.ld-root *::after {
+  box-sizing: border-box;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   NAVBAR OVERRIDE  — white bar with a green bottom border
+   (Changes appearance only; Navbar JSX is unchanged.)
+───────────────────────────────────────────────────────────────────────────── */
+.ld-root .navbar {
+  background:    var(--ld-surface);
+  border-bottom: 2px solid var(--ld-green-bdr);
+  backdrop-filter: none;
+}
+
+.ld-root .navbar .navbar-brand  { color: var(--ld-text); }
+.ld-root .navbar .navbar-links a,
+.ld-root .navbar .navbar-links button { color: var(--ld-text-2); }
+
+.ld-root .navbar .navbar-links a:hover,
+.ld-root .navbar .navbar-links button:hover {
+  background: var(--ld-green-lt);
+  color: var(--ld-green);
+}
+
+.ld-root .navbar .navbar-links a.active {
+  background: var(--ld-green-lt);
+  color: var(--ld-green);
+  font-weight: 600;
+}
+
+.ld-root .navbar .notif-btn        { color: var(--ld-text); }
+.ld-root .hamburger-icon span      { background: var(--ld-text); }
+
+.ld-root .navbar .btn-outline {
+  border-color: var(--ld-green-bdr2);
+  color: var(--ld-green);
+}
+.ld-root .navbar .btn-outline:hover {
+  border-color: var(--ld-green);
+  background: var(--ld-green-lt);
+}
+
+.ld-root .navbar .btn-primary {
+  background: var(--ld-green);
+  color: #fff;
+}
+.ld-root .navbar .btn-primary:hover {
+  background: var(--ld-green-mid);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   BOTTOM NAV OVERRIDE  — clean white, green active state
+───────────────────────────────────────────────────────────────────────────── */
+.ld-root .bottom-nav {
+  background:  var(--ld-surface);
+  border-top:  1px solid var(--ld-line);
+}
+
+.ld-root .bottom-nav-item                     { color: var(--ld-text-3); }
+.ld-root .bottom-nav-item:hover,
+.ld-root .bottom-nav-item.active              { color: var(--ld-green); }
+.ld-root .bottom-nav-camera                   { background: var(--ld-green-lt); color: var(--ld-green); border-color: var(--ld-green-bdr); }
+.ld-root .bottom-nav-camera:hover             { background: var(--ld-green); color: #fff; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   EYEBROW PILL  (shared across all sections)
+───────────────────────────────────────────────────────────────────────────── */
+.ld-eyebrow {
+  display:     inline-flex;
+  align-items: center;
+  gap:         7px;
+  background:  var(--ld-green-lt);
+  color:       var(--ld-green);
+  border:      1px solid var(--ld-green-bdr);
+  padding:     4px 13px;
+  border-radius: 100px;
+  font-size:   11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+.ld-eyebrow__dot {
+  width:  7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ld-green);
+  flex-shrink: 0;
+}
+
+/* Optional inline tags inside the eyebrow (cached / updating) */
+.ld-eyebrow__tag {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: var(--ld-r-sm);
+}
+.ld-eyebrow__tag--amber { background: var(--ld-amber-lt); color: var(--ld-amber); }
+.ld-eyebrow__tag--blue  { background: var(--ld-blue-lt);  color: var(--ld-blue);  }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   SECTION HEADER ROW
+───────────────────────────────────────────────────────────────────────────── */
+.ld-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.ld-section-title {
+  font-family:    var(--ld-display);
+  font-size:      clamp(20px, 3vw, 26px);
+  font-weight:    800;
+  letter-spacing: -0.02em;
+  color:          var(--ld-text);
+  margin:         0;
+  line-height:    1.15;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   BUTTONS  (all prefixed ld- so they never conflict with global .btn)
+───────────────────────────────────────────────────────────────────────────── */
+.ld-btn {
+  display:     inline-flex;
+  align-items: center;
+  gap:         7px;
+  font-family: var(--ld-body);
+  font-size:   14px;
+  font-weight: 600;
+  border:      none;
+  cursor:      pointer;
+  border-radius: var(--ld-r-md);
+  padding:     12px 22px;
+  transition:  background .18s, transform .12s, box-shadow .18s;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.ld-btn:active { transform: scale(.97); }
+
+/* Primary — solid green */
+.ld-btn--primary {
+  background: var(--ld-green);
+  color:      #ffffff;
+}
+.ld-btn--primary:hover {
+  background: var(--ld-green-mid);
+  box-shadow: 0 4px 14px rgba(46,125,50,.25);
+}
+
+/* Outline — white with green border */
+.ld-btn--outline {
+  background:   var(--ld-surface);
+  color:        var(--ld-green);
+  border:       1.5px solid var(--ld-green-bdr2);
+}
+.ld-btn--outline:hover {
+  background:   var(--ld-green-lt);
+  border-color: var(--ld-green);
+}
+
+/* Outline-green (compact, used in section headers) */
+.ld-btn--outline-green {
+  background:   transparent;
+  color:        var(--ld-green);
+  border:       1px solid var(--ld-green-bdr2);
+  font-size:    13px;
+  padding:      8px 16px;
+  border-radius: var(--ld-r-sm);
+}
+.ld-btn--outline-green:hover {
+  background: var(--ld-green-lt);
+}
+
+/* Small modifier */
+.ld-btn--sm {
+  font-size: 12px;
+  padding:   8px 15px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   HERO
+───────────────────────────────────────────────────────────────────────────── */
+.ld-hero {
+  position:        relative;
+  min-height:      92svh;
+  display:         flex;
+  flex-direction:  column;
+  justify-content: center;
+  align-items:     flex-start;
+  padding:         calc(58px + 64px) 24px 72px;
+  overflow:        hidden;
+  background:      linear-gradient(155deg, #f0f8ec 0%, #e8f5e9 55%, #f1f8e9 100%);
+  border-bottom:   1px solid var(--ld-line);
+}
+
+/* Decorative orb — top-right */
+.ld-hero::before {
+  content:       '';
+  position:      absolute;
+  width:         700px;
+  height:        700px;
+  border-radius: 50%;
+  background:    radial-gradient(circle, rgba(46,125,50,.13) 0%, transparent 65%);
+  top:           -220px;
+  right:         -200px;
+  pointer-events: none;
+}
+
+/* Decorative orb — bottom-left */
+.ld-hero::after {
+  content:       '';
+  position:      absolute;
+  width:         480px;
+  height:        480px;
+  border-radius: 50%;
+  background:    radial-gradient(circle, rgba(165,214,167,.28) 0%, transparent 65%);
+  bottom:        -140px;
+  left:          -60px;
+  pointer-events: none;
+}
+
+.ld-hero__inner {
+  position:  relative;
+  z-index:   2;
+  max-width: 620px;
+  animation: ldFadeUp .65s ease both;
+}
+
+.ld-hero__heading {
+  font-family:    var(--ld-display);
+  font-size:      clamp(34px, 6vw, 66px);
+  font-weight:    800;
+  line-height:    1.08;
+  letter-spacing: -0.025em;
+  color:          var(--ld-text);
+  margin-bottom:  16px;
+}
+
+.ld-hero__heading em {
+  font-style: normal;
+  color:      var(--ld-green);
+}
+
+.ld-hero__sub {
+  font-size:    clamp(14px, 2vw, 17px);
+  color:        var(--ld-text-2);
+  line-height:  1.7;
+  max-width:    480px;
+  margin-bottom: 28px;
+  animation:    ldFadeUp .65s .1s ease both;
+}
+
+.ld-hero__actions {
+  display:   flex;
+  gap:       12px;
+  flex-wrap: wrap;
+  animation: ldFadeUp .65s .2s ease both;
+}
+
+/* Floating stat chips (desktop — right side) */
+.ld-hero__chips {
+  position:  absolute;
+  right:     48px;
+  top:       50%;
+  transform: translateY(-50%);
+  display:   flex;
+  flex-direction: column;
+  gap:       14px;
+  z-index:   2;
+}
+
+.ld-chip {
+  background:    var(--ld-surface);
+  border:        1px solid var(--ld-line);
+  border-radius: var(--ld-r-lg);
+  padding:       12px 18px;
+  min-width:     165px;
+  display:       flex;
+  align-items:   center;
+  gap:           12px;
+  box-shadow:    0 2px 8px rgba(46,125,50,.08);
+  animation:     ldSlideIn .55s ease both;
+}
+
+.ld-chip:nth-child(2) { animation-delay: .12s; }
+.ld-chip:nth-child(3) { animation-delay: .24s; }
+
+.ld-chip__dot {
+  width:  10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.ld-chip__dot--green { background: var(--ld-green); }
+.ld-chip__dot--amber { background: #f57c00; }
+.ld-chip__dot--blue  { background: var(--ld-blue); }
+
+.ld-chip__value {
+  font-family:    var(--ld-display);
+  font-size:      22px;
+  font-weight:    800;
+  color:          var(--ld-text);
+  line-height:    1;
+}
+.ld-chip__label {
+  font-size: 11px;
+  color:     var(--ld-text-3);
+  line-height: 1.2;
+}
+
+/* Hero slide dot nav */
+.ld-hero__dots {
+  display:   flex;
+  gap:       8px;
+  margin-top: 36px;
+  animation: ldFadeUp .65s .3s ease both;
+}
+
+.ld-hero__dot {
+  width:  26px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ld-green-bdr);
+  border: none;
+  cursor: pointer;
+  transition: background .25s, width .25s;
+  padding: 0;
+}
+
+.ld-hero__dot--active {
+  background: var(--ld-green);
+  width: 40px;
+}
+
+/* Pending sync pill */
+.ld-hero__sync-pill {
+  position:    absolute;
+  bottom:      32px;
+  left:        24px;
+  display:     flex;
+  align-items: center;
+  gap:         8px;
+  background:  var(--ld-amber-lt);
+  border:      1px solid var(--ld-amber-bdr);
+  border-radius: 100px;
+  padding:     6px 16px;
+  font-size:   12px;
+  font-weight: 600;
+  color:       var(--ld-amber);
+  z-index:     2;
+  animation:   ldPulse 2.2s ease infinite;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   STATS BAR
+   Deep green band — the only dark reversal on the page. Anchors the brand.
+───────────────────────────────────────────────────────────────────────────── */
+.ld-stats-wrap {
+  background: var(--ld-green);
+}
+
+.ld-stats {
+  max-width: var(--ld-max);
+  margin:    0 auto;
+  display:   grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.ld-stat {
+  padding:    26px 20px;
+  text-align: center;
+  border-right: 1px solid rgba(255,255,255,.18);
+}
+
+.ld-stat:last-child { border-right: none; }
+
+.ld-stat__value {
+  font-family:    var(--ld-display);
+  font-size:      clamp(24px, 3vw, 34px);
+  font-weight:    800;
+  color:          #ffffff;
+  line-height:    1;
+  margin-bottom:  5px;
+  letter-spacing: -0.02em;
+}
+
+.ld-stat__label {
+  font-size:   11px;
+  color:       rgba(255,255,255,.72);
+  font-weight: 500;
+  letter-spacing: .04em;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   FEATURE CARDS
+───────────────────────────────────────────────────────────────────────────── */
+.ld-features-wrap {
+  background:    var(--ld-surface);
+  padding:       44px 24px;
+  border-bottom: 1px solid var(--ld-line);
+}
+
+.ld-features-inner {
+  max-width: var(--ld-max);
+  margin:    0 auto;
+}
+
+.ld-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.ld-feature {
+  background:    var(--ld-surface-2);
+  border:        1px solid var(--ld-line);
+  border-radius: var(--ld-r-xl);
+  padding:       26px 22px;
+  cursor:        pointer;
+  transition:    border-color .2s, transform .2s, box-shadow .2s;
+  position:      relative;
+  overflow:      hidden;
+  text-align:    left;
+}
+
+.ld-feature:hover {
+  border-color: var(--ld-green-bdr2);
+  transform:    translateY(-3px);
+  box-shadow:   0 6px 20px rgba(46,125,50,.1);
+}
+
+.ld-feature__icon {
+  width:  44px;
+  height: 44px;
+  border-radius: var(--ld-r-md);
+  display:       flex;
+  align-items:   center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.ld-feature__icon--green { background: var(--ld-green-lt); color: var(--ld-green); }
+.ld-feature__icon--amber { background: var(--ld-amber-lt); color: var(--ld-amber); }
+.ld-feature__icon--blue  { background: var(--ld-blue-lt);  color: var(--ld-blue);  }
+
+.ld-feature__title {
+  font-family:   var(--ld-display);
+  font-size:     15px;
+  font-weight:   700;
+  color:         var(--ld-text);
+  margin-bottom: 7px;
+}
+
+.ld-feature__desc {
+  font-size:   13px;
+  color:       var(--ld-text-3);
+  line-height: 1.6;
+}
+
+.ld-feature__arrow {
+  position:    absolute;
+  top:         20px;
+  right:       20px;
+  color:       var(--ld-green-bdr2);
+  font-size:   16px;
+  transition:  all .2s;
+}
+
+.ld-feature:hover .ld-feature__arrow {
+  color:     var(--ld-green);
+  transform: translate(3px, -3px);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   COLLECTION SCHEDULE
+───────────────────────────────────────────────────────────────────────────── */
+.ld-schedule-wrap {
+  background:    var(--ld-surface-2);
+  padding:       44px 24px;
+  border-bottom: 1px solid var(--ld-line);
+}
+
+.ld-schedule-inner {
+  max-width: var(--ld-max);
+  margin:    0 auto;
+}
+
+/* "Next collection" hero badge */
+.ld-next-badge {
+  display:       flex;
+  align-items:   center;
+  gap:           16px;
+  background:    var(--ld-surface);
+  border:        1.5px solid var(--ld-green-bdr2);
+  border-radius: var(--ld-r-xl);
+  padding:       20px 24px;
+  margin-bottom: 16px;
+  box-shadow:    0 2px 10px rgba(46,125,50,.08);
+}
+
+.ld-next-badge__icon {
+  width:   48px;
+  height:  48px;
+  border-radius: var(--ld-r-md);
+  background:    var(--ld-green-lt);
+  display:       flex;
+  align-items:   center;
+  justify-content: center;
+  flex-shrink:   0;
+  color:         var(--ld-green);
+}
+
+.ld-next-badge__label {
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color:          var(--ld-green);
+  margin-bottom:  6px;
+}
+
+.ld-next-badge__row {
+  display:     flex;
+  gap:         10px;
+  flex-wrap:   wrap;
+  align-items: center;
+}
+
+.ld-next-badge__day {
+  font-family:    var(--ld-display);
+  font-size:      22px;
+  font-weight:    800;
+  color:          var(--ld-text);
+}
+
+.ld-next-badge__pill {
+  font-size:   12px;
+  font-weight: 600;
+  color:       var(--ld-text-2);
+  background:  var(--ld-green-lt);
+  border:      1px solid var(--ld-green-bdr);
+  padding:     4px 12px;
+  border-radius: 100px;
+}
+
+.ld-next-badge__pill--action {
+  color:  var(--ld-green);
+  cursor: pointer;
+}
+
+.ld-next-badge__pill--action:hover {
+  background: var(--ld-green-bdr);
+}
+
+/* Schedule list card */
+.ld-schedule-list {
+  background:    var(--ld-surface);
+  border:        1px solid var(--ld-line);
+  border-radius: var(--ld-r-lg);
+  overflow:      hidden;
+}
+
+.ld-schedule-head {
+  display:         flex;
+  align-items:     center;
+  justify-content: space-between;
+  padding:         14px 20px;
+  border-bottom:   1px solid var(--ld-line-inner);
+}
+
+.ld-schedule-head-title {
+  font-family: var(--ld-display);
+  font-size:   13px;
+  font-weight: 700;
+  color:       var(--ld-text);
+}
+
+.ld-cached {
+  font-size:      9px;
+  font-weight:    800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color:          var(--ld-amber);
+  background:     var(--ld-amber-lt);
+  border:         1px solid var(--ld-amber-bdr);
+  padding:        2px 8px;
+  border-radius:  var(--ld-r-sm);
+}
+
+.ld-schedule-item {
+  display:     flex;
+  align-items: center;
+  gap:         16px;
+  padding:     15px 20px;
+  border-bottom: 1px solid var(--ld-line-inner);
+  transition:  background .15s;
+}
+
+.ld-schedule-item:last-child  { border-bottom: none; }
+.ld-schedule-item--next       { background: #f0f8f0; }
+.ld-schedule-item:hover       { background: var(--ld-green-lt); }
+
+.ld-sched-icon {
+  width:  34px;
+  height: 34px;
+  border-radius: var(--ld-r-sm);
+  display:       flex;
+  align-items:   center;
+  justify-content: center;
+  flex-shrink:   0;
+}
+
+.ld-sched-icon svg { width: 16px; height: 16px; }
+
+.ld-sched-icon--check { background: var(--ld-green-lt); color: var(--ld-green); }
+.ld-sched-icon--cross { background: var(--ld-red-lt);   color: var(--ld-red);   }
+
+.ld-sched-day  { font-size: 13px; font-weight: 600; color: var(--ld-text); }
+.ld-sched-zone { font-size: 11px; color: var(--ld-text-3); margin-top: 2px; }
+.ld-sched-time { margin-left: auto; font-size: 12px; color: var(--ld-text-2); font-weight: 500; white-space: nowrap; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   LIVE MAP
+───────────────────────────────────────────────────────────────────────────── */
+.ld-map-wrap {
+  background:    var(--ld-surface);
+  padding:       44px 24px;
+  border-bottom: 1px solid var(--ld-line);
+}
+
+.ld-map-inner {
+  max-width: var(--ld-max);
+  margin:    0 auto;
+}
+
+.ld-map-container {
+  border-radius: var(--ld-r-xl);
+  overflow:      hidden;
+  border:        1px solid var(--ld-line);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   ANNOUNCEMENTS
+───────────────────────────────────────────────────────────────────────────── */
+.ld-ann-wrap {
+  background:    var(--ld-surface-2);
+  padding:       44px 24px;
+  border-bottom: 1px solid var(--ld-line);
+}
+
+.ld-ann-inner {
+  max-width: var(--ld-max);
+  margin:    0 auto;
+}
+
+/* Split card: image left, content right */
+.ld-ann-card {
+  position:      relative;
+  background:    var(--ld-surface);
+  border:        1px solid var(--ld-line);
+  border-radius: var(--ld-r-xl);
+  overflow:      hidden;
+  display:       flex;
+  min-height:    200px;
+}
+
+/* Image side */
+.ld-ann-img-wrap {
+  width:       38%;
+  min-height:  200px;
+  flex-shrink: 0;
+  overflow:    hidden;
+  background:  linear-gradient(135deg, var(--ld-green-lt) 0%, var(--ld-green-bdr) 100%);
+}
+
+.ld-ann-img {
+  width:      100%;
+  height:     100%;
+  object-fit: cover;
+  display:    block;
+  animation:  ldImgFade .4s ease;
+}
+
+/* Content side */
+.ld-ann-content {
+  flex:    1;
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap:     10px;
+}
+
+.ld-ann-category {
+  display:        inline-block;
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color:          var(--ld-green);
+  background:     var(--ld-green-lt);
+  border:         1px solid var(--ld-green-bdr);
+  padding:        3px 10px;
+  border-radius:  100px;
+  align-self:     flex-start;
+}
+
+.ld-ann-title {
+  font-family:   var(--ld-display);
+  font-size:     clamp(16px, 2.5vw, 22px);
+  font-weight:   700;
+  color:         var(--ld-text);
+  line-height:   1.25;
+  margin:        0;
+}
+
+.ld-ann-body {
+  font-size:    13px;
+  color:        var(--ld-text-2);
+  line-height:  1.6;
+  margin:       0;
+  display:      -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow:     hidden;
+}
+
+/* Carousel arrow buttons */
+.ld-ann-nav {
+  position:    absolute;
+  top:         50%;
+  transform:   translateY(-50%);
+  background:  var(--ld-surface);
+  border:      1px solid var(--ld-line);
+  color:       var(--ld-text);
+  font-size:   20px;
+  width:       36px;
+  height:      36px;
+  border-radius: 50%;
+  display:     flex;
+  align-items: center;
+  justify-content: center;
+  cursor:      pointer;
+  z-index:     3;
+  transition:  all .2s;
+  line-height: 1;
+}
+
+.ld-ann-nav:hover {
+  background:    var(--ld-green-lt);
+  border-color:  var(--ld-green-bdr2);
+  color:         var(--ld-green);
+}
+
+.ld-ann-nav--prev { left: 10px; }
+.ld-ann-nav--next { right: 10px; }
+
+/* Dots */
+.ld-ann-dots {
+  display:         flex;
+  gap:             7px;
+  justify-content: center;
+  margin-top:      16px;
+}
+
+.ld-ann-dot {
+  width:  8px;
+  height: 8px;
+  border-radius: 50%;
+  background:    var(--ld-green-bdr);
+  border:        none;
+  cursor:        pointer;
+  transition:    all .3s;
+  padding:       0;
+}
+
+.ld-ann-dot--active {
+  background:    var(--ld-green);
+  width:         20px;
+  border-radius: 4px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   CTA BANNERS
+───────────────────────────────────────────────────────────────────────────── */
+.ld-cta {
+  position:    relative;
+  padding:     72px 24px;
+  overflow:    hidden;
+  text-align:  center;
+}
+
+/* Mid CTA — solid green */
+.ld-cta--mid {
+  background: var(--ld-green);
+}
+
+/* Bottom CTA — deep green */
+.ld-cta--bottom {
+  background: var(--ld-green-dark);
+}
+
+.ld-cta__inner {
+  position:  relative;
+  z-index:   2;
+  max-width: 580px;
+  margin:    0 auto;
+}
+
+.ld-cta__track {
+  display:         flex;
+  justify-content: center;
+  gap:             16px;
+  font-size:       11px;
+  font-weight:     700;
+  color:           rgba(255,255,255,.55);
+  letter-spacing:  .1em;
+  text-transform:  uppercase;
+  margin-bottom:   20px;
+}
+
+.ld-cta__track span { color: rgba(255,255,255,.9); }
+
+.ld-cta__quote {
+  font-family:    var(--ld-display);
+  font-size:      clamp(22px, 3.5vw, 36px);
+  font-weight:    800;
+  letter-spacing: -0.02em;
+  color:          #ffffff;
+  line-height:    1.18;
+  margin-bottom:  12px;
+}
+
+.ld-cta__sub {
+  font-size:   14px;
+  color:       rgba(255,255,255,.72);
+  margin-bottom: 28px;
+  line-height: 1.7;
+}
+
+/* White button on green CTA */
+.ld-cta .ld-btn--primary {
+  background: #ffffff;
+  color:      var(--ld-green);
+}
+
+.ld-cta .ld-btn--primary:hover {
+  background: var(--ld-green-lt);
+  box-shadow: 0 4px 14px rgba(0,0,0,.15);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   OFFLINE REPORT QUEUE SECTION
+───────────────────────────────────────────────────────────────────────────── */
+.ld-reports-wrap {
+  background:    var(--ld-surface);
+  padding:       44px 24px;
+  border-bottom: 1px solid var(--ld-line);
+}
+
+.ld-reports-inner {
+  max-width: var(--ld-max);
+  margin:    0 auto;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   FOOTER
+───────────────────────────────────────────────────────────────────────────── */
+.ld-footer {
+  background:  var(--ld-green-deep);
+  border-top:  1px solid rgba(255,255,255,.06);
+  padding:     56px 24px 28px;
+}
+
+.ld-footer__inner {
+  max-width: var(--ld-max);
+  margin:    0 auto;
+  display:   grid;
+  grid-template-columns: 1.8fr repeat(3, 1fr);
+  gap:       40px;
+}
+
+/* Brand */
+.ld-footer__brand {
+  display:       flex;
+  align-items:   center;
+  gap:           10px;
+  margin-bottom: 12px;
+}
+
+.ld-footer__brand img {
+  height:  36px;
+  filter:  brightness(0) invert(1);
+  opacity: .88;
+}
+
+.ld-footer__tagline {
+  font-size:   13px;
+  color:       #4caf50;
+  line-height: 1.65;
+  max-width:   240px;
+}
+
+/* Columns */
+.ld-footer__col-title {
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color:          #81c784;
+  margin-bottom:  14px;
+  padding-bottom: 10px;
+  border-bottom:  1px solid rgba(255,255,255,.06);
+}
+
+.ld-footer__col a {
+  display:     block;
+  font-size:   13px;
+  color:       #4a6741;
+  text-decoration: none;
+  margin-bottom: 8px;
+  transition:  color .18s;
+}
+
+.ld-footer__col a:hover { color: #81c784; }
+
+/* Bottom bar */
+.ld-footer__bottom {
+  max-width:   var(--ld-max);
+  margin:      28px auto 0;
+  padding-top: 18px;
+  border-top:  1px solid rgba(255,255,255,.06);
+  display:     flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap:   wrap;
+  gap:         12px;
+}
+
+.ld-footer__copy    { font-size: 12px; color: #3a5a3a; }
+.ld-footer__contact { font-size: 12px; color: #4a6741; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   KEYFRAMES
+───────────────────────────────────────────────────────────────────────────── */
+@keyframes ldFadeUp {
+  from { opacity: 0; transform: translateY(22px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ldSlideIn {
+  from { opacity: 0; transform: translateX(22px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes ldImgFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes ldPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .6; }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   RESPONSIVE
+───────────────────────────────────────────────────────────────────────────── */
+
+/* Tablet — hide floating chips, compress stats */
+@media (max-width: 900px) {
+  .ld-hero__chips {
+    display: none;
+  }
+
+  .ld-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .ld-stat {
+    border-bottom: 1px solid rgba(255,255,255,.18);
+  }
+
+  .ld-footer__inner {
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+  }
+}
+
+/* Mobile */
+@media (max-width: 600px) {
+  .ld-hero {
+    padding:     calc(58px + 40px) 16px 56px;
+    min-height:  100svh;
+  }
+
+  .ld-stats-wrap,
+  .ld-features-wrap,
+  .ld-schedule-wrap,
+  .ld-map-wrap,
+  .ld-ann-wrap,
+  .ld-reports-wrap {
+    padding-left:  16px;
+    padding-right: 16px;
+  }
+
+  /* Stack features vertically */
+  .ld-features { grid-template-columns: 1fr; }
+
+  /* Stack announcement card vertically */
+  .ld-ann-card { flex-direction: column; }
+
+  .ld-ann-img-wrap {
+    width:      100%;
+    min-height: 160px;
+  }
+
+  .ld-ann-content { padding: 20px 16px; }
+
+  /* Stack next badge */
+  .ld-next-badge {
+    flex-direction: column;
+    align-items:    flex-start;
+    padding:        16px 18px;
+  }
+
+  /* Stack footer cols */
+  .ld-footer__inner {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  .ld-footer__tagline { max-width: 100%; }
+
+  .ld-cta { padding: 52px 16px; }
+  .ld-cta__track { flex-wrap: wrap; gap: 8px; }
+}

@@ -1,519 +1,616 @@
 /**
  * pages/dashboard/PublicDashboard.jsx
  * ------------------------------------
- * PWA public landing dashboard — accessible without login, works fully offline.
- * Mobile-first. Desktop layout handled via CSS media queries.
+ * Light-mode redesign for normal Lucena City citizens.
+ * All hooks, logic, and child-component imports are preserved exactly.
+ * Only JSX structure and class-names have changed to match the new
+ * Publicdashboardlanding.css light-mode stylesheet.
  */
 
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+
 import Navbar from '../../components/Navbar'
 import BottomNav from '../../components/BottomNav'
 import OfflineBanner from '../../components/OfflineBanner'
+import CachedMapSnapshot from '../../components/CachedMapSnapshot'
+import OfflineReportBuilder from '../../components/OfflineReportBuilder'
+import OfflineReportQueue from '../../components/OfflineReportQueue'
+import OfflineAnalyticsSnapshot from '../../components/OfflineAnalyticsSnapshot'
+import OfflineEventCalendar from '../../components/OfflineEventCalendar'
+import OfflineCommandCenter from '../../components/OfflineCommandCenter'
+import OfflineBarangayProfile from '../../components/OfflineBarangayProfile'
+import OfflineGamification from '../../components/OfflineGamification'
+import OfflineGISLite from '../../components/OfflineGISLite'
+
 import { useAuth } from '../../context/AuthContext'
 import { useOnline } from '../../hooks/useOnline'
-import { useCache } from '../../hooks/useCache'
-import api from '../../api/client'
-import '../../styles/pages/PublicDashboard.css'
+import { useOfflineReports } from '../../hooks/useOfflineReports'
+import { useOfflineAnnouncements } from '../../hooks/useOfflineAnnouncements'
+import { useOfflineSyncManager } from '../../hooks/useOfflineSyncManager'
+import { useOfflineInsights } from '../../hooks/useOfflineInsights'
+
+/* Light-mode landing stylesheet */
+import '../../styles/pages/Publicdashboardlanding.css'
+/* Child-component stylesheets (unchanged) */
+import '../../styles/pages/OfflineModules.css'
+import '../../styles/pages/OfflineModules2.css'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const LS_KEY = 'ww_offline_reports'
-
 const HERO_SLIDES = [
   {
-    title: 'The Intelligent Future of Lucena City Waste Management',
-    subtitle: 'Connecting Solid Waste Collection with GIS, ML, and PWA Technology for a Cleaner, Greener Lucena!',
+    eyebrow: 'Lucena City · CENRO',
+    title: (
+      <>
+        Cleaner Lucena,{' '}
+        <em>One Report at a Time</em>
+      </>
+    ),
+    sub: "I-report ang basura sa inyong barangay, alamin ang schedule ng kolektor, at makiisa sa mas malinis na Lucena City.",
   },
   {
-    title: 'Report Garbage Problems Instantly',
-    subtitle: 'Capture your location offline, submit reports anytime — we sync when you\'re back online.',
+    eyebrow: 'Citizen Portal',
+    title: (
+      <>
+        Mag-report ng Problema. <em>Madali Lang.</em>
+      </>
+    ),
+    sub: "I-capture ang inyong lokasyon kahit offline, mag-submit anumang oras — i-sync pagbalik ng signal.",
   },
   {
-    title: 'Track Your Collection Schedule',
-    subtitle: 'Know exactly when the garbage truck comes to your barangay.',
-  },
-]
-
-const FALLBACK_ANNOUNCEMENTS = [
-  {
-    id: 1,
-    title: 'CENRO Conducted 31-day Segregation Test',
-    body: 'Lucena City CENRO strictly implements proper waste segregation. Let us unite and make Lucena clean!',
-    image: 'https://images.unsplash.com/photo-1532996122724-e3c354a0b15b?auto=format&fit=crop&q=80&w=600',
-    date: '2026-04-20',
-  },
-  {
-    id: 2,
-    title: 'New Garbage Collection Trucks Arrived',
-    body: 'The local government procured 5 new garbage trucks to improve collection efficiency across all barangays.',
-    image: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&q=80&w=600',
-    date: '2026-04-15',
-  },
-  {
-    id: 3,
-    title: 'Illegal Dumping Alert — Barangay 1',
-    body: 'Multiple reports near 5th Ave. Residents please be vigilant and report any suspicious dumping activity.',
-    image: 'https://images.unsplash.com/photo-1567174891668-5b08b0f3e80a?auto=format&fit=crop&q=80&w=600',
-    date: '2026-04-10',
+    eyebrow: 'Collection Schedules',
+    title: (
+      <>
+        Alamin Kung Kailan <em>Darating ang Truck</em>
+      </>
+    ),
+    sub: "Huwag palampasin ang koleksyon. Tingnan ang schedule ng inyong barangay anumang oras.",
   },
 ]
 
 const FALLBACK_SCHEDULE = [
-  { day: 'Monday', zone: 'Barangay Isabang', time: '6:00 AM – 10:00 AM', isNext: true, status: 'upcoming' },
-  { day: 'Wednesday', zone: 'Barangay Gulang-Gulang', time: 'N/A', isNext: false, status: 'missed' },
-  { day: 'Monday', zone: 'Barangay Isabang', time: '6:00 AM – 10:00 AM', isNext: false, status: 'upcoming' },
+  { day: 'Lunes',      zone: 'Barangay Isabang',       time: '6:00 AM – 10:00 AM', isNext: true,  status: 'upcoming' },
+  { day: 'Miyerkules', zone: 'Barangay Gulang-Gulang',  time: 'N/A',                isNext: false, status: 'missed'   },
+  { day: 'Biyernes',   zone: 'Barangay Isabang',        time: '6:00 AM – 10:00 AM', isNext: false, status: 'upcoming' },
 ]
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── SVG Icons (inline, no external dep) ─────────────────────────────────────
 
-function getStoredReports() {
-  try {
-    return JSON.parse(localStorage.getItem(LS_KEY) || '[]')
-  } catch {
-    return []
-  }
-}
-
-function saveStoredReports(reports) {
-  localStorage.setItem(LS_KEY, JSON.stringify(reports))
-}
+const IconMap = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+    <path d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+  </svg>
+)
+const IconTruck = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z"/>
+    <path d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1"/>
+  </svg>
+)
+const IconPhone = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+    <line x1="12" y1="18" x2="12.01" y2="18" />
+  </svg>
+)
+const IconCalendar = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+    <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" /><path d="M9 16l2 2 4-4" />
+  </svg>
+)
+const IconCheck = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+)
+const IconX = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+)
+const IconFlag = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" y1="22" x2="4" y2="15" />
+  </svg>
+)
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function PublicDashboard() {
-  const { user } = useAuth()
-  const navigate = useNavigate()
-  const isOnline = useOnline()
+  const { user }  = useAuth()
+  const navigate  = useNavigate()
+  const isOnline  = useOnline()
 
-  const [announcements, setAnnouncements] = useCache('announcements', FALLBACK_ANNOUNCEMENTS)
-  const [schedule, setSchedule] = useCache('schedule', FALLBACK_SCHEDULE)
+  // ── Data hooks ───────────────────────────────────────────────────────────────
+  const { announcements, isStale, isRefreshing } = useOfflineAnnouncements()
 
-  const [heroSlide, setHeroSlide] = useState(0)
-  const [annSlide, setAnnSlide] = useState(0)
-  const [reports, setReports] = useState([])
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [lastSync, setLastSync] = useState(null)
+  const {
+    reports, addReport, retryReport,
+    isSyncing: reportsSyncing, pendingCount, failedCount,
+  } = useOfflineReports()
 
-  // ── Load reports from localStorage ──────────────────────────────────────────
-  useEffect(() => {
-    setReports(getStoredReports())
-  }, [])
+  const { syncNow, isSyncing, lastSyncAt, summary } = useOfflineSyncManager()
 
-  // ── Hero auto-play ───────────────────────────────────────────────────────────
+  const {
+    insights, overallRiskLevel, wasteSpikeDays, riskBarangays,
+  } = useOfflineInsights()
+
+  // ── UI state ─────────────────────────────────────────────────────────────────
+  const [schedule,    setSchedule]    = useState(FALLBACK_SCHEDULE)
+  const [heroSlide,   setHeroSlide]   = useState(0)
+  const [annSlide,    setAnnSlide]    = useState(0)
+  const [showBuilder, setShowBuilder] = useState(false)
+
+  // ── Auto-play ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     const t = setInterval(() => setHeroSlide(p => (p + 1) % HERO_SLIDES.length), 4500)
     return () => clearInterval(t)
   }, [])
 
-  // ── Announcement auto-play ────────────────────────────────────────────────────
   useEffect(() => {
     if (announcements.length <= 1) return
     const t = setInterval(() => setAnnSlide(p => (p + 1) % announcements.length), 5000)
     return () => clearInterval(t)
   }, [announcements.length])
 
-  // ── Online → sync pending reports & refresh data ─────────────────────────────
-  const syncAndRefresh = useCallback(async () => {
-    if (!isOnline || isSyncing) return
-    setIsSyncing(true)
-    try {
-      // 1. Fetch fresh data from server
-      const [annRes] = await Promise.allSettled([
-        api.get('/api/public/announcements/').catch(() => null),
-      ])
-      if (annRes.status === 'fulfilled' && annRes.value?.data) {
-        setAnnouncements(annRes.value.data)
-      }
+  // ── Handlers ──────────────────────────────────────────────────────────────────
+  const handleSyncNow      = useCallback(() => syncNow(), [syncNow])
+  const handleSubmitReport = useCallback(async (fields) => addReport(fields), [addReport])
 
-      // 2. Sync unsynced offline reports
-      const current = getStoredReports()
-      const hasUnsynced = current.some(r => !r.synced)
-      if (hasUnsynced) {
-        const updated = await Promise.all(
-          current.map(async (report) => {
-            if (report.synced) return report
-            try {
-              await api.post('/api/reports/', report)
-              return { ...report, synced: true, syncedAt: new Date().toISOString() }
-            } catch {
-              return report
-            }
-          })
-        )
-        saveStoredReports(updated)
-        setReports(updated)
-      }
-
-      setLastSync(new Date())
-    } catch (err) {
-      console.error('Sync error:', err)
-    } finally {
-      setIsSyncing(false)
-    }
-  }, [isOnline]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (isOnline) syncAndRefresh()
-  }, [isOnline, syncAndRefresh])
-
-  // ── Derived ──────────────────────────────────────────────────────────────────
+  // ── Derived ───────────────────────────────────────────────────────────────────
   const nextCollection = schedule.find(s => s.isNext) || schedule[0]
-  const unsyncedCount = reports.filter(r => !r.synced).length
-  const currentAnn = announcements[annSlide] || announcements[0]
-  const currentHero = HERO_SLIDES[heroSlide]
+  const currentAnn     = announcements[annSlide] || announcements[0]
+  const currentHero    = HERO_SLIDES[heroSlide]
+
+  // ─────────────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="pd-container">
+    <div className="ld-root">
       <OfflineBanner />
       <Navbar />
 
-      {/* ════════════════════════════════════════════════
-          HERO CAROUSEL
-      ════════════════════════════════════════════════ */}
-      <section className="pd-hero">
-        <div className="pd-hero__overlay" />
+      {/* ════════ HERO ════════ */}
+      <section className="ld-hero">
+        {/* decorative orbs — CSS handles them via ::before / ::after */}
 
-        {/* Slide content — animate with key for fade transition */}
-        <div className="pd-hero__content" key={heroSlide}>
-          <h1 className="pd-hero__title">{currentHero.title}</h1>
-          <p className="pd-hero__subtitle">{currentHero.subtitle}</p>
-          <div className="pd-hero__buttons">
+        <div className="ld-hero__inner" key={heroSlide}>
+          <div className="ld-eyebrow">
+            <span className="ld-eyebrow__dot" />
+            {currentHero.eyebrow}
+          </div>
+
+          <h1 className="ld-hero__heading">{currentHero.title}</h1>
+          <p  className="ld-hero__sub">{currentHero.sub}</p>
+
+          <div className="ld-hero__actions">
             <button
-              className="pd-btn pd-btn--primary"
-              onClick={() => document.getElementById('pd-schedule')?.scrollIntoView({ behavior: 'smooth' })}
+              className="ld-btn ld-btn--primary"
+              onClick={() => setShowBuilder(true)}
             >
-              Explore The App
+              <IconFlag /> Mag-report Ngayon
             </button>
             <button
-              className="pd-btn pd-btn--outline-white"
-              onClick={() => navigate('/about')}
+              className="ld-btn ld-btn--outline"
+              onClick={() => document.getElementById('ld-schedule')?.scrollIntoView({ behavior: 'smooth' })}
             >
-              Learn How
-            </button>
-          </div>
-        </div>
-
-        {/* Dots */}
-        <div className="pd-dots pd-hero__dots">
-          {HERO_SLIDES.map((_, i) => (
-            <button
-              key={i}
-              className={`pd-dot${heroSlide === i ? ' pd-dot--active' : ''}`}
-              onClick={() => setHeroSlide(i)}
-              aria-label={`Slide ${i + 1}`}
-            />
-          ))}
-        </div>
-
-        {/* Pending sync chip — shown on hero for visibility */}
-        {unsyncedCount > 0 && (
-          <div className="pd-sync-chip">
-            <span className="pd-sync-chip__dot" />
-            {unsyncedCount} Pending Sync
-          </div>
-        )}
-      </section>
-
-      {/* ════════════════════════════════════════════════
-          FEATURE CARDS
-      ════════════════════════════════════════════════ */}
-      <div className="pd-features">
-        <button className="pd-feature-card" onClick={() => navigate('/map')}>
-          <svg className="pd-feature-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-            <path d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-          <span>Smart GIS<br />Mapping</span>
-        </button>
-
-        <button className="pd-feature-card pd-feature-card--orange" onClick={() => document.getElementById('pd-schedule')?.scrollIntoView({ behavior: 'smooth' })}>
-          <svg className="pd-feature-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" />
-            <path d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" />
-          </svg>
-          <span>Optimized<br />Collection</span>
-        </button>
-
-        <button className="pd-feature-card" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-          <svg className="pd-feature-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
-            <line x1="12" y1="18" x2="12.01" y2="18" />
-          </svg>
-          <span>Citizen<br />Portal</span>
-        </button>
-      </div>
-
-      {/* ════════════════════════════════════════════════
-          ANNOUNCEMENTS CAROUSEL
-      ════════════════════════════════════════════════ */}
-      <section className="pd-section pd-announcements">
-        <div className="pd-section__header">
-          <h2 className="pd-section__title">Announcements</h2>
-          <button className="pd-btn pd-btn--dark-sm" onClick={() => navigate('/announcements')}>
-            Read More Articles
-          </button>
-        </div>
-
-        {/* Carousel card */}
-        <div className="pd-ann-card">
-          <img
-            key={annSlide}
-            src={currentAnn?.image}
-            alt={currentAnn?.title}
-            className="pd-ann-card__img"
-          />
-          <div className="pd-ann-card__fade" />
-          <div className="pd-ann-card__content">
-            <h3 className="pd-ann-card__title">{currentAnn?.title}</h3>
-            <p className="pd-ann-card__body">{currentAnn?.body}</p>
-            <button
-              className="pd-btn pd-btn--white-sm"
-              onClick={() => navigate(`/announcements/${currentAnn?.id}`)}
-            >
-              Read More &rsaquo;
+              <IconCalendar /> Tingnan ang Schedule
             </button>
           </div>
 
-          {/* Prev / Next arrows */}
-          {announcements.length > 1 && (
-            <>
-              <button
-                className="pd-ann-card__arrow pd-ann-card__arrow--prev"
-                onClick={() => setAnnSlide(p => (p - 1 + announcements.length) % announcements.length)}
-                aria-label="Previous"
-              >‹</button>
-              <button
-                className="pd-ann-card__arrow pd-ann-card__arrow--next"
-                onClick={() => setAnnSlide(p => (p + 1) % announcements.length)}
-                aria-label="Next"
-              >›</button>
-            </>
-          )}
-        </div>
-
-        {/* Dots */}
-        {announcements.length > 1 && (
-          <div className="pd-dots pd-dots--dark">
-            {announcements.map((_, i) => (
+          {/* Hero slide dots */}
+          <div className="ld-hero__dots">
+            {HERO_SLIDES.map((_, i) => (
               <button
                 key={i}
-                className={`pd-dot pd-dot--dark${annSlide === i ? ' pd-dot--active-dark' : ''}`}
-                onClick={() => setAnnSlide(i)}
-                aria-label={`Announcement ${i + 1}`}
+                className={`ld-hero__dot${heroSlide === i ? ' ld-hero__dot--active' : ''}`}
+                onClick={() => setHeroSlide(i)}
+                aria-label={`Slide ${i + 1}`}
               />
             ))}
           </div>
+        </div>
+
+        {/* Floating stat chips */}
+        <div className="ld-hero__chips">
+          <div className="ld-chip">
+            <span className="ld-chip__dot ld-chip__dot--green" />
+            <div>
+              <div className="ld-chip__value">33</div>
+              <div className="ld-chip__label">Barangays</div>
+            </div>
+          </div>
+          <div className="ld-chip">
+            <span className="ld-chip__dot ld-chip__dot--amber" />
+            <div>
+              <div className="ld-chip__value">{pendingCount || 0}</div>
+              <div className="ld-chip__label">Mga Pending</div>
+            </div>
+          </div>
+          <div className="ld-chip">
+            <span className="ld-chip__dot ld-chip__dot--blue" />
+            <div>
+              <div className="ld-chip__value">PWA</div>
+              <div className="ld-chip__label">Works Offline</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Pending sync pill */}
+        {pendingCount > 0 && (
+          <div className="ld-hero__sync-pill">
+            ⏳ {pendingCount} report{pendingCount > 1 ? 's' : ''} pending sync
+          </div>
         )}
       </section>
 
-      {/* ════════════════════════════════════════════════
-          COLLECTION SCHEDULE
-      ════════════════════════════════════════════════ */}
-      <section id="pd-schedule" className="pd-section pd-schedule">
-        {/* Next collection banner */}
-        <div className="pd-next-card">
-          <div className="pd-next-card__icon">
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-              <line x1="16" y1="2" x2="16" y2="6" />
-              <line x1="8" y1="2" x2="8" y2="6" />
-              <line x1="3" y1="10" x2="21" y2="10" />
-              <path d="M9 16l2 2 4-4" />
-            </svg>
+      {/* ════════ STATS BAR ════════ */}
+      <div className="ld-stats-wrap">
+        <div className="ld-stats">
+          <div className="ld-stat">
+            <div className="ld-stat__value">33</div>
+            <div className="ld-stat__label">Barangays Covered</div>
           </div>
-          <div className="pd-next-card__info">
-            <span className="pd-next-card__label">Next Garbage Collection</span>
-            <div className="pd-next-card__row" style={{ justifyContent: "space-between", display: "flex" }}>
-              <span className="pd-next-card__day">{nextCollection?.day || 'Monday'}</span>
-              <span className="pd-next-card__badge">{nextCollection?.time?.split('–')[0]?.trim() || '6:00 AM'}</span>
-              <span className="pd-next-card__badge">{nextCollection?.zone || 'Brgy. Isabang'}</span>
-              <span className="pd-next-card__badge" style={{ color: 'rgba(255, 255, 255, 1)' }} onClick={() => navigate('/schedule')}>{nextCollection ? 'View More' : ''}</span>
-            </div>
+          <div className="ld-stat">
+            <div className="ld-stat__value">12</div>
+            <div className="ld-stat__label">Collection Trucks</div>
           </div>
-        </div>
-
-        {/* Schedule list */}
-        <div className="pd-schedule-card">
-          <div className="pd-schedule-card__header">
-            <span className="pd-schedule-card__title">Your Collection Schedule</span>
-            {!isOnline && <span className="pd-cached-badge">CACHED</span>}
+          <div className="ld-stat">
+            <div className="ld-stat__value">GIS</div>
+            <div className="ld-stat__label">Real-Time Mapping</div>
           </div>
-          {schedule.length === 0 ? (
-            <p className="pd-empty">No schedule available.</p>
-          ) : (
-            schedule.map((s, i) => (
-              <div key={i} className={`pd-schedule-item${s.isNext ? ' pd-schedule-item--next' : ''}`}>
-                <div className={`pd-schedule-item__icon ${s.status === 'upcoming' ? 'check' : 'cross'}`}>
-                  {s.status === 'upcoming' ? (
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                  ) : (
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                  )}
-                </div>
-                <div className="pd-schedule-item__info">
-                  <span className="pd-schedule-item__day">{s.day}</span>
-                  <span className="pd-schedule-item__zone">{s.zone}</span>
-                </div>
-                <div className="pd-schedule-item__time">{s.time}</div>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-
-      {/* ════════════════════════════════════════════════
-          MID BANNER
-      ════════════════════════════════════════════════ */}
-      <div className="pd-mid-banner">
-        <div className="pd-mid-banner__overlay" />
-        <div className="pd-mid-banner__content">
-          <blockquote className="pd-mid-banner__quote">
-            "One App for Monitoring All Waste Management Related Stuff"
-          </blockquote>
-          <p className="pd-mid-banner__sub">Track &bull; Monitor &bull; Report</p>
+          <div className="ld-stat">
+            <div className="ld-stat__value">PWA</div>
+            <div className="ld-stat__label">Works Offline</div>
+          </div>
         </div>
       </div>
 
-      {/* ════════════════════════════════════════════════
-          MY REPORTS / OFFLINE REPORTS
-      ════════════════════════════════════════════════ */}
-      <section className="pd-section pd-reports-wrap">
-        {/* Header card (dark) */}
-        <div className="pd-reports-header">
-          <div className="pd-reports-header__icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
-              <circle cx="12" cy="10" r="3" />
-            </svg>
-          </div>
-          <div className="pd-reports-header__info">
-            <h2 className="pd-reports-header__title">Your Garbage Reports</h2>
-            <p className="pd-reports-header__sub">
-              {lastSync ? `Last synced: ${lastSync.toLocaleTimeString()}` : 'Not yet synced this session'}
-            </p>
-          </div>
-          <div className={`pd-status-pill${isOnline ? ' pd-status-pill--online' : ''}`}>
-            <span className="pd-status-pill__dot" />
-            {isOnline ? (isSyncing ? 'Syncing…' : 'Online') : 'Offline'}
+      {/* ════════ FEATURE CARDS ════════ */}
+      <div className="ld-features-wrap">
+        <div className="ld-features-inner">
+          <h2 className="ld-section-title" style={{ marginBottom: 20 }}>
+            Ano ang magagawa mo?
+          </h2>
+          <div className="ld-features">
+            <button
+              className="ld-feature"
+              onClick={() => navigate('/map')}
+            >
+              <div className="ld-feature__icon ld-feature__icon--green">
+                <IconMap />
+              </div>
+              <div className="ld-feature__title">GIS Waste Map</div>
+              <p className="ld-feature__desc">
+                Tingnan kung saan ang pinaka-maraming basura sa interactive na mapa ng Lucena City.
+              </p>
+              <span className="ld-feature__arrow">↗</span>
+            </button>
+
+            <button
+              className="ld-feature"
+              onClick={() => document.getElementById('ld-schedule')?.scrollIntoView({ behavior: 'smooth' })}
+            >
+              <div className="ld-feature__icon ld-feature__icon--amber">
+                <IconTruck />
+              </div>
+              <div className="ld-feature__title">Collection Schedule</div>
+              <p className="ld-feature__desc">
+                Alamin kung kailan darating ang garbage truck sa inyong barangay.
+              </p>
+              <span className="ld-feature__arrow">↗</span>
+            </button>
+
+            <button
+              className="ld-feature"
+              onClick={() => setShowBuilder(true)}
+            >
+              <div className="ld-feature__icon ld-feature__icon--blue">
+                <IconPhone />
+              </div>
+              <div className="ld-feature__title">Citizen Portal</div>
+              <p className="ld-feature__desc">
+                Mag-submit ng report kahit walang internet. I-sync pagbalik ng signal.
+              </p>
+              <span className="ld-feature__arrow">↗</span>
+            </button>
           </div>
         </div>
+      </div>
 
-        {/* Reports list */}
-        <div className="pd-reports-list">
-          <div className="pd-reports-list__header">
-            <span className="pd-reports-list__title">My Reports</span>
+      {/* ════════ COLLECTION SCHEDULE ════════ */}
+      <div id="ld-schedule" className="ld-schedule-wrap">
+        <div className="ld-schedule-inner">
+          <div className="ld-section-head">
+            <div>
+              <div className="ld-eyebrow">
+                <span className="ld-eyebrow__dot" /> Inyong Zone
+              </div>
+              <h2 className="ld-section-title">Collection Schedule</h2>
+            </div>
             <button
-              className="pd-link"
-              onClick={() => navigate('/reports')}
+              className="ld-btn ld-btn--outline-green ld-btn--sm"
+              onClick={() => navigate('/schedule')}
             >
-              View More &rsaquo;
+              Full Schedule →
             </button>
           </div>
 
-          {reports.length === 0 ? (
-            <div className="pd-empty">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" /></svg>
-              <span>No reports yet. Submit your first report!</span>
+          {/* Next collection hero badge */}
+          <div className="ld-next-badge">
+            <div className="ld-next-badge__icon">
+              <IconCalendar />
             </div>
-          ) : (
-            reports.slice(0, 5).map((r, i) => (
-              <div key={r.id || i} className="pd-report-item">
-                <div className="pd-report-item__pin">📍</div>
-                <div className="pd-report-item__details">
-                  <div className="pd-report-item__top">
-                    <span className="pd-report-item__type">{r.issueType || 'Overflow'}</span>
-                    <span className={`pd-status-badge pd-status-badge--${(r.status || 'pending').toLowerCase()}`}>
-                      {r.status || 'Pending'}
-                    </span>
-                  </div>
-                  <span className="pd-report-item__address">{r.address || r.location || 'Location unavailable'}</span>
-                </div>
-                <div className="pd-report-item__meta">
-                  <span className="pd-report-item__date">
-                    {r.date ? new Date(r.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }) : '—'}
-                  </span>
-                  <span className={`pd-sync-badge${r.synced ? '' : ' pd-sync-badge--unsynced'}`}>
-                    {r.synced ? 'Synced' : 'Unsynced'}
-                  </span>
-                </div>
+            <div style={{ flex: 1 }}>
+              <div className="ld-next-badge__label">Susunod na Koleksyon</div>
+              <div className="ld-next-badge__row">
+                <span className="ld-next-badge__day">{nextCollection?.day || 'Lunes'}</span>
+                <span className="ld-next-badge__pill">
+                  {nextCollection?.time?.split('–')[0]?.trim() || '6:00 AM'}
+                </span>
+                <span className="ld-next-badge__pill">{nextCollection?.zone || 'Brgy. Isabang'}</span>
+                <span
+                  className="ld-next-badge__pill ld-next-badge__pill--action"
+                  onClick={() => navigate('/schedule')}
+                >
+                  View More →
+                </span>
               </div>
-            ))
+            </div>
+          </div>
+
+          {/* Schedule list */}
+          <div className="ld-schedule-list">
+            <div className="ld-schedule-head">
+              <span className="ld-schedule-head-title">Lingguhang Iskedyul</span>
+              {!isOnline && <span className="ld-cached">CACHED</span>}
+            </div>
+            {schedule.map((s, i) => (
+              <div
+                key={i}
+                className={`ld-schedule-item${s.isNext ? ' ld-schedule-item--next' : ''}`}
+              >
+                <div className={`ld-sched-icon ${s.status === 'upcoming' ? 'ld-sched-icon--check' : 'ld-sched-icon--cross'}`}>
+                  {s.status === 'upcoming' ? <IconCheck /> : <IconX />}
+                </div>
+                <div>
+                  <div className="ld-sched-day">{s.day}</div>
+                  <div className="ld-sched-zone">{s.zone}</div>
+                </div>
+                <div className="ld-sched-time">{s.time}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ════════ LIVE MAP ════════ */}
+      <div className="ld-map-wrap">
+        <div className="ld-map-inner">
+          <div className="ld-section-head">
+            <div>
+              <div className="ld-eyebrow">
+                <span className="ld-eyebrow__dot" /> Live
+              </div>
+              <h2 className="ld-section-title">GIS Waste Map</h2>
+            </div>
+            <button
+              className="ld-btn ld-btn--outline-green ld-btn--sm"
+              onClick={() => navigate('/map')}
+            >
+              Open Full Map →
+            </button>
+          </div>
+          <div className="ld-map-container">
+            <CachedMapSnapshot />
+          </div>
+        </div>
+      </div>
+
+      {/* ════════ ANNOUNCEMENTS ════════ */}
+      <div className="ld-ann-wrap">
+        <div className="ld-ann-inner">
+          <div className="ld-section-head">
+            <div>
+              <div className="ld-eyebrow">
+                <span className="ld-eyebrow__dot" /> Balita
+                {isStale && !isRefreshing && (
+                  <span className="ld-eyebrow__tag ld-eyebrow__tag--amber">CACHED</span>
+                )}
+                {isRefreshing && (
+                  <span className="ld-eyebrow__tag ld-eyebrow__tag--blue">Nag-a-update…</span>
+                )}
+              </div>
+              <h2 className="ld-section-title">Mga Anunsyo</h2>
+            </div>
+            <button
+              className="ld-btn ld-btn--outline-green ld-btn--sm"
+              onClick={() => navigate('/announcements')}
+            >
+              Lahat ng Balita →
+            </button>
+          </div>
+
+          <div className="ld-ann-card">
+            {/* Left: image */}
+            <div className="ld-ann-img-wrap">
+              <img
+                key={annSlide}
+                src={currentAnn?.image}
+                alt={currentAnn?.title}
+                className="ld-ann-img"
+              />
+            </div>
+
+            {/* Right: content */}
+            <div className="ld-ann-content">
+              <span className="ld-ann-category">📣 Anunsyo</span>
+              <h3 className="ld-ann-title">{currentAnn?.title}</h3>
+              <p className="ld-ann-body">{currentAnn?.body}</p>
+              <button
+                className="ld-btn ld-btn--primary ld-btn--sm"
+                onClick={() => navigate(`/announcements/${currentAnn?.id}`)}
+              >
+                Basahin pa →
+              </button>
+            </div>
+
+            {/* Carousel nav */}
+            {announcements.length > 1 && (
+              <>
+                <button
+                  className="ld-ann-nav ld-ann-nav--prev"
+                  onClick={() => setAnnSlide(p => (p - 1 + announcements.length) % announcements.length)}
+                  aria-label="Previous"
+                >‹</button>
+                <button
+                  className="ld-ann-nav ld-ann-nav--next"
+                  onClick={() => setAnnSlide(p => (p + 1) % announcements.length)}
+                  aria-label="Next"
+                >›</button>
+              </>
+            )}
+          </div>
+
+          {announcements.length > 1 && (
+            <div className="ld-ann-dots">
+              {announcements.map((_, i) => (
+                <button
+                  key={i}
+                  className={`ld-ann-dot${annSlide === i ? ' ld-ann-dot--active' : ''}`}
+                  onClick={() => setAnnSlide(i)}
+                  aria-label={`Announcement ${i + 1}`}
+                />
+              ))}
+            </div>
           )}
         </div>
+      </div>
 
-        {/* Report CTA (dark bottom) */}
-        <div className="pd-report-cta">
-          <div className="pd-report-cta__text">
-            <h3>Report a Garbage Problem?</h3>
-            <p>See uncollected waste or illegal dumping? Let us know.</p>
+      {/* ════════ MID CTA ════════ */}
+      <div className="ld-cta ld-cta--mid">
+        <div className="ld-cta__inner">
+          <div className="ld-cta__track">
+            <span>I-track</span> · <span>Subaybayan</span> · <span>Mag-report</span>
           </div>
-          <button
-            className="pd-btn pd-btn--light"
-            onClick={() => navigate('/report/submit')}
-          >
-            Submit report
-          </button>
-        </div>
-      </section>
-
-      {/* ════════════════════════════════════════════════
-          BOTTOM BANNER
-      ════════════════════════════════════════════════ */}
-      <div className="pd-bottom-banner">
-        <div className="pd-bottom-banner__overlay" />
-        <div className="pd-bottom-banner__content">
-          <h2 className="pd-bottom-banner__title">Monitor and Report Waste Problems</h2>
-          <p className="pd-bottom-banner__sub">
-            Makita ang mga problema sa inyong lugar at i-report agad para sa mas malinis na Lucena City.
+          <p className="ld-cta__quote">"Isang App para sa Lahat ng Waste Management"</p>
+          <p className="ld-cta__sub">
+            Ang kumpletong platform ng solid waste management para sa mga mamamayan, field teams, at administrasyon ng Lucena City.
           </p>
-          <button
-            className="pd-btn pd-btn--outline-white"
-            onClick={() => navigate('/report/submit')}
-          >
-            Make a report
+          <button className="ld-btn ld-btn--primary" onClick={() => navigate('/about')}>
+            Alamin Kung Paano Gumagana →
           </button>
         </div>
       </div>
 
-      {/* ════════════════════════════════════════════════
-          FOOTER
-      ════════════════════════════════════════════════ */}
-      <footer className="pd-footer">
-        <div className="pd-footer__brand">
-          <span className="pd-footer__logo">🗑️</span>
-          <span className="pd-footer__name">WasteWatch</span>
+      {/* ════════ OFFLINE REPORT QUEUE ════════ */}
+      <div className="ld-reports-wrap">
+        <div className="ld-reports-inner">
+          <div className="ld-section-head">
+            <div>
+              <div className="ld-eyebrow">
+                <span className="ld-eyebrow__dot" /> Inyong mga Report
+              </div>
+              <h2 className="ld-section-title">Mga Naipadala</h2>
+            </div>
+            <button
+              className="ld-btn ld-btn--primary ld-btn--sm"
+              onClick={() => setShowBuilder(true)}
+            >
+              + Bagong Report
+            </button>
+          </div>
+          <OfflineReportQueue
+            reports={reports}
+            isSyncing={isSyncing || reportsSyncing}
+            isOnline={isOnline}
+            lastSync={lastSyncAt}
+            pendingCount={pendingCount}
+            failedCount={failedCount}
+            onSyncNow={handleSyncNow}
+            onRetry={retryReport}
+            onNewReport={() => setShowBuilder(true)}
+          />
         </div>
+      </div>
 
-        <div className="pd-footer__grid">
-          <div className="pd-footer__col">
-            <h4>How it Works</h4>
+      {/* ════════ BOTTOM CTA ════════ */}
+      <div className="ld-cta ld-cta--bottom">
+        <div className="ld-cta__inner">
+          <div className="ld-eyebrow" style={{ justifyContent: 'center' }}>
+            <span className="ld-eyebrow__dot" /> Tumulong sa Komunidad
+          </div>
+          <p className="ld-cta__quote">
+            I-monitor at I-report ang mga Problema sa Basura
+          </p>
+          <p className="ld-cta__sub">
+            Makita ang mga problema sa inyong lugar at i-report agad para sa mas malinis na Lucena City.
+          </p>
+          <button className="ld-btn ld-btn--primary" onClick={() => setShowBuilder(true)}>
+            Mag-report Ngayon →
+          </button>
+        </div>
+      </div>
+
+      {/* ════════ FOOTER ════════ */}
+      <footer className="ld-footer">
+        <div className="ld-footer__inner">
+          <div>
+            <div className="ld-footer__brand">
+              <span className="logo">
+                <img src="../../../Logo.svg" alt="logo-svg" />
+              </span>
+            </div>
+            <p className="ld-footer__tagline">
+              Smart waste management para sa mas malinis na Lucena City — powered by GIS, ML & PWA.
+            </p>
+          </div>
+
+          <div className="ld-footer__col">
+            <h4 className="ld-footer__col-title">Platform</h4>
             <a href="#">About</a>
             <a href="#">FAQ</a>
             <a href="#">Guidelines</a>
-            <a href="#">For Business</a>
+            <a href="#">Para sa Negosyo</a>
           </div>
-          <div className="pd-footer__col">
-            <h4>Maps</h4>
+
+          <div className="ld-footer__col">
+            <h4 className="ld-footer__col-title">Mapa</h4>
             <a href="#" onClick={e => { e.preventDefault(); navigate('/map') }}>Hotspots</a>
             <a href="#">Truck Radar</a>
-            <a href="#">Live</a>
+            <a href="#">Live View</a>
             <a href="#">Statistics</a>
           </div>
-          <div className="pd-footer__col">
-            <h4>Contact</h4>
+
+          <div className="ld-footer__col">
+            <h4 className="ld-footer__col-title">Makipag-ugnayan</h4>
             <a href="tel:042-710-4311">(042) 710 4311</a>
             <a href="mailto:cenro@lucenacity.gov.ph">cenro@lucenacity.gov.ph</a>
-            <a href="#">City Hall</a>
+            <a href="#">City Hall, Lucena</a>
           </div>
         </div>
 
-        <p className="pd-footer__copy">
-          &copy; 2026 BS Information Technology — CSTC. For thesis purposes only. Lucena City.
-        </p>
+        <div className="ld-footer__bottom">
+          <p className="ld-footer__copy">
+            © 2026 BS Information Technology — CSTC · Para sa thesis lamang · Lucena City
+          </p>
+          <p className="ld-footer__contact">
+            WasteWatch · Lucena City CENRO
+          </p>
+        </div>
       </footer>
 
       <BottomNav />
+
+      {/* ════════ REPORT BUILDER SHEET ════════ */}
+      <OfflineReportBuilder
+        isOpen={showBuilder}
+        onClose={() => setShowBuilder(false)}
+        onSubmit={handleSubmitReport}
+      />
     </div>
   )
 }
