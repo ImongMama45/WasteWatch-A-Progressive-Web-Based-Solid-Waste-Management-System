@@ -30,6 +30,9 @@ import EscalateToAdmin from './pages/EscalateToAdmin'
 import ValidateReports from './pages/ValidateReports'
 import Profile from './pages/Profile'
 import CollectionSchedule from './pages/CollectionSchedule'
+import AnalyticsTabs from './pages/analytics/AnalyticsTabs'
+import NewsPage from './pages/news/NewsPage'
+import CreateAnnouncementPage from './pages/admin/CreateAnnouncementPage'
 
 // These may not exist yet — uncomment when ready:
 import TruckManagement from './pages/admin/TruckManagement'
@@ -113,6 +116,18 @@ export default function App() {
 
           <Route path="/schedule" element={
             <PrivateRoute><CollectionSchedule /></PrivateRoute>
+          } />
+
+          <Route path="/analytics" element={
+            <PrivateRoute><AnalyticsTabs /></PrivateRoute>
+          } />
+
+          <Route path="/announcements" element={
+            <PrivateRoute><NewsPage /></PrivateRoute>
+          } />
+
+          <Route path="/admin/news/create" element={
+            <PrivateRoute><CreateAnnouncementPage /></PrivateRoute>
           } />
 
           <Route path="/map" element={

@@ -386,16 +386,16 @@ function injectStyles() {
 const LeafIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
     stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/>
-    <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>
+    <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" />
+    <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
   </svg>
 )
 
 const BellIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
     stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
-    <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+    <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
   </svg>
 )
 
@@ -403,11 +403,11 @@ const BellIcon = () => (
 
 export default function Navbar() {
   const { user, logout } = useAuth()
-  const navigate         = useNavigate()
-  const location         = useLocation()
-  const isOnline         = useOnline()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const isOnline = useOnline()
 
-  const [menuOpen,  setMenuOpen]  = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
 
   // Inject CSS once on mount
@@ -429,31 +429,34 @@ export default function Navbar() {
   }
 
   const isActive = (path) => location.pathname === path ? 'active' : ''
-  const navTo    = (path) => { navigate(path); setMenuOpen(false) }
+  const navTo = (path) => { navigate(path); setMenuOpen(false) }
 
-  const role      = user?.role?.toLowerCase() || 'citizen'
+  const role = user?.role?.toLowerCase() || 'citizen'
   const baseItems = SIDEBAR_NAV[role] || SIDEBAR_NAV.citizen
 
   const mobileNavItems = user
     ? [
-        ...baseItems.map(item => ({ path: item.path, icon: item.icon, label: item.label })),
-        ...(role === 'driver'
-          ? [{ path: '/collection/confirm', icon: '✅', label: 'Confirm Collection' }]
-          : []),
-      ]
+      ...baseItems.map(item => ({ path: item.path, icon: item.icon, label: item.label })),
+      ...(role === 'driver'
+        ? [{ path: '/collection/confirm', icon: '✅', label: 'Confirm Collection' }]
+        : []),
+    ]
     : [
-        { path: '/',         icon: '🏠', label: 'Home'     },
-        { path: '/login',    icon: '🔑', label: 'Login'    },
-        { path: '/register', icon: '📝', label: 'Register' },
-      ]
+      { path: '/', icon: '🏠', label: 'Home' },
+      { path: '/login', icon: '🔑', label: 'Login' },
+      { path: '/register', icon: '📝', label: 'Register' },
+    ]
 
   const desktopLinks = [
-    { path: '/',             label: 'Home'      },
-    { path: '/map',          label: 'Map'      },
-    { path: '/schedule',     label: 'Schedule'  },
-    { path: '/announcements',label: 'News'    },
-    { path: '/about',        label: 'About'     },
-    ...(user ? [{ path: '/dashboard', label: 'Dashboard' }] : []),
+    { path: '/', label: 'Home' },
+    { path: '/map', label: 'Map' },
+    { path: '/schedule', label: 'Schedule' },
+    { path: '/announcements', label: 'News' },
+    { path: '/about', label: 'About' },
+    ...(user ? [
+      { path: '/dashboard', label: 'Dashboard' },
+      { path: '/analytics', label: 'Analytics' },
+    ] : []),
   ]
 
   return (

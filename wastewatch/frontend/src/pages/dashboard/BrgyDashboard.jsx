@@ -15,6 +15,7 @@ import { useNavigate } from 'react-router-dom'
 import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
+import HomeCarousel from '../../components/carousel/HomeCarousel'
 
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
@@ -180,22 +181,12 @@ export default function BrgyDashboard() {
         </div>
 
         <div className="mobile-schedule">
-          <div className="card card-dark" style={{ textAlign: 'center', padding: '28px 20px' }}>
-            <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 700, marginBottom: 6, color: 'white' }}>
-              Report a Garbage Issue
-            </h3>
-            <p className="text-muted text-sm" style={{ marginBottom: 20, color: 'white' }}>
-              See uncollected waste or illegal dumping? Let us know
-            </p>
-            <div className="btn-row" style={{ justifyContent: 'center' }}>
-              <button className="btn btn-outline" style={{ backgroundColor: 'white' }} onClick={() => navigate('/report/submit')}>
-                Submit Report
-              </button>
-              <button className="btn btn-primary" onClick={() => navigate('/brgy/validate-reports')}>
-                Validate Reports
-              </button>
-            </div>
-          </div>
+          <HomeCarousel
+            role="barangay_official"
+            userBarangay={user?.barangay_name}
+            onReport={() => navigate('/report/submit')}
+            extraSecondCta={{ label: '✔ Validate', onClick: () => navigate('/brgy/validate-reports') }}
+          />
         </div>
 
 

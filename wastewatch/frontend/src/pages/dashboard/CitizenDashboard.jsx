@@ -18,6 +18,7 @@ import { useNavigate } from 'react-router-dom'
 import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
+import HomeCarousel from '../../components/carousel/HomeCarousel'
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 
@@ -136,44 +137,14 @@ export default function CitizenDashboard() {
           <div>
 
             {/* ══════════════════════════════════════
-                HERO CARD — primary action
+                HERO CARD — HomeCarousel (mobile only)
             ══════════════════════════════════════ */}
             <div className='mobile-schedule'>
-              <div className="card card-dark cd-card" style={{ padding: '24px 20px', marginBottom: 16 }}>
-                {/* Icon row */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-                  <div>
-                    <div style={{
-                      color: 'white', fontWeight: 800, fontSize: 16,
-                      fontFamily: 'var(--font-head)', lineHeight: 1.2
-                    }}>
-                      See garbage that needs attention?
-                    </div>
-                    <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12, marginTop: 2 }}>
-                      Let your barangay know — it only takes a minute.
-                    </div>
-                  </div>
-                </div>
-
-                {/* Buttons */}
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button className="cd-btn btn btn-primary"
-                    style={{ flex: 2, fontWeight: 700, fontSize: 13 }}
-                    onClick={() => navigate('/report/submit')}>
-                    Report Issue
-                  </button>
-                  <button className="cd-btn btn"
-                    style={{
-                      flex: 1, fontWeight: 600, fontSize: 13,
-                      background: 'rgba(255,255,255,0.12)',
-                      border: '1px solid rgba(255,255,255,0.2)',
-                      color: 'white',
-                    }}
-                    onClick={() => navigate('/map')}>
-                    🗺 View Map
-                  </button>
-                </div>
-              </div>
+              <HomeCarousel
+                role="citizen"
+                userBarangay={user?.barangay_name}
+                onReport={() => navigate('/report/submit')}
+              />
             </div>
 
             {/* ══════════════════════════════════════

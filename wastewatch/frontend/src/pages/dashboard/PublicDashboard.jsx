@@ -70,9 +70,9 @@ const HERO_SLIDES = [
 ]
 
 const FALLBACK_SCHEDULE = [
-  { day: 'Lunes',      zone: 'Barangay Isabang',       time: '6:00 AM – 10:00 AM', isNext: true,  status: 'upcoming' },
-  { day: 'Miyerkules', zone: 'Barangay Gulang-Gulang',  time: 'N/A',                isNext: false, status: 'missed'   },
-  { day: 'Biyernes',   zone: 'Barangay Isabang',        time: '6:00 AM – 10:00 AM', isNext: false, status: 'upcoming' },
+  { day: 'Lunes', zone: 'Barangay Isabang', time: '6:00 AM – 10:00 AM', isNext: true, status: 'upcoming' },
+  { day: 'Miyerkules', zone: 'Barangay Gulang-Gulang', time: 'N/A', isNext: false, status: 'missed' },
+  { day: 'Biyernes', zone: 'Barangay Isabang', time: '6:00 AM – 10:00 AM', isNext: false, status: 'upcoming' },
 ]
 
 // ─── SVG Icons (inline, no external dep) ─────────────────────────────────────
@@ -85,8 +85,8 @@ const IconMap = () => (
 )
 const IconTruck = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z"/>
-    <path d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1"/>
+    <path d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" />
+    <path d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1" />
   </svg>
 )
 const IconPhone = () => (
@@ -121,9 +121,9 @@ const IconFlag = () => (
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function PublicDashboard() {
-  const { user }  = useAuth()
-  const navigate  = useNavigate()
-  const isOnline  = useOnline()
+  const { user } = useAuth()
+  const navigate = useNavigate()
+  const isOnline = useOnline()
 
   // ── Data hooks ───────────────────────────────────────────────────────────────
   const { announcements, isStale, isRefreshing } = useOfflineAnnouncements()
@@ -140,9 +140,9 @@ export default function PublicDashboard() {
   } = useOfflineInsights()
 
   // ── UI state ─────────────────────────────────────────────────────────────────
-  const [schedule,    setSchedule]    = useState(FALLBACK_SCHEDULE)
-  const [heroSlide,   setHeroSlide]   = useState(0)
-  const [annSlide,    setAnnSlide]    = useState(0)
+  const [schedule, setSchedule] = useState(FALLBACK_SCHEDULE)
+  const [heroSlide, setHeroSlide] = useState(0)
+  const [annSlide, setAnnSlide] = useState(0)
   const [showBuilder, setShowBuilder] = useState(false)
 
   // ── Auto-play ─────────────────────────────────────────────────────────────────
@@ -158,13 +158,13 @@ export default function PublicDashboard() {
   }, [announcements.length])
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
-  const handleSyncNow      = useCallback(() => syncNow(), [syncNow])
+  const handleSyncNow = useCallback(() => syncNow(), [syncNow])
   const handleSubmitReport = useCallback(async (fields) => addReport(fields), [addReport])
 
   // ── Derived ───────────────────────────────────────────────────────────────────
   const nextCollection = schedule.find(s => s.isNext) || schedule[0]
-  const currentAnn     = announcements[annSlide] || announcements[0]
-  const currentHero    = HERO_SLIDES[heroSlide]
+  const currentAnn = announcements[annSlide] || announcements[0]
+  const currentHero = HERO_SLIDES[heroSlide]
 
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -184,7 +184,7 @@ export default function PublicDashboard() {
           </div>
 
           <h1 className="ld-hero__heading">{currentHero.title}</h1>
-          <p  className="ld-hero__sub">{currentHero.sub}</p>
+          <p className="ld-hero__sub">{currentHero.sub}</p>
 
           <div className="ld-hero__actions">
             <button

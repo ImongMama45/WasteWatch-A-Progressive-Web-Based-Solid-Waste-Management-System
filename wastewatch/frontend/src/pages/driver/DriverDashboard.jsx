@@ -16,6 +16,7 @@ import api from '../../api/client'
 import useShiftTimer from '../../hooks/useShiftTimer'
 import useGpsTracking from '../../hooks/useGpsTracking'
 import IssueReporter from './components/IssueReporter'
+import HomeCarousel from '../../components/carousel/HomeCarousel'
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 
@@ -175,25 +176,14 @@ export default function DriverDashboard() {
           )}
         </div>
 
-        {/* ── MOBILE HERO CARD ── */}
+        {/* ── HomeCarousel — mobile only ── */}
         <div className="mobile-schedule">
-          <div className="card card-dark" style={{ padding: '22px 20px', marginBottom: 16 }}>
-            <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 700, marginBottom: 6, color: '#fff' }}>
-              Today's Route
-            </h3>
-            <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, marginBottom: 18 }}>
-              {route.name} is active. {stopsLeft} stops remaining.
-            </p>
-            <div className="btn-row">
-              <button className="abtn btn btn-outline" style={{ background: '#fff', color: '#0d1117', fontWeight: 700 }}
-                onClick={handleShiftToggle}>
-                {shiftActive ? '🚛 Resume Route' : '▶ Start Duty'}
-              </button>
-              <button className="abtn btn btn-primary" onClick={() => navigate('/driver/route')}>
-                View Route
-              </button>
-            </div>
-          </div>
+          <HomeCarousel
+            role="driver"
+            userBarangay={user?.barangay_name}
+            onReport={() => navigate('/report/submit')}
+            extraSecondCta={{ label: '🗺 View Route', onClick: () => navigate('/driver/route') }}
+          />
         </div>
 
         <div className="page-grid">

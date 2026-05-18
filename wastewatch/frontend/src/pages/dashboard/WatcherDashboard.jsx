@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
+import HomeCarousel from '../../components/carousel/HomeCarousel'
 
 export default function Dashboard() {
   const { user } = useAuth()
@@ -42,24 +43,14 @@ export default function Dashboard() {
           {/* ── MAIN COLUMN ── */}
           <div>
 
-            {/* Banner — hidden on desktop (sidebar Quick Actions handles this) */}
+            {/* HomeCarousel — mobile-only, replaces static hero card */}
             <div className="mobile-schedule">
-              <div className="card card-dark" style={{ textAlign: 'center', padding: '28px 20px' }}>
-                <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 700, marginBottom: 6, color:'white' }}>
-                  Report a Garbage Issue
-                </h3>
-                <p className="text-muted text-sm" style={{ marginBottom: 20,color:'white' }}>
-                  See uncollected waste or illegal dumping? Let us know
-                </p>
-                <div className="btn-row" style={{ justifyContent: 'center' }}>
-                  <button className="btn btn-outline" style={{backgroundColor:'white'}} onClick={() => navigate('/report/submit')}>
-                    Submit Report
-                  </button>
-                  <button className="btn btn-primary" onClick={() => navigate('/collection/confirm')}>
-                    Confirm Collection
-                  </button>
-                </div>
-              </div>
+              <HomeCarousel
+                role="watcher"
+                userBarangay={user?.barangay_name}
+                onReport={() => navigate('/report/submit')}
+                extraSecondCta={{ label: '✅ Confirm', onClick: () => navigate('/collection/confirm') }}
+              />
             </div>
 
             {/* Stat Cards */}
