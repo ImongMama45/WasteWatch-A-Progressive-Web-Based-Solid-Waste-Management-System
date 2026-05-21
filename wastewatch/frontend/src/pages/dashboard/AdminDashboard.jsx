@@ -19,7 +19,6 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import MiniMap from "../../components/MiniMap";
 import api from "../../api/client";
-import HomeCarousel from "../../components/carousel/HomeCarousel";
 import { useAuth } from "../../context/AuthContext";
 
 // ─── Mock Data ────────────────────────────────────────────────────────────────
@@ -294,14 +293,7 @@ export default function AdminDashboard() {
 
         </div>
 
-        {/* ── HomeCarousel — mobile only ── */}
-        <div className="mobile-schedule" style={{ marginBottom: 20 }}>
-          <HomeCarousel
-            role="admin"
-            userBarangay={user?.barangay_name}
-            onReport={() => navigate('/report/submit')}
-          />
-        </div>
+
 
         {/* ── Hero KPI strip ── */}
         <div className="card" style={{

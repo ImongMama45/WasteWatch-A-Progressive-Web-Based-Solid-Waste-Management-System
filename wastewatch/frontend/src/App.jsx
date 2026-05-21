@@ -51,32 +51,7 @@ import DriverCollectionLog from './pages/driver/DriverCollectionLog'
 import DriverHotspotAlert from './pages/driver/DriverHotspotAlert'
 import DriverStatusPanel from './pages/driver/DriverStatusPanel'
 import DriverRouteFlow from './pages/driver/DriverRouteFlow'
-import Navbar from './components/Navbar'
-
-// Placeholder for upcoming driver pages
-function DriverComingSoon({ title }) {
-  const navigate = useNavigate()
-  return (
-    <div style={{
-      minHeight: '100vh', display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center', padding: 24,
-      fontFamily: 'var(--font-head)', background: 'var(--bg)',
-    }}>
-      <div style={{ fontSize: 48, marginBottom: 16 }}>🚛</div>
-      <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>{title}</h1>
-      <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 24 }}>
-        This page is coming in the next sprint.
-      </p>
-      <button onClick={() => navigate('/dashboard')}
-        style={{
-          background: 'var(--accent)', color: '#0d1117', border: 'none',
-          padding: '10px 22px', borderRadius: 10, fontWeight: 700, cursor: 'pointer', fontSize: 14
-        }}>
-        ← Back to Dashboard
-      </button>
-    </div>
-  )
-}
+import AboutPage from './pages/AboutPage'
 
 function AuthOverlay({ mode }) {
   const navigate = useNavigate()
@@ -98,6 +73,7 @@ export default function App() {
           <Route path="/" element={<PublicDashboard />} />
           <Route path="/login" element={<AuthOverlay mode="login" />} />
           <Route path="/register" element={<AuthOverlay mode="register" />} />
+          <Route path="/about" element={<AboutPage />} />
 
           {/* ── PROTECTED — all screen sizes ── */}
           <Route path="/dashboard" element={

@@ -42,6 +42,17 @@
   margin-left: 0px;
 }
 
+.leaflet-barangay-tooltip {
+  background: rgba(15,23,42,0.92);
+  border: 1px solid rgba(20,184,166,0.4);
+  color: #e2e8f0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
 .logo img {
   width: 130px;
 }
@@ -529,12 +540,12 @@ select.form-input {
   z-index: 1;
 }
 
-.mobile-only {
-  display: flex;
-}
-
 @media (min-width: 1024px) {
   .mobile-only {
+    display: none;
+  }
+
+  .status-card-mobile-only {
     display: none;
   }
 }
@@ -802,13 +813,8 @@ select.form-input {
 
 /* Hide mobile-only schedule block on desktop (sidebar shows it instead) */
 .mobile-schedule {
+  margin-top: 20px;
   display: block;
-}
-
-@media (min-width: 1024px) {
-  .mobile-schedule {
-    display: none;
-  }
 }
 
 /* ================================================================
@@ -1016,7 +1022,7 @@ select.form-input {
 
 /* Hide on desktop — sidebar handles these sections */
 @media (min-width: 1024px) {
-  .mobile-schedule {
+  .mobile-schedule .submit-button {
     display: none;
   }
 }
@@ -1615,10 +1621,6 @@ select.form-input {
   .dashboard-main {
     margin-left: 220px;
     padding-top: 60px;
-  }
-
-  .status-card-mobile-only {
-    display: none;
   }
 
   .abtn.btn.btn-full.mobile-only {

@@ -133,19 +133,15 @@ export default function CitizenDashboard() {
           </p>
         </div>
 
+        <div className='mobile-schedule'>
+          <HomeCarousel role="citizen" userBarangay={user?.barangay_name} onReport={() => navigate('/report/submit')} />
+        </div>
+
         <div className="page-grid">
           <div>
 
-            {/* ══════════════════════════════════════
-                HERO CARD — HomeCarousel (mobile only)
-            ══════════════════════════════════════ */}
-            <div className='mobile-schedule'>
-              <HomeCarousel
-                role="citizen"
-                userBarangay={user?.barangay_name}
-                onReport={() => navigate('/report/submit')}
-              />
-            </div>
+
+
 
             {/* ══════════════════════════════════════
                 PERSONALIZED STAT CARDS

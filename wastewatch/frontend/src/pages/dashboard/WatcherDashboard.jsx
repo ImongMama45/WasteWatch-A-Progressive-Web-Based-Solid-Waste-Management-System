@@ -8,10 +8,10 @@ import HomeCarousel from '../../components/carousel/HomeCarousel'
 export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const [reports,   setReports]   = useState([])
-  const [stats,     setStats]     = useState({ total: 0, pending_approval: 0, resolved: 0, rejected: 0 })
-  const [loading,   setLoading]   = useState(true)
-  const [activeTab,  setActiveTab]  = useState('schedule')
+  const [reports, setReports] = useState([])
+  const [stats, setStats] = useState({ total: 0, pending_approval: 0, resolved: 0, rejected: 0 })
+  const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState('schedule')
   const [activeTab1, setActiveTab1] = useState('reports')
 
   useEffect(() => {
@@ -38,26 +38,22 @@ export default function Dashboard() {
           <p className="text-muted text-sm">Stay updated on garbage collection in your area</p>
         </div>
 
+        <div className='mobile-schedule'>
+          <HomeCarousel role="watcher" userBarangay={user?.barangay_name} onReport={() => navigate('/report/submit')} />
+        </div>
+
         <div className="page-grid">
 
           {/* ── MAIN COLUMN ── */}
           <div>
 
             {/* HomeCarousel — mobile-only, replaces static hero card */}
-            <div className="mobile-schedule">
-              <HomeCarousel
-                role="watcher"
-                userBarangay={user?.barangay_name}
-                onReport={() => navigate('/report/submit')}
-                extraSecondCta={{ label: '✅ Confirm', onClick: () => navigate('/collection/confirm') }}
-              />
-            </div>
 
             {/* Stat Cards */}
             <div className="stat-grid">
               <div className="stat-card">
                 <div className="label">Total Reports</div>
-                <div className="value" style={{color:'white'}}>{stats.total}</div>
+                <div className="value" style={{ color: 'white' }}>{stats.total}</div>
               </div>
               <div className="stat-card">
                 <div className="label">Pending Approval</div>
@@ -111,14 +107,14 @@ export default function Dashboard() {
                   <p className="text-muted text-sm text-center" style={{ padding: '20px 0' }}>
                     No reports yet.{' '}
                     <span style={{ color: 'var(--accent)', cursor: 'pointer' }}
-                          onClick={() => navigate('/report/submit')}>
+                      onClick={() => navigate('/report/submit')}>
                       Submit your first report
                     </span>
                   </p>
                 ) : (
                   reports.slice(0, 10).map(report => (
                     <div key={report.id} className="report-item"
-                         onClick={() => navigate(`/report/${report.id}`)}>
+                      onClick={() => navigate(`/report/${report.id}`)}>
                       <div className="report-pin">📍</div>
                       <div className="report-info">
                         <div className="report-type">
@@ -159,9 +155,9 @@ export default function Dashboard() {
               {activeTab === 'schedule' ? (
                 user?.barangay_name ? (
                   [
-                    { day: 'Monday',    time: '6:00 AM – 10:00 AM' },
+                    { day: 'Monday', time: '6:00 AM – 10:00 AM' },
                     { day: 'Wednesday', time: 'N/A' },
-                    { day: 'Friday',    time: '6:00 AM – 10:00 AM' },
+                    { day: 'Friday', time: '6:00 AM – 10:00 AM' },
                   ].map((s, i) => (
                     <div key={i} className="report-item">
                       <div className="report-pin">📅</div>
@@ -208,15 +204,15 @@ export default function Dashboard() {
             </div>
 
             {/* Sidebar map preview */}
-           
+
 
             <div className="card">
               <h3 className="section-title" style={{ marginBottom: 12 }}>Collection Schedule</h3>
               {user?.barangay_name ? (
                 [
-                  { day: 'Monday',    time: '6:00 AM – 10:00 AM' },
+                  { day: 'Monday', time: '6:00 AM – 10:00 AM' },
                   { day: 'Wednesday', time: 'N/A' },
-                  { day: 'Friday',    time: '6:00 AM – 10:00 AM' },
+                  { day: 'Friday', time: '6:00 AM – 10:00 AM' },
                 ].map((s, i) => (
                   <div key={i} className="report-item">
                     <div className="report-pin">📅</div>

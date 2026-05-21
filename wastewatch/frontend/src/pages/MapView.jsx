@@ -3,31 +3,29 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'
+import { useAuth } from '../context/AuthContext'   // ← added
 
 const LUCENA_CENTER = [13.9373, 121.6170];
 
-const BARANGAY_ZONES = [
-  {
-    id: 1, name: "Ibabang Dupay Zone 3", type: "residential", color: "#4ade80",
-    coords: [[13.9440, 121.6120], [13.9460, 121.6180], [13.9430, 121.6210], [13.9400, 121.6190], [13.9395, 121.6140], [13.9440, 121.6120]]
-  },
-  {
-    id: 2, name: "Ibabang Dupay Zone 1", type: "residential", color: "#4ade80",
-    coords: [[13.9460, 121.6080], [13.9490, 121.6130], [13.9470, 121.6160], [13.9445, 121.6140], [13.9440, 121.6100], [13.9460, 121.6080]]
-  },
-  {
-    id: 3, name: "Cotta Commercial District", type: "commercial", color: "#fb923c",
-    coords: [[13.9350, 121.6090], [13.9380, 121.6140], [13.9360, 121.6170], [13.9330, 121.6150], [13.9325, 121.6110], [13.9350, 121.6090]]
-  },
-  {
-    id: 4, name: "Gulang-Gulang Industrial", type: "industrial", color: "#94a3b8",
-    coords: [[13.9290, 121.6200], [13.9320, 121.6250], [13.9300, 121.6280], [13.9270, 121.6260], [13.9265, 121.6215], [13.9290, 121.6200]]
-  },
-  {
-    id: 5, name: "Mayao Agricultural", type: "agricultural", color: "#a3e635",
-    coords: [[13.9500, 121.6250], [13.9540, 121.6310], [13.9510, 121.6350], [13.9480, 121.6330], [13.9475, 121.6270], [13.9500, 121.6250]]
-  },
-];
+const ZONE_TYPE_MAP = {
+  "Barangay 1 (Pob.)": "commercial",  "Barangay 2 (Pob.)": "commercial",
+  "Barangay 3 (Pob.)": "commercial",  "Barangay 4 (Pob.)": "commercial",
+  "Barangay 5 (Pob.)": "commercial",  "Barangay 6 (Pob.)": "commercial",
+  "Barangay 7 (Pob.)": "commercial",  "Barangay 8 (Pob.)": "commercial",
+  "Barangay 9 (Pob.)": "commercial",  "Barangay 10 (Pob.)": "commercial",
+  "Barangay 11 (Pob.)": "commercial",
+  "Gulang-Gulang": "industrial",      "Cotta": "industrial",
+  "Mayao Crossing": "agricultural",   "Mayao Kanluran": "agricultural",
+  "Mayao Parada": "agricultural",     "Mayao Silangan": "agricultural",
+  "Ilayang Dupay": "agricultural",
+}
+
+function getZoneType(brgy_name) {
+  return ZONE_TYPE_MAP[brgy_name] ?? "residential"
+}
+
+// Roles that may confirm or dismiss garbage reports
+const REPORT_MODERATOR_ROLES = ["watcher", "brgy_official", "admin"]
 
 const TRUCK_ROUTES = [
   {
@@ -66,9 +64,9 @@ const GARBAGE_REPORTS = [
 
 const ZONE_META = {
   residential: { label: "Residential", icon: "🏠", color: "#4ade80" },
-  commercial: { label: "Commercial", icon: "🏪", color: "#fb923c" },
-  industrial: { label: "Industrial", icon: "🏭", color: "#94a3b8" },
-  agricultural: { label: "Agricultural", icon: "🌾", color: "#a3e635" },
+  commercial:  { label: "Commercial",  icon: "🏪", color: "#fb923c" },
+  industrial:  { label: "Industrial",  icon: "🏭", color: "#94a3b8" },
+  agricultural:{ label: "Agricultural",icon: "🌾", color: "#a3e635" },
 };
 
 const makeTruckIcon = (color, label) => `
@@ -123,6 +121,17 @@ export default function MapView() {
     residential: true, commercial: true, industrial: true, agricultural: true,
     routes: true, trucks: true, dumpSites: true, reports: true,
   })
+  const [barangayGeo, setBarangayGeo] = useState(null)
+
+  const activeFiltersRef = useRef(activeFilters)
+  useEffect(() => { activeFiltersRef.current = activeFilters }, [activeFilters])
+
+  useEffect(() => {
+    fetch('/data/lucena_barangays.geojson')
+      .then(r => r.json())
+      .then(setBarangayGeo)
+      .catch(err => console.error("Failed to load barangay GeoJSON:", err))
+  }, [])
 
   const statusColors = { collecting: "#22c55e", en_route: "#f59e0b", idle: "#64748b", done: "#3b82f6" }
   const statusLabels = { collecting: "Collecting", en_route: "En Route", idle: "Idle", done: "Done" }
@@ -150,14 +159,14 @@ export default function MapView() {
     }).addTo(map)
     L.control.zoom({ position: "topright" }).addTo(map)
     mapInstanceRef.current = map
-    drawAll(map)
   }, [mapReady])
 
-  // Redraw on filter change
+  // Redraw whenever map is ready, GeoJSON loads, or filters change
   useEffect(() => {
     if (!mapInstanceRef.current) return
     drawAll(mapInstanceRef.current)
-  }, [activeFilters])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, barangayGeo, activeFilters])
 
   function clearLayers() {
     const map = mapInstanceRef.current
@@ -167,60 +176,102 @@ export default function MapView() {
 
   function drawAll(map) {
     const L = window.L
+    if (!L) return
     clearLayers()
 
-    BARANGAY_ZONES.forEach(zone => {
-      if (!activeFilters[zone.type]) return
-      const poly = L.polygon(zone.coords, {
-        color: zone.color, weight: 2, opacity: 0.85,
-        fillColor: zone.color, fillOpacity: 0.18, dashArray: "5,4",
-      }).addTo(map)
-      poly.on("click", () => { setSelectedZone(zone); setPanelMode("zone"); setPanelOpen(true) })
-      poly.on("mouseover", () => poly.setStyle({ fillOpacity: 0.32 }))
-      poly.on("mouseout", () => poly.setStyle({ fillOpacity: 0.18 }))
-      layersRef.current[`zone-${zone.id}`] = poly
-    })
+    // ── Barangay GeoJSON zones ──
+    if (barangayGeo) {
+      const geoLayer = L.geoJSON(barangayGeo, {
+        style: (feature) => {
+          const type = getZoneType(feature.properties.brgy_name)
+          const meta = ZONE_META[type]
+          if (!activeFiltersRef.current[type]) {
+            return { opacity: 0, fillOpacity: 0, pointerEvents: "none" }
+          }
+          return {
+            color: meta.color,
+            weight: 1.5,
+            opacity: 0.85,
+            fillColor: meta.color,
+            fillOpacity: 0.18,
+            dashArray: "5,4",
+          }
+        },
+        onEachFeature: (feature, layer) => {
+          const type  = getZoneType(feature.properties.brgy_name)
+          const color = ZONE_META[type].color
 
+          layer.on("click", () => {
+            setSelectedZone({
+              id:    feature.properties.brgy_code,
+              name:  feature.properties.brgy_name,
+              type,
+              color,
+            })
+            setPanelMode("zone")
+            setPanelOpen(true)
+          })
+          layer.on("mouseover", () => {
+            if (activeFiltersRef.current[type]) layer.setStyle({ fillOpacity: 0.32 })
+          })
+          layer.on("mouseout", () => {
+            if (activeFiltersRef.current[type]) layer.setStyle({ fillOpacity: 0.18 })
+          })
+          layer.bindTooltip(feature.properties.brgy_name, {
+            permanent: false, direction: "center",
+            className: "leaflet-barangay-tooltip",
+          })
+        },
+      }).addTo(map)
+
+      layersRef.current["geojson-barangays"] = geoLayer
+    }
+
+    // ── Truck routes ──
     if (activeFilters.routes) {
       TRUCK_ROUTES.forEach(route => {
         const donePts = route.waypoints.slice(0, route.completedUpTo + 1)
-        const remPts = route.waypoints.slice(route.completedUpTo)
+        const remPts  = route.waypoints.slice(route.completedUpTo)
         const clickHandler = () => { setSelectedRoute(route); setPanelMode("route"); setPanelOpen(true) }
 
         const doneLine = L.polyline(donePts, { color: route.color, weight: 5, opacity: 0.95, lineCap: "round", lineJoin: "round" }).addTo(map)
-        const remLine = L.polyline(remPts, { color: route.color, weight: 4, opacity: 0.5, dashArray: "10,8" }).addTo(map)
+        const remLine  = L.polyline(remPts,  { color: route.color, weight: 4, opacity: 0.5, dashArray: "10,8" }).addTo(map)
         doneLine.on("click", clickHandler)
         remLine.on("click", clickHandler)
 
         route.waypoints.forEach((coord, i) => {
           const done = i <= route.completedUpTo
           const circle = L.circleMarker(coord, {
-            radius: done ? 7 : 5, fillColor: done ? route.color : "#1e293b",
-            color: route.color, weight: 2, opacity: 1, fillOpacity: done ? 1 : 0.6,
+            radius: done ? 7 : 5,
+            fillColor: done ? route.color : "#1e293b",
+            color: route.color, weight: 2, opacity: 1,
+            fillOpacity: done ? 1 : 0.6,
           }).addTo(map)
           circle.on("click", clickHandler)
           layersRef.current[`stop-${route.id}-${i}`] = circle
         })
 
         layersRef.current[`route-done-${route.id}`] = doneLine
-        layersRef.current[`route-rem-${route.id}`] = remLine
+        layersRef.current[`route-rem-${route.id}`]  = remLine
       })
     }
 
+    // ── Truck markers ──
     if (activeFilters.trucks) {
       TRUCK_ROUTES.forEach(route => {
-        const pos = route.waypoints[route.completedUpTo]
+        const pos  = route.waypoints[route.completedUpTo]
         const icon = L.divIcon({ html: makeTruckIcon(route.color, route.truckId), className: "", iconSize: [44, 52], iconAnchor: [22, 52] })
-        const m = L.marker(pos, { icon }).addTo(map)
+        const m    = L.marker(pos, { icon }).addTo(map)
         m.on("click", () => { setSelectedRoute(route); setPanelMode("route"); setPanelOpen(true) })
         layersRef.current[`truck-${route.id}`] = m
       })
     }
 
+    // ── Dump sites ──
     if (activeFilters.dumpSites) {
       DUMP_SITES.forEach(site => {
         const icon = L.divIcon({ html: dumpSiteIconHtml, className: "", iconSize: [36, 36], iconAnchor: [18, 18] })
-        const m = L.marker([site.lat, site.lng], { icon }).addTo(map)
+        const m    = L.marker([site.lat, site.lng], { icon }).addTo(map)
         m.bindPopup(`<div style="font-family:sans-serif;min-width:160px;">
           <strong style="color:#ef4444">🏭 ${site.name}</strong><br/>
           <span style="color:#64748b;font-size:12px;">Capacity: ${site.capacity}% full</span>
@@ -229,18 +280,19 @@ export default function MapView() {
       })
     }
 
+    // ── Garbage reports ──
     if (activeFilters.reports) {
       GARBAGE_REPORTS.forEach(report => {
         const icon = L.divIcon({ html: garbageReportIconHtml(report.severity), className: "", iconSize: [30, 36], iconAnchor: [8, 36] })
-        const m = L.marker([report.lat, report.lng], { icon }).addTo(map)
+        const m    = L.marker([report.lat, report.lng], { icon }).addTo(map)
         m.on("click", () => { setSelectedReport(report); setPanelMode("report"); setPanelOpen(true) })
         layersRef.current[`report-${report.id}`] = m
       })
     }
 
-    // "You" marker — TODO: replace with real navigator.geolocation
+    // ── "You" marker ──
     const youIcon = L.divIcon({ html: youIconHtml, className: "", iconSize: [38, 38], iconAnchor: [19, 19] })
-    const youM = L.marker([13.9370, 121.6155], { icon: youIcon, zIndexOffset: 1000 }).addTo(map)
+    const youM    = L.marker([13.9370, 121.6155], { icon: youIcon, zIndexOffset: 1000 }).addTo(map)
     youM.bindPopup("<b>📍 Your Location</b>")
     layersRef.current["you"] = youM
   }
@@ -250,20 +302,12 @@ export default function MapView() {
   }
 
   return (
-    /*
-      Key layout fix:
-      - Outer div: flex column, height 100vh, overflow hidden
-      - <Navbar /> sits first in flow — takes its natural sticky height
-      - Map section: flex:1 so it fills exactly what's left
-      - Map canvas: position absolute inset:0 inside the flex child
-      This means the navbar is ABOVE the map, never overlapping it.
-    */
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden", background: "#0f172a" }}>
 
-      {/* ── NAVBAR — in normal flow, above the map ── */}
+      {/* ── NAVBAR ── */}
       <Navbar />
 
-      {/* ── MAP SECTION — fills remaining space below navbar ── */}
+      {/* ── MAP SECTION ── */}
       <div style={{ position: "relative", flex: 1, overflow: "hidden" }}>
 
         <style>{`
@@ -274,9 +318,10 @@ export default function MapView() {
           .ww-btn             { transition:all 0.15s; cursor:pointer; }
           .filter-chip        { transition:all 0.15s; cursor:pointer; user-select:none; }
           .filter-chip:hover  { opacity:0.85; }
+          .leaflet-barangay-tooltip { background:rgba(15,23,42,0.9); border:1px solid rgba(20,184,166,0.4); color:#e2e8f0; font-size:11px; padding:3px 8px; border-radius:6px; }
         `}</style>
 
-        {/* Map canvas fills the entire flex child */}
+        {/* Map canvas */}
         <div ref={mapRef} style={{ position: "absolute", inset: 0, zIndex: 1 }} />
 
         {/* Loading overlay */}
@@ -286,7 +331,7 @@ export default function MapView() {
           </div>
         )}
 
-        {/* ── TOP CONTROLS (relative to map area, not page) ── */}
+        {/* ── TOP CONTROLS ── */}
         <div style={{
           position: "absolute", top: 0, left: 0, right: 0,
           background: "linear-gradient(to bottom,rgba(15,23,42,0.85),transparent)",
@@ -325,10 +370,10 @@ export default function MapView() {
           }}>
             <div style={{ color: "white", fontWeight: 700, fontSize: 13, marginBottom: 12 }}>MAP LAYERS</div>
             {[
-              { key: "routes", label: "Truck Routes", icon: "〰️" },
-              { key: "trucks", label: "Truck Markers", icon: "🚛" },
-              { key: "dumpSites", label: "Dump Sites", icon: "🏭" },
-              { key: "reports", label: "Garbage Reports", icon: "⚠️" },
+              { key: "routes",    label: "Truck Routes",     icon: "〰️" },
+              { key: "trucks",    label: "Truck Markers",    icon: "🚛" },
+              { key: "dumpSites", label: "Dump Sites",       icon: "🏭" },
+              { key: "reports",   label: "Garbage Reports",  icon: "⚠️" },
             ].map(f => (
               <div key={f.key} className="filter-chip" onClick={() => toggleFilter(f.key)}
                 style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
@@ -372,56 +417,69 @@ export default function MapView() {
             animation: "fadeIn 0.2s", boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
           }}>
             <div style={{ color: "white", fontWeight: 700, fontSize: 13, marginBottom: 12 }}>LEGEND</div>
-            {[{ color: "#14b8a6", label: "Truck 01 route" }, { color: "#f59e0b", label: "Truck 02 route" }, { color: "#a78bfa", label: "Truck 03 route" }].map(r => (
+            {[
+              { color: "#14b8a6", label: "Truck 01 route" },
+              { color: "#f59e0b", label: "Truck 02 route" },
+              { color: "#a78bfa", label: "Truck 03 route" },
+            ].map(r => (
               <div key={r.label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
-                <div style={{ width: 28, height: 4, background: r.color, borderRadius: 2 }} /><span style={{ color: "#cbd5e1", fontSize: 12 }}>{r.label}</span>
+                <div style={{ width: 28, height: 4, background: r.color, borderRadius: 2 }} />
+                <span style={{ color: "#cbd5e1", fontSize: 12 }}>{r.label}</span>
               </div>
             ))}
             <div style={{ width: "100%", height: 1, background: "rgba(255,255,255,0.07)", margin: "10px 0" }} />
-            {[{ icon: "🚛", label: "Truck (current pos)" }, { icon: "🏭", label: "Dump site" }, { icon: "⚠️", label: "Reported garbage" }, { icon: "📍", label: "Your location" }].map(r => (
+            {[
+              { icon: "🚛", label: "Truck (current pos)" },
+              { icon: "🏭", label: "Dump site" },
+              { icon: "⚠️", label: "Reported garbage" },
+              { icon: "📍", label: "Your location" },
+            ].map(r => (
               <div key={r.label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
-                <span style={{ fontSize: 14 }}>{r.icon}</span><span style={{ color: "#cbd5e1", fontSize: 12 }}>{r.label}</span>
+                <span style={{ fontSize: 14 }}>{r.icon}</span>
+                <span style={{ color: "#cbd5e1", fontSize: 12 }}>{r.label}</span>
               </div>
             ))}
             <div style={{ width: "100%", height: 1, background: "rgba(255,255,255,0.07)", margin: "10px 0" }} />
             <div style={{ color: "#94a3b8", fontSize: 11, marginBottom: 6 }}>ROUTE SEGMENTS</div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-              <div style={{ width: 28, height: 4, background: "#14b8a6", borderRadius: 2 }} /><span style={{ color: "#cbd5e1", fontSize: 12 }}>Completed</span>
+              <div style={{ width: 28, height: 4, background: "#14b8a6", borderRadius: 2 }} />
+              <span style={{ color: "#cbd5e1", fontSize: 12 }}>Completed</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ width: 28, height: 0, borderTop: "3px dashed #14b8a6", opacity: 0.5 }} /><span style={{ color: "#cbd5e1", fontSize: 12 }}>Remaining</span>
+              <div style={{ width: 28, height: 0, borderTop: "3px dashed #14b8a6", opacity: 0.5 }} />
+              <span style={{ color: "#cbd5e1", fontSize: 12 }}>Remaining</span>
             </div>
           </div>
         )}
 
         {/* ── FAB (bottom right) ── */}
-        <div style={{ position: "absolute", right: 16, bottom: 24, zIndex: 400 }}>
+        <div style={{ position: "absolute", right: 16, bottom: 24, zIndex: 400, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
           <div style={{
-            flexDirection: "column", gap: 10, marginBottom: 10,
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 10,
             transform: fabOpen ? "translateY(0)" : "translateY(40px)",
             opacity: fabOpen ? 1 : 0, pointerEvents: fabOpen ? "auto" : "none",
             transition: "all 0.25s ease",
           }}>
-            <button className="ww-btn mobile-only" onClick={() => navigate("/report/submit")} title="Report Issue"
+            <button className="ww-btn" onClick={() => navigate("/report/submit")} title="Report Issue"
               style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
                 width: 50, height: 50, borderRadius: "50%", background: "#ef4444", border: "none",
-                fontSize: 22, boxShadow: "0 4px 16px rgba(239,68,68,0.4)",
-                alignItems: "center", justifyContent: "center"
+                fontSize: 22, boxShadow: "0 4px 16px rgba(239,68,68,0.4)", cursor: "pointer",
               }}>⚠️</button>
-            <button className="ww-btn mobile-only" onClick={() => navigate("/collection/confirm")} title="Confirm Collection"
+            <button className="ww-btn" onClick={() => navigate("/collection/confirm")} title="Confirm Collection"
               style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
                 width: 50, height: 50, borderRadius: "50%", background: "#22c55e", border: "none",
-                fontSize: 22, boxShadow: "0 4px 16px rgba(34,197,94,0.4)",
-                alignItems: "center", justifyContent: "center"
+                fontSize: 22, boxShadow: "0 4px 16px rgba(34,197,94,0.4)", cursor: "pointer",
               }}>✅</button>
           </div>
-          <button className="ww-btn mobile-only" onClick={() => setFabOpen(o => !o)}
+          <button className="ww-btn" onClick={() => setFabOpen(o => !o)}
             style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
               width: 50, height: 50, borderRadius: "50%", background: "rgba(20,184,166,0.9)",
-              border: "none", fontSize: 22, fontWeight: 700, color: "white",
+              border: "none", fontSize: 22, fontWeight: 700, color: "white", cursor: "pointer",
               boxShadow: "0 4px 16px rgba(20,184,166,0.4)",
-              alignItems: "center", justifyContent: "center",
-              transform: fabOpen ? "rotate(45deg)" : "rotate(0deg)", transition: "transform 0.2s"
+              transform: fabOpen ? "rotate(45deg)" : "rotate(0deg)", transition: "transform 0.2s",
             }}>
             +
           </button>
@@ -445,8 +503,9 @@ export default function MapView() {
               <button onClick={() => setPanelOpen(false)}
                 style={{ position: "absolute", top: 12, right: 16, background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}>✕</button>
               <div style={{ padding: "0 20px 24px" }}>
-                {panelMode === "route" && selectedRoute && <RoutePanel route={selectedRoute} statusColors={statusColors} statusLabels={statusLabels} />}
-                {panelMode === "zone" && selectedZone && <ZonePanel zone={selectedZone} />}
+                {panelMode === "route"  && selectedRoute  && <RoutePanel  route={selectedRoute}   statusColors={statusColors} statusLabels={statusLabels} />}
+                {panelMode === "zone"   && selectedZone   && <ZonePanel   zone={selectedZone} />}
+                {/* ↓ pass canModerate so ReportPanel knows whether to show action buttons */}
                 {panelMode === "report" && selectedReport && <ReportPanel report={selectedReport} />}
               </div>
             </div>
@@ -476,10 +535,10 @@ function RoutePanel({ route, statusColors, statusLabels }) {
           <span style={{ color: statusColor, fontSize: 12, fontWeight: 600 }}>{statusLabels[route.status]}</span>
         </div>
       </div>
-      <Row label="BARANGGAY" value={route.barangay} />
-      <Row label="ETA TODAY" value={route.eta} accent />
+      <Row label="BARANGAY"        value={route.barangay} />
+      <Row label="ETA TODAY"       value={route.eta}             accent />
       <Row label="NEXT COLLECTION" value={route.nextCollection} />
-      <Row label="LAST UPDATE" value={route.lastUpdate} />
+      <Row label="LAST UPDATE"     value={route.lastUpdate} />
       <div style={{ marginTop: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
           <span style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600 }}>COLLECTION PROGRESS</span>
@@ -495,21 +554,27 @@ function RoutePanel({ route, statusColors, statusLabels }) {
         <div style={{ background: "#1e293b", borderRadius: 8, height: 10, overflow: "hidden" }}>
           <div style={{
             height: "100%", width: `${route.capacity}%`,
-            background: route.capacity > 80 ? "#ef4444" : route.capacity > 60 ? "#f59e0b" : "#22c55e", borderRadius: 8
+            background: route.capacity > 80 ? "#ef4444" : route.capacity > 60 ? "#f59e0b" : "#22c55e",
+            borderRadius: 8,
           }} />
         </div>
         <div style={{ color: route.capacity > 80 ? "#ef4444" : "#94a3b8", fontSize: 11, marginTop: 4 }}>{route.capacity}% full</div>
       </div>
       <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
         <button style={{ flex: 1, background: "rgba(20,184,166,0.15)", border: "1px solid #14b8a6", color: "#14b8a6", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>View Full Route</button>
-        <button style={{ flex: 1, background: "rgba(239,68,68,0.1)", border: "1px solid #ef4444", color: "#ef4444", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Report Issue</button>
+        <button style={{ flex: 1, background: "rgba(239,68,68,0.1)",   border: "1px solid #ef4444", color: "#ef4444", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Report Issue</button>
       </div>
     </>
   )
 }
 
 function ZonePanel({ zone }) {
-  const meta = { residential: { label: "Residential", icon: "🏠" }, commercial: { label: "Commercial", icon: "🏪" }, industrial: { label: "Industrial", icon: "🏭" }, agricultural: { label: "Agricultural", icon: "🌾" } }
+  const meta = {
+    residential: { label: "Residential", icon: "🏠" },
+    commercial:  { label: "Commercial",  icon: "🏪" },
+    industrial:  { label: "Industrial",  icon: "🏭" },
+    agricultural:{ label: "Agricultural",icon: "🌾" },
+  }
   const m = meta[zone.type] || {}
   return (
     <>
@@ -520,9 +585,9 @@ function ZonePanel({ zone }) {
           <div style={{ color: zone.color, fontSize: 12, fontWeight: 600 }}>{m.label} Zone</div>
         </div>
       </div>
-      <Row label="ZONE TYPE" value={m.label} />
+      <Row label="ZONE TYPE"           value={m.label} />
       <Row label="COLLECTION SCHEDULE" value="Mon / Wed / Fri" />
-      <Row label="ASSIGNED TRUCK" value="Truck 02" accent />
+      <Row label="ASSIGNED TRUCK"      value="Truck 02" accent />
       <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
         <button style={{ flex: 1, background: "rgba(20,184,166,0.15)", border: "1px solid #14b8a6", color: "#14b8a6", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>View Reports</button>
       </div>
@@ -530,9 +595,16 @@ function ZonePanel({ zone }) {
   )
 }
 
+// ─── ReportPanel — Confirm / Dismiss shown only to authorised roles ───────────
 function ReportPanel({ report }) {
+  const { user } = useAuth()   // ← pull current user from AuthContext
+
+  // True when the logged-in user's role can moderate reports
+  const canModerate = REPORT_MODERATOR_ROLES.includes(user?.role)
+
   const severityColors = { high: "#ef4444", medium: "#f59e0b", low: "#22c55e" }
-  const typeLabels = { overflow: "Overflow", illegal_dumping: "Illegal Dumping", missed: "Missed Pickup" }
+  const typeLabels     = { overflow: "Overflow", illegal_dumping: "Illegal Dumping", missed: "Missed Pickup" }
+
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
@@ -545,13 +617,32 @@ function ReportPanel({ report }) {
           <span style={{ color: severityColors[report.severity], fontSize: 12, fontWeight: 700 }}>{report.severity.toUpperCase()}</span>
         </div>
       </div>
+
       <Row label="REPORT TYPE" value={typeLabels[report.type]} />
-      <Row label="REPORTED" value={report.reported} />
-      <Row label="STATUS" value="Pending Review" accent />
-      <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-        <button style={{ flex: 1, background: "rgba(34,197,94,0.1)", border: "1px solid #22c55e", color: "#22c55e", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✅ Confirm</button>
-        <button style={{ flex: 1, background: "rgba(239,68,68,0.1)", border: "1px solid #ef4444", color: "#ef4444", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✕ Dismiss</button>
-      </div>
+      <Row label="REPORTED"    value={report.reported} />
+      <Row label="STATUS"      value="Pending Review" accent />
+
+      {/* ── Action buttons — visible to Watcher, Brgy_Official, Admin only ── */}
+      {canModerate ? (
+        <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+          <button style={{ flex: 1, background: "rgba(34,197,94,0.1)",  border: "1px solid #22c55e", color: "#22c55e", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✅ Confirm</button>
+          <button style={{ flex: 1, background: "rgba(239,68,68,0.1)", border: "1px solid #ef4444", color: "#ef4444", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✕ Dismiss</button>
+        </div>
+      ) : (
+        /* Read-only notice for residents / drivers / other roles */
+        <div style={{
+          marginTop: 18, padding: "10px 14px",
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: 10,
+          display: "flex", alignItems: "center", gap: 8,
+        }}>
+          <span style={{ fontSize: 16 }}></span>
+          <span style={{ color: "#64748b", fontSize: 12 }}>
+            photo
+          </span>
+        </div>
+      )}
     </>
   )
 }
@@ -559,7 +650,7 @@ function ReportPanel({ report }) {
 function Row({ label, value, accent }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-      <span style={{ color: "#64748b", fontSize: 11, fontWeight: 600 }}>{label}</span>
+      <span style={{ color: "#0a0c0e", fontSize: 11, fontWeight: 600 }}>{label}</span>
       <span style={{ color: accent ? "#14b8a6" : "#e2e8f0", fontSize: 13, fontWeight: accent ? 700 : 400 }}>{value}</span>
     </div>
   )

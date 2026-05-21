@@ -20,6 +20,7 @@ import { useAuth } from '../context/AuthContext'
 import { useOnline } from '../hooks/useOnline'
 import { SIDEBAR_NAV, NAV_ICONS } from './DashboardLayout'
 
+
 // ─── tiny CSS injected once ───────────────────────────────────────────────────
 const NAVBAR_CSS = `
 /* ── Fixed light navbar ── */
@@ -451,11 +452,9 @@ export default function Navbar() {
     { path: '/', label: 'Home' },
     { path: '/map', label: 'Map' },
     { path: '/schedule', label: 'Schedule' },
-    { path: '/announcements', label: 'News' },
     { path: '/about', label: 'About' },
     ...(user ? [
       { path: '/dashboard', label: 'Dashboard' },
-      { path: '/analytics', label: 'Analytics' },
     ] : []),
   ]
 

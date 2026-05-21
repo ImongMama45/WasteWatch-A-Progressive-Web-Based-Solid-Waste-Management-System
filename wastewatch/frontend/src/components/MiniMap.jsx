@@ -18,9 +18,9 @@ const TRUCK_ROUTES = [
     capacity: 75, collectedCount: 11, totalPoints: 15,
     eta: '1:45 PM', color: '#14b8a6',
     waypoints: [
-      [13.946, 121.6085],[13.9472, 121.6102],[13.948, 121.612],
-      [13.9488, 121.6138],[13.9475, 121.6155],[13.946, 121.616],
-      [13.9448, 121.6145],[13.944, 121.6128],[13.9452, 121.611],
+      [13.946, 121.6085], [13.9472, 121.6102], [13.948, 121.612],
+      [13.9488, 121.6138], [13.9475, 121.6155], [13.946, 121.616],
+      [13.9448, 121.6145], [13.944, 121.6128], [13.9452, 121.611],
       [13.9464, 121.6095],
     ],
     completedUpTo: 7,
@@ -31,10 +31,10 @@ const TRUCK_ROUTES = [
     capacity: 60, collectedCount: 9, totalPoints: 15,
     eta: '2:30 PM', color: '#f59e0b',
     waypoints: [
-      [13.94, 121.6135],[13.941, 121.615],[13.942, 121.6165],
-      [13.9432, 121.6178],[13.944, 121.619],[13.9448, 121.62],
-      [13.9438, 121.6208],[13.9425, 121.6202],[13.9415, 121.6188],
-      [13.9408, 121.617],[13.9402, 121.6152],
+      [13.94, 121.6135], [13.941, 121.615], [13.942, 121.6165],
+      [13.9432, 121.6178], [13.944, 121.619], [13.9448, 121.62],
+      [13.9438, 121.6208], [13.9425, 121.6202], [13.9415, 121.6188],
+      [13.9408, 121.617], [13.9402, 121.6152],
     ],
     completedUpTo: 8,
   },
@@ -44,18 +44,18 @@ const TRUCK_ROUTES = [
     capacity: 30, collectedCount: 4, totalPoints: 12,
     eta: '3:15 PM', color: '#a78bfa',
     waypoints: [
-      [13.933, 121.6095],[13.934, 121.611],[13.9352, 121.6125],
-      [13.9362, 121.614],[13.937, 121.6155],[13.9362, 121.6168],
-      [13.935, 121.6162],[13.9338, 121.6148],
+      [13.933, 121.6095], [13.934, 121.611], [13.9352, 121.6125],
+      [13.9362, 121.614], [13.937, 121.6155], [13.9362, 121.6168],
+      [13.935, 121.6162], [13.9338, 121.6148],
     ],
     completedUpTo: 3,
   },
 ]
 
 const GARBAGE_REPORTS = [
-  { id: 'R1', lat: 13.9415, lng: 121.6175, type: 'overflow',        severity: 'high',   address: 'Ibabang Dupay Zone 3' },
-  { id: 'R2', lat: 13.9358, lng: 121.613,  type: 'illegal_dumping', severity: 'medium', address: 'Near Cotta District' },
-  { id: 'R3', lat: 13.9482, lng: 121.6145, type: 'missed',          severity: 'low',    address: 'Zone 1 Side Street' },
+  { id: 'R1', lat: 13.9415, lng: 121.6175, type: 'overflow', severity: 'high', address: 'Ibabang Dupay Zone 3' },
+  { id: 'R2', lat: 13.9358, lng: 121.613, type: 'illegal_dumping', severity: 'medium', address: 'Near Cotta District' },
+  { id: 'R3', lat: 13.9482, lng: 121.6145, type: 'missed', severity: 'low', address: 'Zone 1 Side Street' },
 ]
 
 // ─── ICON HELPERS ─────────────────────────────────────────────────────────────
@@ -90,27 +90,27 @@ const STATUS_LABELS = { collecting: 'Collecting', en_route: 'En Route', idle: 'I
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 
 export default function MiniMap() {
-  const navigate    = useNavigate()
-  const mapRef      = useRef(null)
+  const navigate = useNavigate()
+  const mapRef = useRef(null)
   const mapInstance = useRef(null)
-  const layersRef   = useRef({})
+  const layersRef = useRef({})
 
-  const [leafletReady,  setLeafletReady]  = useState(false)
+  const [leafletReady, setLeafletReady] = useState(false)
   const [selectedRoute, setSelectedRoute] = useState(null)
-  const [panelOpen,     setPanelOpen]     = useState(false)
+  const [panelOpen, setPanelOpen] = useState(false)
 
   // ── Load Leaflet CSS + JS once ──────────────────────────────────────────────
   useEffect(() => {
     if (window.L) { setLeafletReady(true); return }
 
     const link = document.createElement('link')
-    link.rel   = 'stylesheet'
-    link.href  = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+    link.rel = 'stylesheet'
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
     document.head.appendChild(link)
 
-    const script    = document.createElement('script')
-    script.src      = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-    script.onload   = () => setLeafletReady(true)
+    const script = document.createElement('script')
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+    script.onload = () => setLeafletReady(true)
     document.head.appendChild(script)
   }, [])
 
@@ -118,10 +118,10 @@ export default function MiniMap() {
   useEffect(() => {
     if (!leafletReady || !mapRef.current || mapInstance.current) return
 
-    const L   = window.L
+    const L = window.L
     const map = L.map(mapRef.current, {
-      center:      LUCENA_CENTER,
-      zoom:        14,
+      center: LUCENA_CENTER,
+      zoom: 14,
       zoomControl: false,
       scrollWheelZoom: false, // disabled in widget — full map has it
     })
@@ -144,7 +144,7 @@ export default function MiniMap() {
     // Truck routes
     TRUCK_ROUTES.forEach(route => {
       const donePts = route.waypoints.slice(0, route.completedUpTo + 1)
-      const remPts  = route.waypoints.slice(route.completedUpTo)
+      const remPts = route.waypoints.slice(route.completedUpTo)
 
       const doneLine = L.polyline(donePts, {
         color: route.color, weight: 4, opacity: 0.95,
@@ -161,7 +161,7 @@ export default function MiniMap() {
 
       // Stop dots
       route.waypoints.forEach((coord, i) => {
-        const done   = i <= route.completedUpTo
+        const done = i <= route.completedUpTo
         const circle = L.circleMarker(coord, {
           radius: done ? 6 : 4,
           fillColor: done ? route.color : '#1e293b',
@@ -173,12 +173,12 @@ export default function MiniMap() {
       })
 
       layersRef.current[`done-${route.id}`] = doneLine
-      layersRef.current[`rem-${route.id}`]  = remLine
+      layersRef.current[`rem-${route.id}`] = remLine
     })
 
     // Truck markers at current position
     TRUCK_ROUTES.forEach(route => {
-      const pos  = route.waypoints[route.completedUpTo]
+      const pos = route.waypoints[route.completedUpTo]
       const icon = L.divIcon({
         html: makeTruckIconHtml(route.color, route.truckId),
         className: '', iconSize: [36, 44], iconAnchor: [18, 44],
@@ -241,34 +241,7 @@ export default function MiniMap() {
         </div>
       )}
 
-      {/* ── LIVE TRUCK CHIPS (top-left overlay) ── */}
-      <div style={{
-        position: 'absolute', top: 10, left: 10,
-        display: 'flex', flexDirection: 'column', gap: 5,
-        zIndex: 400,
-      }}>
-        {TRUCK_ROUTES.map(r => (
-          <div
-            key={r.id}
-            onClick={() => { setSelectedRoute(r); setPanelOpen(true) }}
-            style={{
-              background: 'rgba(15,23,42,0.88)',
-              border: `1px solid ${r.color}`,
-              borderRadius: 8, padding: '4px 9px',
-              display: 'flex', alignItems: 'center', gap: 7,
-              cursor: 'pointer', backdropFilter: 'blur(6px)',
-            }}
-          >
-            <div style={{
-              width: 6, height: 6, borderRadius: '50%',
-              background: STATUS_COLORS[r.status],
-              boxShadow: `0 0 5px ${STATUS_COLORS[r.status]}`,
-            }} />
-            <span style={{ color: 'white', fontSize: 11, fontWeight: 700 }}>{r.truckId}</span>
-            <span style={{ color: '#64748b', fontSize: 10 }}>{r.collectedCount}/{r.totalPoints}</span>
-          </div>
-        ))}
-      </div>
+
 
       {/* ── EXPAND BUTTON (top-right) ── */}
       <button
@@ -384,17 +357,7 @@ export default function MiniMap() {
             >
               🗺 View Full Route
             </button>
-            <button
-              onClick={() => navigate('/collection/confirm')}
-              style={{
-                flex: 1, background: 'rgba(34,197,94,0.1)',
-                border: '1px solid #22c55e',
-                color: '#22c55e', borderRadius: 10,
-                padding: '9px', fontWeight: 700, fontSize: 12, cursor: 'pointer',
-              }}
-            >
-              ✅ Confirm Stop
-            </button>
+
           </div>
         </div>
       )}

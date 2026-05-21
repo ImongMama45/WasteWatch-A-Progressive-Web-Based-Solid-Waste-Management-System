@@ -148,6 +148,10 @@ export default function DriverDashboard() {
             {route.truck} · {route.barangay} · {route.name}
           </p>
 
+          <div className='mobile-schedule'>
+            <HomeCarousel role="driver" userBarangay={user?.barangay_name} onReport={() => navigate('/report/submit')} />
+          </div>
+
           {/* ── SHIFT TIMER ── */}
           {shiftActive && (
             <div style={{
@@ -177,14 +181,6 @@ export default function DriverDashboard() {
         </div>
 
         {/* ── HomeCarousel — mobile only ── */}
-        <div className="mobile-schedule">
-          <HomeCarousel
-            role="driver"
-            userBarangay={user?.barangay_name}
-            onReport={() => navigate('/report/submit')}
-            extraSecondCta={{ label: '🗺 View Route', onClick: () => navigate('/driver/route') }}
-          />
-        </div>
 
         <div className="page-grid">
 
@@ -427,14 +423,7 @@ export default function DriverDashboard() {
                   }}>
                   📋 Collection Log
                 </button>
-                <button className="abtn btn btn-full mobile-only" onClick={() => navigate('/report/submit')}
-                  style={{
-                    background: 'rgba(231,76,60,0.06)', border: '1px solid rgba(231,76,60,0.35)',
-                    color: 'var(--danger)', fontWeight: 700,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-                  }}>
-                  ⚠ Report Issue
-                </button>
+
               </div>
             </div>
 

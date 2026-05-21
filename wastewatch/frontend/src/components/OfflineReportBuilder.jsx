@@ -16,17 +16,17 @@ import { useState, useEffect, useCallback } from 'react'
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const WASTE_TYPES = [
-  { value: 'biodegradable', label: 'Biodegradable', emoji: '🌿', color: '#22c55e', bg: 'rgba(34,197,94,0.12)',  border: 'rgba(34,197,94,0.4)' },
-  { value: 'residual',      label: 'Residual',      emoji: '🗑️', color: '#94a3b8', bg: 'rgba(148,163,184,0.1)', border: 'rgba(148,163,184,0.4)' },
-  { value: 'recyclable',    label: 'Recyclable',    emoji: '♻️', color: '#3b82f6', bg: 'rgba(59,130,246,0.12)', border: 'rgba(59,130,246,0.4)' },
-  { value: 'special',       label: 'Special',       emoji: '⚠️', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.4)' },
+  { value: 'biodegradable', label: 'Biodegradable', emoji: '🌿', color: '#22c55e', bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.4)' },
+  { value: 'residual', label: 'Residual', emoji: '🗑️', color: '#94a3b8', bg: 'rgba(148,163,184,0.1)', border: 'rgba(148,163,184,0.4)' },
+  { value: 'recyclable', label: 'Recyclable', emoji: '♻️', color: '#3b82f6', bg: 'rgba(59,130,246,0.12)', border: 'rgba(59,130,246,0.4)' },
+  { value: 'special', label: 'Special', emoji: '⚠️', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.4)' },
 ]
 
 const SEVERITIES = [
-  { value: 'low',      label: 'Low',      color: '#22c55e', desc: 'Minor issue'     },
-  { value: 'medium',   label: 'Medium',   color: '#f59e0b', desc: 'Needs attention' },
-  { value: 'high',     label: 'High',     color: '#ef4444', desc: 'Urgent'          },
-  { value: 'critical', label: 'Critical', color: '#7c3aed', desc: 'Emergency'       },
+  { value: 'low', label: 'Low', color: '#22c55e', desc: 'Minor issue' },
+  { value: 'medium', label: 'Medium', color: '#f59e0b', desc: 'Needs attention' },
+  { value: 'high', label: 'High', color: '#ef4444', desc: 'Urgent' },
+  { value: 'critical', label: 'Critical', color: '#7c3aed', desc: 'Emergency' },
 ]
 
 // ─── GPS helpers ──────────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ const SEVERITIES = [
 const LS_LAST_LOC = 'ww_last_location'
 
 function cacheLocation(loc) {
-  try { localStorage.setItem(LS_LAST_LOC, JSON.stringify(loc)) } catch {}
+  try { localStorage.setItem(LS_LAST_LOC, JSON.stringify(loc)) } catch { }
 }
 
 function getCachedLocation() {
@@ -61,12 +61,12 @@ async function reverseGeocode(lat, lng) {
 
 export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
   const [wasteType, setWasteType] = useState('residual')
-  const [severity,  setSeverity]  = useState('medium')
-  const [notes,     setNotes]     = useState('')
-  const [location,  setLocation]  = useState(null)
-  const [gpsState,  setGpsState]  = useState('idle') // idle | loading | done | error | cached
+  const [severity, setSeverity] = useState('medium')
+  const [notes, setNotes] = useState('')
+  const [location, setLocation] = useState(null)
+  const [gpsState, setGpsState] = useState('idle') // idle | loading | done | error | cached
   const [submitting, setSubmitting] = useState(false)
-  const [submitted,  setSubmitted]  = useState(false)
+  const [submitted, setSubmitted] = useState(false)
 
   // ── Reset form on open ────────────────────────────────────────────────────
   useEffect(() => {
@@ -96,14 +96,14 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
     if (!navigator.geolocation) {
       const cached = getCachedLocation()
       if (cached) { setLocation(cached); setGpsState('cached') }
-      else         setGpsState('error')
+      else setGpsState('error')
       return
     }
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const { latitude: lat, longitude: lng } = pos.coords
         const address = await reverseGeocode(lat, lng)
-        const loc     = { lat, lng, address }
+        const loc = { lat, lng, address }
         cacheLocation(loc)
         setLocation(loc)
         setGpsState('done')
@@ -112,7 +112,7 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
         // Fallback to cached
         const cached = getCachedLocation()
         if (cached) { setLocation(cached); setGpsState('cached') }
-        else         setGpsState('error')
+        else setGpsState('error')
       },
       { timeout: 8000, maximumAge: 120000, enableHighAccuracy: true }
     )
@@ -137,7 +137,7 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
 
   if (!isOpen) return null
 
-  const selectedWaste    = WASTE_TYPES.find(w => w.value === wasteType)
+  const selectedWaste = WASTE_TYPES.find(w => w.value === wasteType)
   const selectedSeverity = SEVERITIES.find(s => s.value === severity)
 
   return (
@@ -178,9 +178,9 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
                 {gpsState !== 'idle' && (
                   <span className={`orb-gps-badge orb-gps-badge--${gpsState}`}>
                     {gpsState === 'loading' ? 'Getting GPS…'
-                     : gpsState === 'cached' ? '📦 Cached'
-                     : gpsState === 'error'  ? '⚠️ Unavailable'
-                     : '✓ Located'}
+                      : gpsState === 'cached' ? '📦 Cached'
+                        : gpsState === 'error' ? '⚠️ Unavailable'
+                          : '✓ Located'}
                   </span>
                 )}
               </label>
