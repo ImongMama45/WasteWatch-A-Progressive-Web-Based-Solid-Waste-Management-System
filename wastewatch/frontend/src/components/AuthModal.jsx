@@ -10,8 +10,8 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
 
   // true = Register view (Right Panel Active), false = Login view
   const [isRegister, setIsRegister] = useState(defaultMode === 'register')
-  
-  const [form, setForm] = useState({ email: '', password: '', full_name: '' })
+
+  const [form, setForm] = useState({ email: '', password: '', password2: '', full_name: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -44,14 +44,37 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
     e.preventDefault()
     setError('')
     setLoading(true)
+
     try {
-      await register({ email: form.email, password: form.password, full_name: form.full_name })
+      await register({
+        email: form.email,
+        password: form.password,
+        password2: form.password,
+        full_name: form.full_name
+      })
+
       // Auto login after register
       await login(form.email, form.password)
+
       if (onClose) onClose()
+
       navigate('/dashboard')
+
     } catch (err) {
-      setError(err.response?.data?.email?.[0] || 'Registration failed.')
+      console.log(err.response?.data)
+
+      const data = err.response?.data
+
+      const firstError =
+        data?.email?.[0] ||
+        data?.password?.[0] ||
+        data?.full_name?.[0] ||
+        data?.detail ||
+        Object.values(data || {})[0]?.[0] ||
+        'Registration failed.'
+
+      setError(firstError)
+
     } finally {
       setLoading(false)
     }
@@ -156,32 +179,32 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
       `}</style>
 
       <div className={`auth-modal-container ${isRegister ? 'right-panel-active' : ''}`}>
-        
+
         <button className="auth-modal-close" style={{ color: isRegister ? 'var(--text)' : '#0d1117' }} onClick={onClose}>×</button>
 
         {/* --- SIGN UP FORM --- */}
         <div className="auth-form-container sign-up-container">
           <form className="auth-form-content" onSubmit={handleRegister}>
             <h1 style={{ fontFamily: 'var(--font-head)', fontSize: 28, fontWeight: 800, marginBottom: 16 }}>Create Account</h1>
-            
+
             <div style={{ display: 'flex', marginBottom: 20 }}>
               <div className="social-circle">f</div>
               <div className="social-circle">G+</div>
               <div className="social-circle">in</div>
             </div>
-            
+
             <span style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>or use your email for registration:</span>
-            
+
             {error && isRegister && <div className="alert alert-error" style={{ padding: 8, marginBottom: 10, width: '100%' }}>{error}</div>}
 
             <input className="form-input" style={{ width: '100%', marginBottom: 12, background: 'var(--surface-2)' }} type="text" name="full_name" value={form.full_name} onChange={handleChange} placeholder="👤 Name" required />
             <input className="form-input" style={{ width: '100%', marginBottom: 12, background: 'var(--surface-2)' }} type="email" name="email" value={form.email} onChange={handleChange} placeholder="✉️ Email" required />
             <input className="form-input" style={{ width: '100%', marginBottom: 20, background: 'var(--surface-2)' }} type="password" name="password" value={form.password} onChange={handleChange} placeholder="🔒 Password" required />
-            
+
             <button className="btn btn-primary" style={{ width: 160, borderRadius: 30, padding: '12px 24px', fontWeight: 700 }} type="submit" disabled={loading}>
               {loading ? 'WAIT...' : 'SIGN UP'}
             </button>
-            
+
             {/* Mobile toggle link */}
             <div className="desktop-only" style={{ display: 'none' }} />
             <p className="text-muted" style={{ display: 'block', marginTop: 20, fontSize: 13 }} onClick={() => setIsRegister(false)}>
@@ -194,22 +217,22 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
         <div className="auth-form-container sign-in-container">
           <form className="auth-form-content" onSubmit={handleLogin}>
             <h1 style={{ fontFamily: 'var(--font-head)', fontSize: 28, fontWeight: 800, marginBottom: 16 }}>Sign in</h1>
-            
+
             <div style={{ display: 'flex', marginBottom: 20 }}>
               <div className="social-circle">f</div>
               <div className="social-circle">G+</div>
               <div className="social-circle">in</div>
             </div>
-            
+
             <span style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>or use your account</span>
-            
+
             {error && !isRegister && <div className="alert alert-error" style={{ padding: 8, marginBottom: 10, width: '100%' }}>{error}</div>}
 
             <input className="form-input" style={{ width: '100%', marginBottom: 12, background: 'var(--surface-2)' }} type="email" name="email" value={form.email} onChange={handleChange} placeholder="✉️ Email" required />
             <input className="form-input" style={{ width: '100%', marginBottom: 12, background: 'var(--surface-2)' }} type="password" name="password" value={form.password} onChange={handleChange} placeholder="🔒 Password" required />
-            
+
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 20, textDecoration: 'underline', cursor: 'pointer' }}>Forgot your password?</div>
-            
+
             <button className="btn btn-primary" style={{ width: 160, borderRadius: 30, padding: '12px 24px', fontWeight: 700 }} type="submit" disabled={loading}>
               {loading ? 'WAIT...' : 'SIGN IN'}
             </button>
@@ -234,7 +257,7 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
                 SIGN IN
               </button>
             </div>
-            
+
             <div className="auth-overlay-panel auth-overlay-right">
               <h1 style={{ fontFamily: 'var(--font-head)', fontSize: 32, fontWeight: 800, marginBottom: 16 }}>Hello, Friend!</h1>
               <p style={{ fontSize: 14, lineHeight: 1.6, marginBottom: 30, opacity: 0.9 }}>

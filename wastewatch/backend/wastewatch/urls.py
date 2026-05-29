@@ -32,11 +32,6 @@ urlpatterns = [
     # JSON API — consumed by the React Vite frontend
     path('api/', include('wastewatch.api_urls')),
 
-    # -----------------------------------------------------------------------
-    # Future modules — uncomment and create their api_urls when ready:
-    # path('api/driver/',    include('driver.api_urls')),
-    # path('api/barangay/',  include('barangay_official.api_urls')),
-    # -----------------------------------------------------------------------
 ]
 
 # Serve uploaded media files during development

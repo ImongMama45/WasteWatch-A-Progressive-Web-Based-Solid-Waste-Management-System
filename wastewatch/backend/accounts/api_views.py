@@ -69,23 +69,31 @@ def api_logout_view(request):
 # ── POST /api/auth/register/ ─────────────────────────────────────────────────
 @require_http_methods(['POST'])
 def api_register_view(request):
+
+    print("RAW BODY:", request.body)
+
     data = json.loads(request.body)
 
-    # Reuse the existing RegistrationForm for validation
+    print("PARSED DATA:", data)
+
     form_data = {
         'full_name': data.get('full_name', ''),
         'email':     data.get('email', ''),
-        'barangay':  data.get('barangay', ''),
+        'barangay':  data.get('barangay', '') or None,
         'password1': data.get('password', ''),
         'password2': data.get('password2', ''),
     }
+
+    print("FORM DATA:", form_data)
+
     form = RegistrationForm(form_data)
 
     if form.is_valid():
         user = form.save()
         return JsonResponse({'user': user_to_dict(user)}, status=201)
 
-    # Return field-level errors so React can display them
+    print(form.errors)
+
     return JsonResponse(form.errors, status=400)
 
 

@@ -5,11 +5,12 @@ All /api/* routes.
 Public endpoints are at /api/public/* — no auth required.
 """
 
-from django.urls import path
+from django.urls import path, include
 
 from accounts import api_views as auth_api
 from watcher  import api_views as watcher_api
-from .        import public_api
+from . import public_api
+import driver.urls as driver_urls
 
 urlpatterns = [
     # ── Public (no auth) ─────────────────────────────────────────────────────
@@ -30,5 +31,6 @@ urlpatterns = [
     path('watcher/reports/',                    watcher_api.reports_view,          name='api-reports'),
     path('watcher/reports/<int:report_id>/',    watcher_api.report_detail_view,    name='api-report-detail'),
     path('watcher/stats/',                      watcher_api.stats_view,            name='api-stats'),
+    path('driver/', include(driver_urls.router.urls), name='api-driver'),
     path('watcher/confirm/',                    watcher_api.confirm_collection_view, name='api-confirm'),
 ]

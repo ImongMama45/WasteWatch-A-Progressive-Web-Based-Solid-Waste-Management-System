@@ -26,11 +26,13 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 
     # Third-party
+    'rest_framework',          # Django REST framework
     'corsheaders',          # Allow React frontend to talk to Django
 
     # WasteWatch apps
     'accounts',             # Custom user model + auth
     'watcher',              # Report submission, collection confirmation
+    'driver',               # Driver management features
 ]
 
 MIDDLEWARE = [
