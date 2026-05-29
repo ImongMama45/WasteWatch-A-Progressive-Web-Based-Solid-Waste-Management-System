@@ -2,6 +2,8 @@ from rest_framework import routers
 from . import views
 
 router = routers.DefaultRouter()
+router.register(r'trucks', views.TruckViewSet)
+router.register(r'dumpsites', views.DumpsiteViewSet)
 router.register(r'collection-schedules', views.CollectionScheduleViewSet)
 router.register(r'route-assignments', views.RouteAssignmentViewSet)
 router.register(r'pickup-statuses', views.PickupStatusViewSet)

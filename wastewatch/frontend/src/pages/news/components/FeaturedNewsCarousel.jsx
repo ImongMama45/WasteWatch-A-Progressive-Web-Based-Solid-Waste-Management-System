@@ -8,7 +8,6 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ChevronLeft, ChevronRight, AlertTriangle, Megaphone, Newspaper, Trophy } from 'lucide-react'
-import { FEATURED_ITEMS } from '../data/newsData'
 
 const TYPE_ICONS = {
   emergency:    { Icon: AlertTriangle, label: 'Emergency' },
@@ -85,7 +84,7 @@ function inject() {
   const el = document.createElement('style'); el.textContent = CSS; document.head.appendChild(el)
 }
 
-export default function FeaturedNewsCarousel({ items = FEATURED_ITEMS, onReadMore }) {
+export default function FeaturedNewsCarousel({ items = [], onReadMore }) {
   inject()
   const TOTAL = items.length
   const [active, setActive] = useState(0)
@@ -94,18 +93,26 @@ export default function FeaturedNewsCarousel({ items = FEATURED_ITEMS, onReadMor
   const timer    = useRef(null)
   const pause    = useRef(null)
 
+  // Start auto-play only if items exist
   const startAuto = useCallback(() => {
+    if (TOTAL === 0) return
     clearInterval(timer.current)
     timer.current = setInterval(() => setActive(p => (p + 1) % TOTAL), 5500)
   }, [TOTAL])
 
   const pauseAuto = useCallback(() => {
+    if (TOTAL === 0) return
     clearInterval(timer.current)
     clearTimeout(pause.current)
     pause.current = setTimeout(startAuto, 4000)
-  }, [startAuto])
+  }, [startAuto, TOTAL])
 
-  useEffect(() => { startAuto(); return () => { clearInterval(timer.current); clearTimeout(pause.current) } }, [startAuto])
+  useEffect(() => { 
+    if (TOTAL > 0) startAuto()
+    return () => { clearInterval(timer.current); clearTimeout(pause.current) } 
+  }, [startAuto, TOTAL])
+
+  if (TOTAL === 0) return null
 
   function prev() { setActive(p => (p - 1 + TOTAL) % TOTAL); pauseAuto() }
   function next() { setActive(p => (p + 1) % TOTAL); pauseAuto() }

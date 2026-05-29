@@ -6,7 +6,6 @@
  */
 
 import { Award, TrendingUp, Users, ArrowUpRight } from 'lucide-react'
-import { BARANGAY_SPOTLIGHTS } from '../data/newsData'
 
 const ICON_MAP = { award: Award, 'trending-up': TrendingUp, users: Users }
 
@@ -16,7 +15,8 @@ const ACCENT_COLORS = [
   { color: 'var(--info)', bg: 'rgba(93,173,226,.08)', border: 'rgba(93,173,226,.25)' },
 ]
 
-export default function BarangaySpotlight({ items = BARANGAY_SPOTLIGHTS }) {
+export default function BarangaySpotlight({ items = [] }) {
+  if (items.length === 0) return null
   return (
     <div className="card" style={{ marginBottom: 16 }}>
       {/* Header */}
@@ -38,6 +38,8 @@ export default function BarangaySpotlight({ items = BARANGAY_SPOTLIGHTS }) {
           const scoreColor =
             item.score >= 90 ? 'var(--accent)' :
             item.score >= 80 ? 'var(--warning)' : 'var(--text-muted)'
+
+          const brgyName = typeof item.barangay === 'object' ? item.barangay.name : item.barangay
 
           return (
             <div key={item.id} style={{
@@ -68,7 +70,7 @@ export default function BarangaySpotlight({ items = BARANGAY_SPOTLIGHTS }) {
                 </div>
                 {/* Barangay name */}
                 <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)', marginBottom: 4 }}>
-                  {item.barangay}
+                  {brgyName}
                 </div>
                 {/* Description */}
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.55, marginBottom: 8 }}>

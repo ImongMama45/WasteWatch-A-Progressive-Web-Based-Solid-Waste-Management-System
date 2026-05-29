@@ -21,33 +21,20 @@ from django.views.decorators.cache import cache_page
 def announcements_view(request):
     """
     Returns public announcements.
-    TODO: Replace mock data with a real Announcement model query.
     """
-    # Mock data — replace with:
-    # from announcements.models import Announcement
-    # items = Announcement.objects.filter(is_public=True).order_by('-created_at')[:10]
+    from news.models import NewsItem
+    
+    items = NewsItem.objects.filter(is_featured=True)[:10]
     data = [
         {
-            'id': 1,
-            'title': 'Collection Schedule Updated',
-            'body':  'Monday and Wednesday schedules adjusted for holiday season.',
-            'date':  '2026-04-20',
-            'type':  'info',
-        },
-        {
-            'id': 2,
-            'title': 'Illegal Dumping Alert',
-            'body':  'Multiple reports near Baranggay 1, 5th Ave. Please be vigilant.',
-            'date':  '2026-04-18',
-            'type':  'warning',
-        },
-        {
-            'id': 3,
-            'title': 'Collection Completed',
-            'body':  'All routes in Zone A completed. Thank you for your cooperation.',
-            'date':  '2026-04-17',
-            'type':  'success',
-        },
+            'id': item.id,
+            'title': item.title,
+            'body':  item.description,
+            'date':  item.date.isoformat(),
+            'type':  item.type,
+            'barangay': item.barangay,
+            'priority': item.priority,
+        } for item in items
     ]
     return JsonResponse(data, safe=False)
 
@@ -59,20 +46,25 @@ def public_stats_view(request):
     Returns aggregate community statistics.
     Safe to expose publicly — no personal data.
     """
-    from watcher.models import GarbageReport, ReportStatus
+    from watcher.models import GarbageReport, ReportStatus, GarbageHotspot
+    from driver.models import Truck, TruckStatus
 
     try:
         total_reports    = GarbageReport.objects.count()
         resolved_reports = GarbageReport.objects.filter(status=ReportStatus.RESOLVED).count()
+        active_trucks    = Truck.objects.filter(status=TruckStatus.ACTIVE).count()
+        hotspots         = GarbageHotspot.objects.count()
     except Exception:
         total_reports    = 0
         resolved_reports = 0
+        active_trucks    = 0
+        hotspots         = 0
 
     return JsonResponse({
         'total_reports':    total_reports,
         'resolved_reports': resolved_reports,
-        'active_trucks':    3,   # TODO: from Truck model when Driver module is built
-        'hotspots':         7,   # TODO: from hotspot detection algorithm
+        'active_trucks':    active_trucks,
+        'hotspots':         hotspots,
     })
 
 
@@ -82,9 +74,15 @@ def public_schedule_view(request):
     Returns general collection schedule (not personalized).
     Personalized schedule requires auth — handled in watcher API.
     """
+    from driver.models import CollectionSchedule
+    
+    schedules = CollectionSchedule.objects.select_related('barangay').all()[:10]
     data = [
-        { 'day': 'Monday',    'zone': 'Baranggay Isabang',      'time': '6:00 AM – 10:00 AM', 'isNext': True  },
-        { 'day': 'Wednesday', 'zone': 'Baranggay Gulang-Gulang', 'time': 'N/A',                'isNext': False },
-        { 'day': 'Friday',    'zone': 'Baranggay Isabang',      'time': '6:00 AM – 10:00 AM', 'isNext': False },
+        {
+            'day': s.days,
+            'zone': s.barangay.name if s.barangay else s.area,
+            'time': f"{s.start_time.strftime('%I:%M %p')} – {s.end_time.strftime('%I:%M %p')}",
+            'isNext': False # Logic for 'isNext' can be added later
+        } for s in schedules
     ]
     return JsonResponse(data, safe=False)

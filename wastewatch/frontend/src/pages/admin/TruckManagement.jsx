@@ -7,49 +7,11 @@
  * - Assign driver and crew members
  */
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../../components/DashboardLayout'
-
-// ─── Mock Data ───────────────────────────────────────────────────────────────
-
-const INITIAL_TRUCKS = [
-  {
-    id: 1, plate: 'LCN-001', model: 'Isuzu Elf', status: 'active',
-    driver: 'Juan Dela Cruz', crew: ['Pedro Santos', 'Mario Reyes'],
-    zone: 'Zone 3 — 5th Ave', capacity: 85, lastService: '2026-04-10',
-  },
-  {
-    id: 2, plate: 'LCN-002', model: 'Hino 300', status: 'active',
-    driver: 'Ana Mendoza', crew: ['Carlo Ramos'],
-    zone: 'Zone 1 — Main St', capacity: 60, lastService: '2026-04-08',
-  },
-  {
-    id: 3, plate: 'LCN-003', model: 'Isuzu Elf', status: 'maintenance',
-    driver: null, crew: [],
-    zone: 'Unassigned', capacity: 0, lastService: '2026-03-30',
-  },
-  {
-    id: 4, plate: 'LCN-004', model: 'Mitsubishi Canter', status: 'active',
-    driver: 'Jose Bautista', crew: ['Liza Torres', 'Ramon Cruz', 'Ben Aquino'],
-    zone: 'Zone 4 — Quezon Blvd', capacity: 92, lastService: '2026-04-12',
-  },
-  {
-    id: 5, plate: 'LCN-005', model: 'Hino 300', status: 'inactive',
-    driver: null, crew: [],
-    zone: 'Unassigned', capacity: 0, lastService: '2026-02-20',
-  },
-]
-
-const ALL_DRIVERS = [
-  'Juan Dela Cruz', 'Ana Mendoza', 'Jose Bautista',
-  'Maria Reyes', 'Carlo Ramos', 'Liza Torres', 'Pedro Santos',
-]
-
-const ALL_CREW = [
-  'Pedro Santos', 'Mario Reyes', 'Carlo Ramos', 'Liza Torres',
-  'Ramon Cruz', 'Ben Aquino', 'Tony Flores', 'Danny Mercado',
-]
+import { useTrucks } from '../../hooks/useTrucks'
+import { useUsers } from '../../hooks/useUsers'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -86,28 +48,32 @@ function CapacityBar({ pct }) {
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
-const EMPTY_FORM = { plate: '', model: '', status: 'active', driver: '', crew: [], zone: '', lastService: '' }
+const EMPTY_FORM = { plate_number: '', model: '', status: 'active', driver: '', crew: [], zone: '', last_service: '' }
 
-function TruckModal({ truck, onSave, onClose }) {
+function TruckModal({ truck, onSave, onClose, drivers, crewPool }) {
   const [form, setForm] = useState(truck ? {
-    plate: truck.plate, model: truck.model, status: truck.status,
-    driver: truck.driver || '', crew: [...truck.crew],
-    zone: truck.zone, lastService: truck.lastService,
+    plate_number: truck.plate_number, model: truck.model, status: truck.status,
+    driver: truck.driver || '', crew: truck.crew || [],
+    zone: truck.zone, last_service: truck.last_service || '',
   } : { ...EMPTY_FORM })
   const [crewInput, setCrewInput] = useState('')
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
-  const addCrew = (name) => {
-    if (!name || form.crew.includes(name)) return
-    set('crew', [...form.crew, name])
+  const addCrew = (id) => {
+    if (!id || form.crew.includes(parseInt(id))) return
+    set('crew', [...form.crew, parseInt(id)])
     setCrewInput('')
   }
 
-  const removeCrew = (name) => set('crew', form.crew.filter(c => c !== name))
+  const removeCrew = (id) => set('crew', form.crew.filter(c => c !== id))
 
-  const availableDrivers = ALL_DRIVERS.filter(d => d !== form.driver)
-  const availableCrew = ALL_CREW.filter(c => !form.crew.includes(c))
+  const availableCrew = crewPool.filter(c => !form.crew.includes(c.id))
+
+  const getMemberName = (id) => {
+    const u = crewPool.find(x => x.id === id) || drivers.find(x => x.id === id)
+    return u ? u.full_name : 'Unknown'
+  }
 
   return (
     <div style={{
@@ -132,7 +98,7 @@ function TruckModal({ truck, onSave, onClose }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
           <div>
             <label className="form-label">Plate Number</label>
-            <input className="form-input" value={form.plate} onChange={e => set('plate', e.target.value)} placeholder="LCN-001" />
+            <input className="form-input" value={form.plate_number} onChange={e => set('plate_number', e.target.value)} placeholder="LCN-001" />
           </div>
           <div>
             <label className="form-label">Model</label>
@@ -152,7 +118,7 @@ function TruckModal({ truck, onSave, onClose }) {
           </div>
           <div>
             <label className="form-label">Last Service</label>
-            <input className="form-input" type="date" value={form.lastService} onChange={e => set('lastService', e.target.value)} />
+            <input className="form-input" type="date" value={form.last_service} onChange={e => set('last_service', e.target.value)} />
           </div>
         </div>
 
@@ -167,7 +133,7 @@ function TruckModal({ truck, onSave, onClose }) {
           <label className="form-label">Assigned Driver</label>
           <select className="form-input" value={form.driver} onChange={e => set('driver', e.target.value)}>
             <option value="">— No Driver —</option>
-            {ALL_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
+            {drivers.map(d => <option key={d.id} value={d.id}>{d.full_name}</option>)}
           </select>
         </div>
 
@@ -182,7 +148,7 @@ function TruckModal({ truck, onSave, onClose }) {
               style={{ flex: 1 }}
             >
               <option value="">— Select crew member —</option>
-              {availableCrew.map(c => <option key={c} value={c}>{c}</option>)}
+              {availableCrew.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
             </select>
             <button
               onClick={() => addCrew(crewInput)}
@@ -197,15 +163,15 @@ function TruckModal({ truck, onSave, onClose }) {
             {form.crew.length === 0 && (
               <span style={{ fontSize: 12, color: '#aaa' }}>No crew assigned yet.</span>
             )}
-            {form.crew.map(c => (
-              <span key={c} style={{
+            {form.crew.map(id => (
+              <span key={id} style={{
                 background: 'var(--surface-2)', border: '1px solid var(--border)',
                 borderRadius: 20, padding: '4px 10px', fontSize: 12,
                 display: 'flex', alignItems: 'center', gap: 6,
               }}>
-                {c}
+                {getMemberName(id)}
                 <button
-                  onClick={() => removeCrew(c)}
+                  onClick={() => removeCrew(id)}
                   style={{ background: 'none', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}
                 >×</button>
               </span>
@@ -219,7 +185,7 @@ function TruckModal({ truck, onSave, onClose }) {
             className="btn btn-primary"
             style={{ flex: 1 }}
             onClick={() => {
-              if (!form.plate.trim()) return alert('Plate number is required.')
+              if (!form.plate_number.trim()) return alert('Plate number is required.')
               onSave(form)
             }}
           >
@@ -234,8 +200,9 @@ function TruckModal({ truck, onSave, onClose }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function TruckManagement() {
-  const navigate = useNavigate()
-  const [trucks, setTrucks] = useState(INITIAL_TRUCKS)
+  const { trucks, loading, saveTruck, deleteTruck: apiDeleteTruck } = useTrucks()
+  const { drivers, crew: crewPool } = useUsers()
+
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState(null)   // null | 'add' | truck object
@@ -247,39 +214,41 @@ export default function TruckManagement() {
     setTimeout(() => setToast(null), 3000)
   }
 
-  function handleSave(form) {
-    if (modal === 'add') {
-      setTrucks(prev => [...prev, { ...form, id: Date.now(), capacity: 0 }])
-      showToast('✅ Truck added successfully.')
+  async function handleSave(form) {
+    const id = modal === 'add' ? null : modal.id
+    const res = await saveTruck(id, form)
+    if (res.ok) {
+      showToast(id ? '✅ Truck updated successfully.' : '✅ Truck added successfully.')
+      setModal(null)
     } else {
-      setTrucks(prev => prev.map(t => t.id === modal.id ? { ...t, ...form } : t))
-      showToast('✅ Truck updated successfully.')
+      alert(JSON.stringify(res.error))
     }
-    setModal(null)
   }
 
-  function deleteTruck(id) {
+  async function handleDeleteTruck(id) {
     if (!window.confirm('Delete this truck record?')) return
-    setTrucks(prev => prev.filter(t => t.id !== id))
-    setExpanded(null)
-    showToast('🗑 Truck removed.')
+    const res = await apiDeleteTruck(id)
+    if (res.ok) {
+      setExpanded(null)
+      showToast('🗑 Truck removed.')
+    }
   }
 
-  const filtered = trucks.filter(t => {
+  const filtered = useMemo(() => trucks.filter(t => {
     const matchStatus = filter === 'all' || t.status === filter
     const matchSearch = !search ||
-      t.plate.toLowerCase().includes(search.toLowerCase()) ||
-      (t.driver || '').toLowerCase().includes(search.toLowerCase()) ||
+      t.plate_number.toLowerCase().includes(search.toLowerCase()) ||
+      (t.driver_name || '').toLowerCase().includes(search.toLowerCase()) ||
       t.zone.toLowerCase().includes(search.toLowerCase())
     return matchStatus && matchSearch
-  })
+  }), [trucks, filter, search])
 
-  const counts = {
+  const counts = useMemo(() => ({
     all: trucks.length,
     active: trucks.filter(t => t.status === 'active').length,
     maintenance: trucks.filter(t => t.status === 'maintenance').length,
     inactive: trucks.filter(t => t.status === 'inactive').length,
-  }
+  }), [trucks])
 
   return (
     <DashboardLayout>
@@ -301,6 +270,8 @@ export default function TruckManagement() {
           truck={modal === 'add' ? null : modal}
           onSave={handleSave}
           onClose={() => setModal(null)}
+          drivers={drivers}
+          crewPool={crewPool}
         />
       )}
 
@@ -386,154 +357,156 @@ export default function TruckManagement() {
 
         {/* ── Truck List ── */}
         <div>
-          {filtered.length === 0 && (
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>Loading trucks...</div>
+          ) : filtered.length === 0 ? (
             <div className="card" style={{ textAlign: 'center', padding: '36px 20px' }}>
               <div style={{ fontSize: 36, marginBottom: 10 }}>🚛</div>
               <div style={{ fontWeight: 700, marginBottom: 4 }}>No trucks found</div>
               <div className="text-muted text-sm">Try adjusting your filter or search.</div>
             </div>
-          )}
-
-          {filtered.map(truck => {
-            const isOpen = expanded === truck.id
-            const sm = STATUS_META[truck.status]
-            return (
-              <div
-                key={truck.id}
-                className="truck-row"
-                style={{
-                  background: 'var(--surface)',
-                  border: `1px solid ${isOpen ? sm.border : 'var(--border)'}`,
-                  borderRadius: 14, marginBottom: 10, overflow: 'hidden',
-                }}
-              >
-                {/* ── Row header ── */}
+          ) : (
+            filtered.map(truck => {
+              const isOpen = expanded === truck.id
+              const sm = STATUS_META[truck.status]
+              return (
                 <div
-                  style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 14 }}
-                  onClick={() => setExpanded(p => p === truck.id ? null : truck.id)}
+                  key={truck.id}
+                  className="truck-row"
+                  style={{
+                    background: 'var(--surface)',
+                    border: `1px solid ${isOpen ? sm.border : 'var(--border)'}`,
+                    borderRadius: 14, marginBottom: 10, overflow: 'hidden',
+                  }}
                 >
-                  {/* Icon */}
-                  <div style={{
-                    width: 44, height: 44, borderRadius: 12, flexShrink: 0,
-                    background: `${sm.bg}`,
-                    border: `1px solid ${sm.border}`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22,
-                  }}>🚛</div>
-
-                  {/* Main info */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 3 }}>
-                      <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 15 }}>{truck.plate}</span>
-                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{truck.model}</span>
-                      <StatusBadge status={truck.status} />
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
-                      {truck.driver ? `👤 ${truck.driver}` : '👤 No driver assigned'} &nbsp;·&nbsp; {truck.zone}
-                    </div>
-                    {truck.status === 'active' && <CapacityBar pct={truck.capacity} />}
-                  </div>
-
-                  {/* Crew count */}
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>Crew</div>
-                    <div style={{
-                      fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 20,
-                      color: truck.crew.length === 0 ? '#e74c3c' : 'var(--text)',
-                    }}>{truck.crew.length}</div>
-                  </div>
-
-                  {/* Chevron */}
-                  <div style={{
-                    fontSize: 16, color: 'var(--text-muted)',
-                    transform: isOpen ? 'rotate(90deg)' : 'rotate(0)',
-                    transition: 'transform .2s', flexShrink: 0,
-                  }}>›</div>
-                </div>
-
-                {/* ── Expanded detail ── */}
-                {isOpen && (
+                  {/* ── Row header ── */}
                   <div
-                    style={{ borderTop: '1px solid var(--border)', padding: '16px', animation: 'slideDown .18s' }}
-                    onClick={e => e.stopPropagation()}
+                    style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 14 }}
+                    onClick={() => setExpanded(p => p === truck.id ? null : truck.id)}
                   >
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                    {/* Icon */}
+                    <div style={{
+                      width: 44, height: 44, borderRadius: 12, flexShrink: 0,
+                      background: `${sm.bg}`,
+                      border: `1px solid ${sm.border}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22,
+                    }}>🚛</div>
 
-                      {/* Driver card */}
-                      <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px' }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 8 }}>DRIVER</div>
-                        {truck.driver ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <div style={{
-                              width: 32, height: 32, borderRadius: '50%',
-                              background: 'var(--accent)', color: '#0d1117',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontWeight: 800, fontSize: 13,
-                            }}>{truck.driver[0]}</div>
-                            <span style={{ fontSize: 13, fontWeight: 600 }}>{truck.driver}</span>
+                    {/* Main info */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 3 }}>
+                        <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 15 }}>{truck.plate_number}</span>
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{truck.model}</span>
+                        <StatusBadge status={truck.status} />
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
+                        {truck.driver_name ? `👤 ${truck.driver_name}` : '👤 No driver assigned'} &nbsp;·&nbsp; {truck.zone}
+                      </div>
+                      {truck.status === 'active' && <CapacityBar pct={truck.current_capacity} />}
+                    </div>
+
+                    {/* Crew count */}
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>Crew</div>
+                      <div style={{
+                        fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 20,
+                        color: truck.crew.length === 0 ? '#e74c3c' : 'var(--text)',
+                      }}>{truck.crew.length}</div>
+                    </div>
+
+                    {/* Chevron */}
+                    <div style={{
+                      fontSize: 16, color: 'var(--text-muted)',
+                      transform: isOpen ? 'rotate(90deg)' : 'rotate(0)',
+                      transition: 'transform .2s', flexShrink: 0,
+                    }}>›</div>
+                  </div>
+
+                  {/* ── Expanded detail ── */}
+                  {isOpen && (
+                    <div
+                      style={{ borderTop: '1px solid var(--border)', padding: '16px', animation: 'slideDown .18s' }}
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+
+                        {/* Driver card */}
+                        <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px' }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 8 }}>DRIVER</div>
+                          {truck.driver_name ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <div style={{
+                                width: 32, height: 32, borderRadius: '50%',
+                                background: 'var(--accent)', color: '#0d1117',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontWeight: 800, fontSize: 13,
+                              }}>{truck.driver_name[0]}</div>
+                              <span style={{ fontSize: 13, fontWeight: 600 }}>{truck.driver_name}</span>
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: 12, color: '#e74c3c' }}>Not assigned</span>
+                          )}
+                        </div>
+
+                        {/* Last service */}
+                        <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px' }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 6 }}>LAST SERVICE</div>
+                          <div style={{ fontSize: 13, fontWeight: 600 }}>
+                            {truck.last_service || '—'}
                           </div>
+                        </div>
+                      </div>
+
+                      {/* Crew list */}
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 8 }}>
+                          CREW MEMBERS ({truck.crew.length})
+                        </div>
+                        {truck.crew.length === 0 ? (
+                          <div style={{ fontSize: 12, color: '#e74c3c' }}>No crew assigned to this truck.</div>
                         ) : (
-                          <span style={{ fontSize: 12, color: '#e74c3c' }}>Not assigned</span>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {truck.crew_names?.map(c => (
+                              <span key={c} style={{
+                                background: 'var(--surface)', border: '1px solid var(--border)',
+                                borderRadius: 20, padding: '4px 12px', fontSize: 12, fontWeight: 500,
+                                display: 'flex', alignItems: 'center', gap: 6,
+                              }}>
+                                <span style={{
+                                  width: 18, height: 18, borderRadius: '50%', background: '#5dade2',
+                                  color: '#fff', fontSize: 9, fontWeight: 800,
+                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                }}>{c[0]}</span>
+                                {c}
+                              </span>
+                            ))}
+                          </div>
                         )}
                       </div>
 
-                      {/* Last service */}
-                      <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px' }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 6 }}>LAST SERVICE</div>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>
-                          {truck.lastService || '—'}
-                        </div>
+                      {/* Action buttons */}
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          className="btn btn-outline btn-sm"
+                          style={{ flex: 1 }}
+                          onClick={() => setModal(truck)}
+                        >
+                          ✏️ Edit / Reassign
+                        </button>
+                        <button
+                          className="btn btn-sm"
+                          style={{ background: 'rgba(231,76,60,0.08)', color: '#e74c3c', border: '1px solid rgba(231,76,60,0.3)' }}
+                          onClick={() => handleDeleteTruck(truck.id)}
+                        >
+                          🗑 Delete
+                        </button>
                       </div>
                     </div>
-
-                    {/* Crew list */}
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 8 }}>
-                        CREW MEMBERS ({truck.crew.length})
-                      </div>
-                      {truck.crew.length === 0 ? (
-                        <div style={{ fontSize: 12, color: '#e74c3c' }}>No crew assigned to this truck.</div>
-                      ) : (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                          {truck.crew.map(c => (
-                            <span key={c} style={{
-                              background: 'var(--surface)', border: '1px solid var(--border)',
-                              borderRadius: 20, padding: '4px 12px', fontSize: 12, fontWeight: 500,
-                              display: 'flex', alignItems: 'center', gap: 6,
-                            }}>
-                              <span style={{
-                                width: 18, height: 18, borderRadius: '50%', background: '#5dade2',
-                                color: '#fff', fontSize: 9, fontWeight: 800,
-                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                              }}>{c[0]}</span>
-                              {c}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Action buttons */}
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button
-                        className="btn btn-outline btn-sm"
-                        style={{ flex: 1 }}
-                        onClick={() => setModal(truck)}
-                      >
-                        ✏️ Edit / Reassign
-                      </button>
-                      <button
-                        className="btn btn-sm"
-                        style={{ background: 'rgba(231,76,60,0.08)', color: '#e74c3c', border: '1px solid rgba(231,76,60,0.3)' }}
-                        onClick={() => deleteTruck(truck.id)}
-                      >
-                        🗑 Delete
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )
-          })}
+                  )}
+                </div>
+              )
+            })
+          )}
         </div>
 
       </div>

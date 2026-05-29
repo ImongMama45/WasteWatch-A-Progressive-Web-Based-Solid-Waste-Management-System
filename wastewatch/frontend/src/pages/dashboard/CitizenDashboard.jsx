@@ -20,40 +20,6 @@ import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
 import HomeCarousel from '../../components/carousel/HomeCarousel'
 
-// ─── MOCK DATA ────────────────────────────────────────────────────────────────
-
-const MOCK_MY_REPORTS = [
-  {
-    id: 1, type: 'overflow', typeLabel: 'Garbage Overflow',
-    address: 'Baranggay 1, 5th Ave', date: '2026-04-18',
-    status: 'pending', statusLabel: 'Pending Review',
-  },
-  {
-    id: 2, type: 'illegal_dumping', typeLabel: 'Illegal Dumping',
-    address: 'Near the river bank, Zone 2', date: '2026-04-15',
-    status: 'resolved', statusLabel: 'Resolved',
-  },
-  {
-    id: 3, type: 'missed', typeLabel: 'Missed Collection',
-    address: 'Purok 4 — Side Street', date: '2026-04-12',
-    status: 'approved', statusLabel: 'Approved',
-  },
-]
-
-const MOCK_HOTSPOTS = [
-  { id: 1, address: 'Baranggay 1, 5th Ave', type: 'Garbage Overflow', distance: '0.3 KM', severity: 'high' },
-  { id: 2, address: 'Baranggay 1, Main Road', type: 'Illegal Dumping', distance: '0.6 KM', severity: 'medium' },
-  { id: 3, address: 'Baranggay 1, Side Street', type: 'Missed Collection', distance: '0.9 KM', severity: 'low' },
-  { id: 4, address: 'Baranggay 1, 8th Ave', type: 'Garbage Overflow', distance: '1.2 KM', severity: 'high' },
-]
-
-
-const MOCK_SCHEDULE = [
-  { day: 'Monday', zone: 'Baranggay Isabang', time: '6:00 AM – 10:00 AM', isNext: true, done: false },
-  { day: 'Wednesday', zone: 'Baranggay Isabang', time: 'N/A', isNext: false, done: false },
-  { day: 'Friday', zone: 'Baranggay Isabang', time: '6:00 AM – 10:00 AM', isNext: false, done: false },
-]
-
 const STATUS_META = {
   pending: { label: 'Pending', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' },
   approved: { label: 'Approved', color: '#22c55e', bg: 'rgba(34,197,94,0.1)' },
@@ -75,21 +41,27 @@ export default function CitizenDashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
 
-  const [myReports, setMyReports] = useState(MOCK_MY_REPORTS)
-  const [stats, setStats] = useState({ total: 3, pending: 1, resolved: 1 })
+  const [myReports, setMyReports] = useState([])
+  const [stats, setStats] = useState({ total: 0, pending: 0, resolved: 0 })
+  const [hotspots, setHotspots] = useState([])
+  const [schedule, setSchedule] = useState([])
   const [loading, setLoading] = useState(true)
   const [reportsTab, setReportsTab] = useState('all')   // all | pending | resolved
 
-  const nextDay = MOCK_SCHEDULE.find(s => s.isNext)
+  const nextDay = schedule.find(s => s.isNext) || schedule[0]
 
   useEffect(() => {
     Promise.all([
       api.get('/api/watcher/reports/').catch(() => ({ data: [] })),
-      api.get('/api/watcher/stats/').catch(() => ({ data: stats })),
+      api.get('/api/watcher/reports/stats/').catch(() => ({ data: { total: 0, pending: 0, resolved: 0 } })),
+      api.get('/api/watcher/hotspots/').catch(() => ({ data: [] })),
+      api.get('/api/public/schedule/').catch(() => ({ data: [] })),
     ])
-      .then(([r, s]) => {
-        if (r.data?.length) setMyReports(r.data.slice(0, 5))
+      .then(([r, s, h, sc]) => {
+        if (r.data) setMyReports(r.data.slice(0, 5))
         if (s.data) setStats(s.data)
+        if (h.data) setHotspots(h.data.slice(0, 4))
+        if (sc.data) setSchedule(sc.data)
       })
       .finally(() => setLoading(false))
   }, [])
@@ -177,7 +149,7 @@ export default function CitizenDashboard() {
                   padding: "20px",
                   fontFamily: 'var(--font-head)', fontSize: 28, fontWeight: 800,
                   lineHeight: 1, marginBottom: 4, color: 'var(--warning)',
-                }}>{MOCK_HOTSPOTS.length}</div>
+                }}>{hotspots.length}</div>
                 <div style={{
                   fontSize: 10, fontWeight: 700, color: 'var(--text-muted)',
                   textTransform: 'uppercase', letterSpacing: '.06em'
@@ -232,21 +204,21 @@ export default function CitizenDashboard() {
                   background: 'rgba(239,68,68,0.1)', color: 'var(--danger)',
                   fontSize: 10, fontWeight: 700, padding: '3px 10px',
                   borderRadius: 20,
-                }}>{MOCK_HOTSPOTS.length} Active</span>
+                }}>{hotspots.length} Active</span>
               </div>
 
               <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                {MOCK_HOTSPOTS.map((h, i) => (
+                {hotspots.map((h, i) => (
                   <div key={h.id} className="cd-row"
                     style={{
                       display: 'flex', alignItems: 'center', gap: 12,
                       padding: '12px 16px',
-                      borderBottom: i < MOCK_HOTSPOTS.length - 1 ? '1px solid var(--border)' : 'none',
+                      borderBottom: i < hotspots.length - 1 ? '1px solid var(--border)' : 'none',
                     }}>
                     {/* Pin icon with severity color */}
                     <div style={{
                       width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-                      background: `${SEVERITY_COLORS[h.severity]}15`,
+                      background: `${SEVERITY_COLORS[h.status || 'low']}15`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}>
                       <span style={{ fontSize: 18 }}>📍</span>
@@ -254,7 +226,7 @@ export default function CitizenDashboard() {
 
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 1 }}>
-                        {h.address}
+                        {h.barangay_name}
                       </div>
                       <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                         {h.type}
@@ -263,13 +235,13 @@ export default function CitizenDashboard() {
 
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>
-                        {h.distance}
+                        {h.count} reps
                       </div>
                       <div style={{
                         width: 8, height: 8, borderRadius: '50%',
-                        background: SEVERITY_COLORS[h.severity],
+                        background: SEVERITY_COLORS[h.status || 'low'],
                         marginLeft: 'auto', marginTop: 4,
-                        boxShadow: `0 0 5px ${SEVERITY_COLORS[h.severity]}`,
+                        boxShadow: `0 0 5px ${SEVERITY_COLORS[h.status || 'low']}`,
                       }} />
                     </div>
                   </div>
@@ -350,12 +322,12 @@ export default function CitizenDashboard() {
                           background: 'rgba(239,68,68,0.08)',
                           display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
                         }}>
-                          {TYPE_ICONS[report.type] || '📍'}
+                          {TYPE_ICONS[report.waste_type] || '📍'}
                         </div>
 
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>
-                            {report.typeLabel}
+                            {report.waste_type?.toUpperCase()}
                           </div>
                           <div style={{
                             fontSize: 12, color: 'var(--text-muted)',
@@ -376,7 +348,7 @@ export default function CitizenDashboard() {
                             {sm.label.toUpperCase()}
                           </span>
                           <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                            {report.date || report.created_at?.slice(0, 10)}
+                            {new Date(report.created_at).toLocaleDateString()}
                           </div>
                         </div>
                       </div>
@@ -427,11 +399,11 @@ export default function CitizenDashboard() {
 
               {/* Full schedule */}
               <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                {MOCK_SCHEDULE.map((s, i) => (
+                {schedule.map((s, i) => (
                   <div key={i} style={{
                     display: 'flex', alignItems: 'center', gap: 12,
                     padding: '13px 16px',
-                    borderBottom: i < MOCK_SCHEDULE.length - 1 ? '1px solid var(--border)' : 'none',
+                    borderBottom: i < schedule.length - 1 ? '1px solid var(--border)' : 'none',
                     background: s.isNext ? 'rgba(46,204,113,0.03)' : 'transparent',
                   }}>
                     {/* Day icon */}
@@ -440,7 +412,7 @@ export default function CitizenDashboard() {
                       background: s.isNext ? 'rgba(46,204,113,0.12)' : 'var(--surface-2)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
                     }}>
-                      {s.done ? '✅' : s.isNext ? '🚛' : '📅'}
+                      {s.isNext ? '🚛' : '📅'}
                     </div>
 
                     <div style={{ flex: 1 }}>
@@ -492,9 +464,9 @@ export default function CitizenDashboard() {
             <div className="card">
               <h3 className="section-title" style={{ marginBottom: 12, fontSize: 15 }}>My Activity</h3>
               {[
-                { label: 'Total Reports', value: stats.total || myReports.length, color: 'var(--text)' },
-                { label: 'Pending', value: stats.pending || myReports.filter(r => r.status === 'pending').length, color: 'var(--warning)' },
-                { label: 'Resolved', value: stats.resolved || myReports.filter(r => r.status === 'resolved').length, color: 'var(--accent)' },
+                { label: 'Total Reports', value: stats.total, color: 'var(--text)' },
+                { label: 'Pending', value: stats.pending, color: 'var(--warning)' },
+                { label: 'Resolved', value: stats.resolved, color: 'var(--accent)' },
               ].map(s => (
                 <div key={s.label} style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -533,21 +505,21 @@ export default function CitizenDashboard() {
             {/* Nearby Hotspots */}
             <div className="card">
               <h3 className="section-title" style={{ marginBottom: 12, fontSize: 15 }}>Nearby Hotspots</h3>
-              {MOCK_HOTSPOTS.slice(0, 3).map((h, i) => (
+              {hotspots.slice(0, 3).map((h, i) => (
                 <div key={h.id} style={{
                   display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0',
                   borderBottom: i < 2 ? '1px solid var(--border)' : 'none',
                 }}>
                   <div style={{
                     width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                    background: SEVERITY_COLORS[h.severity],
-                    boxShadow: `0 0 5px ${SEVERITY_COLORS[h.severity]}`,
+                    background: SEVERITY_COLORS[h.status || 'low'],
+                    boxShadow: `0 0 5px ${SEVERITY_COLORS[h.status || 'low']}`,
                   }} />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600 }}>{h.address}</div>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>{h.barangay_name}</div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{h.type}</div>
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>{h.distance}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>{h.count} reps</div>
                 </div>
               ))}
             </div>

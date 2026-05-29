@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import DashboardLayout from '../../components/DashboardLayout'
+import { useEscalations } from '../../hooks/useEscalations'
+import { useUsers } from '../../hooks/useUsers'
 
 const PRIORITY = {
   high: { label: 'High', color: '#e74c3c', bg: 'rgba(231,76,60,0.08)', border: 'rgba(231,76,60,0.3)', bar: '#e74c3c' },
@@ -13,21 +15,6 @@ const STATUS_META = {
   resolved: { label: 'Resolved', color: '#2ecc71', bg: 'rgba(46,204,113,0.1)' },
 }
 
-const ASSIGNEES = [
-  'Juan Dela Cruz', 'Ana Mendoza', 'Jose Bautista',
-  'Carlo Ramos', 'Maria Reyes', 'Pedro Santos',
-]
-
-const INITIAL = [
-  { id: 'E001', priority: 'high', title: 'Bin Overflow — Near Market, Cotta', type: 'Overflow', barangay: 'Cotta', reports: 8, raisedBy: 'Brgy. Official Reyes', ago: '14m ago', status: 'open', assignee: null, deadline: null, notes: '' },
-  { id: 'E002', priority: 'high', title: 'Illegal Dumping — Riverside, Kanlurang', type: 'Illegal Dumping', barangay: 'Kanlurang Cotta', reports: 6, raisedBy: 'Brgy. Official Cruz', ago: '31m ago', status: 'open', assignee: null, deadline: null, notes: '' },
-  { id: 'E003', priority: 'high', title: 'Missed Pickup — Zone 5, Purok 7', type: 'Missed Pickup', barangay: 'Gulang-Gulang', reports: 4, raisedBy: 'Citizen Reports', ago: '1h ago', status: 'in_progress', assignee: 'Juan Dela Cruz', deadline: '2026-05-03', notes: 'Dispatched T-01.' },
-  { id: 'E004', priority: 'medium', title: 'Road Blockage — Gulang-Gulang Crossing', type: 'Road Blockage', barangay: 'Gulang-Gulang', reports: 3, raisedBy: 'Watcher Santos', ago: '1.5h ago', status: 'open', assignee: null, deadline: null, notes: '' },
-  { id: 'E005', priority: 'medium', title: 'Overflow — Isabang Market St', type: 'Overflow', barangay: 'Isabang', reports: 5, raisedBy: 'Brgy. Official Tan', ago: '2h ago', status: 'in_progress', assignee: 'Ana Mendoza', deadline: '2026-05-04', notes: '' },
-  { id: 'E006', priority: 'low', title: 'Litter Complaint — Mayao Crossing Park', type: 'Littering', barangay: 'Mayao Crossing', reports: 2, raisedBy: 'Citizen Reports', ago: '3h ago', status: 'open', assignee: null, deadline: null, notes: '' },
-  { id: 'E007', priority: 'low', title: 'Stray Animals Near Dumpsite — Barangay 1', type: 'Health Hazard', barangay: 'Barangay 1', reports: 1, raisedBy: 'Watcher Flores', ago: '5h ago', status: 'resolved', assignee: 'Carlo Ramos', deadline: '2026-05-02', notes: 'Resolved by CENRO.' },
-]
-
 const TYPE_ICON = {
   'Overflow': '🗑️',
   'Illegal Dumping': '🚯',
@@ -38,7 +25,7 @@ const TYPE_ICON = {
 }
 
 function PriorityBadge({ p }) {
-  const m = PRIORITY[p]
+  const m = PRIORITY[p] || PRIORITY.low
   return <span style={{ background: m.bg, border: `1px solid ${m.border}`, color: m.color, borderRadius: 20, padding: '2px 10px', fontSize: 9, fontWeight: 800, letterSpacing: '.06em' }}>{m.label.toUpperCase()}</span>
 }
 
@@ -47,7 +34,7 @@ function StatusBadge({ s }) {
   return <span style={{ background: m.bg, color: m.color, borderRadius: 20, padding: '2px 10px', fontSize: 9, fontWeight: 800 }}>{m.label.toUpperCase()}</span>
 }
 
-function AssignModal({ esc, onSave, onClose }) {
+function AssignModal({ esc, onSave, onClose, staff }) {
   const [assignee, setAssignee] = useState(esc.assignee || '')
   const [deadline, setDeadline] = useState(esc.deadline || '')
   const [notes, setNotes] = useState(esc.notes || '')
@@ -60,13 +47,13 @@ function AssignModal({ esc, onSave, onClose }) {
         </div>
         <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: '10px 12px', marginBottom: 16, fontSize: 12 }}>
           <div style={{ fontWeight: 700 }}>{esc.title}</div>
-          <div style={{ color: 'var(--text-muted)', marginTop: 2 }}>{esc.barangay} · {esc.reports} reports</div>
+          <div style={{ color: 'var(--text-muted)', marginTop: 2 }}>{esc.barangay_name} · {esc.report_count} reports</div>
         </div>
         <div style={{ marginBottom: 12 }}>
           <label className="form-label">Assign To</label>
           <select className="form-input" value={assignee} onChange={e => setAssignee(e.target.value)}>
             <option value="">— Select staff —</option>
-            {ASSIGNEES.map(a => <option key={a} value={a}>{a}</option>)}
+            {staff.map(a => <option key={a.id} value={a.id}>{a.full_name}</option>)}
           </select>
         </div>
         <div style={{ marginBottom: 12 }}>
@@ -87,7 +74,11 @@ function AssignModal({ esc, onSave, onClose }) {
 }
 
 export default function EscalationManagement() {
-  const [items, setItems] = useState(INITIAL)
+  const { items, loading, saveEscalation, resolveEscalation } = useEscalations()
+  const { users } = useUsers()
+  
+  const staff = useMemo(() => users.filter(u => u.role !== 'citizen'), [users])
+
   const [priorityFilter, setPriorityFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [search, setSearch] = useState('')
@@ -97,38 +88,42 @@ export default function EscalationManagement() {
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
-  function resolve(id) {
-    setItems(prev => prev.map(e => e.id === id ? { ...e, status: 'resolved' } : e))
-    setExpanded(null)
-    showToast('✅ Escalation marked as resolved.')
+  async function handleResolve(id) {
+    const res = await resolveEscalation(id)
+    if (res.ok) {
+      setExpanded(null)
+      showToast('✅ Escalation marked as resolved.')
+    }
   }
 
-  function saveAssign(id, data) {
-    setItems(prev => prev.map(e => e.id === id ? { ...e, ...data } : e))
-    setAssignModal(null)
-    showToast('✅ Task assigned successfully.')
+  async function handleSaveAssign(id, data) {
+    const res = await saveEscalation(id, data)
+    if (res.ok) {
+      setAssignModal(null)
+      showToast('✅ Task assigned successfully.')
+    }
   }
 
-  const counts = {
+  const counts = useMemo(() => ({
     all: items.length,
     open: items.filter(e => e.status === 'open').length,
     in_progress: items.filter(e => e.status === 'in_progress').length,
     resolved: items.filter(e => e.status === 'resolved').length,
     high: items.filter(e => e.priority === 'high').length,
-  }
+  }), [items])
 
-  const filtered = items.filter(e => {
+  const filtered = useMemo(() => items.filter(e => {
     const mp = priorityFilter === 'all' || e.priority === priorityFilter
     const ms = statusFilter === 'all' || e.status === statusFilter
-    const mq = !search || e.title.toLowerCase().includes(search.toLowerCase()) || e.barangay.toLowerCase().includes(search.toLowerCase())
+    const mq = !search || e.title.toLowerCase().includes(search.toLowerCase()) || (e.barangay_name || '').toLowerCase().includes(search.toLowerCase())
     return mp && ms && mq
-  })
+  }), [items, priorityFilter, statusFilter, search])
 
-  const sorted = [...filtered].sort((a, b) => {
+  const sorted = useMemo(() => [...filtered].sort((a, b) => {
     const order = { high: 0, medium: 1, low: 2 }
     const so = { open: 0, in_progress: 1, resolved: 2 }
     return (so[a.status] - so[b.status]) || (order[a.priority] - order[b.priority])
-  })
+  }), [filtered])
 
   return (
     <DashboardLayout>
@@ -237,7 +232,7 @@ export default function EscalationManagement() {
         )}
 
         {sorted.map(e => {
-          const p = PRIORITY[e.priority]
+          const p = PRIORITY[e.priority] || PRIORITY.low
           const isOpen = expanded === e.id
           const isResolved = e.status === 'resolved'
           return (
@@ -267,15 +262,15 @@ export default function EscalationManagement() {
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                     <span>📋 {e.type}</span>
-                    <span>📣 {e.reports} reports</span>
-                    <span>📍 Brgy. {e.barangay}</span>
-                    <span>👤 {e.raisedBy}</span>
+                    <span>📣 {e.report_count} reports</span>
+                    <span>📍 Brgy. {e.barangay_name}</span>
+                    <span>👤 {e.raised_by_name}</span>
                   </div>
                 </div>
 
                 {/* Right meta */}
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{e.ago}</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{e.ago || 'recently'}</div>
                   {e.deadline && <div style={{ fontSize: 10, color: '#f39c12', fontWeight: 700 }}>⏰ {e.deadline}</div>}
                   <div style={{ fontSize: 14, color: 'var(--text-muted)', transform: isOpen ? 'rotate(90deg)' : 'rotate(0)', transition: 'transform .2s' }}>›</div>
                 </div>
@@ -288,7 +283,7 @@ export default function EscalationManagement() {
 
                   {/* Context info */}
                   <div style={{ background: p.bg, border: `1px solid ${p.border}`, borderRadius: 8, padding: '9px 12px', marginBottom: 14, fontSize: 12, lineHeight: 1.6, color: 'var(--text-muted)' }}>
-                    <strong style={{ color: p.color }}>Escalated by {e.raisedBy}</strong> — {e.type} with {e.reports} community reports in Barangay {e.barangay}.
+                    <strong style={{ color: p.color }}>Escalated by {e.raised_by_name}</strong> — {e.type} with {e.report_count} community reports in Barangay {e.barangay_name}.
                     {e.notes && <> Notes: <em>{e.notes}</em></>}
                   </div>
 
@@ -297,7 +292,7 @@ export default function EscalationManagement() {
                     <div style={{ display: 'flex', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
                       <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: '8px 12px', flex: 1, minWidth: 120 }}>
                         <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.06em', marginBottom: 3 }}>ASSIGNED TO</div>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>👤 {e.assignee}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>👤 {e.assignee_name || 'Assigned'}</div>
                       </div>
                       {e.deadline && (
                         <div style={{ background: 'rgba(243,156,18,0.07)', border: '1px solid rgba(243,156,18,0.25)', borderRadius: 8, padding: '8px 12px', flex: 1, minWidth: 120 }}>
@@ -318,7 +313,7 @@ export default function EscalationManagement() {
                       }}>
                         👤 {e.assignee ? 'Reassign' : 'Assign Task'}
                       </button>
-                      <button className="esc-act" onClick={() => resolve(e.id)} style={{
+                      <button className="esc-act" onClick={() => handleResolve(e.id)} style={{
                         flex: 1, minWidth: 100, background: 'var(--accent)', color: '#0d1117',
                         border: 'none', borderRadius: 10, padding: '9px',
                         fontWeight: 700, fontSize: 12, fontFamily: 'var(--font-body)',

@@ -29,6 +29,8 @@ import { useOfflineReports } from '../../hooks/useOfflineReports'
 import { useOfflineAnnouncements } from '../../hooks/useOfflineAnnouncements'
 import { useOfflineSyncManager } from '../../hooks/useOfflineSyncManager'
 import { useOfflineInsights } from '../../hooks/useOfflineInsights'
+import { usePublicStats } from '../../hooks/usePublicStats'
+import { usePublicSchedule } from '../../hooks/usePublicSchedule'
 
 /* Light-mode landing stylesheet */
 import '../../styles/pages/Publicdashboardlanding.css'
@@ -67,12 +69,6 @@ const HERO_SLIDES = [
     ),
     sub: "Huwag palampasin ang koleksyon. Tingnan ang schedule ng inyong barangay anumang oras.",
   },
-]
-
-const FALLBACK_SCHEDULE = [
-  { day: 'Lunes', zone: 'Barangay Isabang', time: '6:00 AM – 10:00 AM', isNext: true, status: 'upcoming' },
-  { day: 'Miyerkules', zone: 'Barangay Gulang-Gulang', time: 'N/A', isNext: false, status: 'missed' },
-  { day: 'Biyernes', zone: 'Barangay Isabang', time: '6:00 AM – 10:00 AM', isNext: false, status: 'upcoming' },
 ]
 
 // ─── SVG Icons (inline, no external dep) ─────────────────────────────────────
@@ -127,6 +123,8 @@ export default function PublicDashboard() {
 
   // ── Data hooks ───────────────────────────────────────────────────────────────
   const { announcements, isStale, isRefreshing } = useOfflineAnnouncements()
+  const { stats } = usePublicStats()
+  const { schedule } = usePublicSchedule()
 
   const {
     reports, addReport, retryReport,
@@ -140,7 +138,6 @@ export default function PublicDashboard() {
   } = useOfflineInsights()
 
   // ── UI state ─────────────────────────────────────────────────────────────────
-  const [schedule, setSchedule] = useState(FALLBACK_SCHEDULE)
   const [heroSlide, setHeroSlide] = useState(0)
   const [annSlide, setAnnSlide] = useState(0)
   const [showBuilder, setShowBuilder] = useState(false)
@@ -226,8 +223,8 @@ export default function PublicDashboard() {
           <div className="ld-chip">
             <span className="ld-chip__dot ld-chip__dot--amber" />
             <div>
-              <div className="ld-chip__value">{pendingCount || 0}</div>
-              <div className="ld-chip__label">Mga Pending</div>
+              <div className="ld-chip__value">{stats.total_reports || 0}</div>
+              <div className="ld-chip__label">Total Reports</div>
             </div>
           </div>
           <div className="ld-chip">
@@ -255,16 +252,16 @@ export default function PublicDashboard() {
             <div className="ld-stat__label">Barangays Covered</div>
           </div>
           <div className="ld-stat">
-            <div className="ld-stat__value">12</div>
-            <div className="ld-stat__label">Collection Trucks</div>
+            <div className="ld-stat__value">{stats.active_trucks || 0}</div>
+            <div className="ld-stat__label">Active Trucks</div>
           </div>
           <div className="ld-stat">
-            <div className="ld-stat__value">GIS</div>
-            <div className="ld-stat__label">Real-Time Mapping</div>
+            <div className="ld-stat__value">{stats.hotspots || 0}</div>
+            <div className="ld-stat__label">Hotspots Detected</div>
           </div>
           <div className="ld-stat">
-            <div className="ld-stat__value">PWA</div>
-            <div className="ld-stat__label">Works Offline</div>
+            <div className="ld-stat__value">{stats.resolved_reports || 0}</div>
+            <div className="ld-stat__label">Issues Resolved</div>
           </div>
         </div>
       </div>
