@@ -6,24 +6,11 @@
  * sized/colored by report count to simulate a heatmap.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import DashboardLayout from '../../components/DashboardLayout'
+import { useHotspots } from '../../hooks/useHotspots'
 
 const LUCENA_CENTER = [13.9373, 121.617]
-
-// Hotspot data — each point has a lat/lng and a count of reports
-const HOTSPOTS = [
-  { id: 'H1',  lat: 13.9415, lng: 121.6175, count: 14, barangay: 'Ibabang Dupay',   type: 'Overflow',        status: 'critical', last: '20m ago' },
-  { id: 'H2',  lat: 13.9345, lng: 121.6085, count: 11, barangay: 'Cotta',           type: 'Illegal Dumping', status: 'critical', last: '45m ago' },
-  { id: 'H3',  lat: 13.9295, lng: 121.6230, count:  9, barangay: 'Gulang-Gulang',   type: 'Missed Pickup',   status: 'high',     last: '1h ago'  },
-  { id: 'H4',  lat: 13.9470, lng: 121.6140, count:  8, barangay: 'Ibabang Dupay',   type: 'Overflow',        status: 'high',     last: '1.5h ago'},
-  { id: 'H5',  lat: 13.9500, lng: 121.6280, count:  7, barangay: 'Mayao Crossing',  type: 'Illegal Dumping', status: 'high',     last: '2h ago'  },
-  { id: 'H6',  lat: 13.9360, lng: 121.6150, count:  5, barangay: 'Cotta',           type: 'Littering',       status: 'medium',   last: '3h ago'  },
-  { id: 'H7',  lat: 13.9430, lng: 121.6210, count:  4, barangay: 'Ibabang Dupay',   type: 'Overflow',        status: 'medium',   last: '4h ago'  },
-  { id: 'H8',  lat: 13.9320, lng: 121.6260, count:  3, barangay: 'Gulang-Gulang',   type: 'Road Blockage',   status: 'medium',   last: '5h ago'  },
-  { id: 'H9',  lat: 13.9482, lng: 121.6145, count:  2, barangay: 'Ibabang Dupay',   type: 'Missed Pickup',   status: 'low',      last: '6h ago'  },
-  { id: 'H10', lat: 13.9380, lng: 121.6110, count:  2, barangay: 'Cotta',           type: 'Littering',       status: 'low',      last: '8h ago'  },
-]
 
 const STATUS_META = {
   critical: { label: 'Critical', color: '#e74c3c', bg: 'rgba(231,76,60,0.12)',  border: 'rgba(231,76,60,0.35)'  },
@@ -62,6 +49,8 @@ export default function HotspotDetection() {
   const mapInst     = useRef(null)
   const circlesRef  = useRef([])
 
+  const { items: hotspots, loading } = useHotspots()
+
   const [mapReady,  setMapReady]  = useState(false)
   const [selected,  setSelected]  = useState(null)
   const [filter,    setFilter]    = useState('all')
@@ -90,8 +79,13 @@ export default function HotspotDetection() {
     }).addTo(map)
     L.control.zoom({ position: 'topright' }).addTo(map)
     mapInst.current = map
-    drawHotspots(map)
   }, [mapReady])
+
+  useEffect(() => {
+    if (mapInst.current && hotspots.length > 0) {
+      drawHotspots(mapInst.current)
+    }
+  }, [hotspots, mapReady])
 
   function drawHotspots(map) {
     const L = window.L
@@ -99,11 +93,11 @@ export default function HotspotDetection() {
     circlesRef.current.forEach(c => { try { map.removeLayer(c) } catch {} })
     circlesRef.current = []
 
-    HOTSPOTS.forEach(h => {
+    hotspots.forEach(h => {
       const st = hotspotStyle(h.count)
 
       // Outer glow circle
-      const outer = L.circle([h.lat, h.lng], {
+      const outer = L.circle([h.latitude, h.longitude], {
         radius: st.radius,
         color: st.fill, weight: 0,
         fillColor: st.fill, fillOpacity: st.opacity * 0.4,
@@ -111,7 +105,7 @@ export default function HotspotDetection() {
       }).addTo(map)
 
       // Inner circle
-      const inner = L.circle([h.lat, h.lng], {
+      const inner = L.circle([h.latitude, h.longitude], {
         radius: st.radius * 0.5,
         color: st.fill, weight: 1.5,
         fillColor: st.fill, fillOpacity: st.opacity,
@@ -126,7 +120,7 @@ export default function HotspotDetection() {
           box-shadow:0 2px 8px rgba(0,0,0,.35);">${h.count}</div>`,
         className: '', iconSize: [24, 24], iconAnchor: [12, 12],
       })
-      const marker = L.marker([h.lat, h.lng], { icon }).addTo(map)
+      const marker = L.marker([h.latitude, h.longitude], { icon }).addTo(map)
 
       marker.on('click', () => setSelected(h))
       inner.on('click',  () => setSelected(h))
@@ -137,24 +131,26 @@ export default function HotspotDetection() {
 
   function flyTo(h) {
     if (!mapInst.current) return
-    mapInst.current.flyTo([h.lat, h.lng], 16, { duration: 1 })
+    mapInst.current.flyTo([h.latitude, h.longitude], 16, { duration: 1 })
     setSelected(h)
   }
 
-  const allTypes = [...new Set(HOTSPOTS.map(h => h.type))]
+  const allTypes = useMemo(() => [...new Set(hotspots.map(h => h.type))], [hotspots])
 
-  const filtered = HOTSPOTS.filter(h => {
+  const filtered = useMemo(() => hotspots.filter(h => {
     const ms = filter === 'all' || h.status === filter
     const mt = typeFilter === 'all' || h.type === typeFilter
     return ms && mt
-  }).sort((a, b) => b.count - a.count)
+  }).sort((a, b) => b.count - a.count), [hotspots, filter, typeFilter])
 
-  const counts = {
-    critical: HOTSPOTS.filter(h => h.status === 'critical').length,
-    high:     HOTSPOTS.filter(h => h.status === 'high').length,
-    medium:   HOTSPOTS.filter(h => h.status === 'medium').length,
-    low:      HOTSPOTS.filter(h => h.status === 'low').length,
-  }
+  const counts = useMemo(() => ({
+    critical: hotspots.filter(h => h.status === 'critical').length,
+    high:     hotspots.filter(h => h.status === 'high').length,
+    medium:   hotspots.filter(h => h.status === 'medium').length,
+    low:      hotspots.filter(h => h.status === 'low').length,
+  }), [hotspots])
+
+  const maxCount = useMemo(() => Math.max(...hotspots.map(h => h.count), 1), [hotspots])
 
   return (
     <DashboardLayout>
@@ -185,7 +181,7 @@ export default function HotspotDetection() {
         {/* KPI strip */}
         <div className="stat-grid" style={{ marginBottom: 20 }}>
           {[
-            { label: 'Total Hotspots', value: HOTSPOTS.length,    color: 'var(--text)' },
+            { label: 'Total Hotspots', value: hotspots.length,    color: 'var(--text)' },
             { label: 'Critical',       value: counts.critical,     color: '#e74c3c'     },
             { label: 'High',           value: counts.high,         color: '#f39c12'     },
             { label: 'Medium / Low',   value: counts.medium + counts.low, color: '#f1c40f' },
@@ -206,7 +202,7 @@ export default function HotspotDetection() {
                 {counts.critical} critical hotspot(s) with high report density — dispatch recommended.
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                {HOTSPOTS.filter(h => h.status === 'critical').map(h => h.barangay).join(', ')}
+                {hotspots.filter(h => h.status === 'critical').map(h => h.barangay_name).join(', ')}
               </div>
             </div>
           </div>
@@ -254,7 +250,7 @@ export default function HotspotDetection() {
                     <span style={{ fontSize: 20 }}>{TYPE_ICON[selected.type] || '⚠️'}</span>
                     <div>
                       <div style={{ color: '#fff', fontWeight: 700, fontSize: 13 }}>{selected.type}</div>
-                      <div style={{ color: '#94a3b8', fontSize: 11 }}>Brgy. {selected.barangay}</div>
+                      <div style={{ color: '#94a3b8', fontSize: 11 }}>Brgy. {selected.barangay_name}</div>
                     </div>
                   </div>
                   <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: 16, cursor: 'pointer' }}>×</button>
@@ -262,8 +258,8 @@ export default function HotspotDetection() {
                 {[
                   { label: 'REPORTS',  value: selected.count, accent: true },
                   { label: 'STATUS',   value: selected.status.charAt(0).toUpperCase() + selected.status.slice(1) },
-                  { label: 'LAST REPORT', value: selected.last },
-                  { label: 'LOCATION', value: `${selected.lat.toFixed(4)}, ${selected.lng.toFixed(4)}` },
+                  { label: 'LAST REPORT', value: selected.ago || 'recently' },
+                  { label: 'LOCATION', value: `${selected.latitude.toFixed(4)}, ${selected.longitude.toFixed(4)}` },
                 ].map(r => (
                   <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                     <span style={{ color: '#64748b', fontSize: 10, fontWeight: 700 }}>{r.label}</span>
@@ -298,7 +294,7 @@ export default function HotspotDetection() {
                     color: active ? (m.color || 'var(--accent)') : 'var(--text-muted)',
                     background: active ? (m.bg || 'rgba(46,204,113,0.08)') : 'transparent',
                   }}>
-                    {f === 'all' ? `All (${HOTSPOTS.length})` : m.label}
+                    {f === 'all' ? `All (${hotspots.length})` : m.label}
                   </button>
                 )
               })}
@@ -320,7 +316,7 @@ export default function HotspotDetection() {
 
             {/* Hotspot cards */}
             {filtered.map((h, i) => {
-              const m  = STATUS_META[h.status]
+              const m  = STATUS_META[h.status] || STATUS_META.low
               const st = hotspotStyle(h.count)
               const isSelected = selected?.id === h.id
               return (
@@ -341,7 +337,7 @@ export default function HotspotDetection() {
                         <StatusBadge s={h.status} />
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                        Brgy. {h.barangay} · {h.last}
+                        Brgy. {h.barangay_name} · {h.ago || 'recently'}
                       </div>
                     </div>
 
@@ -354,7 +350,7 @@ export default function HotspotDetection() {
 
                   {/* Mini bar */}
                   <div style={{ background: 'var(--surface-2)', borderRadius: 20, height: 5, overflow: 'hidden' }}>
-                    <div style={{ width: `${Math.round((h.count / 14) * 100)}%`, height: '100%', background: st.fill, borderRadius: 20, transition: 'width .5s' }} />
+                    <div style={{ width: `${Math.round((h.count / maxCount) * 100)}%`, height: '100%', background: st.fill, borderRadius: 20, transition: 'width .5s' }} />
                   </div>
                 </div>
               )

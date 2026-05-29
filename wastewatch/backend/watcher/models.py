@@ -165,3 +165,50 @@ class CollectionConfirmation(models.Model):
 
     def __str__(self):
         return f'Confirmed by {self.confirmed_by.full_name} @ {self.barangay} on {self.confirmed_at:%Y-%m-%d}'
+
+class HotspotSeverity(models.TextChoices):
+    LOW    = 'low',    'Low'
+    MEDIUM = 'medium', 'Medium'
+    HIGH   = 'high',   'High'
+
+class GarbageHotspot(models.Model):
+    name = models.CharField(max_length=100)
+    severity = models.CharField(max_length=10, choices=HotspotSeverity.choices, default=HotspotSeverity.MEDIUM)
+    barangay = models.ForeignKey('accounts.Barangay', on_delete=models.CASCADE, related_name='hotspots')
+    latitude  = models.DecimalField(max_digits=9,  decimal_places=6)
+    longitude = models.DecimalField(max_digits=10, decimal_places=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'{self.name} ({self.severity})'
+
+class Escalation(models.Model):
+    PRIORITY_CHOICES = [
+        ('low', 'Low'),
+        ('medium', 'Medium'),
+        ('high', 'High'),
+    ]
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+        ('resolved', 'Resolved'),
+    ]
+    
+    priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='medium')
+    title = models.CharField(max_length=255)
+    issue_type = models.CharField(max_length=100)
+    reports_count = models.IntegerField(default=1)
+    raised_by = models.CharField(max_length=255) # Name of the person/role
+    barangay = models.ForeignKey('accounts.Barangay', on_delete=models.CASCADE, related_name='escalations')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    assignee = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_escalations')
+    deadline = models.DateField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-priority', '-created_at']
+
+    def __str__(self):
+        return f'{self.title} - {self.status}'

@@ -11,7 +11,9 @@ import { useNavigate } from 'react-router-dom'
 import { Bell, PlusCircle } from 'lucide-react'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useAuth } from '../../context/AuthContext'
-import { NEWS_ITEMS } from './data/newsData'
+import { useNewsItems } from '../../hooks/useNewsItems'
+import { useEmergencyAlerts } from '../../hooks/useEmergencyAlerts'
+import { useBarangaySpotlights } from '../../hooks/useBarangaySpotlights'
 
 import EmergencyAlertBanner from './components/EmergencyAlertBanner'
 import FeaturedNewsCarousel from './components/FeaturedNewsCarousel'
@@ -25,18 +27,24 @@ export default function NewsPage() {
   const navigate  = useNavigate()
   const isAdmin   = user?.role?.toLowerCase() === 'admin'
 
+  const { items: newsItems, isRefreshing: itemsLoading } = useNewsItems()
+  const { alerts, isRefreshing: alertsLoading } = useEmergencyAlerts()
+  const { spotlights, isRefreshing: spotsLoading } = useBarangaySpotlights()
+
   const [category, setCategory] = useState('All')
   const [search, setSearch]     = useState('')
 
   // Count results for search hint
   const filteredCount = useMemo(() => {
-    return NEWS_ITEMS.filter(item => {
+    return newsItems.filter(item => {
       const matchCat    = category === 'All' || item.category === category
       const q           = search.toLowerCase()
       const matchSearch = !q || item.title.toLowerCase().includes(q) || item.description.toLowerCase().includes(q) || (item.barangay || '').toLowerCase().includes(q)
       return matchCat && matchSearch
     }).length
-  }, [category, search])
+  }, [newsItems, category, search])
+
+  const featuredItems = useMemo(() => newsItems.filter(item => item.is_featured), [newsItems])
 
   return (
     <DashboardLayout>
@@ -74,14 +82,15 @@ export default function NewsPage() {
           </div>
           <p className="text-muted text-sm" style={{ margin: 0, paddingLeft: 30 }}>
             Stay updated with waste management activities and city advisories for Lucena City.
+            {(itemsLoading || alertsLoading || spotsLoading) && <span style={{ marginLeft: 8, color: 'var(--accent)' }}>Updating...</span>}
           </p>
         </div>
 
         {/* ── Emergency Alert Banner ── */}
-        <EmergencyAlertBanner />
+        <EmergencyAlertBanner alerts={alerts} />
 
         {/* ── Featured Carousel ── */}
-        <FeaturedNewsCarousel />
+        <FeaturedNewsCarousel items={featuredItems} />
 
         {/* ── Search ── */}
         <NewsSearchBar
@@ -95,14 +104,14 @@ export default function NewsPage() {
 
         {/* ── News Feed ── */}
         <NewsFeed
-          items={NEWS_ITEMS}
+          items={newsItems}
           category={category}
           search={search}
         />
 
         {/* ── Barangay Spotlight ── */}
         <div style={{ marginTop: 24 }}>
-          <BarangaySpotlight />
+          <BarangaySpotlight items={spotlights} />
         </div>
 
       </div>

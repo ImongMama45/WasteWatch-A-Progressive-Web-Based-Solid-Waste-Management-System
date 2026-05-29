@@ -82,8 +82,8 @@ export default function DriverDashboard() {
 
   useEffect(() => {
     Promise.all([
-      api.get('/api/driver/route/today/').catch(() => ({ data: null })),
-      api.get('/api/driver/shift/status/').catch(() => ({ data: null })),
+      api.get('/api/driver/route-assignments/today/').catch(() => ({ data: null })),
+      api.get('/api/driver/trucks/shift/status/').catch(() => ({ data: null })),
     ]).then(([routeRes, shiftRes]) => {
       if (routeRes.data) setRoute(r => ({ ...r, ...routeRes.data }))
     }).finally(() => setLoading(false))

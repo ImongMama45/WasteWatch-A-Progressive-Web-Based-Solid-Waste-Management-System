@@ -3,16 +3,12 @@
  * Admin: Create, edit, assign barangay, activate/deactivate users.
  */
 
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import DashboardLayout from '../../components/DashboardLayout'
+import { useUsers } from '../../hooks/useUsers'
+import api from '../../api/client'
 
 // ── Mock Data ─────────────────────────────────────────────────────────────────
-
-const BARANGAYS = [
-  'Isabang', 'Cotta', 'Kanlurang Cotta', 'Ibabang Dupay',
-  'Gulang-Gulang', 'Mayao Crossing', 'Barangay 1', 'Barangay 2',
-  'Barangay 3', 'Barangay 4', 'Barangay 5', 'Ilayang Dupay',
-]
 
 const ROLES = ['watcher', 'driver', 'barangay_official', 'citizen']
 
@@ -21,20 +17,8 @@ const ROLE_META = {
   driver: { label: 'Driver', color: '#f39c12', bg: 'rgba(243,156,18,0.1)', border: 'rgba(243,156,18,0.3)' },
   barangay_official: { label: 'Brgy. Official', color: '#9b59b6', bg: 'rgba(155,89,182,0.1)', border: 'rgba(155,89,182,0.3)' },
   citizen: { label: 'Citizen', color: '#2ecc71', bg: 'rgba(46,204,113,0.1)', border: 'rgba(46,204,113,0.3)' },
+  admin: { label: 'Admin', color: '#e74c3c', bg: 'rgba(231,76,60,0.1)', border: 'rgba(231,76,60,0.3)' },
 }
-
-const INITIAL_USERS = [
-  { id: 1, full_name: 'Juan Dela Cruz', email: 'juan@lucena.gov.ph', role: 'driver', barangay: 'Isabang', is_active: true },
-  { id: 2, full_name: 'Ana Mendoza', email: 'ana@lucena.gov.ph', role: 'watcher', barangay: 'Cotta', is_active: true },
-  { id: 3, full_name: 'Pedro Santos', email: 'pedro@lucena.gov.ph', role: 'citizen', barangay: 'Gulang-Gulang', is_active: true },
-  { id: 4, full_name: 'Maria Reyes', email: 'maria@lucena.gov.ph', role: 'barangay_official', barangay: 'Isabang', is_active: true },
-  { id: 5, full_name: 'Jose Bautista', email: 'jose@lucena.gov.ph', role: 'driver', barangay: 'Mayao Crossing', is_active: false },
-  { id: 6, full_name: 'Carlo Ramos', email: 'carlo@lucena.gov.ph', role: 'watcher', barangay: 'Ibabang Dupay', is_active: true },
-  { id: 7, full_name: 'Liza Torres', email: 'liza@lucena.gov.ph', role: 'citizen', barangay: 'Barangay 1', is_active: true },
-  { id: 8, full_name: 'Ramon Cruz', email: 'ramon@lucena.gov.ph', role: 'barangay_official', barangay: 'Cotta', is_active: false },
-  { id: 9, full_name: 'Tony Flores', email: 'tony@lucena.gov.ph', role: 'driver', barangay: 'Kanlurang Cotta', is_active: true },
-  { id: 10, full_name: 'Danny Mercado', email: 'danny@lucena.gov.ph', role: 'watcher', barangay: 'Gulang-Gulang', is_active: true },
-]
 
 const EMPTY_FORM = { full_name: '', email: '', password: '', role: 'citizen', barangay: '', is_active: true }
 
@@ -64,11 +48,11 @@ function Avatar({ name, active }) {
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 
-function UserModal({ user, onSave, onClose }) {
+function UserModal({ user, onSave, onClose, barangays }) {
   const isEdit = !!user
   const [form, setForm] = useState(user ? {
     full_name: user.full_name, email: user.email, password: '',
-    role: user.role, barangay: user.barangay, is_active: user.is_active,
+    role: user.role, barangay: user.barangay || '', is_active: user.is_active,
   } : { ...EMPTY_FORM })
   const [err, setErr] = useState('')
 
@@ -78,7 +62,6 @@ function UserModal({ user, onSave, onClose }) {
     if (!form.full_name.trim()) return 'Full name is required.'
     if (!form.email.trim()) return 'Email is required.'
     if (!isEdit && !form.password.trim()) return 'Password is required for new users.'
-    if (!form.barangay) return 'Please assign a barangay.'
     return ''
   }
 
@@ -132,14 +115,14 @@ function UserModal({ user, onSave, onClose }) {
           <div>
             <label className="form-label">Role</label>
             <select className="form-input" value={form.role} onChange={e => set('role', e.target.value)}>
-              {ROLES.map(r => <option key={r} value={r}>{ROLE_META[r].label}</option>)}
+              {Object.keys(ROLE_META).map(r => <option key={r} value={r}>{ROLE_META[r].label}</option>)}
             </select>
           </div>
           <div>
             <label className="form-label">Barangay</label>
             <select className="form-input" value={form.barangay} onChange={e => set('barangay', e.target.value)}>
               <option value="">— Select —</option>
-              {BARANGAYS.map(b => <option key={b} value={b}>{b}</option>)}
+              {barangays.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
         </div>
@@ -180,7 +163,9 @@ function UserModal({ user, onSave, onClose }) {
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function UserManagement() {
-  const [users, setUsers] = useState(INITIAL_USERS)
+  const { users, loading, refresh: refreshUsers } = useUsers()
+  const [barangays, setBarangays] = useState([])
+  
   const [roleFilter, setRoleFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [search, setSearch] = useState('')
@@ -189,31 +174,48 @@ export default function UserManagement() {
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
-  function handleSave(form) {
-    if (modal === 'add') {
-      setUsers(prev => [...prev, { ...form, id: Date.now() }])
-      showToast('✅ User created successfully.')
-    } else {
-      setUsers(prev => prev.map(u => u.id === modal.id ? { ...u, ...form } : u))
-      showToast('✅ User updated.')
+  useEffect(() => {
+    api.get('/api/barangays/').then(res => setBarangays(res.data))
+  }, [])
+
+  async function handleSave(form) {
+    try {
+      if (modal === 'add') {
+        await api.post('/api/accounts/users/', form)
+        showToast('✅ User created successfully.')
+      } else {
+        await api.patch(`/api/accounts/users/${modal.id}/`, form)
+        showToast('✅ User updated.')
+      }
+      refreshUsers()
+      setModal(null)
+    } catch (err) {
+      alert(JSON.stringify(err.response?.data || 'Failed to save user'))
     }
-    setModal(null)
   }
 
-  function toggleActive(id) {
-    setUsers(prev => prev.map(u => u.id === id ? { ...u, is_active: !u.is_active } : u))
-    const u = users.find(u => u.id === id)
-    showToast(u?.is_active ? '⛔ Account deactivated.' : '✅ Account activated.')
+  async function toggleActive(u) {
+    try {
+      await api.patch(`/api/accounts/users/${u.id}/`, { is_active: !u.is_active })
+      showToast(u.is_active ? '⛔ Account deactivated.' : '✅ Account activated.')
+      refreshUsers()
+    } catch {
+      showToast('❌ Failed to update status.')
+    }
   }
 
-  function deleteUser(id) {
+  async function deleteUser(id) {
     if (!window.confirm('Delete this user? This cannot be undone.')) return
-    setUsers(prev => prev.filter(u => u.id !== id))
-    showToast('🗑 User removed.')
+    try {
+      await api.delete(`/api/accounts/users/${id}/`)
+      showToast('🗑 User removed.')
+      refreshUsers()
+    } catch {
+      showToast('❌ Failed to delete user.')
+    }
   }
 
-  // Counts
-  const counts = {
+  const counts = useMemo(() => ({
     all: users.length,
     watcher: users.filter(u => u.role === 'watcher').length,
     driver: users.filter(u => u.role === 'driver').length,
@@ -221,17 +223,17 @@ export default function UserManagement() {
     citizen: users.filter(u => u.role === 'citizen').length,
     active: users.filter(u => u.is_active).length,
     inactive: users.filter(u => !u.is_active).length,
-  }
+  }), [users])
 
-  const filtered = users.filter(u => {
+  const filtered = useMemo(() => users.filter(u => {
     const matchRole = roleFilter === 'all' || u.role === roleFilter
     const matchStatus = statusFilter === 'all' || (statusFilter === 'active' ? u.is_active : !u.is_active)
     const matchSearch = !search ||
       u.full_name.toLowerCase().includes(search.toLowerCase()) ||
       u.email.toLowerCase().includes(search.toLowerCase()) ||
-      u.barangay.toLowerCase().includes(search.toLowerCase())
+      (u.barangay_name || '').toLowerCase().includes(search.toLowerCase())
     return matchRole && matchStatus && matchSearch
-  })
+  }), [users, roleFilter, statusFilter, search])
 
   return (
     <DashboardLayout>
@@ -253,6 +255,7 @@ export default function UserManagement() {
           user={modal === 'add' ? null : modal}
           onSave={handleSave}
           onClose={() => setModal(null)}
+          barangays={barangays}
         />
       )}
 
@@ -367,7 +370,9 @@ export default function UserManagement() {
           </div>
 
           {/* Rows */}
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>Loading users...</div>
+          ) : filtered.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px 20px' }}>
               <div style={{ fontSize: 32, marginBottom: 10 }}>👥</div>
               <div style={{ fontWeight: 700, marginBottom: 4 }}>No users found</div>
@@ -406,12 +411,12 @@ export default function UserManagement() {
                 <RoleBadge role={u.role} />
 
                 {/* Barangay */}
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{u.barangay || '—'}</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{u.barangay_name || '—'}</span>
 
                 {/* Active toggle */}
                 <div style={{ display: 'flex', justifyContent: 'center' }}>
                   <div
-                    onClick={() => toggleActive(u.id)}
+                    onClick={() => toggleActive(u)}
                     title={u.is_active ? 'Deactivate' : 'Activate'}
                     style={{
                       width: 36, height: 20, borderRadius: 20, position: 'relative',

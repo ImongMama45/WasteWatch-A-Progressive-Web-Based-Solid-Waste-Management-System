@@ -27,7 +27,7 @@ const MAX_RETRY    = 3
 
 const ENDPOINTS = {
   reports: {
-    url       : '/api/reports/',
+    url       : '/api/watcher/reports/',
     transform : (r) => ({
       waste_type : r.wasteType,
       severity   : r.severity,
@@ -39,11 +39,11 @@ const ENDPOINTS = {
     }),
   },
   analytics_queue: {
-    url       : '/api/analytics/sync/',
+    url       : '/api/analytics/kpi/',
     transform : (r) => r.payload,
   },
   events_queue: {
-    url       : '/api/events/sync/',
+    url       : '/api/watcher/escalations/',
     transform : (r) => r.payload,
   },
 }

@@ -6,11 +6,11 @@
  * Uses existing .form-group / .form-input / .form-label / .btn classes.
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Megaphone, AlertTriangle, Newspaper, Send, Save, ArrowLeft, CheckCircle } from 'lucide-react'
 import DashboardLayout from '../../components/DashboardLayout'
-import { CATEGORIES } from '../news/data/newsData'
+import api from '../../api/client'
 
 const TYPE_OPTIONS = [
   { value: 'announcement', label: 'Announcement',    Icon: Megaphone,     desc: 'Official LGU notices and advisories' },
@@ -24,10 +24,7 @@ const PRIORITY_OPTIONS = [
   { value: 'high',   label: 'High — Urgent' },
 ]
 
-const BARANGAYS = [
-  'City-Wide', 'Barangay 1', 'Barangay 2', 'Barangay 3', 'Barangay 4', 'Cotta',
-  'Gulang-Gulang', 'Ibabang Dupay', 'Isabang', 'Kanlurang Cotta', 'Mayao Crossing',
-]
+const CATEGORIES = ['General', 'Service Updates', 'Community', 'Rankings', 'Emergency']
 
 const CSS = `
 @keyframes cp-pop { 0%{transform:scale(0.92);opacity:0} 100%{transform:scale(1);opacity:1} }
@@ -42,19 +39,24 @@ function inject() { if (_injected) return; _injected = true; const e = document.
 export default function CreateAnnouncementPage() {
   inject()
   const navigate = useNavigate()
+  const [barangays, setBarangays] = useState([])
 
   const [form, setForm] = useState({
     type: 'announcement',
-    category: 'Announcements',
+    category: 'General',
     title: '',
     body: '',
-    barangay: 'City-Wide',
+    barangay: '',
     priority: 'medium',
-    isPinned: false,
-    isFeatured: false,
+    is_pinned: false,
+    is_featured: false,
   })
   const [submitted, setSubmitted] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    api.get('/api/barangays/').then(res => setBarangays(res.data))
+  }, [])
 
   function set(key, val) { setForm(f => ({ ...f, [key]: val })) }
 
@@ -64,11 +66,24 @@ export default function CreateAnnouncementPage() {
       return
     }
     setSaving(true)
-    // REPLACE WITH: api.post('/api/announcements/', { ...form, is_draft: isDraft })
-    await new Promise(r => setTimeout(r, 800))
-    setSaving(false)
-    if (!isDraft) setSubmitted(true)
-    else { alert('Draft saved.'); navigate('/announcements') }
+    try {
+      const endpoint = form.type === 'emergency' ? '/api/news/alerts/' : '/api/news/items/'
+      const payload = { 
+        ...form, 
+        is_active: !isDraft,
+        description: form.body // Backend expects description
+      }
+      if (!payload.barangay) delete payload.barangay // Allow null/empty
+
+      await api.post(endpoint, payload)
+      setSaving(false)
+      if (!isDraft) setSubmitted(true)
+      else { alert('Draft saved.'); navigate('/announcements') }
+    } catch (err) {
+      console.error(err)
+      alert('Failed to save post.')
+      setSaving(false)
+    }
   }
 
   // ── Success state ─────────────────────────────────────────────────────────
@@ -185,7 +200,7 @@ export default function CreateAnnouncementPage() {
                 value={form.category}
                 onChange={e => set('category', e.target.value)}
               >
-                {CATEGORIES.filter(c => c !== 'All').map(c => (
+                {CATEGORIES.map(c => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
@@ -206,14 +221,15 @@ export default function CreateAnnouncementPage() {
           </div>
 
           <div className="form-group" style={{ marginTop: 12, marginBottom: 0 }}>
-            <label className="form-label">Target Barangay</label>
+            <label className="form-label">Target Barangay (optional)</label>
             <select
               className="form-input"
               value={form.barangay}
               onChange={e => set('barangay', e.target.value)}
             >
-              {BARANGAYS.map(b => (
-                <option key={b} value={b}>{b}</option>
+              <option value="">City-Wide</option>
+              {barangays.map(b => (
+                <option key={b.id} value={b.id}>{b.name}</option>
               ))}
             </select>
           </div>
@@ -224,8 +240,8 @@ export default function CreateAnnouncementPage() {
           <div className="form-label" style={{ marginBottom: 12 }}>Publish Options</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {[
-              { key: 'isPinned',   label: 'Pin this post to the top of the feed' },
-              { key: 'isFeatured', label: 'Feature in the top carousel' },
+              { key: 'is_pinned',   label: 'Pin this post to the top of the feed' },
+              { key: 'is_featured', label: 'Feature in the top carousel' },
             ].map(({ key, label }) => (
               <label key={key} style={{
                 display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',

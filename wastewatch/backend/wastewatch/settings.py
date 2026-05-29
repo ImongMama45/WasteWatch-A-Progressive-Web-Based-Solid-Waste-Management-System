@@ -33,6 +33,8 @@ INSTALLED_APPS = [
     'accounts',             # Custom user model + auth
     'watcher',              # Report submission, collection confirmation
     'driver',               # Driver management features
+    'news',                 # News and announcements
+    'analytics',            # Performance metrics and trends
 ]
 
 MIDDLEWARE = [
@@ -69,16 +71,24 @@ WSGI_APPLICATION = 'wastewatch.wsgi.application'
 # ---------------------------------------------------------------------------
 # Database — PostgreSQL
 # ---------------------------------------------------------------------------
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': 'wastewatch_db',
+#         'USER': 'wastewatch_user',
+#         'PASSWORD': 'taequert123',    
+#         'HOST': 'localhost',
+#         'PORT': '5432',
+#     }
+# }
+
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'wastewatch_db',
-        'USER': 'wastewatch_user',
-        'PASSWORD': 'taequert123',    
-        'HOST': 'localhost',
-        'PORT': '5432',
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
+
 
 # ---------------------------------------------------------------------------
 # Custom User Model — tells Django to use our accounts.User instead of default

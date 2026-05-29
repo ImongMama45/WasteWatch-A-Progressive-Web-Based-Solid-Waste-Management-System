@@ -19,8 +19,26 @@ from django.views.decorators.csrf   import ensure_csrf_cookie
 from django.contrib.auth            import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 
-from .models  import User, Barangay
-from .forms   import RegistrationForm
+from rest_framework import viewsets, permissions
+from .models import User, Barangay
+from .serializers import UserSerializer, BarangaySerializer
+
+
+class UserViewSet(viewsets.ModelViewSet):
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+    permission_classes = [permissions.IsAuthenticated] # In a real app, restrict more
+
+    def get_queryset(self):
+        role = self.request.query_params.get('role')
+        if role:
+            return self.queryset.filter(role=role)
+        return self.queryset
+
+class BarangayViewSet(viewsets.ModelViewSet):
+    queryset = Barangay.objects.all()
+    serializer_class = BarangaySerializer
+    permission_classes = [permissions.AllowAny]
 
 
 # ── Helper: serialize a User to a safe dict ──────────────────────────────────
@@ -102,3 +120,20 @@ def api_register_view(request):
 def barangay_list_view(request):
     barangays = list(Barangay.objects.values('id', 'name').order_by('name'))
     return JsonResponse(barangays, safe=False)
+
+
+# ── GET /api/auth/users/ ──────────────────────────────────────────────────────
+@require_http_methods(['GET'])
+def user_list_view(request):
+    # Basic protection: only admins can see all users
+    # In a real app, you'd use a better check
+    if not request.user.is_authenticated or request.user.role != 'admin':
+        return JsonResponse({'error': 'Unauthorized'}, status=403)
+
+    role_filter = request.GET.get('role')
+    users = User.objects.all()
+    if role_filter:
+        users = users.filter(role=role_filter)
+    
+    data = [user_to_dict(u) for u in users]
+    return JsonResponse(data, safe=False)

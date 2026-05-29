@@ -3,45 +3,12 @@
  * -------------------
  * Public analytics (all roles). Material Symbols icons.
  * Design matches WasteWatch .card / .card-dark system.
- *
- * Sections:
- *   1. Waste Generation Analytics
- *   2. Barangay Rankings
- *   3. Barangay Map
- *   4. Illegal Dumping Hotspots
  */
 
 import { useState } from 'react'
 import BarangayRankingCard from './BarangayRankingCard'
 import HotspotMap from './HotspotMap'
-import { TOP_BARANGAYS } from '../../components/carousel/RankingModal'
-
-// ─── Mock data ────────────────────────────────────────────────────────────────
-// REPLACE WITH: api.get('/api/analytics/global/waste/')
-const WASTE_DAILY = [
-  { label: 'Mon', organic: 380, residual: 210, general: 590 },
-  { label: 'Tue', organic: 420, residual: 230, general: 650 },
-  { label: 'Wed', organic: 290, residual: 180, general: 470 },
-  { label: 'Thu', organic: 510, residual: 260, general: 770 },
-  { label: 'Fri', organic: 480, residual: 250, general: 730 },
-  { label: 'Sat', organic: 340, residual: 190, general: 530 },
-  { label: 'Sun', organic: 220, residual: 140, general: 360 },
-]
-const WASTE_MONTHLY = [
-  { label: 'Jan', kg: 8400 }, { label: 'Feb', kg: 7800 }, { label: 'Mar', kg: 9200 },
-  { label: 'Apr', kg: 8900 }, { label: 'May', kg: 9800 }, { label: 'Jun', kg: 8100 },
-]
-
-// REPLACE WITH: api.get('/api/analytics/hotspots/')
-const HOTSPOTS = [
-  { id: 1, location: 'Near Public Market, Cotta',  type: 'Illegal Dumping', reports: 12, reportsWeek: 4, resolutionDays: 2.1, severity: 'critical', resolved: 8  },
-  { id: 2, location: 'Riverside, Kanlurang Cotta', type: 'Overflow',        reports: 9,  reportsWeek: 3, resolutionDays: 1.8, severity: 'high',     resolved: 5  },
-  { id: 3, location: 'Gulang-Gulang Crossing',     type: 'Illegal Dumping', reports: 8,  reportsWeek: 2, resolutionDays: 3.2, severity: 'high',     resolved: 4  },
-  { id: 4, location: 'Zone 5, Purok 7',            type: 'Missed Pickup',   reports: 6,  reportsWeek: 1, resolutionDays: 1.0, severity: 'medium',   resolved: 6  },
-  { id: 5, location: 'Isabang Market Street',      type: 'Overflow',        reports: 5,  reportsWeek: 2, resolutionDays: 2.5, severity: 'medium',   resolved: 3  },
-]
-
-const PROBLEMATIC = TOP_BARANGAYS.slice().reverse().slice(0, 5)
+import { useAnalytics } from '../../hooks/useAnalytics'
 
 // ─── Shared card shell ────────────────────────────────────────────────────────
 function GCard({ children }) {
@@ -143,6 +110,7 @@ function StackedChart({ data }) {
 
 // ─── SVG line chart ───────────────────────────────────────────────────────────
 function LineChart({ data, valueKey = 'general' }) {
+  if (!data || data.length < 2) return <div style={{ height: 72, background: 'var(--surface-2)', borderRadius: 8 }} />
   const W = 280, H = 72, P = 12
   const vals = data.map(d => d[valueKey] || 0)
   const max  = Math.max(...vals, 1)
@@ -173,18 +141,12 @@ function LineChart({ data, valueKey = 'general' }) {
 }
 
 // ─── Waste Section ────────────────────────────────────────────────────────────
-function WasteSection() {
+function WasteSection({ data, stats }) {
   const [chartType, setChartType] = useState('bar')
   const [period, setPeriod]       = useState('week')
-  const data = period === 'week' ? WASTE_DAILY : WASTE_MONTHLY
-
-  const totalKg      = WASTE_DAILY.reduce((a, d) => a + d.general, 0)
-  const totalOrganic = WASTE_DAILY.reduce((a, d) => a + d.organic,  0)
-  const totalRes     = WASTE_DAILY.reduce((a, d) => a + d.residual, 0)
 
   return (
     <GCard>
-      {/* Header row */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
         <SectionHead icon="delete_sweep" title="Waste Generation" subtitle="Daily · Weekly · Monthly data for Lucena City" />
         <div style={{ display: 'flex', gap: 3, background: 'var(--bg)', borderRadius: 8, padding: 3 }}>
@@ -200,14 +162,12 @@ function WasteSection() {
         </div>
       </div>
 
-      {/* KPI strip */}
       <KpiStrip items={[
-        { label: 'Total Waste', value: `${(totalKg / 1000).toFixed(1)}t`, color: 'var(--text)' },
-        { label: 'Organic',     value: `${(totalOrganic / 1000).toFixed(1)}t`, color: 'var(--accent)' },
-        { label: 'Residual',    value: `${(totalRes / 1000).toFixed(1)}t`, color: 'var(--info)' },
+        { label: 'Total Reports', value: stats.totalWaste, color: 'var(--text)' },
+        { label: 'Organic (est)',     value: stats.totalOrganic, color: 'var(--accent)' },
+        { label: 'Residual (est)',    value: stats.totalResidual, color: 'var(--info)' },
       ]} />
 
-      {/* Chart type tabs */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
         {[
           { key: 'bar',     label: 'Bar',     icon: 'bar_chart' },
@@ -228,10 +188,9 @@ function WasteSection() {
         ))}
       </div>
 
-      {/* Charts */}
-      {chartType === 'bar'     && <BarChart     data={data} valueKey={period === 'month' ? 'kg' : 'general'} />}
-      {chartType === 'stacked' && <StackedChart data={WASTE_DAILY} />}
-      {chartType === 'line'    && <LineChart    data={WASTE_DAILY} valueKey="general" />}
+      {chartType === 'bar'     && <BarChart     data={data} valueKey="general" />}
+      {chartType === 'stacked' && <StackedChart data={data} />}
+      {chartType === 'line'    && <LineChart    data={data} valueKey="general" />}
 
       {chartType === 'stacked' && (
         <div style={{ display: 'flex', gap: 12, marginTop: 8, fontSize: 10, color: 'var(--text-muted)' }}>
@@ -244,7 +203,6 @@ function WasteSection() {
         </div>
       )}
 
-      {/* Forecast note */}
       <div style={{
         marginTop: 14, padding: '9px 12px', borderRadius: 8,
         background: 'rgba(231,76,60,.06)', border: '1px solid rgba(231,76,60,.2)',
@@ -258,16 +216,15 @@ function WasteSection() {
 }
 
 // ─── Rankings Section ─────────────────────────────────────────────────────────
-function RankingsSection({ userBarangay }) {
+function RankingsSection({ rankings, problematic, userBarangay }) {
   const [showProb, setShowProb] = useState(false)
   return (
     <GCard>
       <SectionHead icon="leaderboard" title="Barangay Cleanliness Rankings" subtitle="Ranked by compliance ratio · Updated daily" />
 
-      {/* Toggle */}
       <div style={{ display: 'flex', gap: 3, background: 'var(--bg)', borderRadius: 8, padding: 3, width: 'fit-content', marginBottom: 14 }}>
         {[
-          { key: false, label: 'Top 10 Cleanest', icon: 'emoji_events' },
+          { key: false, label: 'Top Cleanest', icon: 'emoji_events' },
           { key: true,  label: 'Problematic Areas', icon: 'warning' },
         ].map(t => (
           <button key={String(t.key)} onClick={() => setShowProb(t.key)} style={{
@@ -285,54 +242,41 @@ function RankingsSection({ userBarangay }) {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {(showProb ? PROBLEMATIC : TOP_BARANGAYS).map((b, i) => (
+        {(showProb ? problematic : rankings).map((b, i) => (
           <BarangayRankingCard
-            key={b.rank}
+            key={b.name}
             brgy={b}
-            rank={showProb ? TOP_BARANGAYS.length - i : b.rank}
+            rank={showProb ? '!' : i + 1}
             isUser={userBarangay && b.name.toLowerCase() === userBarangay.toLowerCase()}
           />
         ))}
       </div>
-
-      {!showProb && (
-        <div style={{
-          marginTop: 12, padding: '9px 12px', borderRadius: 8,
-          background: 'rgba(46,204,113,.06)', border: '1px solid rgba(46,204,113,.2)',
-          fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6,
-        }}>
-          <span className="msi" style={{ fontSize: 15, color: 'var(--accent)' }}>info</span>
-          Rankings reset monthly. Scores = waste generated vs. barangay population.
-        </div>
-      )}
     </GCard>
   )
 }
 
 // ─── Hotspots Section ─────────────────────────────────────────────────────────
-function HotspotsSection() {
+function HotspotsSection({ hotspots, stats }) {
   const SEV = {
     critical: { color: 'var(--danger)',   bg: 'rgba(231,76,60,.08)',  border: 'rgba(231,76,60,.25)'  },
     high:     { color: 'var(--warning)',  bg: 'rgba(243,156,18,.08)', border: 'rgba(243,156,18,.25)' },
     medium:   { color: 'var(--text-muted)',bg:'rgba(0,0,0,.04)',      border: 'var(--border)'        },
+    low:      { color: 'var(--text-muted)',bg:'rgba(0,0,0,.04)',      border: 'var(--border)'        },
   }
-  const totalReports = HOTSPOTS.reduce((a, h) => a + h.reports, 0)
-  const totalResolved = HOTSPOTS.reduce((a, h) => a + h.resolved, 0)
-  const avgDays = (HOTSPOTS.reduce((a, h) => a + h.resolutionDays, 0) / HOTSPOTS.length).toFixed(1)
 
   return (
     <GCard>
       <SectionHead icon="local_fire_department" title="Illegal Dumping Hotspots" subtitle="Most reported areas · Time-based tracking" />
       <KpiStrip items={[
-        { label: 'Reports This Week', value: HOTSPOTS.reduce((a, h) => a + h.reportsWeek, 0), color: 'var(--danger)' },
-        { label: 'Resolution Rate',   value: `${Math.round((totalResolved / totalReports) * 100)}%`, color: 'var(--accent)' },
-        { label: 'Avg Response',      value: `${avgDays}d`, color: 'var(--warning)' },
+        { label: 'This Week', value: stats.reportsThisWeek, color: 'var(--danger)' },
+        { label: 'Resolution',   value: `${stats.resolutionRate}%`, color: 'var(--accent)' },
+        { label: 'Avg Resp',      value: `${stats.avgResponse}d`, color: 'var(--warning)' },
       ]} />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {HOTSPOTS.map((h, i) => {
-          const sv = SEV[h.severity]
-          const resRate = Math.round((h.resolved / h.reports) * 100)
+        {hotspots.slice(0, 5).map((h, i) => {
+          const sv = SEV[h.severity] || SEV.medium
+          const resRate = Math.round((h.resolved / (h.reports || 1)) * 100)
           return (
             <div key={h.id} style={{
               background: 'var(--surface)',
@@ -340,7 +284,6 @@ function HotspotsSection() {
               borderRadius: 'var(--radius)', padding: '12px 14px',
               display: 'flex', alignItems: 'flex-start', gap: 10,
             }}>
-              {/* Rank */}
               <div style={{
                 width: 28, height: 28, borderRadius: 7, flexShrink: 0,
                 background: sv.bg, display: 'flex', alignItems: 'center',
@@ -360,7 +303,6 @@ function HotspotsSection() {
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
                   {h.type} · {h.reports} total reports · {h.reportsWeek} this week
                 </div>
-                {/* Resolution bar */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ flex: 1, height: 4, borderRadius: 20, background: 'var(--border)', overflow: 'hidden' }}>
                     <div style={{ width: `${resRate}%`, height: '100%', background: 'var(--accent)', borderRadius: 20 }} />
@@ -369,10 +311,6 @@ function HotspotsSection() {
                     {resRate}% resolved
                   </span>
                 </div>
-              </div>
-
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0, textAlign: 'right' }}>
-                {h.resolutionDays}d avg
               </div>
             </div>
           )
@@ -394,12 +332,16 @@ function MapSection({ userBarangay }) {
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 export default function GlobalInsights({ userBarangay }) {
+  const { data, loading } = useAnalytics()
+
+  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Loading analytics...</div>
+
   return (
     <>
-      <WasteSection />
-      <RankingsSection userBarangay={userBarangay} />
+      <WasteSection data={data.wasteDaily} stats={data.stats} />
+      <RankingsSection rankings={data.rankings} problematic={data.problematic} userBarangay={userBarangay} />
       <MapSection userBarangay={userBarangay} />
-      <HotspotsSection />
+      <HotspotsSection hotspots={data.hotspots} stats={data.stats} />
     </>
   )
 }

@@ -3,11 +3,55 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 
+class TruckStatus(models.TextChoices):
+    ACTIVE = 'active', 'Active'
+    MAINTENANCE = 'maintenance', 'Maintenance'
+    INACTIVE = 'inactive', 'Inactive'
+
+class Truck(models.Model):
+    plate_number = models.CharField(max_length=20, unique=True)
+    model = models.CharField(max_length=100)
+    status = models.CharField(max_length=20, choices=TruckStatus.choices, default=TruckStatus.ACTIVE)
+    driver = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_truck')
+    crew = models.ManyToManyField(User, related_name='crew_trucks', blank=True)
+    zone = models.CharField(max_length=100, blank=True)
+    current_capacity = models.IntegerField(default=0) # 0-100%
+    last_service = models.DateField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.plate_number} ({self.model})"
+
+class DumpsiteType(models.TextChoices):
+    LANDFILL = 'landfill', 'Landfill'
+    DUMPSITE = 'dumpsite', 'Open Dumpsite'
+    TRANSFER = 'transfer', 'Transfer Station'
+    COMPOSTING = 'composting', 'Composting Area'
+
+class Dumpsite(models.Model):
+    name = models.CharField(max_length=100)
+    type = models.CharField(max_length=20, choices=DumpsiteType.choices, default=DumpsiteType.DUMPSITE)
+    barangay = models.ForeignKey('accounts.Barangay', on_delete=models.CASCADE, related_name='dumpsites')
+    capacity_used = models.IntegerField(default=0) # 0-100%
+    notes = models.TextField(blank=True)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+
+    def __str__(self):
+        return self.name
+
 class CollectionSchedule(models.Model):
+    truck = models.ForeignKey(Truck, on_delete=models.SET_NULL, null=True, blank=True, related_name='schedules')
     driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='collection_schedules')
-    date = models.DateField()
+    barangay = models.ForeignKey('accounts.Barangay', on_delete=models.CASCADE, related_name='collection_schedules', null=True)
+    area = models.CharField(max_length=255, blank=True)
     start_time = models.TimeField()
     end_time = models.TimeField()
+    days = models.CharField(max_length=100, help_text="e.g. Mon, Wed, Fri", blank=True)
+    frequency = models.CharField(max_length=100, blank=True)
+    
+    # Specific date if it's a one-time thing, otherwise can be null for recurring
+    date = models.DateField(null=True, blank=True)
+
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
         ('COMPLETED', 'Completed'),
@@ -16,7 +60,7 @@ class CollectionSchedule(models.Model):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
 
     def __str__(self):
-        return f"Schedule {self.id} for {self.driver}" 
+        return f"Schedule {self.id} - {self.barangay.name if self.barangay else 'City-wide'}"
 
 class RouteAssignment(models.Model):
     driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='route_assignments')

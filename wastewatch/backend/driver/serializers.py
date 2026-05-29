@@ -1,5 +1,7 @@
 from rest_framework import serializers
 from .models import (
+    Truck,
+    Dumpsite,
     CollectionSchedule,
     RouteAssignment,
     PickupStatus,
@@ -7,6 +9,26 @@ from .models import (
     CompletionReport,
     DriverNotification,
 )
+
+class TruckSerializer(serializers.ModelSerializer):
+    driver_name = serializers.CharField(source='driver.full_name', read_only=True)
+    crew_names = serializers.SlugRelatedField(
+        many=True,
+        read_only=True,
+        slug_field='full_name',
+        source='crew'
+    )
+    
+    class Meta:
+        model = Truck
+        fields = '__all__'
+
+class DumpsiteSerializer(serializers.ModelSerializer):
+    barangay_name = serializers.CharField(source='barangay.name', read_only=True)
+    
+    class Meta:
+        model = Dumpsite
+        fields = '__all__'
 
 class CollectionScheduleSerializer(serializers.ModelSerializer):
     class Meta:

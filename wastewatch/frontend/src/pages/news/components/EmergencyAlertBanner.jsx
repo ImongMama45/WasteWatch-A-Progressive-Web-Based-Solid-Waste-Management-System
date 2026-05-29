@@ -7,7 +7,6 @@
 
 import { useState } from 'react'
 import { ShieldAlert, X } from 'lucide-react'
-import { EMERGENCY_ALERTS } from '../data/newsData'
 
 const CSS = `
 @keyframes ea-pulse {
@@ -28,7 +27,7 @@ function inject() {
   const el = document.createElement('style'); el.textContent = CSS; document.head.appendChild(el)
 }
 
-export default function EmergencyAlertBanner({ alerts = EMERGENCY_ALERTS }) {
+export default function EmergencyAlertBanner({ alerts = [] }) {
   inject()
   const [dismissed, setDismissed] = useState([])
   const visible = alerts.filter(a => !dismissed.includes(a.id))

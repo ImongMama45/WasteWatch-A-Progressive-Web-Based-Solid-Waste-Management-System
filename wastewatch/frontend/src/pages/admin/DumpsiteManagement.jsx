@@ -9,16 +9,12 @@
  * Uses same Leaflet CDN approach as MapView.jsx
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import DashboardLayout from '../../components/DashboardLayout'
+import { useDumpsites } from '../../hooks/useDumpsites'
+import api from '../../api/client'
 
 const LUCENA_CENTER = [13.9373, 121.617]
-
-const BARANGAYS = [
-  'Isabang', 'Cotta', 'Kanlurang Cotta', 'Ibabang Dupay',
-  'Gulang-Gulang', 'Mayao Crossing', 'Barangay 1', 'Barangay 2',
-  'Barangay 3', 'Ilayang Dupay',
-]
 
 const TYPES = [
   { value: 'landfill',  label: 'Landfill',         emoji: '🏔️', color: '#e74c3c' },
@@ -28,12 +24,6 @@ const TYPES = [
 ]
 
 const typeMap = Object.fromEntries(TYPES.map(t => [t.value, t]))
-
-const INITIAL_SITES = [
-  { id: 1, name: 'Main Landfill', type: 'landfill',  barangay: 'Gulang-Gulang', capacity: 82, notes: 'Primary city landfill', lat: 13.9295, lng: 121.623 },
-  { id: 2, name: 'Cotta Transfer Station', type: 'transfer', barangay: 'Cotta', capacity: 55, notes: 'Mid-city transfer point', lat: 13.9345, lng: 121.6085 },
-  { id: 3, name: 'Isabang Composting', type: 'composting', barangay: 'Isabang', capacity: 30, notes: 'Organic waste composting', lat: 13.943, lng: 121.614 },
-]
 
 const EMPTY_FORM = { name: '', type: 'dumpsite', barangay: '', capacity: '', notes: '' }
 
@@ -60,7 +50,7 @@ function pendingMarkerHtml() {
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 
-function SiteModal({ site, coords, onSave, onClose }) {
+function SiteModal({ site, coords, onSave, onClose, barangays }) {
   const isEdit = !!site
   const [form, setForm] = useState(site ? {
     name: site.name, type: site.type, barangay: site.barangay,
@@ -125,7 +115,7 @@ function SiteModal({ site, coords, onSave, onClose }) {
             <label className="form-label">Barangay</label>
             <select className="form-input" value={form.barangay} onChange={e => set('barangay', e.target.value)}>
               <option value="">— Select —</option>
-              {BARANGAYS.map(b => <option key={b} value={b}>{b}</option>)}
+              {barangays.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
         </div>
@@ -177,8 +167,10 @@ export default function DumpsiteManagement() {
   const markersRef     = useRef({})       // id → leaflet marker
   const pendingRef     = useRef(null)     // temp marker while modal is open
 
+  const { sites, loading, saveSite, deleteSite: apiDeleteSite } = useDumpsites()
+  const [barangays, setBarangays] = useState([])
+
   const [mapReady,   setMapReady]   = useState(false)
-  const [sites,      setSites]      = useState(INITIAL_SITES)
   const [modal,      setModal]      = useState(null)  // null | 'add' | site obj
   const [pendingCoords, setPendingCoords] = useState(null)
   const [selected,   setSelected]   = useState(null)
@@ -192,6 +184,8 @@ export default function DumpsiteManagement() {
 
   // ── Load Leaflet CDN ───────────────────────────────────────────────────────
   useEffect(() => {
+    api.get('/api/barangays/').then(res => setBarangays(res.data))
+
     if (window.L) { setMapReady(true); return }
     const link = document.createElement('link')
     link.rel = 'stylesheet'
@@ -248,10 +242,11 @@ export default function DumpsiteManagement() {
       const icon = L.divIcon({ html: markerHtml(site.type), className: '', iconSize: [36, 42], iconAnchor: [18, 42] })
       const marker = L.marker([site.lat, site.lng], { icon }).addTo(map)
       const t = typeMap[site.type] || TYPES[1]
+      const bName = typeof site.barangay === 'object' ? site.barangay.name : site.barangay_name
       marker.bindPopup(`
         <div style="font-family:sans-serif;min-width:160px;">
           <strong style="color:${t.color}">${t.emoji} ${site.name}</strong><br/>
-          <span style="color:#555;font-size:11px;">${t.label} · ${site.barangay}</span><br/>
+          <span style="color:#555;font-size:11px;">${t.label} · ${bName || 'Unknown'}</span><br/>
           <span style="color:#888;font-size:11px;">Capacity: ${site.capacity}% full</span>
         </div>`)
       marker.on('click', () => setSelected(site))
@@ -267,26 +262,31 @@ export default function DumpsiteManagement() {
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
-  function handleSave(form) {
+  async function handleSave(form) {
+    let res
     if (modal === 'add') {
       const [lat, lng] = pendingCoords
-      const newSite = { ...form, id: Date.now(), lat, lng, capacity: Number(form.capacity) || 0 }
-      setSites(prev => [...prev, newSite])
-      if (pendingRef.current) { try { mapInstance.current.removeLayer(pendingRef.current) } catch {} pendingRef.current = null }
-      setPendingCoords(null)
-      showToast('✅ Site added successfully.')
+      res = await saveSite(null, { ...form, lat, lng })
+      if (res.ok) {
+        if (pendingRef.current) { try { mapInstance.current.removeLayer(pendingRef.current) } catch {} pendingRef.current = null }
+        setPendingCoords(null)
+        showToast('✅ Site added successfully.')
+      }
     } else {
-      setSites(prev => prev.map(s => s.id === modal.id ? { ...s, ...form, capacity: Number(form.capacity) || 0 } : s))
-      showToast('✅ Site updated.')
+      res = await saveSite(modal.id, form)
+      if (res.ok) showToast('✅ Site updated.')
     }
-    setModal(null)
+    if (res.ok) setModal(null)
+    else alert(JSON.stringify(res.error))
   }
 
-  function deleteSite(id) {
+  async function deleteSite(id) {
     if (!window.confirm('Remove this site from the map?')) return
-    setSites(prev => prev.filter(s => s.id !== id))
-    if (selected?.id === id) setSelected(null)
-    showToast('🗑 Site removed.')
+    const res = await apiDeleteSite(id)
+    if (res.ok) {
+      if (selected?.id === id) setSelected(null)
+      showToast('🗑 Site removed.')
+    }
   }
 
   function flyTo(site) {
@@ -295,7 +295,9 @@ export default function DumpsiteManagement() {
     setSelected(site)
   }
 
-  const filtered = typeFilter === 'all' ? sites : sites.filter(s => s.type === typeFilter)
+  const filtered = useMemo(() => 
+    typeFilter === 'all' ? sites : sites.filter(s => s.type === typeFilter)
+  , [sites, typeFilter])
 
   return (
     <DashboardLayout>
@@ -457,7 +459,7 @@ export default function DumpsiteManagement() {
                         {site.name}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                        {t.label} · {site.barangay}
+                        {t.label} · {bName || 'Unknown'}
                       </div>
                     </div>
                     <span style={{
