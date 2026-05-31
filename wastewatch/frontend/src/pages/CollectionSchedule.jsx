@@ -32,7 +32,34 @@ export default function CollectionSchedule() {
   const todaySchedule = schedule.find(s => s.isToday)
 
   const showDetails = ['barangay_official', 'watcher', 'driver', 'admin'].includes(role)
-  const isDriver = role === 'driver'
+  const isDriver = role === 'driver'  
+
+  // Add this import at the top with your other useState import
+  // useState is already imported, just add this helper:
+
+  // ── Add this inside the component, after the existing state declarations ──────
+  const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
+
+  const today = new Date()
+  const [calMonth, setCalMonth] = useState(today.getMonth())
+  const [calYear,  setCalYear]  = useState(today.getFullYear())
+
+  // Days that have collection for this barangay
+  const collectionDays = schedule.map(s => s.day) // e.g. ['Monday', 'Thursday']
+  const DAY_NAME_TO_NUM = { Sunday:0, Monday:1, Tuesday:2, Wednesday:3, Thursday:4, Friday:5, Saturday:6 }
+  const collectionDayNums = collectionDays.map(d => DAY_NAME_TO_NUM[d])
+
+  // Build calendar grid
+  function buildCalendar(month, year) {
+    const firstDay = new Date(year, month, 1).getDay()
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    const cells = []
+    for (let i = 0; i < firstDay; i++) cells.push(null)
+    for (let d = 1; d <= daysInMonth; d++) cells.push(d)
+    return cells
+  }
+  const cells = buildCalendar(calMonth, calYear)
 
   return (
     <div>
@@ -58,6 +85,110 @@ export default function CollectionSchedule() {
           </div>
           <p className="text-muted text-sm">View garbage collection schedules and routes for your area.</p>
         </div>
+
+        
+
+        {/* ── Mini Calendar ── */}
+        <div className="sched-card" style={{ marginBottom: 16, padding: '16px 20px' }}>
+          {/* Month nav */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            <button
+              onClick={() => {
+                if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1) }
+                else setCalMonth(m => m - 1)
+              }}
+              style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 8, width: 30, height: 30, cursor: 'pointer', color: 'var(--text)', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >‹</button>
+
+            <span style={{ fontWeight: 800, fontSize: 14, fontFamily: 'var(--font-head)' }}>
+              {MONTHS[calMonth]} {calYear}
+            </span>
+
+            <button
+              onClick={() => {
+                if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1) }
+                else setCalMonth(m => m + 1)
+              }}
+              style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 8, width: 30, height: 30, cursor: 'pointer', color: 'var(--text)', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >›</button>
+          </div>
+
+          {/* Day headers */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, marginBottom: 6 }}>
+            {DAYS.map(d => (
+              <div key={d} style={{ textAlign: 'center', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', padding: '2px 0', letterSpacing: '0.04em' }}>
+                {d}
+              </div>
+            ))}
+          </div>
+
+          {/* Date cells */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+            {cells.map((day, idx) => {
+              if (!day) return <div key={`empty-${idx}`} />
+
+              const cellDate   = new Date(calYear, calMonth, day)
+              const dayOfWeek  = cellDate.getDay()
+              const isToday    = day === today.getDate() && calMonth === today.getMonth() && calYear === today.getFullYear()
+              const hasPickup  = collectionDayNums.includes(dayOfWeek)
+              const isPast     = cellDate < new Date(today.getFullYear(), today.getMonth(), today.getDate())
+
+              return (
+                <div
+                  key={day}
+                  style={{
+                    textAlign:      'center',
+                    padding:        '6px 2px',
+                    borderRadius:   8,
+                    fontSize:       12,
+                    fontWeight:     isToday ? 800 : hasPickup ? 700 : 400,
+                    position:       'relative',
+                    background:     isToday
+                      ? '#2ecc71'
+                      : hasPickup
+                        ? 'rgba(46,204,113,0.1)'
+                        : 'transparent',
+                    color:          isToday
+                      ? '#0d1117'
+                      : hasPickup
+                        ? '#2ecc71'
+                        : isPast
+                          ? 'var(--text-muted)'
+                          : 'var(--text)',
+                    border:         hasPickup && !isToday
+                      ? '1px solid rgba(46,204,113,0.3)'
+                      : '1px solid transparent',
+                    opacity:        isPast && !isToday ? 0.5 : 1,
+                  }}
+                >
+                  {day}
+                  {/* Small dot for pickup days */}
+                  {hasPickup && !isToday && (
+                    <div style={{
+                      width: 4, height: 4, borderRadius: '50%',
+                      background: '#2ecc71',
+                      margin: '2px auto 0',
+                    }} />
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Legend */}
+          <div style={{ display: 'flex', gap: 16, marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
+              <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#2ecc71' }} />
+              Today
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
+              <div style={{ width: 10, height: 10, borderRadius: 3, background: 'rgba(46,204,113,0.15)', border: '1px solid rgba(46,204,113,0.4)' }} />
+              Collection Day
+            </div>
+          </div>
+        </div>
+
+        {/* 2. Today's Schedule (Priority Section) */}
 
         {/* 2. Today's Schedule (Priority Section) */}
         <div className="sched-card" style={{ border: todaySchedule ? '2px solid rgba(46,204,113,0.5)' : '1px solid var(--border)', position: 'relative', overflow: 'hidden' }}>

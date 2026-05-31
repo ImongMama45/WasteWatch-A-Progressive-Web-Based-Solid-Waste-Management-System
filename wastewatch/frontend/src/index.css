@@ -1434,6 +1434,57 @@ select.form-input {
   gap: 2px;
 }
 
+.desktop-sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0;
+}
+
+.desktop-sidebar-group-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 9px 12px 7px;
+  border-radius: 8px;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  transition: background .15s, color .15s;
+}
+
+.desktop-sidebar-group-toggle:hover,
+.desktop-sidebar-group.active .desktop-sidebar-group-toggle {
+  background: rgba(46, 204, 113, 0.05);
+  color: var(--text);
+}
+
+.desktop-sidebar-chevron {
+  font-size: 12px;
+  line-height: 1;
+  transform: rotate(-90deg);
+  transition: transform .16s ease;
+}
+
+.desktop-sidebar-chevron.open {
+  transform: rotate(0deg);
+}
+
+.desktop-sidebar-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 8px;
+}
+
 .desktop-sidebar-item {
   display: flex;
   align-items: center;
@@ -1637,4 +1688,9 @@ select.form-input {
     max-width: 1400px;
     padding: 28px 32px 40px;
   }
+}
+
+.desktop-sidebar-item--nested {
+  padding-left: 12px;
+  font-size: 13px;
 }

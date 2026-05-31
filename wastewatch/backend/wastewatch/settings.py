@@ -145,8 +145,17 @@ lan_ip = get_lan_ip()
 # ---------------------------------------------------------------------------
 # CORS — allow React Vite dev server to call Django API
 # ---------------------------------------------------------------------------
+
+AUTHENTICATION_BACKENDS = [
+    'accounts.backends.EmailBackend',
+]
+
+SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE    = 'Lax'
+CSRF_COOKIE_HTTPONLY    = False
+
 CORS_ALLOWED_ORIGINS = [
-    
     'http://localhost:3000',   # Vite default dev port
     'http://127.0.0.1:3000',
     'https://localhost:3000',

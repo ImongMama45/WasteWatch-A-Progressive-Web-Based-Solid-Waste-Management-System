@@ -32,7 +32,6 @@ import Profile from './pages/Profile'
 import CollectionSchedule from './pages/CollectionSchedule'
 import AnalyticsTabs from './pages/analytics/AnalyticsTabs'
 import NewsPage from './pages/news/NewsPage'
-import CreateAnnouncementPage from './pages/admin/CreateAnnouncementPage'
 
 // These may not exist yet — uncomment when ready:
 import TruckManagement from './pages/admin/TruckManagement'
@@ -96,12 +95,7 @@ export default function App() {
             <PrivateRoute><AnalyticsTabs /></PrivateRoute>
           } />
 
-
-          <Route path="/admin/news/create" element={
-            <PrivateRoute><CreateAnnouncementPage /></PrivateRoute>
-          } />
-
-
+ 
           {/* BARANGAY OFFICIAL PAGE */}
           <Route path="/brgy/escalate" element={
             <PrivateRoute><EscalateToAdmin /></PrivateRoute>

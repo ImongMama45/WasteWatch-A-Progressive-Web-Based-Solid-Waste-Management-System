@@ -225,7 +225,6 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
 
         {/* Header */}
         <div className="orb-header">
-          <div className="orb-header__icon">🗑️</div>
           <div className="orb-header__text">
             <h2 className="orb-header__title">Report a Problem</h2>
             <p className="orb-header__sub">Saved offline · syncs when connected</p>
@@ -425,14 +424,14 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
               <span style={{ color: '#64748b' }}>📍 {location ? 'Located' : 'No GPS'}</span>
               <span className="orb-summary__sep">·</span>
               <span style={{ color: photo ? '#22c55e' : '#ef4444' }}>
-                {photo ? '📷 Photo ✓' : '📷 No Photo'}
+                {photo ? 'Photo ✓' : 'No Photo'}
               </span>
             </div>
 
             {/* ── Photo required notice (shown when no photo yet) ── */}
             {!photo && (
               <div className="orb-photo-required-banner">
-                📸 Mag-attach ng larawan para ma-submit ang report
+                Mag-attach ng larawan para ma-submit ang report
               </div>
             )}
 
@@ -447,7 +446,7 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
                 ? <><span className="orb-spinner" /> Saving…</>
                 : !photo
                   ? '📷 Mag-attach ng Photo muna'
-                  : '📤 Submit Report (Offline)'}
+                  : 'Submit Report (Offline)'}
             </button>
 
           </div>

@@ -48,14 +48,20 @@ export function AuthProvider({ children }) {
   const [barangays, setBarangays] = useState(readBrgyCache)
 
   // ── Session check ─────────────────────────────────────────────────────────
+  // Replace just this useEffect in AuthProvider:
   useEffect(() => {
     api.get('/api/auth/me/')
       .then(res => {
         setUser(res.data)
         saveUserCache(res.data)
       })
-      .catch(() => {
-        // Keep cached user for offline display; /me/ 401 clears it below
+      .catch(err => {
+        if (err.response?.status === 401) {
+          // Server says not logged in — clear stale cache
+          setUser(null)
+          saveUserCache(null)
+        }
+        // Network error (offline) → keep cached user
       })
       .finally(() => setLoading(false))
   }, [])

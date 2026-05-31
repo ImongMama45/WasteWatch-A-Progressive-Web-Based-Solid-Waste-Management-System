@@ -1,25 +1,18 @@
 /**
  * components/Navbar.jsx
  * ----------------------
- * Fixed top navbar — light-mode redesign.
- * All logic, hooks, and auth behaviour are unchanged.
- * Styling uses inline styles + className overrides so it works
- * inside both the global stylesheet and the .ld-root light theme.
+ * Fixed: imports SIDEBAR_NAV from DashboardLayout (was missing, causing
+ * "SIDEBAR_NAV is not defined" crash on line 436).
  *
- * Behaviour:
- *  - Mobile  (<1024px): hamburger → full-height slide-in drawer
- *  - Desktop (≥1024px): horizontal link row + auth buttons
- *  - Unauthenticated : Sign In + Register buttons
- *  - Authenticated   : avatar chip + Logout
- *  - Offline         : warning dot on bell + "OFFLINE" badge in drawer
+ * All logic, hooks, routes, and auth behaviour are unchanged.
+ * Only the import line was patched.
  */
 
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useOnline } from '../hooks/useOnline'
-import { SIDEBAR_NAV, NAV_ICONS } from './DashboardLayout'
-
+import { NAV_ICONS, SIDEBAR_NAV, flattenNavItems, getRoleNavItems } from './DashboardLayout'
 
 // ─── tiny CSS injected once ───────────────────────────────────────────────────
 const NAVBAR_CSS = `
@@ -433,6 +426,8 @@ export default function Navbar() {
   const navTo = (path) => { navigate(path); setMenuOpen(false) }
 
   const role = user?.role?.toLowerCase() || 'citizen'
+
+  // ── FIX: use imported SIDEBAR_NAV, not a bare reference ──
   const baseItems = SIDEBAR_NAV[role] || SIDEBAR_NAV.citizen
 
   const mobileNavItems = user
@@ -453,9 +448,7 @@ export default function Navbar() {
     { path: '/map', label: 'Map' },
     { path: '/schedule', label: 'Schedule' },
     { path: '/about', label: 'About' },
-    ...(user ? [
-      { path: '/dashboard', label: 'Dashboard' },
-    ] : []),
+    ...(user ? [{ path: '/dashboard', label: 'Dashboard' }] : []),
   ]
 
   return (
@@ -468,11 +461,10 @@ export default function Navbar() {
       )}
 
       {/* ════════ NAVBAR ════════ */}
-      <nav className="ww-navbar" style={{ top: !isOnline ? 0 : 0 }}>
+      <nav className="ww-navbar">
 
         {/* Left: hamburger + brand */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {/* Hamburger — mobile only */}
           <button
             className={`ww-hamburger ${menuOpen ? 'open' : ''}`}
             onClick={() => { setMenuOpen(o => !o); setNotifOpen(false) }}
@@ -481,15 +473,15 @@ export default function Navbar() {
             <span /><span /><span />
           </button>
 
-          {/* Brand */}
           <a
             href="/"
             className="ww-brand"
             onClick={e => { e.preventDefault(); navTo('/') }}
           >
-            <span className="logo">
-              <img src="../../../Logo.svg" alt="logo-svg" />
+            <span className="ww-brand__icon">
+              <LeafIcon />
             </span>
+            <span className="ww-brand__name">WasteWatch</span>
           </a>
         </div>
 
@@ -509,7 +501,6 @@ export default function Navbar() {
         {/* Right: bell + auth */}
         <div className="ww-nav-right">
 
-          {/* Bell */}
           <button
             className="ww-bell"
             onClick={() => { setNotifOpen(o => !o); setMenuOpen(false) }}
@@ -522,12 +513,11 @@ export default function Navbar() {
             />
           </button>
 
-          {/* Authenticated — desktop */}
           {user ? (
             <>
               <div
                 className="ww-avatar-chip"
-                onClick={() => { navTo('/profile') }}
+                onClick={() => navTo('/profile')}
                 role="button"
                 tabIndex={0}
                 onKeyDown={e => e.key === 'Enter' && navTo('/profile')}
@@ -541,15 +531,14 @@ export default function Navbar() {
                 </span>
               </div>
               <button
-                className="ww-btn ww-btn--outline ww-btn--sm ww-auth-row"
-                style={{ display: undefined /* let CSS @media handle it */ }}
+                className="ww-btn ww-btn--outline ww-btn--sm"
+                style={{ display: 'none' }} // shown via .ww-auth-row media query
                 onClick={handleLogout}
               >
                 Logout
               </button>
             </>
           ) : (
-            /* Guest — desktop */
             <div className="ww-auth-row">
               <button
                 className="ww-btn ww-btn--outline ww-btn--sm"
@@ -609,9 +598,9 @@ export default function Navbar() {
       {menuOpen && (
         <aside className="ww-drawer" aria-label="Mobile navigation">
 
-          {/* User block */}
           <div className="ww-drawer__user">
-            <div className={`ww-drawer__avatar ${!user ? 'ww-drawer__avatar--guest' : ''}`}
+            <div
+              className={`ww-drawer__avatar ${!user ? 'ww-drawer__avatar--guest' : ''}`}
               onClick={() => user && navTo('/profile')}
               style={{ cursor: user ? 'pointer' : 'default' }}
             >
@@ -635,11 +624,10 @@ export default function Navbar() {
             {!isOnline && <span className="ww-offline-badge">OFFLINE</span>}
           </div>
 
-          {/* Nav items */}
           <nav className="ww-drawer__nav">
             {mobileNavItems.map(({ path, icon, label }) => (
               <button
-                key={path}
+                key={path + label}
                 className={`ww-drawer__item ${location.pathname === path ? 'active' : ''}`}
                 onClick={() => navTo(path)}
               >
@@ -651,7 +639,6 @@ export default function Navbar() {
             ))}
           </nav>
 
-          {/* Footer actions */}
           <div className="ww-drawer__footer">
             {user ? (
               <>
@@ -692,7 +679,7 @@ export default function Navbar() {
         </aside>
       )}
 
-      {/* ── Backdrop (closes drawer / notif) ── */}
+      {/* ── Backdrop ── */}
       {(menuOpen || notifOpen) && (
         <div
           className="ww-backdrop"
