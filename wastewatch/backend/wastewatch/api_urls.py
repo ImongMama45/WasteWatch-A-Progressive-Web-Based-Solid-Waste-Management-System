@@ -30,7 +30,8 @@ urlpatterns = [
     path('auth/me/',       auth_api.me_view,           name='api-me'),
     path('auth/login/',    auth_api.api_login_view,    name='api-login'),
     path('auth/logout/',   auth_api.api_logout_view,   name='api-logout'),
-    path('auth/register/', auth_api.api_register_view, name='api-register'),
+    path('auth/register/',  auth_api.api_register_view,  name='api-register'),
+    path('auth/barangays/', auth_api.barangay_list_view, name='api-auth-barangays'),
     
     # ── CRUD Resources ────────────────────────────────────────────────────────
     path('barangays/', auth_api.BarangayViewSet.as_view({'get': 'list'}), name='api-barangays-legacy'),

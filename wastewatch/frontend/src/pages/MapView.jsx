@@ -5,9 +5,9 @@ import { useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import { useAuth } from '../context/AuthContext'   // ← added
 
-const LUCENA_CENTER = [13.9373, 121.6170];
+export const LUCENA_CENTER = [13.9373, 121.6170];
 
-const ZONE_TYPE_MAP = {
+export const ZONE_TYPE_MAP = {
   "Barangay 1 (Pob.)": "commercial",  "Barangay 2 (Pob.)": "commercial",
   "Barangay 3 (Pob.)": "commercial",  "Barangay 4 (Pob.)": "commercial",
   "Barangay 5 (Pob.)": "commercial",  "Barangay 6 (Pob.)": "commercial",
@@ -20,14 +20,14 @@ const ZONE_TYPE_MAP = {
   "Ilayang Dupay": "agricultural",
 }
 
-function getZoneType(brgy_name) {
+export function getZoneType(brgy_name) {
   return ZONE_TYPE_MAP[brgy_name] ?? "residential"
 }
 
 // Roles that may confirm or dismiss garbage reports
 const REPORT_MODERATOR_ROLES = ["watcher", "brgy_official", "admin"]
 
-const TRUCK_ROUTES = [
+export const TRUCK_ROUTES = [
   {
     id: "T01", truckId: "Truck 01", driver: "Pedro Santos", barangay: "Ibabang Dupay Zone 1",
     status: "collecting", capacity: 75, collectedCount: 11, totalPoints: 15,
@@ -51,18 +51,18 @@ const TRUCK_ROUTES = [
   },
 ];
 
-const DUMP_SITES = [
+export const DUMP_SITES = [
   { id: "D1", name: "Main Landfill — Gulang-Gulang", lat: 13.9295, lng: 121.6230, capacity: 82 },
   { id: "D2", name: "Transfer Station — Cotta", lat: 13.9345, lng: 121.6085, capacity: 55 },
 ];
 
-const GARBAGE_REPORTS = [
+export const GARBAGE_REPORTS = [
   { id: "R1", lat: 13.9415, lng: 121.6175, type: "overflow", severity: "high", address: "Ibabang Dupay Zone 3", reported: "30 min ago" },
   { id: "R2", lat: 13.9358, lng: 121.6130, type: "illegal_dumping", severity: "medium", address: "Near Cotta District", reported: "2 hrs ago" },
   { id: "R3", lat: 13.9482, lng: 121.6145, type: "missed", severity: "low", address: "Zone 1 Side Street", reported: "1 day ago" },
 ];
 
-const ZONE_META = {
+export const ZONE_META = {
   residential: { label: "Residential", icon: "🏠", color: "#4ade80" },
   commercial:  { label: "Commercial",  icon: "🏪", color: "#fb923c" },
   industrial:  { label: "Industrial",  icon: "🏭", color: "#94a3b8" },

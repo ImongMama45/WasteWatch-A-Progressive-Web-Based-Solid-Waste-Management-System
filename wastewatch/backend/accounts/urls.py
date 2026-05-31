@@ -1,27 +1,19 @@
 """
 accounts/urls.py
 ----------------
-Template-based URL routes have been removed.
+Mount this file with:
 
-Authentication is handled exclusively through the JSON API:
-  POST /api/auth/login/
-  POST /api/auth/register/
-  POST /api/auth/logout/
-  GET  /api/auth/me/
-
-See wastewatch/api_urls.py for all active routes.
+    # config/urls.py  (or your root urls.py)
+    path('api/auth/', include('accounts.urls')),
 """
 
 from django.urls import path
-from django.views.generic import RedirectView
-from . import views
-
-app_name = 'accounts'
+from . import api_views
 
 urlpatterns = [
-    path('',          RedirectView.as_view(url='/accounts/login/', permanent=False)),
-    path('login/',    views.login_view,    name='login'),
-    path('register/', views.register_view, name='register'),
-    path('logout/',   views.logout_view,   name='logout'),
-    # No template-based routes. All auth goes through /api/auth/*.
+    path('register/',   api_views.api_register_view,  name='auth-register'),
+    path('login/',      api_views.api_login_view,     name='auth-login'),
+    path('logout/',     api_views.api_logout_view,    name='auth-logout'),
+    path('me/',         api_views.me_view,            name='auth-me'),
+    path('barangays/',  api_views.barangay_list_view, name='auth-barangays'),
 ]

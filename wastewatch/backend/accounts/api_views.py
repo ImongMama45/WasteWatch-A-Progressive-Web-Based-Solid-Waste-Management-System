@@ -17,12 +17,10 @@ from django.http             import JsonResponse
 from django.views.decorators.http   import require_http_methods
 from django.views.decorators.csrf   import ensure_csrf_cookie
 from django.contrib.auth            import authenticate, login, logout
-from django.contrib.auth.decorators import login_required
 
 from rest_framework import viewsets, permissions
 from .models import User, Barangay
-from .serializers import UserSerializer, BarangaySerializer
-from .forms import RegistrationForm
+from .serializers import UserSerializer, BarangaySerializer, RegisterSerializer
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -54,23 +52,51 @@ def user_to_dict(user):
     }
 
 
+def _json_body(request):
+    try:
+        return json.loads(request.body or '{}')
+    except json.JSONDecodeError:
+        return None
+
+
 # ── GET  /api/auth/me/ ────────────────────────────────────────────────────────
 @ensure_csrf_cookie   # Sets the csrftoken cookie so React can read it
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'PATCH'])
 def me_view(request):
     if not request.user.is_authenticated:
         return JsonResponse({'error': 'Not authenticated'}, status=401)
+
+    if request.method == 'PATCH':
+        data = _json_body(request)
+        if data is None:
+            return JsonResponse({'error': 'Invalid JSON payload.'}, status=400)
+
+        allowed = {
+            field: data[field]
+            for field in ('full_name', 'barangay')
+            if field in data
+        }
+        serializer = UserSerializer(request.user, data=allowed, partial=True)
+        if not serializer.is_valid():
+            return JsonResponse(serializer.errors, status=400)
+
+        serializer.save()
+        return JsonResponse(user_to_dict(request.user))
+
     return JsonResponse(user_to_dict(request.user))
 
 
 # ── POST /api/auth/login/ ─────────────────────────────────────────────────────
 @require_http_methods(['POST'])
 def api_login_view(request):
-    data     = json.loads(request.body)
-    email    = data.get('email', '')
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({'error': 'Invalid JSON payload.'}, status=400)
+
+    email    = data.get('email', '').strip().lower()
     password = data.get('password', '')
 
-    user = authenticate(request, email=email, password=password)
+    user = authenticate(request, username=email, password=password)
     if user is None:
         return JsonResponse({'error': 'Invalid email or password.'}, status=400)
 
@@ -88,32 +114,16 @@ def api_logout_view(request):
 # ── POST /api/auth/register/ ─────────────────────────────────────────────────
 @require_http_methods(['POST'])
 def api_register_view(request):
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({'error': 'Invalid JSON payload.'}, status=400)
 
-    print("RAW BODY:", request.body)
-
-    data = json.loads(request.body)
-
-    print("PARSED DATA:", data)
-
-    form_data = {
-        'full_name': data.get('full_name', ''),
-        'email':     data.get('email', ''),
-        'barangay':  data.get('barangay', '') or None,
-        'password1': data.get('password', ''),
-        'password2': data.get('password2', ''),
-    }
-
-    print("FORM DATA:", form_data)
-
-    form = RegistrationForm(form_data)
-
-    if form.is_valid():
-        user = form.save()
+    serializer = RegisterSerializer(data=data)
+    if serializer.is_valid():
+        user = serializer.save()
         return JsonResponse({'user': user_to_dict(user)}, status=201)
 
-    print(form.errors)
-
-    return JsonResponse(form.errors, status=400)
+    return JsonResponse(serializer.errors, status=400)
 
 
 # ── GET /api/barangays/ ───────────────────────────────────────────────────────

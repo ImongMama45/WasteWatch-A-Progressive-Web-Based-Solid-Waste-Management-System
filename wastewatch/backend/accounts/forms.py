@@ -41,8 +41,9 @@ class RegistrationForm(UserCreationForm):
 
     barangay = forms.ModelChoiceField(
         queryset=Barangay.objects.all(),
-        required=False,
+        required=True,
         empty_label='— Select your barangay —',
+        error_messages={'required': 'Please select your barangay.'},
         widget=forms.Select(attrs={'class': 'form-input'}),
     )
 

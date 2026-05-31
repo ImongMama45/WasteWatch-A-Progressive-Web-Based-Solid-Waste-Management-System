@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import DashboardLayout from '../components/DashboardLayout'
+import Navbar from '../components/Navbar'
+import BottomNav from '../components/BottomNav'
 
 // Mock Data
 const ROUTES_BY_BRGY = {
@@ -33,7 +35,8 @@ export default function CollectionSchedule() {
   const isDriver = role === 'driver'
 
   return (
-    <DashboardLayout>
+    <div>
+      <Navbar/>
       <style>{`
         .sched-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px; margin-bottom: 16px; box-shadow: 0 4px 12px rgba(0,0,0,.03); transition: all 0.2s; }
         .sched-card.interactive:hover { border-color: var(--accent); cursor: pointer; }
@@ -178,6 +181,8 @@ export default function CollectionSchedule() {
         </div>
 
       </div>
-    </DashboardLayout>
+      <BottomNav/>
+    </div>
+  
   )
 }

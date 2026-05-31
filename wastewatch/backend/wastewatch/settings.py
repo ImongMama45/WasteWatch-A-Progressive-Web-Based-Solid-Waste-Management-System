@@ -36,7 +36,7 @@ INSTALLED_APPS = [
     'news',                 # News and announcements
     'analytics',            # Performance metrics and trends
 ]
-
+ 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',   # Must be first
     'django.middleware.security.SecurityMiddleware',
@@ -146,6 +146,7 @@ lan_ip = get_lan_ip()
 # CORS — allow React Vite dev server to call Django API
 # ---------------------------------------------------------------------------
 CORS_ALLOWED_ORIGINS = [
+    
     'http://localhost:3000',   # Vite default dev port
     'http://127.0.0.1:3000',
     'https://localhost:3000',

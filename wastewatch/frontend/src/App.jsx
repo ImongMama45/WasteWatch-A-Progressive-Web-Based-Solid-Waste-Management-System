@@ -74,6 +74,9 @@ export default function App() {
           <Route path="/login" element={<AuthOverlay mode="login" />} />
           <Route path="/register" element={<AuthOverlay mode="register" />} />
           <Route path="/about" element={<AboutPage />} />
+          <Route path="/map" element={<MapView />} />
+          <Route path="/announcements" element={<NewsPage />} />X
+          <Route path="/schedule" element={<CollectionSchedule />} />X
 
           {/* ── PROTECTED — all screen sizes ── */}
           <Route path="/dashboard" element={
@@ -89,26 +92,15 @@ export default function App() {
           <Route path="/profile" element={
             <PrivateRoute><Profile /></PrivateRoute>
           } />
-
-          <Route path="/schedule" element={
-            <PrivateRoute><CollectionSchedule /></PrivateRoute>
-          } />
-
           <Route path="/analytics" element={
             <PrivateRoute><AnalyticsTabs /></PrivateRoute>
           } />
 
-          <Route path="/announcements" element={
-            <PrivateRoute><NewsPage /></PrivateRoute>
-          } />
 
           <Route path="/admin/news/create" element={
             <PrivateRoute><CreateAnnouncementPage /></PrivateRoute>
           } />
 
-          <Route path="/map" element={
-            <PrivateRoute><MapView /></PrivateRoute>
-          } />
 
           {/* BARANGAY OFFICIAL PAGE */}
           <Route path="/brgy/escalate" element={

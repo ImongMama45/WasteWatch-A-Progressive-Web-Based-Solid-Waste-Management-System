@@ -1,32 +1,35 @@
 /**
  * components/OfflineReportBuilder.jsx
  * -------------------------------------
- * Slide-up modal/sheet for creating garbage reports — works fully offline.
- * Captures GPS, waste type, severity, and optional notes.
- * Queues the report locally via useOfflineReports (IndexedDB).
+ * Slide-up sheet for creating garbage reports — works fully offline.
+ * CHANGES from previous version:
+ *   • Photo capture is now MANDATORY (camera or file picker).
+ *   • Photo preview shown before submission.
+ *   • Image stored as base64 in the report payload.
+ *   • Submit button disabled until a photo is attached.
  *
  * Props:
  *   isOpen   : boolean
  *   onClose  : () => void
- *   onSubmit : (report) => void  — called after IDB write
+ *   onSubmit : (report) => void
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const WASTE_TYPES = [
   { value: 'biodegradable', label: 'Biodegradable', emoji: '🌿', color: '#22c55e', bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.4)' },
-  { value: 'residual', label: 'Residual', emoji: '🗑️', color: '#94a3b8', bg: 'rgba(148,163,184,0.1)', border: 'rgba(148,163,184,0.4)' },
-  { value: 'recyclable', label: 'Recyclable', emoji: '♻️', color: '#3b82f6', bg: 'rgba(59,130,246,0.12)', border: 'rgba(59,130,246,0.4)' },
-  { value: 'special', label: 'Special', emoji: '⚠️', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.4)' },
+  { value: 'residual',      label: 'Residual',      emoji: '🗑️', color: '#94a3b8', bg: 'rgba(148,163,184,0.1)', border: 'rgba(148,163,184,0.4)' },
+  { value: 'recyclable',    label: 'Recyclable',    emoji: '♻️', color: '#3b82f6', bg: 'rgba(59,130,246,0.12)', border: 'rgba(59,130,246,0.4)' },
+  { value: 'special',       label: 'Special',       emoji: '⚠️', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.4)' },
 ]
 
 const SEVERITIES = [
-  { value: 'low', label: 'Low', color: '#22c55e', desc: 'Minor issue' },
-  { value: 'medium', label: 'Medium', color: '#f59e0b', desc: 'Needs attention' },
-  { value: 'high', label: 'High', color: '#ef4444', desc: 'Urgent' },
-  { value: 'critical', label: 'Critical', color: '#7c3aed', desc: 'Emergency' },
+  { value: 'low',      label: 'Low',      color: '#22c55e', desc: 'Minor issue'  },
+  { value: 'medium',   label: 'Medium',   color: '#f59e0b', desc: 'Needs attention' },
+  { value: 'high',     label: 'High',     color: '#ef4444', desc: 'Urgent'       },
+  { value: 'critical', label: 'Critical', color: '#7c3aed', desc: 'Emergency'    },
 ]
 
 // ─── GPS helpers ──────────────────────────────────────────────────────────────
@@ -57,18 +60,43 @@ async function reverseGeocode(lat, lng) {
   }
 }
 
+// ─── Image helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Reads a File and resolves with { base64, url, file }.
+ * base64 is the full data-URI for offline storage.
+ * url is a local object URL for immediate preview.
+ */
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () =>
+      resolve({ base64: reader.result, url: URL.createObjectURL(file), file })
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
-  const [wasteType, setWasteType] = useState('residual')
-  const [severity, setSeverity] = useState('medium')
-  const [notes, setNotes] = useState('')
-  const [location, setLocation] = useState(null)
-  const [gpsState, setGpsState] = useState('idle') // idle | loading | done | error | cached
-  const [submitting, setSubmitting] = useState(false)
-  const [submitted, setSubmitted] = useState(false)
+  const [wasteType,   setWasteType]   = useState('residual')
+  const [severity,    setSeverity]    = useState('medium')
+  const [notes,       setNotes]       = useState('')
+  const [location,    setLocation]    = useState(null)
+  const [gpsState,    setGpsState]    = useState('idle')
+  const [submitting,  setSubmitting]  = useState(false)
+  const [submitted,   setSubmitted]   = useState(false)
 
-  // ── Reset form on open ────────────────────────────────────────────────────
+  // Photo state
+  const [photo,       setPhoto]       = useState(null)   // { base64, url, file }
+  const [photoError,  setPhotoError]  = useState('')
+  const [showCamera,  setShowCamera]  = useState(false)
+
+  const fileInputRef   = useRef(null)
+  const cameraInputRef = useRef(null)
+
+  // ── Reset on open ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (isOpen) {
       setWasteType('residual')
@@ -78,17 +106,27 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
       setGpsState('idle')
       setSubmitting(false)
       setSubmitted(false)
+      setPhoto(null)
+      setPhotoError('')
+      setShowCamera(false)
       captureGPS()
     }
   }, [isOpen]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Close on Escape ───────────────────────────────────────────────────────
+  // ── Escape to close ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!isOpen) return
     const handler = (e) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [isOpen, onClose])
+
+  // ── Revoke object URL on unmount ───────────────────────────────────────────
+  useEffect(() => {
+    return () => {
+      if (photo?.url) URL.revokeObjectURL(photo.url)
+    }
+  }, [photo])
 
   // ── GPS capture ───────────────────────────────────────────────────────────
   const captureGPS = useCallback(() => {
@@ -109,7 +147,6 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
         setGpsState('done')
       },
       () => {
-        // Fallback to cached
         const cached = getCachedLocation()
         if (cached) { setLocation(cached); setGpsState('cached') }
         else setGpsState('error')
@@ -118,12 +155,46 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
     )
   }, [])
 
+  // ── Photo selection (from file picker or camera) ──────────────────────────
+  const handleFileChange = useCallback(async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPhotoError('')
+    try {
+      const result = await readFileAsBase64(file)
+      setPhoto(result)
+    } catch {
+      setPhotoError('Hindi ma-load ang larawan. Subukan ulit.')
+    }
+    // Reset so same file can be re-selected
+    e.target.value = ''
+  }, [])
+
+  const handleRemovePhoto = useCallback(() => {
+    if (photo?.url) URL.revokeObjectURL(photo.url)
+    setPhoto(null)
+    setPhotoError('')
+  }, [photo])
+
   // ── Submit ────────────────────────────────────────────────────────────────
   const handleSubmit = useCallback(async () => {
     if (submitting) return
+
+    // Guard: photo is mandatory
+    if (!photo) {
+      setPhotoError('Kinakailangan ang larawan. Mag-attach ng photo bago mag-submit.')
+      return
+    }
+
     setSubmitting(true)
     try {
-      const report = await onSubmit({ wasteType, severity, notes, location })
+      const report = await onSubmit({
+        wasteType,
+        severity,
+        notes,
+        location,
+        photo: photo.base64,   // full data-URI stored offline
+      })
       if (report) {
         setSubmitted(true)
         setTimeout(() => onClose(), 1800)
@@ -133,12 +204,13 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
     } finally {
       setSubmitting(false)
     }
-  }, [submitting, onSubmit, wasteType, severity, notes, location, onClose])
+  }, [submitting, photo, onSubmit, wasteType, severity, notes, location, onClose])
 
   if (!isOpen) return null
 
-  const selectedWaste = WASTE_TYPES.find(w => w.value === wasteType)
+  const selectedWaste    = WASTE_TYPES.find(w => w.value === wasteType)
   const selectedSeverity = SEVERITIES.find(s => s.value === severity)
+  const canSubmit        = !!photo && !submitting
 
   return (
     <>
@@ -148,7 +220,7 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
       {/* Sheet */}
       <div className="orb-sheet" role="dialog" aria-modal aria-label="Report Garbage Problem">
 
-        {/* Handle bar */}
+        {/* Handle */}
         <div className="orb-handle" />
 
         {/* Header */}
@@ -166,12 +238,99 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
           <div className="orb-success">
             <div className="orb-success__icon">✅</div>
             <h3 className="orb-success__title">Report Queued!</h3>
-            <p className="orb-success__sub">Your report is saved offline and will sync automatically when you're online.</p>
+            <p className="orb-success__sub">
+              Your report is saved offline and will sync automatically when you're online.
+            </p>
           </div>
         ) : (
           <div className="orb-body">
 
-            {/* GPS Location */}
+            {/* ── PHOTO (mandatory) ── */}
+            <div className="orb-field">
+              <label className="orb-label">
+                <span>📷</span> Photo
+                <span className="orb-required">*</span>
+                <span className="orb-label-hint">(kinakailangan)</span>
+              </label>
+
+              {photo ? (
+                /* Preview */
+                <div className="orb-photo-preview">
+                  <img
+                    src={photo.url}
+                    alt="Report photo preview"
+                    className="orb-photo-preview__img"
+                  />
+                  <div className="orb-photo-preview__overlay">
+                    <button
+                      className="orb-photo-preview__remove"
+                      onClick={handleRemovePhoto}
+                      aria-label="Remove photo"
+                    >
+                      ✕ Tanggalin
+                    </button>
+                  </div>
+                  <div className="orb-photo-preview__badge">
+                    ✓ Photo attached
+                  </div>
+                </div>
+              ) : (
+                /* Upload area */
+                <div className={`orb-photo-area${photoError ? ' orb-photo-area--error' : ''}`}>
+                  <div className="orb-photo-area__icon">📸</div>
+                  <p className="orb-photo-area__title">Mag-attach ng larawan</p>
+                  <p className="orb-photo-area__hint">Kinakailangan para ma-submit ang report</p>
+
+                  <div className="orb-photo-btns">
+                    {/* Camera capture — mobile */}
+                    <button
+                      className="orb-photo-btn orb-photo-btn--camera"
+                      onClick={() => cameraInputRef.current?.click()}
+                      type="button"
+                    >
+                      📷 Camera
+                    </button>
+
+                    {/* File / gallery pick */}
+                    <button
+                      className="orb-photo-btn orb-photo-btn--gallery"
+                      onClick={() => fileInputRef.current?.click()}
+                      type="button"
+                    >
+                      🖼️ Gallery
+                    </button>
+                  </div>
+
+                  {/* Hidden camera input (capture="environment" = rear camera) */}
+                  <input
+                    ref={cameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="orb-file-input"
+                    onChange={handleFileChange}
+                    aria-label="Take photo with camera"
+                  />
+
+                  {/* Hidden gallery / file picker */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="orb-file-input"
+                    onChange={handleFileChange}
+                    aria-label="Choose photo from gallery"
+                  />
+                </div>
+              )}
+
+              {/* Photo error message */}
+              {photoError && (
+                <p className="orb-photo-error">{photoError}</p>
+              )}
+            </div>
+
+            {/* ── GPS Location ── */}
             <div className="orb-field">
               <label className="orb-label">
                 <span>📍</span> Location
@@ -198,7 +357,7 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
               </div>
             </div>
 
-            {/* Waste Type */}
+            {/* ── Waste Type ── */}
             <div className="orb-field">
               <label className="orb-label"><span>🏷️</span> Waste Type</label>
               <div className="orb-waste-grid">
@@ -218,7 +377,7 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
               </div>
             </div>
 
-            {/* Severity */}
+            {/* ── Severity ── */}
             <div className="orb-field">
               <label className="orb-label"><span>🔥</span> Severity</label>
               <div className="orb-severity-row">
@@ -241,9 +400,11 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
               </p>
             </div>
 
-            {/* Notes */}
+            {/* ── Notes ── */}
             <div className="orb-field">
-              <label className="orb-label"><span>📝</span> Notes <span className="orb-optional">(optional)</span></label>
+              <label className="orb-label">
+                <span>📝</span> Notes <span className="orb-optional">(optional)</span>
+              </label>
               <textarea
                 className="orb-textarea"
                 rows={3}
@@ -255,25 +416,40 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
               <span className="orb-char-count">{notes.length}/500</span>
             </div>
 
-            {/* Summary chip */}
+            {/* ── Summary chip ── */}
             <div className="orb-summary" style={{ borderColor: selectedWaste.border }}>
               <span style={{ color: selectedWaste.color }}>{selectedWaste.emoji} {selectedWaste.label}</span>
               <span className="orb-summary__sep">·</span>
               <span style={{ color: selectedSeverity.color }}>🔥 {selectedSeverity.label}</span>
               <span className="orb-summary__sep">·</span>
               <span style={{ color: '#64748b' }}>📍 {location ? 'Located' : 'No GPS'}</span>
+              <span className="orb-summary__sep">·</span>
+              <span style={{ color: photo ? '#22c55e' : '#ef4444' }}>
+                {photo ? '📷 Photo ✓' : '📷 No Photo'}
+              </span>
             </div>
 
-            {/* Submit */}
+            {/* ── Photo required notice (shown when no photo yet) ── */}
+            {!photo && (
+              <div className="orb-photo-required-banner">
+                📸 Mag-attach ng larawan para ma-submit ang report
+              </div>
+            )}
+
+            {/* ── Submit ── */}
             <button
-              className={`orb-submit${submitting ? ' orb-submit--loading' : ''}`}
+              className={`orb-submit${submitting ? ' orb-submit--loading' : ''}${!canSubmit ? ' orb-submit--disabled' : ''}`}
               onClick={handleSubmit}
-              disabled={submitting}
+              disabled={!canSubmit}
+              title={!photo ? 'Kinakailangan ang larawan' : ''}
             >
               {submitting
                 ? <><span className="orb-spinner" /> Saving…</>
-                : '📤 Submit Report (Offline)'}
+                : !photo
+                  ? '📷 Mag-attach ng Photo muna'
+                  : '📤 Submit Report (Offline)'}
             </button>
+
           </div>
         )}
       </div>

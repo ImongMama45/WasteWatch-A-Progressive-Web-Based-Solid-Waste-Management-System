@@ -881,3 +881,220 @@
 }
 
 .cms-stat--stale span { color: #475569; font-size: 9px; margin-left: auto; }
+
+/* ============================================================
+   OfflineModules.css  ADDENDUM
+   New photo-capture styles for OfflineReportBuilder.
+   Append these rules to (or @import after) the existing
+   OfflineModules.css file.
+   Prefix: orb-  (all new selectors stay inside the orb- namespace)
+   ============================================================ */
+
+/* ── Mandatory label markers ────────────────────────────────── */
+.orb-required {
+  color: #ef4444;
+  font-size: 13px;
+  margin-left: 2px;
+  line-height: 1;
+}
+
+.orb-label-hint {
+  font-size: 9px;
+  font-weight: 400;
+  color: #475569;
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: 4px;
+}
+
+/* ── Photo drop/pick area ───────────────────────────────────── */
+.orb-photo-area {
+  background:    #1e293b;
+  border:        1.5px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 14px;
+  padding:       20px 16px 18px;
+  display:       flex;
+  flex-direction: column;
+  align-items:   center;
+  gap:           8px;
+  text-align:    center;
+  transition:    border-color 0.2s;
+}
+
+.orb-photo-area--error {
+  border-color: rgba(239, 68, 68, 0.55);
+  background:   rgba(239, 68, 68, 0.06);
+}
+
+.orb-photo-area__icon {
+  font-size:    32px;
+  line-height:  1;
+  margin-bottom: 2px;
+}
+
+.orb-photo-area__title {
+  font-size:   13px;
+  font-weight: 700;
+  color:       #e2e8f0;
+  margin:      0;
+}
+
+.orb-photo-area__hint {
+  font-size:   10px;
+  color:       #64748b;
+  margin:      0;
+  line-height: 1.4;
+}
+
+/* Button row inside the photo area */
+.orb-photo-btns {
+  display: flex;
+  gap:     10px;
+  margin-top: 6px;
+}
+
+.orb-photo-btn {
+  flex:          1;
+  padding:       9px 14px;
+  border-radius: 10px;
+  font-size:     12px;
+  font-weight:   700;
+  cursor:        pointer;
+  border:        none;
+  transition:    background 0.15s, transform 0.1s;
+  display:       flex;
+  align-items:   center;
+  justify-content: center;
+  gap:           5px;
+}
+
+.orb-photo-btn:active { transform: scale(0.95); }
+
+.orb-photo-btn--camera {
+  background: linear-gradient(135deg, #14b8a6, #0e9488);
+  color:      #fff;
+  box-shadow: 0 3px 12px rgba(20, 184, 166, 0.35);
+}
+
+.orb-photo-btn--camera:hover {
+  background: linear-gradient(135deg, #0e9488, #0c7a72);
+}
+
+.orb-photo-btn--gallery {
+  background: #293548;
+  color:      #94a3b8;
+  border:     1px solid rgba(255, 255, 255, 0.09);
+}
+
+.orb-photo-btn--gallery:hover {
+  background: #334155;
+  color:      #e2e8f0;
+}
+
+/* ── Hidden file inputs ─────────────────────────────────────── */
+.orb-file-input {
+  position: absolute;
+  width:    1px;
+  height:   1px;
+  opacity:  0;
+  overflow: hidden;
+  clip:     rect(0, 0, 0, 0);
+  pointer-events: none;
+}
+
+/* ── Photo preview ──────────────────────────────────────────── */
+.orb-photo-preview {
+  position:      relative;
+  border-radius: 14px;
+  overflow:      hidden;
+  border:        1.5px solid rgba(34, 197, 94, 0.4);
+  background:    #1e293b;
+  max-height:    200px;
+}
+
+.orb-photo-preview__img {
+  width:      100%;
+  max-height: 200px;
+  object-fit: cover;
+  display:    block;
+}
+
+/* Semi-transparent overlay visible on hover */
+.orb-photo-preview__overlay {
+  position:   absolute;
+  inset:      0;
+  background: rgba(0, 0, 0, 0);
+  display:    flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding:    10px;
+  transition: background 0.2s;
+}
+
+.orb-photo-preview:hover .orb-photo-preview__overlay {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.orb-photo-preview__remove {
+  background: rgba(239, 68, 68, 0.88);
+  color:      #fff;
+  border:     none;
+  border-radius: 8px;
+  padding:    5px 11px;
+  font-size:  11px;
+  font-weight: 700;
+  cursor:     pointer;
+  opacity:    0;
+  transition: opacity 0.2s, background 0.15s;
+}
+
+.orb-photo-preview:hover .orb-photo-preview__remove {
+  opacity: 1;
+}
+
+.orb-photo-preview__badge {
+  position:    absolute;
+  bottom:      10px;
+  left:        10px;
+  background:  rgba(34, 197, 94, 0.85);
+  color:       #fff;
+  font-size:   10px;
+  font-weight: 700;
+  padding:     4px 10px;
+  border-radius: 100px;
+  backdrop-filter: blur(4px);
+}
+
+/* ── Photo error text ───────────────────────────────────────── */
+.orb-photo-error {
+  font-size:   11px;
+  color:       #f87171;
+  margin:      0;
+  padding:     6px 10px;
+  background:  rgba(239, 68, 68, 0.08);
+  border:      1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 8px;
+  line-height: 1.4;
+}
+
+/* ── "Photo required" banner above submit ───────────────────── */
+.orb-photo-required-banner {
+  background:    rgba(245, 158, 11, 0.1);
+  border:        1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 10px;
+  padding:       10px 14px;
+  font-size:     12px;
+  font-weight:   600;
+  color:         #f59e0b;
+  text-align:    center;
+}
+
+/* ── Submit button disabled state ───────────────────────────── */
+.orb-submit--disabled {
+  background:    #1e293b;
+  color:         #475569;
+  box-shadow:    none;
+  cursor:        not-allowed;
+}
+
+.orb-submit--disabled:active { transform: none; }

@@ -22,7 +22,7 @@ export const SIDEBAR_NAV = {
   admin: [
     { path: '/', label: 'Home', icon: '🏠' },
     { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-    { path: '/analytics', label: 'City Analytics', icon: '📈' },
+    { path: '/analytics', label: 'Brgy Analytics', icon: '📈' },
     { path: '/announcements', label: 'News & Alerts', icon: '📰' },
     { path: '/schedule', label: 'Schedule', icon: '📅' },
     { path: '/map', label: 'Live Map', icon: '🗺️' },
@@ -40,7 +40,7 @@ export const SIDEBAR_NAV = {
   barangay_official: [
     { path: '/', label: 'Home', icon: '🏠' },
     { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-    { path: '/analytics', label: 'City Analytics', icon: '📈' },
+    { path: '/analytics', label: 'Brgy Analytics', icon: '📈' },
     { path: '/announcements', label: 'News & Alerts', icon: '📰' },
     { path: '/schedule', label: 'Schedule', icon: '📅' },
     { path: '/map', label: 'Live Map', icon: '🗺️' },
@@ -50,7 +50,7 @@ export const SIDEBAR_NAV = {
   watcher: [
     { path: '/', label: 'Home', icon: '🏠' },
     { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-    { path: '/analytics', label: 'City Analytics', icon: '📈' },
+    { path: '/analytics', label: 'Brgy Analytics', icon: '📈' },
     { path: '/announcements', label: 'News & Alerts', icon: '📰' },
     { path: '/schedule', label: 'Schedule', icon: '📅' },
     { path: '/map', label: 'Live Map', icon: '🗺️' },
@@ -59,7 +59,7 @@ export const SIDEBAR_NAV = {
   citizen: [
     { path: '/', label: 'Home', icon: '🏠' },
     { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-    { path: '/analytics', label: 'City Analytics', icon: '📈' },
+    { path: '/analytics', label: 'Brgy Analytics', icon: '📈' },
     { path: '/announcements', label: 'News & Alerts', icon: '📰' },
     { path: '/schedule', label: 'Schedule', icon: '📅' },
     { path: '/map', label: 'Live Map', icon: '🗺️' },
@@ -67,7 +67,7 @@ export const SIDEBAR_NAV = {
   driver: [
     { path: '/', label: 'Home', icon: '🏠' },
     { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-    { path: '/analytics', label: 'City Analytics', icon: '📈' },
+    { path: '/analytics', label: 'Brgy Analytics', icon: '📈' },
     { path: '/announcements', label: 'News & Alerts', icon: '📰' },
     { path: '/driver/route', label: 'My Route', icon: '🗺️' },
     { path: '/driver/log', label: 'Collection Log', icon: '📋' },
