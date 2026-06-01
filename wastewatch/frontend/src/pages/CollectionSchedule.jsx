@@ -29,7 +29,7 @@ export default function CollectionSchedule() {
   const [expandedId, setExpandedId] = useState(null)
 
   const schedule = ROUTES_BY_BRGY[barangay] || FALLBACK_SCHEDULE
-  const todaySchedule = schedule.find(s => s.isToday)
+  const todaySchedule = schedule.find(s => s.isToday) 
 
   const showDetails = ['barangay_official', 'watcher', 'driver', 'admin'].includes(role)
   const isDriver = role === 'driver'  

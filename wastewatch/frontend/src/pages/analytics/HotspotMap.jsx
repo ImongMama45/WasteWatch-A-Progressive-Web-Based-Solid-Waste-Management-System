@@ -1,63 +1,284 @@
 /**
  * HotspotMap.jsx
  * ---------------
- * SVG grid map — offline-safe, no external map library.
- * Uses .msi (Material Symbols) for legend + tooltips.
- * Matches WasteWatch surface / border / accent tokens.
+ * Real Leaflet mini-map of Lucena City barangays.
+ * Reuses the same GeoJSON (/data/lucena_barangays.geojson) and
+ * score-to-color logic as the analytics data.
+ * No external deps beyond Leaflet (already loaded by MapView).
  */
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
-// REPLACE WITH: api.get('/api/analytics/barangay-map/')
-const CELLS = [
-  { id: 'b1',  name: 'Gulang-Gulang',   x: 1, y: 0, score: 98, reports: 2,  hotspots: 0 },
-  { id: 'b2',  name: 'Ibabang Dupay',   x: 2, y: 0, score: 95, reports: 3,  hotspots: 0 },
-  { id: 'b3',  name: 'Mayao Crossing',  x: 3, y: 0, score: 92, reports: 4,  hotspots: 1 },
-  { id: 'b4',  name: 'Barangay 1',      x: 0, y: 1, score: 89, reports: 5,  hotspots: 1 },
-  { id: 'b5',  name: 'Isabang',         x: 1, y: 1, score: 87, reports: 7,  hotspots: 2 },
-  { id: 'b6',  name: 'Cotta',           x: 2, y: 1, score: 84, reports: 5,  hotspots: 2 },
-  { id: 'b7',  name: 'Kanlurang Cotta', x: 3, y: 1, score: 81, reports: 3,  hotspots: 1 },
-  { id: 'b8',  name: 'Barangay 2',      x: 0, y: 2, score: 78, reports: 6,  hotspots: 2 },
-  { id: 'b9',  name: 'Barangay 3',      x: 1, y: 2, score: 75, reports: 4,  hotspots: 3 },
-  { id: 'b10', name: 'Barangay 4',      x: 2, y: 2, score: 72, reports: 8,  hotspots: 3 },
-  { id: 'b11', name: 'Barangay 5',      x: 3, y: 2, score: 68, reports: 9,  hotspots: 4 },
-  { id: 'b12', name: 'Barangay 6',      x: 0, y: 3, score: 63, reports: 11, hotspots: 5 },
-  { id: 'b13', name: 'Barangay 7',      x: 1, y: 3, score: 60, reports: 12, hotspots: 5 },
-  { id: 'b14', name: 'Barangay 8',      x: 2, y: 3, score: 55, reports: 14, hotspots: 6 },
-  { id: 'b15', name: 'Barangay 9',      x: 3, y: 3, score: 50, reports: 15, hotspots: 7 },
-  { id: 'b16', name: 'Barangay 10',     x: 0, y: 0, score: 96, reports: 2,  hotspots: 0 },
-]
-
+// ─── Score → color (matches existing analytics palette) ──────────────────────
 function scoreColor(s) {
-  if (s >= 90) return { fill: '#d1fae5', stroke: '#059669', text: '#065f46' }
-  if (s >= 80) return { fill: '#dcfce7', stroke: '#16a34a', text: '#166534' }
-  if (s >= 70) return { fill: '#fef9c3', stroke: '#ca8a04', text: '#713f12' }
-  if (s >= 60) return { fill: '#ffedd5', stroke: '#ea580c', text: '#7c2d12' }
-  return           { fill: '#fee2e2', stroke: '#dc2626', text: '#7f1d1d' }
+  if (s >= 90) return { fill: '#16a34a', stroke: '#14532d', opacity: 0.55 }
+  if (s >= 80) return { fill: '#22c55e', stroke: '#166534', opacity: 0.50 }
+  if (s >= 70) return { fill: '#eab308', stroke: '#713f12', opacity: 0.50 }
+  if (s >= 60) return { fill: '#f97316', stroke: '#7c2d12', opacity: 0.50 }
+  return              { fill: '#ef4444', stroke: '#7f1d1d', opacity: 0.55 }
 }
 
-const CELL = 54
-const GAP  = 4
-const COLS = 4
-const ROWS = 4
+// ─── Placeholder scores — replace with real API data ─────────────────────────
+const BRGY_SCORES = {
+  'Gulang-Gulang':    98, 'Ibabang Dupay':    95, 'Mayao Crossing':   92,
+  'Barangay 1 (Pob.)': 89, 'Isabang':          87, 'Cotta':            84,
+  'Kanlurang Cotta':  81, 'Barangay 2 (Pob.)': 78, 'Barangay 3 (Pob.)': 75,
+  'Barangay 4 (Pob.)': 72, 'Barangay 5 (Pob.)': 68, 'Barangay 6 (Pob.)': 63,
+  'Barangay 7 (Pob.)': 60, 'Barangay 8 (Pob.)': 55, 'Barangay 9 (Pob.)': 50,
+  'Barangay 10 (Pob.)': 52, 'Barangay 11 (Pob.)': 58,
+  'Mayao Kanluran':   76, 'Mayao Parada':     79, 'Mayao Silangan':   82,
+  'Ilayang Dupay':    85,
+}
 
+const HOTSPOT_COUNTS = {
+  'Barangay 9 (Pob.)': 8, 'Barangay 10 (Pob.)': 6, 'Barangay 6 (Pob.)': 5,
+  'Barangay 7 (Pob.)': 5, 'Cotta': 2, 'Isabang': 2,
+}
+
+const LEGEND = [
+  { color: '#16a34a', label: '90–100 Excellent' },
+  { color: '#22c55e', label: '80–89 Good'       },
+  { color: '#eab308', label: '70–79 Fair'        },
+  { color: '#f97316', label: '60–69 Poor'        },
+  { color: '#ef4444', label: '<60 Critical'      },
+]
+
+// ─── Inject Leaflet once ──────────────────────────────────────────────────────
+let _leafletReady = false
+function loadLeaflet(cb) {
+  if (window.L) { cb(); return }
+  if (_leafletReady) { const t = setInterval(() => { if (window.L) { clearInterval(t); cb() } }, 50); return }
+  _leafletReady = true
+  const link = document.createElement('link')
+  link.rel = 'stylesheet'
+  link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+  document.head.appendChild(link)
+  const script = document.createElement('script')
+  script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+  script.onload = cb
+  document.head.appendChild(script)
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
 export default function HotspotMap({ userBarangay }) {
-  const [tip, setTip] = useState(null)
-  const W = COLS * (CELL + GAP) - GAP + 20
-  const H = ROWS * (CELL + GAP) - GAP + 28
+  const containerRef   = useRef(null)
+  const mapRef         = useRef(null)
+  const geoLayerRef    = useRef(null)
+  const [tip, setTip]  = useState(null)   // { name, score, hotspots }
+  const [ready, setReady] = useState(false)
 
-  const LEGEND = [
-    { color: '#059669', label: '90–100 Excellent' },
-    { color: '#16a34a', label: '80–89 Good' },
-    { color: '#ca8a04', label: '70–79 Fair' },
-    { color: '#ea580c', label: '60–69 Poor' },
-    { color: '#dc2626', label: '<60 Critical' },
-  ]
+  // ── Init map ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    loadLeaflet(() => {
+      setReady(true)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!ready || !containerRef.current || mapRef.current) return
+
+    const L   = window.L
+    const map = L.map(containerRef.current, {
+      center:         [13.9373, 121.6170],
+      zoom:           13,
+      zoomControl:    false,
+      scrollWheelZoom: false,    // don't hijack page scroll
+      dragging:       true,
+      attributionControl: false,
+    })
+
+    // Subtle dark-ish tile for contrast
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+    }).addTo(map)
+
+    mapRef.current = map
+
+    // Load GeoJSON
+    fetch('/data/lucena_barangays.geojson')
+      .then(r => r.json())
+      .then(geo => {
+        if (geoLayerRef.current) {
+          map.removeLayer(geoLayerRef.current)
+        }
+
+        const layer = L.geoJSON(geo, {
+          style: feature => {
+            const name  = feature.properties.brgy_name
+            const score = BRGY_SCORES[name] ?? 75
+            const c     = scoreColor(score)
+            const isUser = userBarangay && name.toLowerCase() === userBarangay.toLowerCase()
+            return {
+              color:       isUser ? '#fff' : c.stroke,
+              weight:      isUser ? 2.5    : 1.2,
+              fillColor:   c.fill,
+              fillOpacity: c.opacity,
+              opacity:     0.9,
+            }
+          },
+
+          onEachFeature: (feature, flayer) => {
+            const name     = feature.properties.brgy_name
+            const score    = BRGY_SCORES[name] ?? 75
+            const hotspots = HOTSPOT_COUNTS[name] ?? 0
+            const isUser   = userBarangay && name.toLowerCase() === userBarangay.toLowerCase()
+
+            flayer.on('mouseover', () => {
+              flayer.setStyle({ fillOpacity: 0.85, weight: 2 })
+              setTip({ name, score, hotspots, isUser })
+            })
+            flayer.on('mouseout', () => {
+              layer.resetStyle(flayer)
+              setTip(null)
+            })
+            flayer.on('click', () => {
+              setTip({ name, score, hotspots, isUser })
+              map.fitBounds(flayer.getBounds(), { padding: [20, 20], maxZoom: 15 })
+            })
+
+            // Hotspot dot for problematic barangays
+            if (hotspots > 0) {
+              const center = flayer.getBounds().getCenter()
+              const dot = L.circleMarker(center, {
+                radius:      hotspots > 5 ? 7 : 5,
+                fillColor:   '#ef4444',
+                color:       '#fff',
+                weight:      1.5,
+                fillOpacity: 0.95,
+              }).addTo(map)
+
+              dot.bindTooltip(`${name}: ${hotspots} hotspot${hotspots > 1 ? 's' : ''}`, {
+                direction: 'top',
+                className: 'ww-mini-tip',
+              })
+            }
+
+            // User barangay marker
+            if (isUser) {
+              const center = flayer.getBounds().getCenter()
+              L.circleMarker(center, {
+                radius:      6,
+                fillColor:   '#fff',
+                color:       '#16a34a',
+                weight:      2,
+                fillOpacity: 1,
+              }).addTo(map).bindTooltip('Your barangay', { direction: 'top', className: 'ww-mini-tip' })
+            }
+          },
+        }).addTo(map)
+
+        geoLayerRef.current = layer
+
+        // Fit map to Lucena bounds
+        try {
+          map.fitBounds(layer.getBounds(), { padding: [8, 8] })
+        } catch { /* layer might be empty */ }
+      })
+      .catch(() => {
+        // GeoJSON not found — show fallback message
+        console.warn('HotspotMap: /data/lucena_barangays.geojson not found')
+      })
+
+    return () => {
+      // Cleanup on unmount
+      if (mapRef.current) {
+        mapRef.current.remove()
+        mapRef.current = null
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready])
+
+  // Re-style when userBarangay changes (no full reinit needed)
+  useEffect(() => {
+    if (!geoLayerRef.current || !window.L) return
+    geoLayerRef.current.eachLayer(flayer => {
+      const name    = flayer.feature?.properties?.brgy_name
+      if (!name) return
+      const score   = BRGY_SCORES[name] ?? 75
+      const c       = scoreColor(score)
+      const isUser  = userBarangay && name.toLowerCase() === userBarangay.toLowerCase()
+      flayer.setStyle({
+        color:       isUser ? '#fff' : c.stroke,
+        weight:      isUser ? 2.5    : 1.2,
+        fillColor:   c.fill,
+        fillOpacity: c.opacity,
+      })
+    })
+  }, [userBarangay])
 
   return (
     <div>
+      {/* Tooltip badge injected CSS */}
+      <style>{`
+        .ww-mini-tip {
+          background: rgba(15,23,42,0.92) !important;
+          border: 1px solid rgba(255,255,255,0.12) !important;
+          color: #e2e8f0 !important;
+          font-size: 11px !important;
+          padding: 3px 8px !important;
+          border-radius: 6px !important;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
+        }
+        .ww-mini-tip::before { display: none !important; }
+      `}</style>
+
       {/* Legend */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+      
+
+      {/* Map container */}
+      <div style={{
+        position:     'relative',
+        borderRadius: 'var(--radius)',
+        overflow:     'hidden',
+        border:       '1px solid var(--border)',
+        background:   '#0f172a',
+        height:       320,
+      }}>
+        {!ready && (
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            color: 'var(--text-muted)', fontSize: 12,
+          }}>
+            Loading map…
+          </div>
+        )}
+        <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+
+        {/* Hover tooltip overlay */}
+        {tip && (
+          <div style={{
+            position:     'absolute',
+            bottom:       12,
+            left:         12,
+            background:   'rgba(15,23,42,0.95)',
+            border:       '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 10,
+            padding:      '10px 14px',
+            zIndex:       1000,
+            minWidth:     170,
+            pointerEvents: 'none',
+          }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: '#e2e8f0', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {tip.isUser && <span style={{ fontSize: 9, background: 'rgba(46,204,113,.2)', color: '#4ade80', padding: '1px 5px', borderRadius: 8, fontWeight: 800 }}>YOU</span>}
+              {tip.name}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              {[
+                { label: 'SCORE',    value: `${tip.score}%`,     color: tip.score >= 80 ? '#4ade80' : tip.score >= 60 ? '#eab308' : '#ef4444' },
+                { label: 'HOTSPOTS', value: tip.hotspots || '0', color: tip.hotspots > 3 ? '#ef4444' : '#94a3b8' },
+              ].map(s => (
+                <div key={s.label} style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 6, padding: '6px 8px', textAlign: 'center' }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: s.color }}>{s.value}</div>
+                  <div style={{ fontSize: 8, color: '#64748b', fontWeight: 700, letterSpacing: '.04em', marginTop: 1 }}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
         {LEGEND.map(l => (
           <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}>
             <div style={{ width: 9, height: 9, borderRadius: 2, background: l.color }} />
@@ -66,87 +287,9 @@ export default function HotspotMap({ userBarangay }) {
         ))}
       </div>
 
-      {/* Map */}
-      <div style={{
-        background: 'var(--bg)',
-        borderRadius: 'var(--radius)',
-        padding: 10, border: '1px solid var(--border)',
-      }}>
-        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxWidth: 300, display: 'block', margin: '0 auto' }}>
-          <text x="50%" y="13" textAnchor="middle" fontSize="8" fill="#7a8899" fontWeight="700" letterSpacing=".07em">
-            LUCENA CITY BARANGAY MAP
-          </text>
-          {CELLS.map(cell => {
-            const cx = 10 + cell.x * (CELL + GAP)
-            const cy = 20 + cell.y * (CELL + GAP)
-            const c  = scoreColor(cell.score)
-            const isUser = userBarangay && cell.name.toLowerCase() === userBarangay.toLowerCase()
-            return (
-              <g key={cell.id} style={{ cursor: 'pointer' }}
-                onMouseEnter={() => setTip(cell)}
-                onMouseLeave={() => setTip(null)}
-                onClick={() => setTip(t => t?.id === cell.id ? null : cell)}
-              >
-                <rect x={cx} y={cy} width={CELL} height={CELL} rx="6"
-                  fill={c.fill}
-                  stroke={isUser ? '#000' : c.stroke}
-                  strokeWidth={isUser ? 2.5 : 1.5}
-                />
-                <text x={cx + CELL / 2} y={cy + CELL / 2 - 4}
-                  textAnchor="middle" fontSize="12" fontWeight="700" fill={c.text}
-                >{cell.score}%</text>
-                <text x={cx + CELL / 2} y={cy + CELL / 2 + 10}
-                  textAnchor="middle" fontSize="6" fill={c.text} opacity=".7"
-                >{cell.name.split(' ').slice(0, 2).join(' ')}</text>
-                {cell.hotspots > 0 && (
-                  <>
-                    <circle cx={cx + CELL - 6} cy={cy + 6} r="5.5" fill="var(--danger, #e74c3c)" />
-                    <text x={cx + CELL - 6} y={cy + 9} textAnchor="middle"
-                      fontSize="6" fontWeight="800" fill="#fff"
-                    >{cell.hotspots}</text>
-                  </>
-                )}
-                {isUser && (
-                  <circle cx={cx + 7} cy={cy + 7} r="4" fill="#1e2633" opacity=".7" />
-                )}
-              </g>
-            )
-          })}
-        </svg>
-      </div>
-
-      {/* Tooltip */}
-      {tip && (
-        <div style={{
-          marginTop: 10,
-          background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 'var(--radius)', padding: '12px 14px',
-        }}>
-          <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span className="msi" style={{ fontSize: 16, color: 'var(--accent)' }}>location_on</span>
-            {tip.name}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
-            {[
-              { label: 'Score',    value: `${tip.score}%`, icon: 'analytics' },
-              { label: 'Reports',  value: tip.reports,     icon: 'flag' },
-              { label: 'Hotspots', value: tip.hotspots,    icon: 'local_fire_department' },
-            ].map(s => (
-              <div key={s.label} style={{
-                background: 'var(--bg)', borderRadius: 8, padding: '8px', textAlign: 'center',
-              }}>
-                <span className="msi" style={{ fontSize: 16, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>{s.icon}</span>
-                <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>{s.value}</div>
-                <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '.04em' }}>{s.label.toUpperCase()}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
         <span className="msi" style={{ fontSize: 13 }}>info</span>
-        Red dot = hotspot count · Dark dot = your barangay · Tap a cell for details
+        Red dot = hotspot cluster · White dot = your barangay · Hover or click a zone for details
       </div>
     </div>
   )
