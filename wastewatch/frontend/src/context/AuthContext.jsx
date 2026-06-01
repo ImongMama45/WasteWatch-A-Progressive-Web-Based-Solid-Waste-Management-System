@@ -68,7 +68,7 @@ export function AuthProvider({ children }) {
 
   // ── Barangay list (once, cached) ──────────────────────────────────────────
   useEffect(() => {
-    api.get('/api/auth/barangays/')
+    api.get('/api/barangays/')
       .then(res => {
         setBarangays(res.data)
         saveBrgyCache(res.data)

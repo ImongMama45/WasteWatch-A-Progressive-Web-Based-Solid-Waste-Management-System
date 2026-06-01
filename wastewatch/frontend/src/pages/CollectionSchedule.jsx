@@ -31,7 +31,7 @@ export default function CollectionSchedule() {
   const schedule = ROUTES_BY_BRGY[barangay] || FALLBACK_SCHEDULE
   const todaySchedule = schedule.find(s => s.isToday)
 
-  const showDetails = ['barangay_official', 'watcher', 'driver', 'admin'].includes(role)
+  const showDetails = ['brgy_official', 'watcher', 'driver', 'admin'].includes(role)
   const isDriver = role === 'driver'  
 
   // Add this import at the top with your other useState import

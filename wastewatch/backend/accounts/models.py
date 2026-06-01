@@ -39,11 +39,12 @@ class Barangay(models.Model):
 #    triggering model imports.  Add new roles here — nothing else needs changing.
 # ---------------------------------------------------------------------------
 class UserRole(models.TextChoices):
-    ADMIN             = 'admin',             'Admin'
-    BARANGAY_OFFICIAL = 'barangay_official', 'Barangay Official'
-    WATCHER           = 'watcher',           'Watcher'
-    DRIVER            = 'driver',            'Driver'
-    CITIZEN           = 'citizen',           'Citizen'
+    ADMIN         = 'admin',         'Admin'
+    BRGY_OFFICIAL = 'brgy_official', 'Brgy Official'
+    WATCHER       = 'watcher',       'Watcher'
+    DRIVER        = 'driver',        'Driver'
+    CITIZEN       = 'citizen',       'Citizen'
+    DUMPSITE      = 'dumpsite',      'Dumpsite'
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +83,14 @@ class User(AbstractUser):
         related_name='residents',
     )
 
+    dumpsite = models.ForeignKey(
+        'driver.Dumpsite',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='staff',
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     # Tell Django to use email as the login field
@@ -109,8 +118,12 @@ class User(AbstractUser):
         return self.role == UserRole.DRIVER
 
     @property
-    def is_barangay_official(self):
-        return self.role == UserRole.BARANGAY_OFFICIAL
+    def is_brgy_official(self):
+        return self.role == UserRole.BRGY_OFFICIAL
+
+    @property
+    def is_dumpsite(self):
+        return self.role == UserRole.DUMPSITE
 
     @property
     def is_admin_role(self):

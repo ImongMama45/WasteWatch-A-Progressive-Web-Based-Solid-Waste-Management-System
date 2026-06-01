@@ -5,6 +5,7 @@ import DriverDashboard from "./DriverDashboard";
 import AdminDashboard from "./AdminDashboard";
 import CitizenDashboard from "./CitizenDashboard";
 import BrgyDashboard from "./BrgyDashboard";
+import DumpsiteDashboard from "./DumpsiteDashboard";
 
 export default function DashboardRouter() {
   const { user } = useAuth();
@@ -24,8 +25,11 @@ export default function DashboardRouter() {
     case "citizen":
       content = <CitizenDashboard />;
       break;
-    case "barangay_official":
+    case "brgy_official":
       content = <BrgyDashboard />;
+      break;
+    case "dumpsite":
+      content = <DumpsiteDashboard />;
       break;
     default:
       content = <div>Unauthorized</div>;
