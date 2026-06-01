@@ -23,15 +23,9 @@ function TabSpinner() {
 
 // ─── Tab registry ─────────────────────────────────────────────────────────────
 const ALL_TABS = [
-<<<<<<< HEAD
   { key: 'global', label: 'Global Insights', icon: 'public',        roles: ['citizen', 'watcher', 'driver', 'brgy_official', 'admin'] },
   { key: 'perf',   label: 'Performance',     icon: 'speed',         roles: ['driver', 'admin'] },
   { key: 'admin',  label: 'Admin Controls',  icon: 'admin_panel_settings', roles: ['admin'] },
-=======
-  { key: 'global', label: 'Barangay Analytics', icon: 'public',                roles: ['citizen', 'watcher', 'driver', 'barangay_official', 'admin'] },
-  { key: 'perf',   label: 'Performance',         icon: 'speed',                roles: ['driver', 'admin'] },
-  { key: 'admin',  label: 'Admin Controls',       icon: 'admin_panel_settings', roles: ['admin'] },
->>>>>>> a68ee423d55e29178992e79ad66f572be64e9d9d
 ]
 
 function buildTabs(role) {
