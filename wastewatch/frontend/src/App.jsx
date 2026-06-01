@@ -39,7 +39,7 @@ import UserManagement from './pages/admin/UserManagement'
 import DumpsiteManagement from './pages/admin/DumpsiteManagement'
 import RouteBuilder from './pages/admin/RouteBuilder'
 import EscalationManagement from './pages/admin/EscalationManagement'
-import PerformanceAnalytics from './pages/admin/PerformanceAnalytics'
+import PerformanceAnalytics from './pages/analytics/PerformanceAnalytics'
 import HotspotDetection from './pages/admin/HotspotDetection'
 import NotificationCenter from './pages/admin/NotificationCenter'
 import ActivityLog from './pages/admin/ActivityLog'
@@ -91,11 +91,11 @@ export default function App() {
           <Route path="/profile" element={
             <PrivateRoute><Profile /></PrivateRoute>
           } />
+
           <Route path="/analytics" element={
             <PrivateRoute><AnalyticsTabs /></PrivateRoute>
           } />
 
- 
           {/* BARANGAY OFFICIAL PAGE */}
           <Route path="/brgy/escalate" element={
             <PrivateRoute><EscalateToAdmin /></PrivateRoute>

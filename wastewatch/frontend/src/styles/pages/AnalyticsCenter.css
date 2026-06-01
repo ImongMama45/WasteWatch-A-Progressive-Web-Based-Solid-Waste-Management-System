@@ -1,0 +1,1282 @@
+/* ============================================================
+   AnalyticsCenter.css  —  v2  (responsive overhaul)
+   Smart Waste Management Analytics Command Center
+   Prefix: ac-
+   Assumes existing WasteWatch tokens:
+     --accent --danger --warning --info
+     --surface --surface-2 --bg --border
+     --text --text-muted
+     --font-head --font-body --radius
+   ============================================================ */
+
+/* ─────────────────────────────────────────────────────────────
+   COMMAND CENTER HEADER
+   ─────────────────────────────────────────────────────────────
+   FIX: removed negative margin hack. The header now sits flush
+   inside .page padding using a negative-margin bleed only wide
+   enough to cancel the page's own horizontal padding.
+   On desktop (inside dashboard-main .page padding is 32px);
+   on mobile (inside .page padding is 16px).
+───────────────────────────────────────────────────────────── */
+.ac-header {
+  background: linear-gradient(150deg, #071612 0%, #0d2318 42%, #122b1a 100%);
+  /* Bleed to page edges by reversing the parent's padding */
+  margin-left:  -16px;
+  margin-right: -16px;
+  margin-top:   -20px;
+  margin-bottom: 0;
+  padding: 24px 16px 0;
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(46, 204, 113, 0.18);
+}
+
+@media (min-width: 640px) {
+  .ac-header {
+    margin-left:  -24px;
+    margin-right: -24px;
+    padding-left:  24px;
+    padding-right: 24px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .ac-header {
+    margin-left:  -32px;
+    margin-right: -32px;
+    padding-left:  32px;
+    padding-right: 32px;
+    padding-top:   28px;
+  }
+}
+
+/* Decorative circuit-board grid lines */
+.ac-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(46,204,113,.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(46,204,113,.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+}
+
+/* Soft glow orb top-right */
+.ac-header::after {
+  content: '';
+  position: absolute;
+  width: 480px;
+  height: 480px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(46,204,113,.09) 0%, transparent 65%);
+  top: -180px;
+  right: -80px;
+  pointer-events: none;
+}
+
+.ac-header__inner {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Breadcrumb ────────────────────────────────────────────── */
+.ac-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255,255,255,.4);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.ac-breadcrumb__city  { color: rgba(255,255,255,.55); }
+.ac-breadcrumb__sep   { color: rgba(255,255,255,.2); }
+.ac-breadcrumb__scope {
+  color: #4ade80;
+  background: rgba(74,222,128,.1);
+  border: 1px solid rgba(74,222,128,.22);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 9px;
+}
+
+/* ── Title + actions row ───────────────────────────────────── */
+.ac-header__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.ac-display-title {
+  font-family: var(--font-head, sans-serif);
+  font-size: clamp(18px, 2.5vw, 28px);
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0 0 4px;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.ac-display-sub {
+  font-size: 12px;
+  color: rgba(255,255,255,.45);
+  font-weight: 500;
+  letter-spacing: .03em;
+}
+
+/* ── Filter bar ────────────────────────────────────────────── */
+.ac-filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  /* FIX: cap width so filters never overflow on small screens */
+  max-width: 100%;
+}
+
+.ac-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* FIX: let selects shrink on tight viewports */
+  min-width: 0;
+}
+
+.ac-filter-label {
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: rgba(255,255,255,.32);
+}
+
+.ac-filter-select {
+  background: rgba(255,255,255,.07);
+  border: 1px solid rgba(255,255,255,.12);
+  color: rgba(255,255,255,.85);
+  border-radius: 8px;
+  padding: 7px 28px 7px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-body, sans-serif);
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='rgba(255,255,255,0.4)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  transition: border-color .18s, background .18s;
+  /* FIX: fluid width instead of fixed min-width */
+  width: 100%;
+  min-width: 100px;
+  max-width: 160px;
+  white-space: nowrap;
+}
+
+.ac-filter-select:hover  { border-color: rgba(46,204,113,.35); }
+.ac-filter-select:focus  { border-color: rgba(46,204,113,.6); background-color: rgba(46,204,113,.06); }
+.ac-filter-select option { background: #1a2e1a; color: #fff; }
+
+/* Export button */
+.ac-export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(46,204,113,.14);
+  border: 1px solid rgba(46,204,113,.35);
+  color: #4ade80;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: var(--font-body, sans-serif);
+  white-space: nowrap;
+  transition: background .18s, border-color .18s, transform .12s;
+  flex-shrink: 0;
+  align-self: flex-end;
+}
+
+.ac-export-btn:hover  { background: rgba(46,204,113,.22); border-color: rgba(46,204,113,.6); }
+.ac-export-btn:active { transform: scale(.96); }
+
+/* ── Tab bar ───────────────────────────────────────────────── */
+.ac-tabs {
+  display: flex;
+  gap: 0;
+  position: relative;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* FIX: fade edges to hint at scroll */
+  -webkit-mask-image: linear-gradient(to right, transparent 0, black 8px, black calc(100% - 8px), transparent 100%);
+  mask-image:         linear-gradient(to right, transparent 0, black 8px, black calc(100% - 8px), transparent 100%);
+}
+
+.ac-tabs::-webkit-scrollbar { display: none; }
+
+.ac-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 11px 18px;
+  border: none;
+  background: transparent;
+  color: rgba(255,255,255,.42);
+  font-family: var(--font-body, sans-serif);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  border-bottom: 2px solid transparent;
+  transition: color .18s, border-color .18s, background .18s;
+}
+
+.ac-tab:hover { color: rgba(255,255,255,.75); background: rgba(255,255,255,.04); }
+
+.ac-tab--active {
+  color: #ffffff;
+  border-bottom-color: #4ade80;
+  background: rgba(255,255,255,.06);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   CONTENT AREA
+───────────────────────────────────────────────────────────── */
+.ac-content {
+  padding: 20px 0 0;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   EXECUTIVE KPI ROW
+   FIX: fluid columns with auto-fit so it gracefully reflows
+   6 → 3 → 2 without a hard breakpoint jump
+───────────────────────────────────────────────────────────── */
+.ac-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.ac-kpi-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  position: relative;
+  overflow: hidden;  /* FIX: contain sparklines */
+  transition: transform .2s, box-shadow .2s;
+  cursor: default;
+}
+
+.ac-kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0,0,0,.1);
+}
+
+/* Top accent stripe */
+.ac-kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  border-radius: 14px 14px 0 0;
+  background: var(--ac-kpi-accent, var(--accent));
+  opacity: .7;
+}
+
+.ac-kpi-card--green  { --ac-kpi-accent: var(--accent);  }
+.ac-kpi-card--amber  { --ac-kpi-accent: var(--warning); }
+.ac-kpi-card--red    { --ac-kpi-accent: var(--danger);  }
+.ac-kpi-card--blue   { --ac-kpi-accent: var(--info);    }
+
+.ac-kpi-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 10px;
+  color: var(--ac-kpi-accent, var(--accent));
+  flex-shrink: 0;
+}
+
+.ac-kpi-card--green .ac-kpi-icon  { background: rgba(46,204,113,.1);  }
+.ac-kpi-card--amber .ac-kpi-icon  { background: rgba(243,156,18,.1);  }
+.ac-kpi-card--red   .ac-kpi-icon  { background: rgba(231,76,60,.1);   }
+.ac-kpi-card--blue  .ac-kpi-icon  { background: rgba(93,173,226,.1);  }
+
+.ac-kpi-value {
+  font-family: var(--font-head, sans-serif);
+  font-size: clamp(20px, 2.5vw, 26px);
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  margin-bottom: 4px;
+}
+
+.ac-kpi-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+
+.ac-kpi-delta--up   { color: #16a34a; background: rgba(22,163,74,.1); }
+.ac-kpi-delta--down { color: var(--danger); background: rgba(231,76,60,.1); }
+.ac-kpi-delta--flat { color: var(--text-muted); background: var(--bg); }
+
+.ac-kpi-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.ac-kpi-spark {
+  margin-top: 10px;
+  opacity: .7;
+  /* FIX: clip sparkline overflow */
+  overflow: hidden;
+  line-height: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   TWO-COLUMN WORKSPACE
+   FIX: sidebar is 320px on large desktop, collapses to 1 col
+   at 1100px (not 1024px — that's too early for this layout)
+───────────────────────────────────────────────────────────── */
+.ac-workspace {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 16px;
+  align-items: start;
+}
+
+.ac-main-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;  /* FIX: allow shrink */
+}
+
+.ac-aside-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   SECTION CARDS
+───────────────────────────────────────────────────────────── */
+.ac-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 1px 6px rgba(0,0,0,.05);
+  /* FIX: prevent cards from ever overflowing their column */
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ac-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.ac-card-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.ac-card-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: rgba(46,204,113,.1);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ac-card-icon--amber { background: rgba(243,156,18,.1);  color: var(--warning); }
+.ac-card-icon--red   { background: rgba(231,76,60,.1);   color: var(--danger);  }
+.ac-card-icon--blue  { background: rgba(93,173,226,.1);  color: var(--info);    }
+
+.ac-card-titles { flex: 1; min-width: 0; }
+
+.ac-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 2px;
+  line-height: 1.2;
+}
+
+.ac-card-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.ac-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+/* ── Period toggle ─────────────────────────────────────────── */
+.ac-period-tog {
+  display: flex;
+  gap: 2px;
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 3px;
+  border: 1px solid var(--border);
+}
+
+.ac-period-btn {
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-body, sans-serif);
+  font-size: 10px;
+  font-weight: 700;
+  background: transparent;
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition: background .15s, color .15s;
+}
+
+.ac-period-btn--active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(0,0,0,.1);
+}
+
+/* ── Chart type toggle ─────────────────────────────────────── */
+.ac-chart-tog {
+  display: flex;
+  gap: 4px;
+}
+
+.ac-chart-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font-body, sans-serif);
+  transition: all .15s;
+}
+
+.ac-chart-btn--active {
+  background: rgba(46,204,113,.1);
+  border-color: rgba(46,204,113,.4);
+  color: var(--accent);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   COLLECTION EFFICIENCY WIDGET
+───────────────────────────────────────────────────────────── */
+.ac-eff-wrap {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.ac-eff-ring-wrap {
+  position: relative;
+  flex-shrink: 0;
+  width: 96px;
+  height: 96px;
+}
+
+.ac-eff-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+.ac-eff-pct {
+  font-family: var(--font-head, sans-serif);
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
+}
+
+.ac-eff-rows {
+  flex: 1;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ac-eff-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ac-eff-row-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  width: 64px;
+  flex-shrink: 0;
+}
+
+.ac-eff-bar-track {
+  flex: 1;
+  height: 5px;
+  border-radius: 20px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.ac-eff-bar-fill {
+  height: 100%;
+  border-radius: 20px;
+  transition: width .5s ease;
+}
+
+.ac-eff-row-val {
+  font-size: 11px;
+  font-weight: 700;
+  width: 24px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   HOTSPOT INTELLIGENCE
+───────────────────────────────────────────────────────────── */
+.ac-hotspot-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.ac-mini-stat {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-align: center;
+}
+
+.ac-mini-stat__val {
+  font-family: var(--font-head, sans-serif);
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.ac-mini-stat__label {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--text-muted);
+}
+
+.ac-hotspot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ac-hotspot-item {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  transition: border-color .18s;
+}
+
+.ac-hotspot-item:hover { border-color: rgba(46,204,113,.3); }
+
+.ac-hotspot-rank {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.ac-hotspot-body { flex: 1; min-width: 0; }
+
+.ac-hotspot-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+  flex-wrap: wrap;
+}
+
+.ac-hotspot-location {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ac-sev-badge {
+  font-size: 8px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 20px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.ac-sev-badge--critical { background: rgba(231,76,60,.1);   color: var(--danger);  border: 1px solid rgba(231,76,60,.25); }
+.ac-sev-badge--high     { background: rgba(243,156,18,.1);  color: var(--warning); border: 1px solid rgba(243,156,18,.25); }
+.ac-sev-badge--medium   { background: rgba(93,173,226,.1);  color: var(--info);    border: 1px solid rgba(93,173,226,.25); }
+.ac-sev-badge--low      { background: var(--bg);            color: var(--text-muted); border: 1px solid var(--border); }
+
+.ac-hotspot-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.ac-res-track {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ac-res-bar {
+  flex: 1;
+  height: 3px;
+  border-radius: 20px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.ac-res-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 20px;
+  transition: width .5s ease;
+}
+
+.ac-res-pct {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   BARANGAY RANKINGS SIDEBAR
+───────────────────────────────────────────────────────────── */
+.ac-rank-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  margin-bottom: 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ac-rank-tabs::-webkit-scrollbar { display: none; }
+
+.ac-rank-tab {
+  flex: 1;
+  padding: 5px 8px;
+  border-radius: 5px;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-body, sans-serif);
+  font-size: 10px;
+  font-weight: 700;
+  background: transparent;
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition: all .15s;
+  text-align: center;
+}
+
+.ac-rank-tab--active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(0,0,0,.1);
+}
+
+.ac-rank-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ac-rank-item {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  transition: border-color .18s, transform .18s;
+}
+
+.ac-rank-item:hover        { border-color: rgba(46,204,113,.3); transform: translateX(2px); }
+.ac-rank-item--user        { border-color: rgba(46,204,113,.4); background: rgba(46,204,113,.04); }
+
+.ac-rank-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--surface);
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--text-muted);
+}
+
+.ac-rank-info { flex: 1; min-width: 0; }
+
+.ac-rank-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.ac-rank-name--user { color: var(--accent); }
+
+.ac-rank-bar-track {
+  height: 3px;
+  border-radius: 20px;
+  background: var(--border);
+  overflow: hidden;
+  margin-bottom: 3px;
+}
+
+.ac-rank-bar-fill {
+  height: 100%;
+  border-radius: 20px;
+  transition: width .5s ease;
+}
+
+.ac-rank-pop   { font-size: 9px; color: var(--text-muted); }
+.ac-rank-right { text-align: right; flex-shrink: 0; }
+
+.ac-rank-score {
+  font-family: var(--font-head, sans-serif);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  margin-bottom: 2px;
+}
+
+.ac-rank-trend { font-size: 15px; }
+
+.ac-you-badge {
+  display: inline-block;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  background: rgba(46,204,113,.12);
+  color: var(--accent);
+  padding: 1px 5px;
+  border-radius: 8px;
+  margin-left: 4px;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   OPERATIONAL INSIGHTS
+───────────────────────────────────────────────────────────── */
+.ac-insights-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+.ac-insights-badge {
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  background: rgba(93,173,226,.12);
+  color: var(--info);
+  border: 1px solid rgba(93,173,226,.28);
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.ac-insight-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ac-insight-item {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid transparent;
+  border-radius: 9px;
+  padding: 10px 12px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.4;
+  transition: border-color .18s;
+}
+
+.ac-insight-item:hover { border-color: rgba(46,204,113,.3); border-left-color: var(--accent); }
+
+.ac-insight-item--green { border-left-color: var(--accent); }
+.ac-insight-item--amber { border-left-color: var(--warning); }
+.ac-insight-item--red   { border-left-color: var(--danger); }
+.ac-insight-item--blue  { border-left-color: var(--info); }
+
+.ac-insight-emoji { font-size: 16px; flex-shrink: 0; line-height: 1.2; }
+.ac-insight-text strong { color: var(--text); font-weight: 700; }
+
+/* ─────────────────────────────────────────────────────────────
+   QUICK ALERTS
+───────────────────────────────────────────────────────────── */
+.ac-alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ac-alert-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.ac-alert-dot-wrap { padding-top: 2px; flex-shrink: 0; }
+
+.ac-alert-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.ac-alert-dot--critical { background: var(--danger);  box-shadow: 0 0 6px rgba(231,76,60,.5); animation: ac-pulse 1.8s ease infinite; }
+.ac-alert-dot--high     { background: var(--warning); }
+.ac-alert-dot--medium   { background: var(--info); }
+
+@keyframes ac-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: .5; transform: scale(.7); }
+}
+
+.ac-alert-body { flex: 1; min-width: 0; }
+
+.ac-alert-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+  line-height: 1.2;
+}
+
+.ac-alert-meta { font-size: 10px; color: var(--text-muted); }
+
+.ac-alert-tag {
+  display: inline-block;
+  font-size: 8px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  flex-shrink: 0;
+}
+
+.ac-alert-tag--critical { background: rgba(231,76,60,.12); color: var(--danger);  }
+.ac-alert-tag--high     { background: rgba(243,156,18,.12); color: var(--warning); }
+.ac-alert-tag--medium   { background: rgba(93,173,226,.12); color: var(--info);    }
+
+/* ─────────────────────────────────────────────────────────────
+   TRUCK PERFORMANCE TABLE
+───────────────────────────────────────────────────────────── */
+.ac-truck-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ac-truck-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  transition: border-color .18s;
+}
+
+.ac-truck-row:hover     { border-color: rgba(46,204,113,.3); }
+.ac-truck-row--top      { border-color: rgba(46,204,113,.35); background: rgba(46,204,113,.03); }
+
+.ac-truck-rank {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ac-truck-info { flex: 1; min-width: 0; }
+
+.ac-truck-id {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.ac-truck-driver {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ac-truck-stats {
+  display: flex;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.ac-truck-rate          { text-align: right; flex-shrink: 0; }
+.ac-truck-rate__val     { font-family: var(--font-head, sans-serif); font-size: 16px; font-weight: 800; line-height: 1; }
+.ac-truck-rate__label   { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); }
+
+/* ─────────────────────────────────────────────────────────────
+   WASTE COMPOSITION
+───────────────────────────────────────────────────────────── */
+.ac-composition-wrap {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.ac-composition-list {
+  flex: 1;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ac-composition-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ac-composition-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.ac-composition-name {
+  font-size: 12px;
+  color: var(--text-muted);
+  flex: 0 0 70px;
+}
+
+.ac-composition-bar-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 20px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.ac-composition-bar-fill {
+  height: 100%;
+  border-radius: 20px;
+  transition: width .5s ease;
+}
+
+.ac-composition-pct {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+  width: 32px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   BOTTOM GRID
+   FIX: use auto-fill with a sensible min so it never squishes
+───────────────────────────────────────────────────────────── */
+.ac-bottom-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   ADMIN CONTROLS
+───────────────────────────────────────────────────────────── */
+.ac-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.ac-admin-action {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-body, sans-serif);
+  text-align: left;
+  transition: transform .15s, filter .15s;
+}
+
+.ac-admin-action:hover  { transform: translateY(-2px); filter: brightness(1.08); }
+.ac-admin-action:active { transform: scale(.97); }
+
+.ac-sys-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.ac-sys-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ac-sys-val {
+  font-family: var(--font-head, sans-serif);
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
+}
+
+.ac-sys-label {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--text-muted);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   RESPONSIVE BREAKPOINTS
+   Strategy:
+     ≥ 1100px  — full two-column workspace
+     768–1099  — single column workspace; aside becomes 2-col grid
+     < 768px   — full mobile; filters stack; tabs scroll
+───────────────────────────────────────────────────────────── */
+
+/* ── Mid-range: tablet landscape / small desktop ─────────── */
+@media (max-width: 1100px) {
+  .ac-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  /* Aside becomes a responsive 2-col grid instead of a column */
+  .ac-aside-col {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+  }
+}
+
+/* ── Tablet ────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .ac-kpi-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* ── Mobile ────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  /* Header padding synced with .page on mobile */
+  .ac-header {
+    margin-left:  -16px;
+    margin-right: -16px;
+    padding-left:  16px;
+    padding-right: 16px;
+    padding-top:   20px;
+  }
+
+  .ac-header__row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  /* Filters scroll horizontally on mobile */
+  .ac-filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    width: 100%;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+  }
+  .ac-filters::-webkit-scrollbar { display: none; }
+
+  .ac-filter-group {
+    flex-shrink: 0;
+  }
+
+  .ac-filter-select {
+    max-width: 130px;
+    min-width: 100px;
+  }
+
+  .ac-export-btn {
+    flex-shrink: 0;
+  }
+
+  /* KPI: 2 columns on mobile */
+  .ac-kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .ac-kpi-value {
+    font-size: 20px;
+  }
+
+  /* Aside: single column */
+  .ac-aside-col {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Bottom grid: single column */
+  .ac-bottom-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Admin grids */
+  .ac-sys-grid   { grid-template-columns: repeat(2, 1fr); }
+  .ac-admin-grid { grid-template-columns: 1fr; }
+
+  /* Efficiency widget */
+  .ac-eff-wrap {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .ac-eff-rows { min-width: 0; width: 100%; }
+
+  /* Cards */
+  .ac-card { padding: 16px; }
+  .ac-card-head { gap: 8px; }
+
+  /* Truck stats wrap tightly */
+  .ac-truck-row { gap: 8px; }
+}
+
+/* ── Very small mobile ─────────────────────────────────────── */
+@media (max-width: 400px) {
+  .ac-kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .ac-kpi-card { padding: 12px; }
+  .ac-kpi-value { font-size: 18px; }
+  .ac-hotspot-stats { grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .ac-mini-stat { padding: 8px; }
+}
