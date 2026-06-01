@@ -12,7 +12,7 @@ const MOCK_EXTRA_DATA = {
     crew: 'Jose Bautista, Carlo Ramos',
     routesAssigned: 42,
   },
-  barangay_official: {
+  brgy_official: {
     barangay: 'Cotta',
     reportsHandled: 156,
   },
@@ -116,7 +116,7 @@ export default function Profile() {
             <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>{user.full_name}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <span className="role-badge">{role.replace('_', ' ')}</span>
-              {(role === 'barangay_official' || role === 'watcher' || role === 'citizen') && (
+              {(role === 'brgy_official' || role === 'watcher' || role === 'citizen') && (
                 <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>📍 Brgy. {form.barangay}</span>
               )}
             </div>
@@ -149,7 +149,7 @@ export default function Profile() {
                     <label className="form-label">Contact Number</label>
                     <input className="form-input" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
                   </div>
-                  {(role === 'barangay_official' || role === 'watcher' || role === 'citizen') && (
+                  {(role === 'brgy_official' || role === 'watcher' || role === 'citizen') && (
                     <div>
                       <label className="form-label">Barangay</label>
                       <input className="form-input" value={form.barangay} onChange={e => setForm({ ...form, barangay: e.target.value })} />
@@ -175,7 +175,7 @@ export default function Profile() {
                   <div className="info-label">Contact Number</div>
                   <div className="info-value">{form.phone || 'Not provided'}</div>
                 </div>
-                {(role === 'barangay_official' || role === 'watcher' || role === 'citizen') && (
+                {(role === 'brgy_official' || role === 'watcher' || role === 'citizen') && (
                   <div className="info-row">
                     <div className="info-label">Barangay</div>
                     <div className="info-value">{form.barangay}</div>
@@ -213,7 +213,7 @@ export default function Profile() {
               </>
             )}
 
-            {(role === 'barangay_official' || role === 'watcher') && (
+            {(role === 'brgy_official' || role === 'watcher') && (
               <>
                 <div className="info-row">
                   <div className="info-label">Jurisdiction</div>

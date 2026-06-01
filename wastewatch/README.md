@@ -153,7 +153,7 @@ The Vite dev server proxies all `/api/*` calls to Django at `:8000` automaticall
 | `citizen`           | Default for new registrations       |                        Automatic |
 | `watcher`           | Submit reports, confirm collections | Admin panel → User → Change role |
 | `driver`            | *(Future)* View assigned routes     | TBD |
-| `barangay_official` | *(Future)* Approve/reject reports   | TBD |
+| `brgy_official` | *(Future)* Approve/reject reports   | TBD |
 | `admin`             | Full system access                  | Admin panel |
 
 > **Important:** The role field is **hidden** from the public registration form. Only Django admin (`/admin/`) can change a user's role. This prevents self-promotion attacks.
@@ -198,7 +198,7 @@ Phase 2 — Driver Module
 
 Phase 3 — Barangay Official
   → Can approve/reject GarbageReports (just update status field)
-  → Add permission check: @role_required('barangay_official')
+  → Add permission check: @role_required('brgy_official')
 
 Phase 4 — Map Integration
   → Replace map placeholder in Dashboard with Leaflet.js

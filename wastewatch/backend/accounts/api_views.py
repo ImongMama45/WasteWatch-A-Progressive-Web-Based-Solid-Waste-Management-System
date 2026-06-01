@@ -49,6 +49,8 @@ def user_to_dict(user):
         'role':         user.role,
         'barangay_id':  user.barangay_id,
         'barangay_name': user.barangay.name if user.barangay else None,
+        'dumpsite_id':   user.dumpsite_id,
+        'dumpsite_name': user.dumpsite.name if user.dumpsite else None,
     }
 
 

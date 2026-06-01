@@ -84,7 +84,7 @@ wastewatch/
     - `citizen`: Default role, can view public data.
     - `watcher`: Can submit reports and confirm collections.
     - `driver`: *(Future)* Will view assigned routes.
-    - `barangay_official`: *(Future)* Will approve/reject reports.
+    - `brgy_official`: *(Future)* Will approve/reject reports.
     - `admin`: Full system access via `/admin/`.
 - **Database:** Development uses SQLite by default. For production or advanced local testing, use PostgreSQL as described in `wastewatch/README.md`.
 - **Media:** Uploaded images are stored in `wastewatch/backend/media`. This directory should be excluded from version control in production.

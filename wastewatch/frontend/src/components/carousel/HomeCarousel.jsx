@@ -1,14 +1,14 @@
 /**
  * HomeCarousel.jsx — Role-Based Swipeable Hero Carousel
  * -------------------------------------------------------
- * Roles supported: citizen | driver | watcher | barangay_official
+ * Roles supported: citizen | driver | watcher | brgy_official
  *
  * Each role gets 3 purpose-built slides tailored to their workflow.
  * Design: matches .card-dark (#1e2633) surface style.
  * No external dependencies — native pointer/touch + CSS transitions.
  *
  * Props:
- *   role           {string} — 'citizen' | 'driver' | 'watcher' | 'barangay_official'
+ *   role           {string} — 'citizen' | 'driver' | 'watcher' | 'brgy_official'
  *   userBarangay   {string} — user's barangay name
  *   onReport       {fn}     — report submission handler (citizen/official)
  *   onValidate     {fn}     — validation handler (watcher/official)
@@ -811,7 +811,7 @@ export default function HomeCarousel({
         return <DriverSlides active={active} onStartRoute={resolvedOnStartRoute} onViewRankings={handleViewRankings} />
       case 'watcher':
         return <WatcherSlides active={active} onValidate={resolvedOnValidate} onViewRankings={handleViewRankings} />
-      case 'barangay_official':
+      case 'brgy_official':
         return (
           <OfficialSlides
             active={active}

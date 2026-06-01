@@ -7,17 +7,19 @@ import { useState, useEffect, useMemo } from 'react'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useUsers } from '../../hooks/useUsers'
 import api from '../../api/client'
+import BarangaySelect from '../../components/BarangaySelect'
 
 // ── Mock Data ─────────────────────────────────────────────────────────────────
 
-const ROLES = ['watcher', 'driver', 'barangay_official', 'citizen']
+const ROLES = ['watcher', 'driver', 'brgy_official', 'citizen', 'dumpsite']
 
 const ROLE_META = {
   watcher: { label: 'Watcher', color: '#5dade2', bg: 'rgba(93,173,226,0.1)', border: 'rgba(93,173,226,0.3)' },
   driver: { label: 'Driver', color: '#f39c12', bg: 'rgba(243,156,18,0.1)', border: 'rgba(243,156,18,0.3)' },
-  barangay_official: { label: 'Brgy. Official', color: '#9b59b6', bg: 'rgba(155,89,182,0.1)', border: 'rgba(155,89,182,0.3)' },
+  brgy_official: { label: 'Brgy. Official', color: '#9b59b6', bg: 'rgba(155,89,182,0.1)', border: 'rgba(155,89,182,0.3)' },
   citizen: { label: 'Citizen', color: '#2ecc71', bg: 'rgba(46,204,113,0.1)', border: 'rgba(46,204,113,0.3)' },
   admin: { label: 'Admin', color: '#e74c3c', bg: 'rgba(231,76,60,0.1)', border: 'rgba(231,76,60,0.3)' },
+  dumpsite: { label: 'Dumpsite', color: '#94a3b8', bg: 'rgba(148,163,184,0.1)', border: 'rgba(148,163,184,0.3)' },
 }
 
 const EMPTY_FORM = { full_name: '', email: '', password: '', role: 'citizen', barangay: '', is_active: true }
@@ -48,12 +50,14 @@ function Avatar({ name, active }) {
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 
-function UserModal({ user, onSave, onClose, barangays }) {
+function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
   const isEdit = !!user
   const [form, setForm] = useState(user ? {
     full_name: user.full_name, email: user.email, password: '',
-    role: user.role, barangay: user.barangay || '', is_active: user.is_active,
-  } : { ...EMPTY_FORM })
+    role: user.role, barangay: user.barangay || '', 
+    dumpsite: user.dumpsite || '',
+    is_active: user.is_active,
+  } : { ...EMPTY_FORM, dumpsite: '' })
   const [err, setErr] = useState('')
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -62,6 +66,7 @@ function UserModal({ user, onSave, onClose, barangays }) {
     if (!form.full_name.trim()) return 'Full name is required.'
     if (!form.email.trim()) return 'Email is required.'
     if (!isEdit && !form.password.trim()) return 'Password is required for new users.'
+    if (form.role === 'dumpsite' && !form.dumpsite) return 'Please assign a dumpsite facility.'
     return ''
   }
 
@@ -119,11 +124,25 @@ function UserModal({ user, onSave, onClose, barangays }) {
             </select>
           </div>
           <div>
-            <label className="form-label">Barangay</label>
-            <select className="form-input" value={form.barangay} onChange={e => set('barangay', e.target.value)}>
-              <option value="">— Select —</option>
-              {barangays.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
+            {form.role === 'dumpsite' ? (
+              <>
+                <label className="form-label">Dumpsite Facility</label>
+                <select className="form-input" value={form.dumpsite} onChange={e => set('dumpsite', e.target.value)}>
+                  <option value="">— Select —</option>
+                  {dumpsites.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              </>
+            ) : (
+              <>
+                <label className="form-label">Barangay</label>
+                <BarangaySelect
+                  barangays={barangays}
+                  value={form.barangay}
+                  onChange={id => set('barangay', id)}
+                  label="— Select —"
+                />
+              </>
+            )}
           </div>
         </div>
 
@@ -165,6 +184,7 @@ function UserModal({ user, onSave, onClose, barangays }) {
 export default function UserManagement() {
   const { users, loading, refresh: refreshUsers } = useUsers()
   const [barangays, setBarangays] = useState([])
+  const [dumpsites, setDumpsites] = useState([])
   
   const [roleFilter, setRoleFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -176,6 +196,7 @@ export default function UserManagement() {
 
   useEffect(() => {
     api.get('/api/barangays/').then(res => setBarangays(res.data))
+    api.get('/api/driver/dumpsites/').then(res => setDumpsites(res.data))
   }, [])
 
   async function handleSave(form) {
@@ -219,8 +240,9 @@ export default function UserManagement() {
     all: users.length,
     watcher: users.filter(u => u.role === 'watcher').length,
     driver: users.filter(u => u.role === 'driver').length,
-    barangay_official: users.filter(u => u.role === 'barangay_official').length,
+    brgy_official: users.filter(u => u.role === 'brgy_official').length,
     citizen: users.filter(u => u.role === 'citizen').length,
+    dumpsite: users.filter(u => u.role === 'dumpsite').length,
     active: users.filter(u => u.is_active).length,
     inactive: users.filter(u => !u.is_active).length,
   }), [users])
@@ -231,7 +253,8 @@ export default function UserManagement() {
     const matchSearch = !search ||
       u.full_name.toLowerCase().includes(search.toLowerCase()) ||
       u.email.toLowerCase().includes(search.toLowerCase()) ||
-      (u.barangay_name || '').toLowerCase().includes(search.toLowerCase())
+      (u.barangay_name || '').toLowerCase().includes(search.toLowerCase()) ||
+      (u.dumpsite_name || '').toLowerCase().includes(search.toLowerCase())
     return matchRole && matchStatus && matchSearch
   }), [users, roleFilter, statusFilter, search])
 
@@ -256,6 +279,7 @@ export default function UserManagement() {
           onSave={handleSave}
           onClose={() => setModal(null)}
           barangays={barangays}
+          dumpsites={dumpsites}
         />
       )}
 
@@ -282,7 +306,7 @@ export default function UserManagement() {
                 fontSize: 9, fontWeight: 800, padding: '3px 10px', borderRadius: 20,
               }}>ADMIN</span>
             </div>
-            <p className="text-muted text-sm">Manage accounts, roles, and barangay assignments.</p>
+            <p className="text-muted text-sm">Manage accounts, roles, and assignments.</p>
           </div>
           <button className="btn btn-primary" onClick={() => setModal('add')}>
             + Add User
@@ -295,7 +319,7 @@ export default function UserManagement() {
             { label: 'Total Users', value: counts.all, color: '#ffffffff' },
             { label: 'Active', value: counts.active, color: '#2ecc71' },
             { label: 'Inactive', value: counts.inactive, color: '#e74c3c' },
-            { label: 'Brgy. Officials', value: counts.barangay_official, color: '#9b59b6' },
+            { label: 'Brgy. Officials', value: counts.brgy_official, color: '#9b59b6' },
           ].map(s => (
             <div key={s.label} className="stat-card">
               <div className="label">{s.label}</div>
@@ -310,8 +334,9 @@ export default function UserManagement() {
             { key: 'all', label: 'All' },
             { key: 'watcher', label: 'Watchers' },
             { key: 'driver', label: 'Drivers' },
-            { key: 'barangay_official', label: 'Brgy. Officials' },
+            { key: 'brgy_official', label: 'Brgy. Officials' },
             { key: 'citizen', label: 'Citizens' },
+            { key: 'dumpsite', label: 'Dumpsites' },
           ].map(f => (
             <button key={f.key} className="um-filter" onClick={() => setRoleFilter(f.key)} style={{
               padding: '6px 14px', borderRadius: 8, border: 'none',
@@ -342,7 +367,7 @@ export default function UserManagement() {
           </div>
           <input
             className="form-input"
-            placeholder="Search name, email, barangay…"
+            placeholder="Search name, email, assignment…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             style={{ maxWidth: 280, marginLeft: 'auto' }}
@@ -364,7 +389,7 @@ export default function UserManagement() {
             <span>User</span>
             <span>Email</span>
             <span>Role</span>
-            <span>Barangay</span>
+            <span>Jurisdiction</span>
             <span style={{ textAlign: 'center' }}>Status</span>
             <span style={{ textAlign: 'right' }}>Actions</span>
           </div>
@@ -410,8 +435,10 @@ export default function UserManagement() {
                 {/* Role */}
                 <RoleBadge role={u.role} />
 
-                {/* Barangay */}
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{u.barangay_name || '—'}</span>
+                {/* Jurisdiction (Barangay or Dumpsite) */}
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {u.role === 'dumpsite' ? (u.dumpsite_name || '—') : (u.barangay_name || '—')}
+                </span>
 
                 {/* Active toggle */}
                 <div style={{ display: 'flex', justifyContent: 'center' }}>

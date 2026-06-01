@@ -10,7 +10,7 @@ from django import forms
 from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
 from django.contrib.auth import authenticate
 
-from .models import User, Barangay
+from .models import User, Barangay, UserRole
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +73,7 @@ class RegistrationForm(UserCreationForm):
         user.barangay  = self.cleaned_data.get('barangay')
         # Role is always CITIZEN on public registration
         # Admins change roles via /admin/ panel
-        user.role = 'citizen'
+        user.role = UserRole.CITIZEN
         if commit:
             user.save()
         return user

@@ -289,7 +289,7 @@ const ROLE_NAV_CONFIG = {
     },
   ],
 
-  barangay_official: [
+  brgy_official: [
     { type: 'item', path: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
     {
       type: 'group',
@@ -397,6 +397,19 @@ const ROLE_NAV_CONFIG = {
       ],
     },
   ],
+  dumpsite: [
+    { type: 'item', path: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
+    {
+      type: 'group',
+      label: 'Operations',
+      icon: 'dumpsite',
+      items: [
+        { path: '/dumpsite/inbound',  label: 'Inbound Trucks', icon: 'truck' },
+        { path: '/dumpsite/log',      label: 'Disposal Log',   icon: 'report' },
+      ],
+    },
+    { type: 'item', path: '/announcements', label: 'News & Alerts', icon: 'news' },
+  ],
 }
 
 // ─── Legacy exports (used by Navbar + other components) ──────────────────────
@@ -419,7 +432,7 @@ export const SIDEBAR_NAV = {
     { path: '/admin/hotspots', label: 'Hotspots', icon: '🔥' },
     { path: '/admin/activity-log', label: 'Activity Log', icon: '📝' },
   ],
-  barangay_official: [
+  brgy_official: [
     { path: '/', label: 'Home', icon: '🏠' },
     { path: '/dashboard', label: 'Dashboard', icon: '📊' },
     { path: '/analytics', label: 'Brgy Analytics', icon: '📈' },
@@ -458,6 +471,13 @@ export const SIDEBAR_NAV = {
     { path: '/driver/status', label: 'Shift & Truck', icon: '🚛' },
     { path: '/map', label: 'Live Map', icon: '📍' },
     { path: '/profile', label: 'Profile', icon: '👤' },
+  ],
+  dumpsite: [
+    { path: '/', label: 'Home', icon: '🏠' },
+    { path: '/dashboard', label: 'Dashboard', icon: '📊' },
+    { path: '/announcements', label: 'News & Alerts', icon: '📰' },
+    { path: '/dumpsite/inbound', label: 'Inbound', icon: '🚛' },
+    { path: '/dumpsite/log', label: 'Disposal Log', icon: '📋' },
   ],
 }
 

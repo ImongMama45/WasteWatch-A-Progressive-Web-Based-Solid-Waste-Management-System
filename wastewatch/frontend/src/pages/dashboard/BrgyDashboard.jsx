@@ -183,7 +183,7 @@ export default function BrgyDashboard() {
         </div>
 
         <div className='mobile-schedule'>
-          <HomeCarousel role="barangay_official" userBarangay={user?.barangay_name} onReport={() => navigate('/report/submit')} extraSecondCta={{ label: '✔ Validate', onClick: () => navigate('/brgy/validate-reports') }} />
+          <HomeCarousel role="brgy_official" userBarangay={user?.barangay_name} onReport={() => navigate('/report/submit')} extraSecondCta={{ label: '✔ Validate', onClick: () => navigate('/brgy/validate-reports') }} />
         </div>
 
 

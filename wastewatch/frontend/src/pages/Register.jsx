@@ -8,12 +8,12 @@ import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../api/client'
+import BarangaySelect from '../components/BarangaySelect'
 
 export default function Register() {
-  const { register } = useAuth()
+  const { register, barangays } = useAuth()
   const navigate = useNavigate()
 
-  const [barangays, setBarangays] = useState([])
   const [form, setForm] = useState({
     full_name: '',
     email: '',
@@ -23,13 +23,6 @@ export default function Register() {
   })
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
-
-  // Load barangays for the dropdown
-  useEffect(() => {
-    api.get('/api/barangays/')
-      .then(res => setBarangays(res.data))
-      .catch(() => { })   // Silently fail — barangay is optional
-  }, [])
 
   function handleChange(e) {
     setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
@@ -42,6 +35,7 @@ export default function Register() {
     const errs = {}
     if (!form.full_name.trim()) errs.full_name = 'Full name is required.'
     if (!form.email.trim()) errs.email = 'Email is required.'
+    if (!form.barangay) errs.barangay = 'Please select your barangay.'
     if (form.password.length < 8) errs.password = 'Password must be at least 8 characters.'
     if (form.password !== form.password2) errs.password2 = 'Passwords do not match.'
     return errs
@@ -104,18 +98,13 @@ export default function Register() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Barangay <span className="text-muted">(optional)</span></label>
-            <select
-              className="form-input"
-              name="barangay"
+            <label className="form-label">Barangay</label>
+            <BarangaySelect
+              barangays={barangays}
               value={form.barangay}
-              onChange={handleChange}
-            >
-              <option value="">— Select your barangay —</option>
-              {barangays.map(b => (
-                <option key={b.id} value={b.id}>{b.name}</option>
-              ))}
-            </select>
+              onChange={id => setForm(prev => ({ ...prev, barangay: id }))}
+            />
+            {errors.barangay && <p className="form-error">{errors.barangay}</p>}
           </div>
 
           <div className="form-group">

@@ -19,7 +19,7 @@ function TabSpinner() {
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
 const ALL_TABS = [
-  { key: 'global', label: 'Global Insights', icon: 'public',        roles: ['citizen', 'watcher', 'driver', 'barangay_official', 'admin'] },
+  { key: 'global', label: 'Global Insights', icon: 'public',        roles: ['citizen', 'watcher', 'driver', 'brgy_official', 'admin'] },
   { key: 'perf',   label: 'Performance',     icon: 'speed',         roles: ['driver', 'admin'] },
   { key: 'admin',  label: 'Admin Controls',  icon: 'admin_panel_settings', roles: ['admin'] },
 ]
