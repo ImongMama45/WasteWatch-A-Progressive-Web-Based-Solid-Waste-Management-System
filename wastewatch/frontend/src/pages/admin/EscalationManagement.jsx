@@ -76,7 +76,7 @@ function AssignModal({ esc, onSave, onClose, staff }) {
 export default function EscalationManagement() {
   const { items, loading, saveEscalation, resolveEscalation } = useEscalations()
   const { users } = useUsers()
-  
+
   const staff = useMemo(() => users.filter(u => u.role !== 'citizen'), [users])
 
   const [priorityFilter, setPriorityFilter] = useState('all')
@@ -143,7 +143,7 @@ export default function EscalationManagement() {
         .esc-act:hover { opacity: .82; transform: scale(.97); }
       `}</style>
 
-      <div className="page" style={{ maxWidth: 1000, margin: '0 auto', paddingBottom: 0 }}>
+      <div className="page" style={{ margin: '0 auto', paddingBottom: 0 }}>
 
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>

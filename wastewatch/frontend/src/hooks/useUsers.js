@@ -15,7 +15,7 @@ export function useUsers() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await api.get('/api/auth/users/') // Assuming we add this to accounts
+      const res = await api.get('/api/accounts/users/')
       setUsers(res.data)
       setError(null)
     } catch (err) {
@@ -31,7 +31,9 @@ export function useUsers() {
   }, [refresh])
 
   const drivers = users.filter(u => u.role === 'driver')
-  const crew = users.filter(u => u.role === 'citizen') // Or a specific crew role if added
+  // Crew members are citizens tagged with employee_type = 'crew_member'
+  const crew = users.filter(u => u.employee_type === 'crew_member')
+  const crewPool = crew   // alias used by TruckManagement
 
-  return { users, drivers, crew, loading, error, refresh }
+  return { users, drivers, crew, crewPool, loading, error, refresh }
 }

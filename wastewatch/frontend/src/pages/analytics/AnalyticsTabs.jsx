@@ -23,9 +23,9 @@ function TabSpinner() {
 
 // ─── Tab registry ─────────────────────────────────────────────────────────────
 const ALL_TABS = [
-  { key: 'global', label: 'Global Insights', icon: 'public',        roles: ['citizen', 'watcher', 'driver', 'brgy_official', 'admin'] },
-  { key: 'perf',   label: 'Performance',     icon: 'speed',         roles: ['driver', 'admin'] },
-  { key: 'admin',  label: 'Admin Controls',  icon: 'admin_panel_settings', roles: ['admin'] },
+  { key: 'global', label: 'Global Insights', icon: 'public', roles: ['citizen', 'watcher', 'driver', 'brgy_official', 'admin'] },
+  { key: 'perf', label: 'Performance', icon: 'speed', roles: ['driver', 'admin'] },
+  { key: 'admin', label: 'Admin Controls', icon: 'admin_panel_settings', roles: ['admin'] },
 ]
 
 function buildTabs(role) {
@@ -35,13 +35,13 @@ function buildTabs(role) {
 // ─── Barangay list ────────────────────────────────────────────────────────────
 const BARANGAY_OPTIONS = [
   'All Barangays',
-  'Barangay 1 (Pob.)','Barangay 2 (Pob.)','Barangay 3 (Pob.)','Barangay 4 (Pob.)',
-  'Barangay 5 (Pob.)','Barangay 6 (Pob.)','Barangay 7 (Pob.)','Barangay 8 (Pob.)',
-  'Barangay 9 (Pob.)','Barangay 10 (Pob.)','Barangay 11 (Pob.)',
-  'Barra','Bocohan','Cotta','Dalahican','Domoit','Gulang-Gulang',
-  'Ibabang Dupay','Ibabang Iyam','Ibabang Talim','Ilayang Dupay','Ilayang Iyam',
-  'Ilayang Talim','Isabang','Market View','Mayao Castillo','Mayao Crossing',
-  'Mayao Kanluran','Mayao Parada','Mayao Silangan','Ransohan','Salinas','Talao-Talao',
+  'Barangay 1 (Pob.)', 'Barangay 2 (Pob.)', 'Barangay 3 (Pob.)', 'Barangay 4 (Pob.)',
+  'Barangay 5 (Pob.)', 'Barangay 6 (Pob.)', 'Barangay 7 (Pob.)', 'Barangay 8 (Pob.)',
+  'Barangay 9 (Pob.)', 'Barangay 10 (Pob.)', 'Barangay 11 (Pob.)',
+  'Barra', 'Bocohan', 'Cotta', 'Dalahican', 'Domoit', 'Gulang-Gulang',
+  'Ibabang Dupay', 'Ibabang Iyam', 'Ibabang Talim', 'Ilayang Dupay', 'Ilayang Iyam',
+  'Ilayang Talim', 'Isabang', 'Market View', 'Mayao Castillo', 'Mayao Crossing',
+  'Mayao Kanluran', 'Mayao Parada', 'Mayao Silangan', 'Ransohan', 'Salinas', 'Talao-Talao',
 ]
 
 // ─── Admin Controls ───────────────────────────────────────────────────────────
@@ -51,19 +51,19 @@ function AdminControls() {
   function show(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
   const ACTIONS = [
-    { label: 'Flag Hotspot',        icon: 'local_fire_department', color: 'var(--danger)',  bg: 'rgba(231,76,60,.08)',   border: 'rgba(231,76,60,.25)',   onClick: () => show('Hotspot flagging coming soon.') },
-    { label: 'Refresh Rankings',    icon: 'refresh',               color: 'var(--accent)',  bg: 'rgba(46,204,113,.08)',  border: 'rgba(46,204,113,.25)',  onClick: () => show('Rankings refreshed.') },
-    { label: 'Export CSV',          icon: 'download',              color: 'var(--info)',    bg: 'rgba(93,173,226,.08)',  border: 'rgba(93,173,226,.25)',  onClick: () => show('Export queued — CSV downloading.') },
-    { label: 'Schedule Collection', icon: 'calendar_month',        color: 'var(--warning)', bg: 'rgba(243,156,18,.08)', border: 'rgba(243,156,18,.25)', onClick: () => navigate('/schedule') },
+    { label: 'Flag Hotspot', icon: 'local_fire_department', color: 'var(--danger)', bg: 'rgba(231,76,60,.08)', border: 'rgba(231,76,60,.25)', onClick: () => show('Hotspot flagging coming soon.') },
+    { label: 'Refresh Rankings', icon: 'refresh', color: 'var(--accent)', bg: 'rgba(46,204,113,.08)', border: 'rgba(46,204,113,.25)', onClick: () => show('Rankings refreshed.') },
+    { label: 'Export CSV', icon: 'download', color: 'var(--info)', bg: 'rgba(93,173,226,.08)', border: 'rgba(93,173,226,.25)', onClick: () => show('Export queued — CSV downloading.') },
+    { label: 'Schedule Collection', icon: 'calendar_month', color: 'var(--warning)', bg: 'rgba(243,156,18,.08)', border: 'rgba(243,156,18,.25)', onClick: () => navigate('/schedule') },
   ]
 
   const SYS = [
-    { label: 'Registered Users',   value: '1,243', icon: 'group',                color: 'var(--info)'    },
-    { label: 'Active Barangays',   value: '33',    icon: 'location_city',         color: 'var(--accent)'  },
-    { label: 'Reports Filed',      value: '4,781', icon: 'flag',                  color: 'var(--warning)' },
-    { label: 'Resolved Issues',    value: '4,102', icon: 'check_circle',          color: 'var(--accent)'  },
-    { label: 'Active Trucks',      value: '7',     icon: 'local_shipping',        color: 'var(--info)'    },
-    { label: 'Open Hotspots',      value: '14',    icon: 'local_fire_department', color: 'var(--danger)'  },
+    { label: 'Registered Users', value: '1,243', icon: 'group', color: 'var(--info)' },
+    { label: 'Active Barangays', value: '33', icon: 'location_city', color: 'var(--accent)' },
+    { label: 'Reports Filed', value: '4,781', icon: 'flag', color: 'var(--warning)' },
+    { label: 'Resolved Issues', value: '4,102', icon: 'check_circle', color: 'var(--accent)' },
+    { label: 'Active Trucks', value: '7', icon: 'local_shipping', color: 'var(--info)' },
+    { label: 'Open Hotspots', value: '14', icon: 'local_fire_department', color: 'var(--danger)' },
   ]
 
   return (
@@ -128,24 +128,24 @@ function AdminControls() {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function AnalyticsTabs() {
-  const { user }     = useAuth()
-  const role         = user?.role?.toLowerCase() || 'citizen'
+  const { user } = useAuth()
+  const role = user?.role?.toLowerCase() || 'citizen'
   const userBarangay = user?.barangay_name || ''
-  const navigate     = useNavigate()
+  const navigate = useNavigate()
 
   const tabs = buildTabs(role)
   const [active, setActive] = useState(tabs[0]?.key || 'global')
 
   // ── Filter state ───────────────────────────────────────────────────────────
   const [selectedBarangay, setSelectedBarangay] = useState('All Barangays')
-  const [selectedPeriod,   setSelectedPeriod]   = useState('This Week')
-  const [selectedRoute,    setSelectedRoute]     = useState('All Routes')
+  const [selectedPeriod, setSelectedPeriod] = useState('This Week')
+  const [selectedRoute, setSelectedRoute] = useState('All Routes')
 
   function handleExport() {
     const params = new URLSearchParams({
       barangay: selectedBarangay,
-      period:   selectedPeriod,
-      route:    selectedRoute,
+      period: selectedPeriod,
+      route: selectedRoute,
     })
     window.open(`/api/analytics/export/?${params}`, '_blank')
   }
@@ -215,9 +215,9 @@ export default function AnalyticsTabs() {
                     onChange={e => setSelectedPeriod(e.target.value)}
                     aria-label="Select date range"
                   >
-                    {['Today','This Week','This Month','This Quarter','This Year'].map(p => (
+                    {['Today', 'This Week', 'This Month', 'This Quarter', 'This Year'].map(p => (
                       <option key={p} value={p}>{p}</option>
-                    ))} 
+                    ))}
                   </select>
                 </div>
 
@@ -231,7 +231,7 @@ export default function AnalyticsTabs() {
                       onChange={e => setSelectedRoute(e.target.value)}
                       aria-label="Select collection route"
                     >
-                      {['All Routes','Zone A','Zone B','Zone C','Zone D'].map(r => (
+                      {['All Routes', 'Zone A', 'Zone B', 'Zone C', 'Zone D'].map(r => (
                         <option key={r} value={r}>{r}</option>
                       ))}
                     </select>
@@ -279,12 +279,12 @@ export default function AnalyticsTabs() {
           )}
 
           {active === 'perf' && (
-              <PerformanceAnalytics
-                selectedBarangay={selectedBarangay}
-                selectedPeriod={selectedPeriod}
-                selectedRoute={selectedRoute}
-              />
-            )}
+            <PerformanceAnalytics
+              selectedBarangay={selectedBarangay}
+              selectedPeriod={selectedPeriod}
+              selectedRoute={selectedRoute}
+            />
+          )}
           {active === 'admin' && <AdminControls />}
 
         </div>

@@ -31,11 +31,12 @@ export function useDumpsites() {
       if (id) {
         const res = await api.patch(`/api/driver/dumpsites/${id}/`, data)
         setSites(prev => prev.map(s => s.id === id ? res.data : s))
+        return { ok: true, data: res.data }
       } else {
         const res = await api.post('/api/driver/dumpsites/', data)
         setSites(prev => [...prev, res.data])
+        return { ok: true, data: res.data }
       }
-      return { ok: true }
     } catch (err) {
       console.error(err)
       return { ok: false, error: err.response?.data || 'Failed to save site' }
@@ -53,9 +54,19 @@ export function useDumpsites() {
     }
   }
 
+  const createAccount = async (siteId, accountData) => {
+    try {
+      const res = await api.post(`/api/driver/dumpsites/${siteId}/create-account/`, accountData)
+      return { ok: true, data: res.data }
+    } catch (err) {
+      console.error(err)
+      return { ok: false, error: err.response?.data?.error || 'Failed to create account' }
+    }
+  }
+
   useEffect(() => {
     refresh()
   }, [refresh])
 
-  return { sites, loading, error, refresh, saveSite, deleteSite }
+  return { sites, loading, error, refresh, saveSite, deleteSite, createAccount }
 }

@@ -38,13 +38,18 @@ class Barangay(models.Model):
 #    Defined as a plain Python class so they can be imported anywhere without
 #    triggering model imports.  Add new roles here — nothing else needs changing.
 # ---------------------------------------------------------------------------
+class EmployeeType(models.TextChoices):
+    NONE        = '',            '—'
+    CREW_MEMBER = 'crew_member', 'Crew Member'
+
+
 class UserRole(models.TextChoices):
     ADMIN         = 'admin',         'Admin'
     BRGY_OFFICIAL = 'brgy_official', 'Brgy Official'
     WATCHER       = 'watcher',       'Watcher'
     DRIVER        = 'driver',        'Driver'
     CITIZEN       = 'citizen',       'Citizen'
-    DUMPSITE      = 'dumpsite',      'Dumpsite'
+    DUMPSITE      = 'dumpsite',      'Dumpsite Operator'
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +96,14 @@ class User(AbstractUser):
         related_name='staff',
     )
 
+    employee_type = models.CharField(
+        max_length=20,
+        choices=EmployeeType.choices,
+        default='',
+        blank=True,
+        help_text="Set to 'crew_member' for citizens who serve on collection trucks.",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     # Tell Django to use email as the login field
@@ -124,6 +137,16 @@ class User(AbstractUser):
     @property
     def is_dumpsite(self):
         return self.role == UserRole.DUMPSITE
+
+    @property
+    def is_dumpsite_operator(self):
+        """Alias for is_dumpsite — clearer name for the operator role."""
+        return self.role == UserRole.DUMPSITE
+
+    @property
+    def is_crew_member(self):
+        """True when this citizen has been tagged as a crew member."""
+        return self.employee_type == EmployeeType.CREW_MEMBER
 
     @property
     def is_admin_role(self):

@@ -20,13 +20,18 @@ from django.contrib.auth            import authenticate, login, logout
 
 from rest_framework import viewsets, permissions
 from .models import User, Barangay
-from .serializers import UserSerializer, BarangaySerializer, RegisterSerializer
+from .serializers import UserSerializer, BarangaySerializer, RegisterSerializer, AdminUserSerializer
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.all()
-    serializer_class = UserSerializer
-    permission_classes = [permissions.IsAuthenticated] # In a real app, restrict more
+    queryset = User.objects.select_related('barangay', 'dumpsite').all()
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_serializer_class(self):
+        # Admin writes use the full serializer (password + role writable)
+        if self.action in ('create', 'update', 'partial_update'):
+            return AdminUserSerializer
+        return UserSerializer
 
     def get_queryset(self):
         role = self.request.query_params.get('role')
@@ -43,11 +48,12 @@ class BarangayViewSet(viewsets.ModelViewSet):
 # ── Helper: serialize a User to a safe dict ──────────────────────────────────
 def user_to_dict(user):
     return {
-        'id':           user.id,
-        'full_name':    user.full_name,
-        'email':        user.email,
-        'role':         user.role,
-        'barangay_id':  user.barangay_id,
+        'id':            user.id,
+        'full_name':     user.full_name,
+        'email':         user.email,
+        'role':          user.role,
+        'employee_type': user.employee_type,
+        'barangay_id':   user.barangay_id,
         'barangay_name': user.barangay.name if user.barangay else None,
         'dumpsite_id':   user.dumpsite_id,
         'dumpsite_name': user.dumpsite.name if user.dumpsite else None,

@@ -14,15 +14,18 @@ import BarangaySelect from '../../components/BarangaySelect'
 const ROLES = ['watcher', 'driver', 'brgy_official', 'citizen', 'dumpsite']
 
 const ROLE_META = {
-  watcher: { label: 'Watcher', color: '#5dade2', bg: 'rgba(93,173,226,0.1)', border: 'rgba(93,173,226,0.3)' },
-  driver: { label: 'Driver', color: '#f39c12', bg: 'rgba(243,156,18,0.1)', border: 'rgba(243,156,18,0.3)' },
-  brgy_official: { label: 'Brgy. Official', color: '#9b59b6', bg: 'rgba(155,89,182,0.1)', border: 'rgba(155,89,182,0.3)' },
-  citizen: { label: 'Citizen', color: '#2ecc71', bg: 'rgba(46,204,113,0.1)', border: 'rgba(46,204,113,0.3)' },
-  admin: { label: 'Admin', color: '#e74c3c', bg: 'rgba(231,76,60,0.1)', border: 'rgba(231,76,60,0.3)' },
-  dumpsite: { label: 'Dumpsite', color: '#94a3b8', bg: 'rgba(148,163,184,0.1)', border: 'rgba(148,163,184,0.3)' },
+  watcher:      { label: 'Watcher',           color: '#5dade2', bg: 'rgba(93,173,226,0.1)',  border: 'rgba(93,173,226,0.3)' },
+  driver:       { label: 'Driver',             color: '#f39c12', bg: 'rgba(243,156,18,0.1)', border: 'rgba(243,156,18,0.3)' },
+  brgy_official:{ label: 'Brgy. Official',     color: '#9b59b6', bg: 'rgba(155,89,182,0.1)', border: 'rgba(155,89,182,0.3)' },
+  citizen:      { label: 'Citizen',            color: '#2ecc71', bg: 'rgba(46,204,113,0.1)', border: 'rgba(46,204,113,0.3)' },
+  admin:        { label: 'Admin',              color: '#e74c3c', bg: 'rgba(231,76,60,0.1)',  border: 'rgba(231,76,60,0.3)' },
+  dumpsite:     { label: 'Dumpsite Operator',  color: '#94a3b8', bg: 'rgba(148,163,184,0.1)',border: 'rgba(148,163,184,0.3)' },
 }
 
-const EMPTY_FORM = { full_name: '', email: '', password: '', role: 'citizen', barangay: '', is_active: true }
+const EMPTY_FORM = {
+  full_name: '', email: '', password: '', role: 'citizen',
+  barangay: '', dumpsite: '', employee_type: '', is_active: true,
+}
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -53,18 +56,22 @@ function Avatar({ name, active }) {
 function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
   const isEdit = !!user
   const [form, setForm] = useState(user ? {
-    full_name: user.full_name, email: user.email, password: '',
-    role: user.role, barangay: user.barangay || '', 
-    dumpsite: user.dumpsite || '',
-    is_active: user.is_active,
-  } : { ...EMPTY_FORM, dumpsite: '' })
+    full_name:     user.full_name,
+    email:         user.email,
+    password:      '',
+    role:          user.role,
+    employee_type: user.employee_type || '',
+    barangay:      user.barangay  || '',
+    dumpsite:      user.dumpsite  || '',
+    is_active:     user.is_active,
+  } : { ...EMPTY_FORM })
   const [err, setErr] = useState('')
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   function validate() {
     if (!form.full_name.trim()) return 'Full name is required.'
-    if (!form.email.trim()) return 'Email is required.'
+    if (!form.email.trim())     return 'Email is required.'
     if (!isEdit && !form.password.trim()) return 'Password is required for new users.'
     if (form.role === 'dumpsite' && !form.dumpsite) return 'Please assign a dumpsite facility.'
     return ''
@@ -73,7 +80,10 @@ function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
   function handleSubmit() {
     const e = validate()
     if (e) { setErr(e); return }
-    onSave(form)
+    // Strip employee_type unless citizen
+    const payload = { ...form }
+    if (payload.role !== 'citizen') payload.employee_type = ''
+    onSave(payload)
   }
 
   return (
@@ -146,6 +156,38 @@ function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
           </div>
         </div>
 
+        {/* Crew Member toggle — only for citizens */}
+        {form.role === 'citizen' && (
+          <div style={{
+            marginBottom: 13, padding: '12px 14px', borderRadius: 10,
+            background: form.employee_type === 'crew_member' ? 'rgba(251,191,36,0.06)' : 'var(--surface-2)',
+            border: `1px solid ${form.employee_type === 'crew_member' ? 'rgba(251,191,36,0.3)' : 'var(--border)'}`,
+            transition: 'all .2s',
+          }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+              <div
+                onClick={() => set('employee_type', form.employee_type === 'crew_member' ? '' : 'crew_member')}
+                style={{
+                  width: 40, height: 22, borderRadius: 20, position: 'relative', flexShrink: 0,
+                  background: form.employee_type === 'crew_member' ? '#f59e0b' : '#ccc',
+                  transition: 'background .2s', cursor: 'pointer',
+                }}
+              >
+                <div style={{
+                  position: 'absolute', top: 3,
+                  left: form.employee_type === 'crew_member' ? 20 : 3,
+                  width: 16, height: 16, borderRadius: '50%', background: '#fff',
+                  transition: 'left .2s', boxShadow: '0 1px 3px rgba(0,0,0,.2)',
+                }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700 }}>🚛 Crew Member</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Assigns this citizen to collection truck crews</div>
+              </div>
+            </label>
+          </div>
+        )}
+
         <div style={{ marginBottom: 20 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
             <div
@@ -189,10 +231,18 @@ export default function UserManagement() {
   const [roleFilter, setRoleFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [search, setSearch] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const itemsPerPage = 20
+
   const [modal, setModal] = useState(null)  // null | 'add' | user object
   const [toast, setToast] = useState(null)
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
+
+  // Reset to first page when filters change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [roleFilter, statusFilter, search])
 
   useEffect(() => {
     api.get('/api/barangays/').then(res => setBarangays(res.data))
@@ -208,7 +258,7 @@ export default function UserManagement() {
         await api.patch(`/api/accounts/users/${modal.id}/`, form)
         showToast('✅ User updated.')
       }
-      refreshUsers()
+      await refreshUsers()
       setModal(null)
     } catch (err) {
       alert(JSON.stringify(err.response?.data || 'Failed to save user'))
@@ -219,7 +269,7 @@ export default function UserManagement() {
     try {
       await api.patch(`/api/accounts/users/${u.id}/`, { is_active: !u.is_active })
       showToast(u.is_active ? '⛔ Account deactivated.' : '✅ Account activated.')
-      refreshUsers()
+      await refreshUsers()
     } catch {
       showToast('❌ Failed to update status.')
     }
@@ -230,25 +280,28 @@ export default function UserManagement() {
     try {
       await api.delete(`/api/accounts/users/${id}/`)
       showToast('🗑 User removed.')
-      refreshUsers()
+      await refreshUsers()
     } catch {
       showToast('❌ Failed to delete user.')
     }
   }
 
   const counts = useMemo(() => ({
-    all: users.length,
-    watcher: users.filter(u => u.role === 'watcher').length,
-    driver: users.filter(u => u.role === 'driver').length,
-    brgy_official: users.filter(u => u.role === 'brgy_official').length,
-    citizen: users.filter(u => u.role === 'citizen').length,
-    dumpsite: users.filter(u => u.role === 'dumpsite').length,
-    active: users.filter(u => u.is_active).length,
-    inactive: users.filter(u => !u.is_active).length,
+    all:          users.length,
+    watcher:      users.filter(u => u.role === 'watcher').length,
+    driver:       users.filter(u => u.role === 'driver').length,
+    brgy_official:users.filter(u => u.role === 'brgy_official').length,
+    citizen:      users.filter(u => u.role === 'citizen').length,
+    dumpsite:     users.filter(u => u.role === 'dumpsite').length,
+    crew_member:  users.filter(u => u.employee_type === 'crew_member').length,
+    active:       users.filter(u => u.is_active).length,
+    inactive:     users.filter(u => !u.is_active).length,
   }), [users])
 
   const filtered = useMemo(() => users.filter(u => {
-    const matchRole = roleFilter === 'all' || u.role === roleFilter
+    const matchRole = roleFilter === 'all'
+      || u.role === roleFilter
+      || (roleFilter === 'crew_member' && u.employee_type === 'crew_member')
     const matchStatus = statusFilter === 'all' || (statusFilter === 'active' ? u.is_active : !u.is_active)
     const matchSearch = !search ||
       u.full_name.toLowerCase().includes(search.toLowerCase()) ||
@@ -257,6 +310,12 @@ export default function UserManagement() {
       (u.dumpsite_name || '').toLowerCase().includes(search.toLowerCase())
     return matchRole && matchStatus && matchSearch
   }), [users, roleFilter, statusFilter, search])
+
+  const totalPages = Math.ceil(filtered.length / itemsPerPage)
+  const paginatedUsers = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage
+    return filtered.slice(startIndex, startIndex + itemsPerPage)
+  }, [filtered, currentPage])
 
   return (
     <DashboardLayout>
@@ -331,12 +390,13 @@ export default function UserManagement() {
         {/* ── Role filter tabs ── */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 14, background: 'var(--surface-2)', borderRadius: 10, padding: 4, width: 'fit-content', flexWrap: 'wrap' }}>
           {[
-            { key: 'all', label: 'All' },
-            { key: 'watcher', label: 'Watchers' },
-            { key: 'driver', label: 'Drivers' },
-            { key: 'brgy_official', label: 'Brgy. Officials' },
-            { key: 'citizen', label: 'Citizens' },
-            { key: 'dumpsite', label: 'Dumpsites' },
+            { key: 'all',          label: 'All' },
+            { key: 'watcher',      label: 'Watchers' },
+            { key: 'driver',       label: 'Drivers' },
+            { key: 'brgy_official',label: 'Brgy. Officials' },
+            { key: 'citizen',      label: 'Citizens' },
+            { key: 'crew_member',  label: '🚛 Crew' },
+            { key: 'dumpsite',     label: 'Dumpsite Ops' },
           ].map(f => (
             <button key={f.key} className="um-filter" onClick={() => setRoleFilter(f.key)} style={{
               padding: '6px 14px', borderRadius: 8, border: 'none',
@@ -404,7 +464,7 @@ export default function UserManagement() {
               <div className="text-muted text-sm">Try adjusting your filters.</div>
             </div>
           ) : (
-            filtered.map((u, idx) => (
+            paginatedUsers.map((u, idx) => (
               <div
                 key={u.id}
                 className="um-row"
@@ -420,11 +480,20 @@ export default function UserManagement() {
                 {/* Name + avatar */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                   <Avatar name={u.full_name} active={u.is_active} />
-                  <span style={{
-                    fontSize: 13, fontWeight: 600, overflow: 'hidden',
-                    textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    color: u.is_active ? 'var(--text)' : 'var(--text-muted)',
-                  }}>{u.full_name}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 13, fontWeight: 600, overflow: 'hidden',
+                      textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      color: u.is_active ? 'var(--text)' : 'var(--text-muted)',
+                    }}>{u.full_name}</div>
+                    {u.employee_type === 'crew_member' && (
+                      <span style={{
+                        fontSize: 8, fontWeight: 800, padding: '1px 6px', borderRadius: 10,
+                        background: 'rgba(251,191,36,0.12)', color: '#f59e0b',
+                        border: '1px solid rgba(251,191,36,0.3)', letterSpacing: '.06em',
+                      }}>CREW</span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Email */}
@@ -485,8 +554,33 @@ export default function UserManagement() {
           )}
         </div>
 
-        <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
-          Showing {filtered.length} of {users.length} users
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+            Showing {paginatedUsers.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0} to {Math.min(currentPage * itemsPerPage, filtered.length)} of {filtered.length} users
+          </div>
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button 
+                className="btn btn-outline" 
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                style={{ padding: '6px 12px', fontSize: 12, opacity: currentPage === 1 ? 0.5 : 1 }}
+              >
+                Previous
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', padding: '0 10px', fontSize: 13, fontWeight: 600 }}>
+                Page {currentPage} of {totalPages}
+              </div>
+              <button 
+                className="btn btn-outline" 
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                style={{ padding: '6px 12px', fontSize: 12, opacity: currentPage === totalPages ? 0.5 : 1 }}
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
 
       </div>

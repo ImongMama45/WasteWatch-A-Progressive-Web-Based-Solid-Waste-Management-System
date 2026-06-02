@@ -45,8 +45,8 @@ export default function ActivityLog() {
     const mAction = actionFilter === 'all' || log.action === actionFilter
     const mModule = moduleFilter === 'all' || log.module === moduleFilter
     const q = search.toLowerCase()
-    const mSearch = !q || 
-      log.details.toLowerCase().includes(q) || 
+    const mSearch = !q ||
+      log.details.toLowerCase().includes(q) ||
       (log.admin_name || '').toLowerCase().includes(q)
     return mAction && mModule && mSearch
   })
@@ -60,7 +60,7 @@ export default function ActivityLog() {
         .log-row:last-child .timeline-line { display: none; }
       `}</style>
 
-      <div className="page" style={{ maxWidth: 1000, margin: '0 auto' }}>
+      <div className="page" style={{ margin: '0 auto' }}>
 
         {/* Header */}
         <div style={{ marginBottom: 24 }}>
@@ -73,7 +73,7 @@ export default function ActivityLog() {
 
         {/* Filters Card */}
         <div className="card" style={{ padding: 16, marginBottom: 20, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
-          
+
           <div style={{ display: 'flex', gap: 4, background: 'var(--surface-2)', borderRadius: 10, padding: 4 }}>
             {['all', 'create', 'update', 'delete'].map(act => {
               const active = actionFilter === act
@@ -94,18 +94,18 @@ export default function ActivityLog() {
 
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>MODULE:</span>
-            <select className="form-input" style={{ width: 140, padding: '6px 10px', fontSize: 12 }} 
+            <select className="form-input" style={{ width: 140, padding: '6px 10px', fontSize: 12 }}
               value={moduleFilter} onChange={e => setModuleFilter(e.target.value)}>
               <option value="all">All Modules</option>
               {MODULES.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
 
-          <input 
-            className="form-input" 
-            placeholder="Search details or admin name..." 
-            value={search} onChange={e => setSearch(e.target.value)} 
-            style={{ flex: 1, minWidth: 200 }} 
+          <input
+            className="form-input"
+            placeholder="Search details or admin name..."
+            value={search} onChange={e => setSearch(e.target.value)}
+            style={{ flex: 1, minWidth: 200 }}
           />
         </div>
 
@@ -124,11 +124,11 @@ export default function ActivityLog() {
               return (
                 <div key={log.id} className="log-row" style={{ position: 'relative', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
                   <div className="timeline-line" />
-                  
+
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
-                    
+
                     {/* Icon Node */}
-                    <div style={{ 
+                    <div style={{
                       width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
                       background: isDelete ? 'rgba(231,76,60,0.15)' : 'var(--surface-2)',
                       border: `2px solid ${isDelete ? '#e74c3c' : 'var(--border)'}`,
@@ -157,7 +157,7 @@ export default function ActivityLog() {
                         </div>
                       </div>
 
-                      <div style={{ 
+                      <div style={{
                         fontSize: 14, lineHeight: 1.5, marginBottom: 6,
                         color: isDelete ? '#e74c3c' : 'var(--text)',
                         fontWeight: isDelete ? 600 : 400

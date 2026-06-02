@@ -269,6 +269,11 @@
   margin-bottom: 20px;
 }
 
+/* 5-card variant — fits Performance KPI row */
+.ac-kpi-grid--5 {
+  grid-template-columns: repeat(5, 1fr);
+}
+
 .ac-kpi-card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -358,6 +363,100 @@
   /* FIX: clip sparkline overflow */
   overflow: hidden;
   line-height: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   KPI CARD v2  —  horizontal icon+label, large value, thin bar
+───────────────────────────────────────────────────────────── */
+.ac-kpi-card--v2 {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 14px 16px 14px;
+}
+
+/* Radial accent glow in the corner */
+.ac-kpi-v2-glow {
+  position: absolute;
+  top: -30px;
+  right: -30px;
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--ac-kpi-accent, var(--accent)) 0%, transparent 70%);
+  opacity: .12;
+  pointer-events: none;
+  transition: opacity .3s;
+}
+.ac-kpi-card--v2:hover .ac-kpi-v2-glow { opacity: .22; }
+
+/* Header: icon pill + label text side-by-side */
+.ac-kpi-v2-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.ac-kpi-v2-head .ac-kpi-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.ac-kpi-v2-head .ac-kpi-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  line-height: 1.25;
+}
+
+/* Value + unit inline */
+.ac-kpi-v2-val-row {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  margin-bottom: 10px;
+}
+
+.ac-kpi-v2-val-row .ac-kpi-value {
+  font-size: clamp(22px, 2.8vw, 30px);
+  margin-bottom: 0;
+}
+
+.ac-kpi-v2-unit {
+  font-family: var(--font-head, sans-serif);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+/* Thin progress bar */
+.ac-kpi-v2-track {
+  height: 4px;
+  border-radius: 20px;
+  background: var(--border);
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.ac-kpi-v2-fill {
+  height: 100%;
+  border-radius: 20px;
+  background: var(--ac-kpi-accent, var(--accent));
+  transition: width .55s cubic-bezier(.4,0,.2,1);
+}
+
+/* Sub-caption */
+.ac-kpi-v2-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.35;
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -1189,6 +1288,9 @@
   .ac-kpi-grid {
     grid-template-columns: repeat(3, 1fr);
   }
+  .ac-kpi-grid--5 {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 
 /* ── Mobile ────────────────────────────────────────────────── */
@@ -1232,7 +1334,8 @@
   }
 
   /* KPI: 2 columns on mobile */
-  .ac-kpi-grid {
+  .ac-kpi-grid,
+  .ac-kpi-grid--5 {
     grid-template-columns: repeat(2, 1fr);
     gap: 10px;
   }

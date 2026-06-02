@@ -17,15 +17,16 @@ import api from '../../api/client'
 const LUCENA_CENTER = [13.9373, 121.617]
 
 const TYPES = [
-  { value: 'landfill',  label: 'Landfill',         emoji: '🏔️', color: '#e74c3c' },
-  { value: 'dumpsite',  label: 'Open Dumpsite',    emoji: '🗑️', color: '#f39c12' },
-  { value: 'transfer',  label: 'Transfer Station', emoji: '🏭', color: '#5dade2' },
-  { value: 'composting',label: 'Composting Area',  emoji: '🌿', color: '#2ecc71' },
+  { value: 'landfill', label: 'Landfill', emoji: '🏔️', color: '#e74c3c' },
+  { value: 'dumpsite', label: 'Open Dumpsite', emoji: '🗑️', color: '#f39c12' },
+  { value: 'transfer', label: 'Transfer Station', emoji: '🏭', color: '#5dade2' },
+  { value: 'composting', label: 'Composting Area', emoji: '🌿', color: '#2ecc71' },
 ]
 
 const typeMap = Object.fromEntries(TYPES.map(t => [t.value, t]))
 
-const EMPTY_FORM = { name: '', type: 'dumpsite', barangay: '', capacity: '', notes: '' }
+const EMPTY_FORM = { name: '', type: 'dumpsite', barangay: '', notes: '' }
+const EMPTY_ACCOUNT = { full_name: '', email: '', password: '' }
 
 // ── Marker HTML by type ───────────────────────────────────────────────────────
 
@@ -48,22 +49,73 @@ function pendingMarkerHtml() {
     animation:ww-blink 1s infinite;">📍</div>`
 }
 
-// ── Modal ─────────────────────────────────────────────────────────────────────
+// ── Modal ─────────────────────────────────────────────────────────────────
 
 function SiteModal({ site, coords, onSave, onClose, barangays }) {
   const isEdit = !!site
-  const [form, setForm] = useState(site ? {
-    name: site.name, type: site.type, barangay: site.barangay,
-    capacity: site.capacity, notes: site.notes || '',
-  } : { ...EMPTY_FORM })
+
+  const [form, setForm] = useState(
+    isEdit
+      ? { name: site.name, type: site.type, barangay: site.barangay, notes: site.notes || '' }
+      : { ...EMPTY_FORM }
+  )
+  const [account, setAccount] = useState({ ...EMPTY_ACCOUNT })
+  const [detecting, setDetecting] = useState(false)
+  const [detectedName, setDetectedName] = useState('')
   const [err, setErr] = useState('')
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const set  = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const setAc = (k, v) => setAccount(a => ({ ...a, [k]: v }))
+
+  // ── Auto-detect barangay from coords via Nominatim ──
+  useEffect(() => {
+    if (isEdit || !coords) return
+    setDetecting(true)
+    setDetectedName('')
+    const [lat, lng] = coords
+    fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`)
+      .then(r => r.json())
+      .then(data => {
+        // Nominatim returns suburb / village / neighbourhood for barangay-level
+        const raw = data.address?.suburb
+          || data.address?.village
+          || data.address?.neighbourhood
+          || data.address?.quarter
+          || ''
+        setDetectedName(raw)
+        // Try to fuzzy-match against our barangay list
+        if (raw) {
+          const lc = raw.toLowerCase()
+          const match = barangays.find(b =>
+            b.name.toLowerCase().includes(lc) || lc.includes(b.name.toLowerCase())
+          )
+          if (match) set('barangay', match.id)
+        }
+      })
+      .catch(() => {})
+      .finally(() => setDetecting(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coords])
 
   function submit() {
-    if (!form.name.trim()) { setErr('Name is required.'); return }
-    if (!form.barangay) { setErr('Please select a barangay.'); return }
-    onSave(form)
+    if (!form.name.trim())   { setErr('Site name is required.'); return }
+    if (!form.barangay)      { setErr('Please select a barangay.'); return }
+    if (!isEdit) {
+      if (!account.full_name.trim()) { setErr('Account full name is required.'); return }
+      if (!account.email.trim())     { setErr('Account email is required.'); return }
+      if (account.password.length < 6) { setErr('Password must be at least 6 characters.'); return }
+    }
+    setErr('')
+    onSave(form, account)
   }
+
+  const SectionHead = ({ label }) => (
+    <div style={{
+      fontSize: 9, fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase',
+      color: 'var(--text-muted)', marginBottom: 10, marginTop: 6,
+      paddingBottom: 6, borderBottom: '1px solid var(--border)',
+    }}>{label}</div>
+  )
 
   return (
     <div style={{
@@ -71,73 +123,253 @@ function SiteModal({ site, coords, onSave, onClose, barangays }) {
       zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
     }} onClick={onClose}>
       <div style={{
-        background: 'var(--surface)', borderRadius: 16, padding: 24,
-        width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+        background: 'var(--surface)', borderRadius: 16, padding: 0,
+        width: '100%', maxWidth: 460, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+        maxHeight: '92vh', display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }} onClick={e => e.stopPropagation()}>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        {/* Header */}
+        <div style={{ padding: '18px 22px 14px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 17, margin: 0 }}>
-            {isEdit ? 'Edit Site' : 'Add New Site'}
+            {isEdit ? 'Edit Site' : '+ Add New Site'}
           </h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#888' }}>×</button>
         </div>
 
-        {coords && !isEdit && (
-          <div style={{
-            background: 'rgba(46,204,113,0.08)', border: '1px solid rgba(46,204,113,0.3)',
-            borderRadius: 8, padding: '8px 12px', fontSize: 11, color: '#2ecc71',
-            marginBottom: 14, fontWeight: 600,
-          }}>
-            📍 {coords[0].toFixed(5)}, {coords[1].toFixed(5)}
+        {/* Scrollable body */}
+        <div style={{ overflowY: 'auto', padding: '16px 22px' }}>
+
+          {/* Coords + auto-detect status */}
+          {coords && !isEdit && (
+            <div style={{
+              background: 'rgba(46,204,113,0.08)', border: '1px solid rgba(46,204,113,0.25)',
+              borderRadius: 9, padding: '8px 12px', fontSize: 11, marginBottom: 16,
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <span style={{ color: '#2ecc71', fontWeight: 700 }}>📍 {coords[0].toFixed(5)}, {coords[1].toFixed(5)}</span>
+              {detecting && <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Detecting barangay…</span>}
+              {!detecting && detectedName && (
+                <span style={{ color: 'var(--text-muted)' }}>· detected: <strong style={{ color: 'var(--text)' }}>{detectedName}</strong></span>
+              )}
+            </div>
+          )}
+
+          {err && (
+            <div style={{
+              background: 'rgba(231,76,60,0.08)', border: '1px solid rgba(231,76,60,0.3)',
+              borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#e74c3c', marginBottom: 14,
+            }}>{err}</div>
+          )}
+
+          {/* ── Site Info ── */}
+          <SectionHead label="Site Information" />
+
+          <div style={{ marginBottom: 12 }}>
+            <label className="form-label">Site Name</label>
+            <input className="form-input" value={form.name}
+              onChange={e => set('name', e.target.value)}
+              placeholder="e.g. Main Landfill — Gulang-Gulang" />
           </div>
-        )}
 
-        {err && (
-          <div style={{
-            background: 'rgba(231,76,60,0.08)', border: '1px solid rgba(231,76,60,0.3)',
-            borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#e74c3c', marginBottom: 12,
-          }}>{err}</div>
-        )}
-
-        <div style={{ marginBottom: 12 }}>
-          <label className="form-label">Site Name</label>
-          <input className="form-input" value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Main Landfill — Gulang-Gulang" />
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-          <div>
-            <label className="form-label">Type</label>
-            <select className="form-input" value={form.type} onChange={e => set('type', e.target.value)}>
-              {TYPES.map(t => <option key={t.value} value={t.value}>{t.emoji} {t.label}</option>)}
-            </select>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+            <div>
+              <label className="form-label">Type</label>
+              <select className="form-input" value={form.type} onChange={e => set('type', e.target.value)}>
+                {TYPES.map(t => <option key={t.value} value={t.value}>{t.emoji} {t.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                Barangay
+                {detecting && <span style={{ fontSize: 9, color: 'var(--text-muted)', fontStyle: 'italic', fontWeight: 400 }}>auto-detecting…</span>}
+              </label>
+              <select className="form-input" value={form.barangay} onChange={e => set('barangay', e.target.value)}>
+                <option value="">{detecting ? 'Detecting…' : '— Select —'}</option>
+                {barangays.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
           </div>
-          <div>
-            <label className="form-label">Barangay</label>
-            <select className="form-input" value={form.barangay} onChange={e => set('barangay', e.target.value)}>
-              <option value="">— Select —</option>
-              {barangays.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
+
+          <div style={{ marginBottom: 16 }}>
+            <label className="form-label">Notes (optional)</label>
+            <textarea className="form-input" rows={2} value={form.notes}
+              onChange={e => set('notes', e.target.value)} placeholder="Additional info…"
+              style={{ resize: 'vertical' }} />
           </div>
+
+          {/* ── Account Credentials (Add only) ── */}
+          {!isEdit && (
+            <>
+              <SectionHead label="Dumpsite Account Credentials" />
+              <div style={{
+                background: 'rgba(93,173,226,0.06)', border: '1px solid rgba(93,173,226,0.2)',
+                borderRadius: 9, padding: '8px 12px', fontSize: 11, color: 'var(--info)',
+                marginBottom: 14,
+              }}>
+                🔑 These credentials will be used to log in as this dumpsite’s account.
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label className="form-label">Full Name</label>
+                <input className="form-input" value={account.full_name}
+                  onChange={e => setAc('full_name', e.target.value)}
+                  placeholder="e.g. Gulang-Gulang Dumpsite" />
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label className="form-label">Email (username)</label>
+                <input className="form-input" type="email" value={account.email}
+                  onChange={e => setAc('email', e.target.value)}
+                  placeholder="e.g. dumpsite.gulang@lucena.gov.ph" />
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <label className="form-label">Password</label>
+                <input className="form-input" type="password" value={account.password}
+                  onChange={e => setAc('password', e.target.value)}
+                  placeholder="Min. 6 characters" />
+              </div>
+            </>
+          )}
         </div>
 
-        <div style={{ marginBottom: 12 }}>
-          <label className="form-label">Capacity Used (%)</label>
-          <input className="form-input" type="number" min="0" max="100"
-            value={form.capacity} onChange={e => set('capacity', e.target.value)} placeholder="0 – 100" />
-        </div>
-
-        <div style={{ marginBottom: 20 }}>
-          <label className="form-label">Notes (optional)</label>
-          <textarea className="form-input" rows={2} value={form.notes}
-            onChange={e => set('notes', e.target.value)} placeholder="Additional info…"
-            style={{ resize: 'vertical' }} />
-        </div>
-
-        <div style={{ display: 'flex', gap: 10 }}>
+        {/* Footer */}
+        <div style={{ padding: '14px 22px', borderTop: '1px solid var(--border)', display: 'flex', gap: 10 }}>
           <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" style={{ flex: 1 }} onClick={submit}>
-            {isEdit ? 'Save Changes' : 'Add Site'}
+            {isEdit ? 'Save Changes' : 'Add Site & Create Account'}
           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Site Detail Modal ────────────────────────────────────────────────────────
+
+function SiteDetailModal({ site, barangays, onClose }) {
+  if (!site) return null
+  const t = typeMap[site.type] || TYPES[1]
+  const bName = barangays.find(b => b.id === site.barangay || b.id === site.barangay?.id)?.name
+              || site.barangay_name || 'Unknown'
+  const capacity = site.capacity_used ?? site.capacity ?? 0
+  const capColor = capacity > 80 ? '#e74c3c' : capacity > 60 ? '#f39c12' : '#2ecc71'
+  const staff = site.staff_accounts || []
+
+  const Row = ({ label, value, mono }) => (
+    <div style={{ display: 'flex', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', width: 130, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '.05em' }}>{label}</span>
+      <span style={{ fontSize: 12, color: 'var(--text)', fontFamily: mono ? 'monospace' : undefined, wordBreak: 'break-all' }}>{value ?? '—'}</span>
+    </div>
+  )
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)',
+      zIndex: 2100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }} onClick={onClose}>
+      <div style={{
+        background: 'var(--surface)', borderRadius: 18, padding: 0,
+        width: '100%', maxWidth: 520, boxShadow: '0 24px 64px rgba(0,0,0,0.4)',
+        maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }} onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{
+          background: `linear-gradient(135deg, ${t.color}22, ${t.color}08)`,
+          borderBottom: `1px solid ${t.color}33`,
+          padding: '18px 22px', display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: 12, flexShrink: 0,
+            background: `${t.color}22`, border: `1px solid ${t.color}44`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22,
+          }}>{t.emoji}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 800, color: 'var(--text)', marginBottom: 2 }}>{site.name}</div>
+            <div style={{ fontSize: 11, color: t.color, fontWeight: 700 }}>{t.label} · {bName}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#888', flexShrink: 0 }}>×</button>
+        </div>
+
+        {/* Scrollable body */}
+        <div style={{ overflowY: 'auto', padding: '16px 22px' }}>
+
+          {/* ── Site Details ── */}
+          <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 8 }}>Site Details</div>
+          <Row label="Site ID" value={`#${site.id}`} mono />
+          <Row label="Name" value={site.name} />
+          <Row label="Type" value={`${t.emoji} ${t.label}`} />
+          <Row label="Barangay" value={bName} />
+          <Row label="Notes" value={site.notes || '—'} />
+
+          {/* Capacity bar */}
+          <div style={{ display: 'flex', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', width: 130, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '.05em' }}>Capacity Used</span>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1, background: 'var(--border)', borderRadius: 20, height: 7, overflow: 'hidden' }}>
+                <div style={{ width: `${capacity}%`, height: '100%', background: capColor, borderRadius: 20, transition: 'width .5s' }} />
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 700, color: capColor, width: 36, textAlign: 'right' }}>{capacity}%</span>
+            </div>
+          </div>
+
+          {/* ── Coordinates ── */}
+          <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '.1em', textTransform: 'uppercase', margin: '14px 0 8px' }}>Coordinates</div>
+          <Row label="Latitude" value={Number(site.latitude).toFixed(6)} mono />
+          <Row label="Longitude" value={Number(site.longitude).toFixed(6)} mono />
+
+          {/* ── Linked Accounts ── */}
+          <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '.1em', textTransform: 'uppercase', margin: '14px 0 8px' }}>
+            Linked Accounts ({staff.length})
+          </div>
+          {staff.length === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '10px 0', fontStyle: 'italic' }}>No accounts linked to this site.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {staff.map(u => (
+                <div key={u.id} style={{
+                  background: 'var(--bg)', border: '1px solid var(--border)',
+                  borderRadius: 10, padding: '10px 12px',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                    <div style={{
+                      width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+                      background: 'rgba(93,173,226,.15)', border: '1px solid rgba(93,173,226,.3)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 13, fontWeight: 800, color: 'var(--info)',
+                    }}>{u.full_name?.[0]?.toUpperCase() || '?'}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.full_name}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
+                    </div>
+                    <span style={{
+                      fontSize: 8, fontWeight: 800, padding: '2px 8px', borderRadius: 20, flexShrink: 0,
+                      background: u.is_active ? 'rgba(46,204,113,.12)' : 'rgba(231,76,60,.12)',
+                      color: u.is_active ? 'var(--accent)' : 'var(--danger)',
+                      border: u.is_active ? '1px solid rgba(46,204,113,.3)' : '1px solid rgba(231,76,60,.3)',
+                      textTransform: 'uppercase',
+                    }}>{u.is_active ? 'Active' : 'Inactive'}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {[{label: 'Role', val: u.role}, {label: 'Barangay', val: u.barangay || '—'}, {label: 'Joined', val: u.created_at}].map(p => (
+                      <div key={p.label} style={{
+                        display: 'flex', gap: 4, alignItems: 'center',
+                        background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 20, padding: '2px 8px',
+                      }}>
+                        <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600 }}>{p.label}:</span>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text)' }}>{p.val}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding: '12px 22px', borderTop: '1px solid var(--border)' }}>
+          <button className="btn btn-outline" style={{ width: '100%' }} onClick={onClose}>Close</button>
         </div>
       </div>
     </div>
@@ -162,21 +394,22 @@ function CapBar({ pct }) {
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function DumpsiteManagement() {
-  const mapRef         = useRef(null)
-  const mapInstance    = useRef(null)
-  const markersRef     = useRef({})       // id → leaflet marker
-  const pendingRef     = useRef(null)     // temp marker while modal is open
+  const mapRef = useRef(null)
+  const mapInstance = useRef(null)
+  const markersRef = useRef({})       // id → leaflet marker
+  const pendingRef = useRef(null)     // temp marker while modal is open
 
-  const { sites, loading, saveSite, deleteSite: apiDeleteSite } = useDumpsites()
+  const { sites, loading, saveSite, deleteSite: apiDeleteSite, createAccount } = useDumpsites()
   const [barangays, setBarangays] = useState([])
 
-  const [mapReady,   setMapReady]   = useState(false)
-  const [modal,      setModal]      = useState(null)  // null | 'add' | site obj
+  const [mapReady, setMapReady] = useState(false)
+  const [modal, setModal] = useState(null)  // null | 'add' | site obj
   const [pendingCoords, setPendingCoords] = useState(null)
-  const [selected,   setSelected]   = useState(null)
-  const [toast,      setToast]      = useState(null)
+  const [selected, setSelected] = useState(null)
+  const [toast, setToast] = useState(null)
   const [typeFilter, setTypeFilter] = useState('all')
-  const [addMode,    setAddMode]    = useState(false)
+  const [addMode, setAddMode] = useState(false)
+  const [detailSite, setDetailSite] = useState(null)  // site to show in detail popup
 
   // refs for closure access in Leaflet event handlers
   const addModeRef = useRef(false)
@@ -210,7 +443,7 @@ export default function DumpsiteManagement() {
       if (!addModeRef.current) return
       const { lat, lng } = e.latlng
       // drop pending marker
-      if (pendingRef.current) { try { map.removeLayer(pendingRef.current) } catch {} }
+      if (pendingRef.current) { try { map.removeLayer(pendingRef.current) } catch { } }
       const icon = L.divIcon({ html: pendingMarkerHtml(), className: '', iconSize: [36, 36], iconAnchor: [18, 36] })
       pendingRef.current = L.marker([lat, lng], { icon }).addTo(map)
       setPendingCoords([lat, lng])
@@ -229,7 +462,7 @@ export default function DumpsiteManagement() {
     // remove stale markers
     Object.keys(markersRef.current).forEach(id => {
       if (!sites.find(s => s.id === Number(id))) {
-        try { map.removeLayer(markersRef.current[id]) } catch {}
+        try { map.removeLayer(markersRef.current[id]) } catch { }
         delete markersRef.current[id]
       }
     })
@@ -237,17 +470,20 @@ export default function DumpsiteManagement() {
     // add / update markers
     sites.forEach(site => {
       if (markersRef.current[site.id]) {
-        try { map.removeLayer(markersRef.current[site.id]) } catch {}
+        try { map.removeLayer(markersRef.current[site.id]) } catch { }
       }
+      const lat = Number(site.latitude)
+      const lng = Number(site.longitude)
+      if (!lat || !lng) return  // skip if coords missing
       const icon = L.divIcon({ html: markerHtml(site.type), className: '', iconSize: [36, 42], iconAnchor: [18, 42] })
-      const marker = L.marker([site.lat, site.lng], { icon }).addTo(map)
+      const marker = L.marker([lat, lng], { icon }).addTo(map)
       const t = typeMap[site.type] || TYPES[1]
       const bName = typeof site.barangay === 'object' ? site.barangay.name : site.barangay_name
       marker.bindPopup(`
         <div style="font-family:sans-serif;min-width:160px;">
           <strong style="color:${t.color}">${t.emoji} ${site.name}</strong><br/>
           <span style="color:#555;font-size:11px;">${t.label} · ${bName || 'Unknown'}</span><br/>
-          <span style="color:#888;font-size:11px;">Capacity: ${site.capacity}% full</span>
+          <span style="color:#888;font-size:11px;">Capacity: ${site.capacity_used ?? 0}% full</span>
         </div>`)
       marker.on('click', () => setSelected(site))
       markersRef.current[site.id] = marker
@@ -262,18 +498,42 @@ export default function DumpsiteManagement() {
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
-  async function handleSave(form) {
+  async function handleSave(form, accountData) {
     let res
     if (modal === 'add') {
       const [lat, lng] = pendingCoords
-      res = await saveSite(null, { ...form, lat, lng })
+      const payload = {
+        name:     form.name,
+        type:     form.type,
+        barangay: form.barangay,
+        lat,
+        lng,
+        capacity: 0,
+        notes:    form.notes || '',
+      }
+      res = await saveSite(null, payload)
       if (res.ok) {
-        if (pendingRef.current) { try { mapInstance.current.removeLayer(pendingRef.current) } catch {} pendingRef.current = null }
+        if (pendingRef.current) { try { mapInstance.current.removeLayer(pendingRef.current) } catch { } pendingRef.current = null }
         setPendingCoords(null)
-        showToast('✅ Site added successfully.')
+        // Create dumpsite account
+        const accRes = await createAccount(res.data.id, accountData)
+        if (!accRes.ok) {
+          showToast(`✅ Site added. ⚠️ Account error: ${accRes.error}`)
+        } else {
+          showToast('✅ Site added and account created.')
+        }
+        // Refresh site so staff_accounts is populated in detail modal
+        const fresh = { ...res.data, staff_accounts: accRes.ok ? [accRes.data] : [] }
+        setDetailSite(fresh)
       }
     } else {
-      res = await saveSite(modal.id, form)
+      const payload = {
+        name:     form.name,
+        type:     form.type,
+        barangay: form.barangay,
+        notes:    form.notes || '',
+      }
+      res = await saveSite(modal.id, payload)
       if (res.ok) showToast('✅ Site updated.')
     }
     if (res.ok) setModal(null)
@@ -291,13 +551,13 @@ export default function DumpsiteManagement() {
 
   function flyTo(site) {
     if (!mapInstance.current) return
-    mapInstance.current.flyTo([site.lat, site.lng], 16, { duration: 1 })
+    mapInstance.current.flyTo([Number(site.latitude), Number(site.longitude)], 16, { duration: 1 })
     setSelected(site)
   }
 
-  const filtered = useMemo(() => 
+  const filtered = useMemo(() =>
     typeFilter === 'all' ? sites : sites.filter(s => s.type === typeFilter)
-  , [sites, typeFilter])
+    , [sites, typeFilter])
 
   return (
     <DashboardLayout>
@@ -315,12 +575,21 @@ export default function DumpsiteManagement() {
         <SiteModal
           site={modal === 'add' ? null : modal}
           coords={modal === 'add' ? pendingCoords : null}
+          barangays={barangays}
           onSave={handleSave}
           onClose={() => {
-            if (pendingRef.current) { try { mapInstance.current?.removeLayer(pendingRef.current) } catch {} pendingRef.current = null }
+            if (pendingRef.current) { try { mapInstance.current?.removeLayer(pendingRef.current) } catch { } pendingRef.current = null }
             setPendingCoords(null)
             setModal(null)
           }}
+        />
+      )}
+
+      {detailSite && (
+        <SiteDetailModal
+          site={detailSite}
+          barangays={barangays}
+          onClose={() => setDetailSite(null)}
         />
       )}
 
@@ -459,7 +728,7 @@ export default function DumpsiteManagement() {
                         {site.name}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                        {t.label} · {bName || 'Unknown'}
+                        {t.label} · {(typeof site.barangay === 'object' ? site.barangay?.name : barangays.find(b => b.id === site.barangay)?.name) || site.barangay_name || 'Unknown'}
                       </div>
                     </div>
                     <span style={{
@@ -478,6 +747,10 @@ export default function DumpsiteManagement() {
 
                   <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
                     <button className="dm-site-btn btn btn-outline btn-sm" style={{ flex: 1, fontSize: 11 }}
+                      onClick={e => { e.stopPropagation(); setDetailSite(site) }}>
+                      🔍 Details
+                    </button>
+                    <button className="dm-site-btn btn btn-outline btn-sm" style={{ flex: 1, fontSize: 11 }}
                       onClick={e => { e.stopPropagation(); setModal(site) }}>
                       ✏️ Edit
                     </button>
@@ -485,7 +758,7 @@ export default function DumpsiteManagement() {
                       background: 'rgba(231,76,60,0.07)', color: '#e74c3c',
                       border: '1px solid rgba(231,76,60,0.25)', fontSize: 11,
                     }} onClick={e => { e.stopPropagation(); deleteSite(site.id) }}>
-                      🗑 Remove
+                      🗑
                     </button>
                   </div>
                 </div>

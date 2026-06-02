@@ -36,7 +36,6 @@ INSTALLED_APPS = [
     'news',                 # News and announcements
     'analytics',            # Performance metrics and trends
 ]
- 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',   # Must be first
     'django.middleware.security.SecurityMiddleware',

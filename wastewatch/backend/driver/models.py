@@ -42,13 +42,17 @@ class Dumpsite(models.Model):
 class CollectionSchedule(models.Model):
     truck = models.ForeignKey(Truck, on_delete=models.SET_NULL, null=True, blank=True, related_name='schedules')
     driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='collection_schedules')
-    barangay = models.ForeignKey('accounts.Barangay', on_delete=models.CASCADE, related_name='collection_schedules', null=True)
+    barangays = models.ManyToManyField('accounts.Barangay', related_name='collection_schedules', blank=True)
     area = models.CharField(max_length=255, blank=True)
     start_time = models.TimeField()
     end_time = models.TimeField()
     days = models.CharField(max_length=100, help_text="e.g. Mon, Wed, Fri", blank=True)
     frequency = models.CharField(max_length=100, blank=True)
     
+    # Route specifics
+    waypoints = models.JSONField(default=list, blank=True)
+    dumpsite = models.ForeignKey('driver.Dumpsite', on_delete=models.SET_NULL, null=True, blank=True, related_name='collection_schedules')
+
     # Specific date if it's a one-time thing, otherwise can be null for recurring
     date = models.DateField(null=True, blank=True)
 
@@ -114,3 +118,122 @@ class DriverNotification(models.Model):
 
     def __str__(self):
         return f"Notification for {self.driver} – {'Read' if self.read else 'Unread'}"
+
+
+# ---------------------------------------------------------------------------
+# Truck Crew Assignment
+# Replaces the loose Truck.crew M2M with a timestamped, auditable model.
+# One record = one truck on one date+shift, with a driver and N crew members.
+# ---------------------------------------------------------------------------
+class TruckCrewAssignment(models.Model):
+    truck  = models.ForeignKey(Truck, on_delete=models.CASCADE, related_name='crew_assignments')
+    driver = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='driven_assignments',
+        limit_choices_to={'role': 'driver'},
+    )
+    crew_members = models.ManyToManyField(
+        User, related_name='crew_assignments', blank=True,
+        limit_choices_to={'employee_type': 'crew_member'},
+    )
+    # Reference CollectionSchedule for shift/date context — avoids duplicating shift info
+    schedule   = models.ForeignKey(
+        CollectionSchedule, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='crew_assignments',
+    )
+    date       = models.DateField()
+    is_active  = models.BooleanField(default=True, help_text='False = historical record')
+    notes      = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='assignments_created',
+    )
+
+    class Meta:
+        ordering = ['-date']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['truck', 'date', 'schedule'],
+                condition=models.Q(is_active=True),
+                name='unique_active_assignment_per_truck_date_schedule',
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.truck} — {self.date} (Driver: {self.driver})"
+
+
+# ---------------------------------------------------------------------------
+# Waste Delivery
+# Records each truck trip to a dumpsite.
+# net_weight is auto-computed: gross_weight - tare_weight.
+# Shift context comes from the linked CollectionSchedule (no separate field).
+# No waste_type — system only handles solid waste.
+# ---------------------------------------------------------------------------
+class WasteDelivery(models.Model):
+    # Core actors
+    truck             = models.ForeignKey(Truck,    on_delete=models.PROTECT, related_name='deliveries')
+    driver            = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name='deliveries_as_driver',
+        limit_choices_to={'role': 'driver'},
+    )
+    dumpsite          = models.ForeignKey(Dumpsite, on_delete=models.PROTECT, related_name='deliveries')
+    dumpsite_operator = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='deliveries_received',
+        limit_choices_to={'role': 'dumpsite'},
+    )
+
+    # Shift context — reuse CollectionSchedule (has start_time, end_time, days, barangay)
+    schedule        = models.ForeignKey(
+        CollectionSchedule, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='deliveries',
+    )
+    crew_assignment = models.ForeignKey(
+        TruckCrewAssignment, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='deliveries',
+    )
+
+    # Timing
+    date         = models.DateField()
+    arrival_time = models.TimeField(null=True, blank=True)
+
+    # Weight — all in kilograms; net auto-computed on save
+    gross_weight = models.DecimalField(max_digits=10, decimal_places=2)
+    tare_weight  = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    net_weight   = models.DecimalField(max_digits=10, decimal_places=2, editable=False, default=0)
+
+    # Barangay served (for per-barangay analytics)
+    barangay = models.ForeignKey(
+        'accounts.Barangay', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='waste_deliveries',
+    )
+
+    # Metadata
+    remarks      = models.TextField(blank=True)
+    is_validated = models.BooleanField(default=False, help_text='Dumpsite operator confirmed this record')
+    created_at   = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering        = ['-date', '-arrival_time']
+        verbose_name    = 'Waste Delivery'
+        verbose_name_plural = 'Waste Deliveries'
+
+    def save(self, *args, **kwargs):
+        self.net_weight = self.gross_weight - self.tare_weight
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.truck} → {self.dumpsite} | {self.date} | {self.net_weight} kg"
+
+class CalendarEvent(models.Model):
+    title = models.CharField(max_length=200)
+    date = models.DateField()
+    location = models.CharField(max_length=255, blank=True)
+    assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='calendar_events')
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.title} on {self.date}"

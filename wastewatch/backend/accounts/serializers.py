@@ -30,12 +30,64 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model  = User
         fields = [
-            'id', 'email', 'full_name', 'role',
+            'id', 'email', 'full_name', 'role', 'employee_type',
             'barangay', 'barangay_name',
             'dumpsite', 'dumpsite_name',
             'is_active', 'created_at',
         ]
         read_only_fields = ['created_at', 'role']
+
+
+# ---------------------------------------------------------------------------
+# Admin User Create / Update  (role + password writable)
+# ---------------------------------------------------------------------------
+class AdminUserSerializer(serializers.ModelSerializer):
+    """
+    Used by UserViewSet for admin create/update operations.
+    Allows setting role, employee_type, password, dumpsite — all fields
+    that the public RegisterSerializer intentionally locks down.
+    """
+    password      = serializers.CharField(write_only=True, required=False, min_length=6)
+    barangay_name = serializers.CharField(source='barangay.name', read_only=True)
+    dumpsite_name = serializers.CharField(source='dumpsite.name', read_only=True)
+
+    class Meta:
+        model  = User
+        fields = [
+            'id', 'email', 'full_name', 'role', 'employee_type',
+            'barangay', 'barangay_name',
+            'dumpsite', 'dumpsite_name',
+            'is_active', 'password', 'created_at',
+        ]
+        read_only_fields = ['created_at']
+
+    def validate_email(self, value):
+        value = value.strip().lower()
+        qs = User.objects.filter(email__iexact=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError('An account with this email already exists.')
+        return value
+
+    def create(self, validated_data):
+        password = validated_data.pop('password', None)
+        user = User(**validated_data)
+        if password:
+            user.set_password(password)
+        else:
+            user.set_unusable_password()
+        user.save()
+        return user
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop('password', None)
+        for attr, val in validated_data.items():
+            setattr(instance, attr, val)
+        if password:
+            instance.set_password(password)
+        instance.save()
+        return instance
 
 
 # ---------------------------------------------------------------------------

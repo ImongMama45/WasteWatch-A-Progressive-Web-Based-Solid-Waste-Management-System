@@ -47,6 +47,7 @@ export default function CitizenDashboard() {
   const [schedule, setSchedule] = useState([])
   const [loading, setLoading] = useState(true)
   const [reportsTab, setReportsTab] = useState('all')   // all | pending | resolved
+  const [crewAssignment, setCrewAssignment] = useState(null)
 
   const nextDay = schedule.find(s => s.isNext) || schedule[0]
 
@@ -64,7 +65,14 @@ export default function CitizenDashboard() {
         if (sc.data) setSchedule(sc.data)
       })
       .finally(() => setLoading(false))
-  }, [])
+
+    // Fetch crew assignment only if user is a crew member
+    if (user?.employee_type === 'crew_member') {
+      api.get('/api/driver/crew-assignments/my-assignment/')
+        .then(res => setCrewAssignment(res.data))
+        .catch(() => setCrewAssignment(null))
+    }
+  }, [user?.employee_type])
 
 
   const filteredReports = myReports.filter(r => {
@@ -114,6 +122,109 @@ export default function CitizenDashboard() {
 
 
 
+
+            {/* ══════════════════════════════════════
+                CREW MEMBER SECTION (visible only if crew_member)
+            ══════════════════════════════════════ */}
+            {user?.employee_type === 'crew_member' && (
+              <div style={{ marginBottom: 20 }}>
+                {/* Header */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                  <h3 className="section-title" style={{ margin: 0 }}>My Crew Assignment</h3>
+                  <span style={{
+                    fontSize: 9, fontWeight: 800, padding: '3px 10px', borderRadius: 20,
+                    background: 'rgba(251,191,36,0.15)', color: '#f59e0b',
+                    border: '1px solid rgba(251,191,36,0.3)', letterSpacing: '.07em',
+                  }}>CREW MEMBER</span>
+                </div>
+
+                {crewAssignment ? (
+                  <div style={{
+                    background: 'linear-gradient(135deg, rgba(251,191,36,0.08), rgba(251,191,36,0.03))',
+                    border: '1.5px solid rgba(251,191,36,0.25)',
+                    borderRadius: 16, padding: '18px 20px',
+                  }}>
+                    {/* Truck + Driver row */}
+                    <div style={{ display: 'flex', gap: 14, marginBottom: 16, flexWrap: 'wrap' }}>
+                      <div style={{
+                        flex: 1, minWidth: 140,
+                        background: 'var(--surface)', border: '1px solid var(--border)',
+                        borderRadius: 12, padding: '12px 14px',
+                      }}>
+                        <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: 6 }}>Assigned Truck</div>
+                        <div style={{ fontSize: 20 }}>🚛</div>
+                        <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 16, marginTop: 4 }}>
+                          {crewAssignment.truck_plate}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{crewAssignment.truck_model}</div>
+                      </div>
+
+                      <div style={{
+                        flex: 1, minWidth: 140,
+                        background: 'var(--surface)', border: '1px solid var(--border)',
+                        borderRadius: 12, padding: '12px 14px',
+                      }}>
+                        <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: 6 }}>Driver</div>
+                        <div style={{ fontSize: 20 }}>👤</div>
+                        <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 15, marginTop: 4 }}>
+                          {crewAssignment.driver_name || '—'}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Lead Driver</div>
+                      </div>
+                    </div>
+
+                    {/* Schedule + Route info */}
+                    <div style={{
+                      background: 'var(--surface)', border: '1px solid var(--border)',
+                      borderRadius: 12, padding: '14px 16px', marginBottom: 12,
+                    }}>
+                      <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--accent)', letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: 10 }}>Collection Schedule</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        {[
+                          { icon: '📍', label: 'Area / Route', value: crewAssignment.schedule_area || '—' },
+                          { icon: '📅', label: 'Days', value: crewAssignment.schedule_days || '—' },
+                          { icon: '🕐', label: 'Shift Start', value: crewAssignment.schedule_start || '—' },
+                          { icon: '🕔', label: 'Shift End', value: crewAssignment.schedule_end || '—' },
+                        ].map(item => (
+                          <div key={item.label}>
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>{item.icon} {item.label}</div>
+                            <div style={{ fontSize: 13, fontWeight: 700 }}>{item.value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Crew row */}
+                    {crewAssignment.crew_names?.length > 0 && (
+                      <div>
+                        <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: 8 }}>Crew on this shift</div>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {crewAssignment.crew_names.map(m => (
+                            <span key={m.id} style={{
+                              fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 20,
+                              background: m.id === user?.id ? 'rgba(251,191,36,0.2)' : 'var(--surface)',
+                              border: m.id === user?.id ? '1px solid rgba(251,191,36,0.4)' : '1px solid var(--border)',
+                              color: m.id === user?.id ? '#f59e0b' : 'var(--text)',
+                            }}>
+                              {m.id === user?.id ? '⭐ ' : ''}{m.full_name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{
+                    background: 'var(--surface)', border: '1px solid var(--border)',
+                    borderRadius: 14, padding: '28px 20px', textAlign: 'center',
+                  }}>
+                    <div style={{ fontSize: 36, marginBottom: 8 }}>🚛</div>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>No Active Assignment</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>You haven't been assigned to a truck today. Check back later or contact your supervisor.</div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* ══════════════════════════════════════
                 PERSONALIZED STAT CARDS
@@ -538,12 +649,22 @@ export default function CitizenDashboard() {
                 </div>
                 <div>
                   <div className="form-label">Role</div>
-                  <span style={{
-                    background: 'rgba(59,130,246,0.1)', color: 'var(--info)',
-                    border: '1px solid rgba(59,130,246,0.25)',
-                    fontSize: 9, fontWeight: 800, padding: '3px 10px',
-                    borderRadius: 20, letterSpacing: '.07em', display: 'inline-block',
-                  }}>RESIDENT</span>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span style={{
+                      background: 'rgba(59,130,246,0.1)', color: 'var(--info)',
+                      border: '1px solid rgba(59,130,246,0.25)',
+                      fontSize: 9, fontWeight: 800, padding: '3px 10px',
+                      borderRadius: 20, letterSpacing: '.07em', display: 'inline-block',
+                    }}>RESIDENT</span>
+                    {user?.employee_type === 'crew_member' && (
+                      <span style={{
+                        background: 'rgba(251,191,36,0.12)', color: '#f59e0b',
+                        border: '1px solid rgba(251,191,36,0.3)',
+                        fontSize: 9, fontWeight: 800, padding: '3px 10px',
+                        borderRadius: 20, letterSpacing: '.07em', display: 'inline-block',
+                      }}>CREW MEMBER</span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
