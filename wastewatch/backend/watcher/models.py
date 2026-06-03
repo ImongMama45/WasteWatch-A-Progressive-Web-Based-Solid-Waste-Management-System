@@ -15,6 +15,7 @@ Future models that will integrate here without breaking anything:
 
 from django.db import models
 from django.conf import settings  # Use settings.AUTH_USER_MODEL, not User directly
+from cloudinary.models import CloudinaryField
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +64,8 @@ class GarbageReport(models.Model):
         settings.AUTH_USER_MODEL,   # Always reference User this way — avoids circular imports
         on_delete=models.CASCADE,   # Delete reports if user is deleted
         related_name='reports',
+        null=True,
+        blank=True,
     )
 
     # Where it is
@@ -79,8 +82,9 @@ class GarbageReport(models.Model):
     longitude = models.DecimalField(max_digits=10, decimal_places=6)
 
     # Photo evidence
-    image = models.ImageField(
-        upload_to='reports/%Y/%m/',  # Organized by year/month: media/reports/2026/03/
+    image = CloudinaryField(
+        'image',
+        folder='reports/',
         null=True,
         blank=True,
     )
@@ -114,7 +118,8 @@ class GarbageReport(models.Model):
         ordering = ['-created_at']  # Newest first
 
     def __str__(self):
-        return f'[{self.status.upper()}] {self.issue_type} @ {self.barangay} by {self.user.full_name}'
+        user_name = self.user.full_name if self.user else "Anonymous"
+        return f'[{self.status.upper()}] {self.issue_type} @ {self.barangay} by {user_name}'
 
 
 # ---------------------------------------------------------------------------

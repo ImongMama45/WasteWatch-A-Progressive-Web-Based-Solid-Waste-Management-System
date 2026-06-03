@@ -35,6 +35,8 @@ INSTALLED_APPS = [
     'driver',               # Driver management features
     'news',                 # News and announcements
     'analytics',            # Performance metrics and trends
+    'cloudinary_storage',   # Cloudinary storage backend
+    'cloudinary',           # Cloudinary integration
 ]
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',   # Must be first
@@ -46,6 +48,18 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+# ---------------------------------------------------------------------------
+# Cloudinary Configuration
+# ---------------------------------------------------------------------------
+import os
+CLOUDINARY_STORAGE = {
+    'CLOUD_NAME': os.environ.get('CLOUDINARY_CLOUD_NAME', 'your_cloud_name'),
+    'API_KEY': os.environ.get('CLOUDINARY_API_KEY', 'your_api_key'),
+    'API_SECRET': os.environ.get('CLOUDINARY_API_SECRET', 'your_api_secret'),
+}
+
+DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 
 ROOT_URLCONF = 'wastewatch.urls'
 

@@ -50,8 +50,12 @@ def public_stats_view(request):
     from driver.models import Truck, TruckStatus
 
     try:
-        total_reports    = GarbageReport.objects.count()
-        resolved_reports = GarbageReport.objects.filter(status=ReportStatus.RESOLVED).count()
+        # Public stats only show verified (Approved or Resolved) reports
+        verified_reports = GarbageReport.objects.filter(
+            status__in=[ReportStatus.APPROVED, ReportStatus.RESOLVED]
+        )
+        total_reports    = verified_reports.count()
+        resolved_reports = verified_reports.filter(status=ReportStatus.RESOLVED).count()
         active_trucks    = Truck.objects.filter(status=TruckStatus.ACTIVE).count()
         hotspots         = GarbageHotspot.objects.count()
     except Exception:
@@ -76,11 +80,12 @@ def public_schedule_view(request):
     """
     from driver.models import CollectionSchedule
     
-    schedules = CollectionSchedule.objects.select_related('barangay').all()[:10]
+    # CollectionSchedule has a ManyToMany relationship to Barangay via 'barangays' field
+    schedules = CollectionSchedule.objects.prefetch_related('barangays').all()[:10]
     data = [
         {
             'day': s.days,
-            'zone': s.barangay.name if s.barangay else s.area,
+            'zone': ", ".join([b.name for b in s.barangays.all()]) if s.barangays.exists() else s.area,
             'time': f"{s.start_time.strftime('%I:%M %p')} – {s.end_time.strftime('%I:%M %p')}",
             'isNext': False # Logic for 'isNext' can be added later
         } for s in schedules
