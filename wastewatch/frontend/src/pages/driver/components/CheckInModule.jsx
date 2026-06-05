@@ -60,7 +60,7 @@ export default function CheckInModule({ setRouteState }) {
       // ── Step 0: Verify session ───────────────────────────────────────
       setStepIndex(0)
       try {
-        const res = await api.get('/api/driver/profile/').catch(() => ({ data: null }))
+        const res = await api.get('/api/driver/shift/profile/').catch(() => ({ data: null }))
         if (res.data) setAssignment(a => ({ ...a, ...res.data }))
       } catch { }
       await delay(900)
@@ -92,15 +92,23 @@ export default function CheckInModule({ setRouteState }) {
 
       // ── Step 2: Log shift start ──────────────────────────────────────
       setStepIndex(2)
-      startShift()
       const ts = new Date().toISOString()
-      sessionStorage.setItem('ww_shift_started_at', ts)
       try {
+        const lat = sessionStorage.getItem('ww_gps_lat')
+        const lng = sessionStorage.getItem('ww_gps_lng')
         await api.post('/api/driver/shift/start/', {
           duty_type: dutyType,
           started_at: ts,
+          latitude: lat,
+          longitude: lng,
         })
-      } catch { }
+        startShift()
+        sessionStorage.setItem('ww_shift_started_at', ts)
+      } catch (err) {
+        setGpsStatus('error') // Use this to visually stall
+        alert(err.response?.data?.error || 'Failed to start shift. Please try again.')
+        return // Cancel the initialization if shift start fails
+      }
       await delay(700)
       if (cancelled) return
       setCompleted(c => [...c, 'timestamp'])

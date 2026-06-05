@@ -11,6 +11,7 @@ from .models import (
     TruckCrewAssignment,
     WasteDelivery,
     CalendarEvent,
+    DriverShift,
 )
 
 class TruckSerializer(serializers.ModelSerializer):
@@ -93,7 +94,8 @@ class PickupStatusSerializer(serializers.ModelSerializer):
 class TruckLocationSerializer(serializers.ModelSerializer):
     class Meta:
         model = TruckLocation
-        fields = '__all__'
+        fields = ['id', 'latitude', 'longitude', 'timestamp', 'driver', 'truck', 'shift']
+        read_only_fields = ['driver', 'truck', 'shift', 'timestamp']
 
 class CompletionReportSerializer(serializers.ModelSerializer):
     class Meta:
@@ -166,4 +168,9 @@ class CalendarEventSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CalendarEvent
+        fields = '__all__'
+
+class DriverShiftSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DriverShift
         fields = '__all__'

@@ -180,15 +180,13 @@ export default function DriverAnalytics() {
     const [trend, setTrend] = useState(MOCK_TREND)
 
     useEffect(() => {
-        Promise.all([
-            api.get('/api/driver/analytics/summary/').catch(() => ({ data: null })),
-            api.get('/api/driver/analytics/weekly/').catch(() => ({ data: null })),
-            api.get('/api/driver/analytics/trend/').catch(() => ({ data: null })),
-        ]).then(([sRes, wRes, tRes]) => {
-            if (sRes.data) setSummary(sRes.data)
-            if (wRes.data) setWeekly(wRes.data)
-            if (tRes.data) setTrend(tRes.data)
-        })
+        api.get('/api/driver/shift/analytics/').catch(() => ({ data: null }))
+            .then(res => {
+                if (!res.data) return
+                if (res.data.summary) setSummary(res.data.summary)
+                if (res.data.weekly)  setWeekly(res.data.weekly)
+                if (res.data.trend)   setTrend(res.data.trend)
+            })
     }, [])
 
     const weekStops = weekly.reduce((a, d) => a + d.stops, 0)

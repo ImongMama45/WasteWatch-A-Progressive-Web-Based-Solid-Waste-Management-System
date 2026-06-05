@@ -115,7 +115,7 @@ function SummaryRow({ icon, label, value }) {
 export default function EndShiftModule({ setRouteState }) {
   const navigate = useNavigate()
   const { user } = useAuth()
-  const { formattedTime, endShift } = useShiftTimer()
+  const { formattedTime, startTime, endShift } = useShiftTimer()
 
   const isRouteComplete = sessionStorage.getItem('ww_route_complete') === 'true'
   const firstName = user?.full_name?.split(' ')[0] || 'Driver'
@@ -132,35 +132,48 @@ export default function EndShiftModule({ setRouteState }) {
   }, [])
 
   async function handleEarlySubmit() {
-    if (!reason) return
+    if (!reason || submitting) return
     setSubmitting(true)
-    const result = endShift()
     try {
+      const endTime = new Date()
+      const durationMs = startTime ? (endTime - new Date(startTime)) : 0
       await api.post('/api/driver/shift/end/', {
         ended_early: true,
         reason: reason,
         notes: customNote.trim() || null,
-        started_at: result.startTime?.toISOString(),
-        ended_at: result.endTime?.toISOString(),
-        duration_ms: result.durationMs,
+        started_at: startTime ? new Date(startTime).toISOString() : null,
+        ended_at: endTime.toISOString(),
+        duration_ms: durationMs,
       })
-    } catch { }
-    setSubmitting(false)
-    setSubmitted(true)
+      endShift()
+      setSubmitted(true)
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to end shift. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   async function handleDone() {
-    const result = endShift()
+    if (submitting) return
+    setSubmitting(true)
     try {
+      const endTime = new Date()
+      const durationMs = startTime ? (endTime - new Date(startTime)) : 0
       await api.post('/api/driver/shift/end/', {
         ended_early: false,
-        started_at: result.startTime?.toISOString(),
-        ended_at: result.endTime?.toISOString(),
-        duration_ms: result.durationMs,
+        started_at: startTime ? new Date(startTime).toISOString() : null,
+        ended_at: endTime.toISOString(),
+        duration_ms: durationMs,
       })
-    } catch { }
-    sessionStorage.clear()  // clean full session on shift complete
-    navigate('/dashboard', { replace: true })
+      endShift()
+      sessionStorage.clear()  // clean full session on shift complete
+      navigate('/dashboard', { replace: true })
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to end shift. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   function handleExtendedMode() {

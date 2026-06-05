@@ -19,12 +19,6 @@ const DUTY_TYPES = [
     description: 'Follow routes designated location, undisturbed',
     buttonLabel: 'NORMAL',
   },
-  {
-    key: 'caring',
-    title: 'CARING DUTY',
-    description: 'Follow routes designated location, Accepts uncollected dump of other drivers',
-    buttonLabel: 'START DUTY',
-  },
 ]
 
 export default function AssignmentModule({ setRouteState }) {

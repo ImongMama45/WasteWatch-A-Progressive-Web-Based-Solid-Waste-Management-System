@@ -6,57 +6,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-
-// ─── SHARED MOCK DATA (mirrors MapView.jsx — swap for API calls later) ────────
+import api from '../api/client'
 
 const LUCENA_CENTER = [13.9373, 121.617]
-
-const TRUCK_ROUTES = [
-  {
-    id: 'T01', truckId: 'Truck 01', driver: 'Pedro Santos',
-    barangay: 'Ibabang Dupay Zone 1', status: 'collecting',
-    capacity: 75, collectedCount: 11, totalPoints: 15,
-    eta: '1:45 PM', color: '#14b8a6',
-    waypoints: [
-      [13.946, 121.6085], [13.9472, 121.6102], [13.948, 121.612],
-      [13.9488, 121.6138], [13.9475, 121.6155], [13.946, 121.616],
-      [13.9448, 121.6145], [13.944, 121.6128], [13.9452, 121.611],
-      [13.9464, 121.6095],
-    ],
-    completedUpTo: 7,
-  },
-  {
-    id: 'T02', truckId: 'Truck 02', driver: 'Juan Dela Cruz',
-    barangay: 'Ibabang Dupay Zone 3', status: 'collecting',
-    capacity: 60, collectedCount: 9, totalPoints: 15,
-    eta: '2:30 PM', color: '#f59e0b',
-    waypoints: [
-      [13.94, 121.6135], [13.941, 121.615], [13.942, 121.6165],
-      [13.9432, 121.6178], [13.944, 121.619], [13.9448, 121.62],
-      [13.9438, 121.6208], [13.9425, 121.6202], [13.9415, 121.6188],
-      [13.9408, 121.617], [13.9402, 121.6152],
-    ],
-    completedUpTo: 8,
-  },
-  {
-    id: 'T03', truckId: 'Truck 03', driver: 'Maria Reyes',
-    barangay: 'Cotta Commercial', status: 'en_route',
-    capacity: 30, collectedCount: 4, totalPoints: 12,
-    eta: '3:15 PM', color: '#a78bfa',
-    waypoints: [
-      [13.933, 121.6095], [13.934, 121.611], [13.9352, 121.6125],
-      [13.9362, 121.614], [13.937, 121.6155], [13.9362, 121.6168],
-      [13.935, 121.6162], [13.9338, 121.6148],
-    ],
-    completedUpTo: 3,
-  },
-]
-
-const GARBAGE_REPORTS = [
-  { id: 'R1', lat: 13.9415, lng: 121.6175, type: 'overflow', severity: 'high', address: 'Ibabang Dupay Zone 3' },
-  { id: 'R2', lat: 13.9358, lng: 121.613, type: 'illegal_dumping', severity: 'medium', address: 'Near Cotta District' },
-  { id: 'R3', lat: 13.9482, lng: 121.6145, type: 'missed', severity: 'low', address: 'Zone 1 Side Street' },
-]
 
 // ─── ICON HELPERS ─────────────────────────────────────────────────────────────
 
@@ -84,10 +36,7 @@ const reportIconHtml = (severity) => {
   </div>`
 }
 
-const STATUS_COLORS = { collecting: '#22c55e', en_route: '#f59e0b', idle: '#64748b', done: '#3b82f6' }
 const STATUS_LABELS = { collecting: 'Collecting', en_route: 'En Route', idle: 'Idle', done: 'Done' }
-
-// ─── COMPONENT ────────────────────────────────────────────────────────────────
 
 export default function MiniMap() {
   const navigate = useNavigate()
@@ -98,6 +47,13 @@ export default function MiniMap() {
   const [leafletReady, setLeafletReady] = useState(false)
   const [selectedRoute, setSelectedRoute] = useState(null)
   const [panelOpen, setPanelOpen] = useState(false)
+  const [activeTrucks, setActiveTrucks] = useState([])
+  const [liveReports, setLiveReports] = useState([])
+
+  const activeTrucksRef = useRef(activeTrucks)
+  const liveReportsRef = useRef(liveReports)
+  useEffect(() => { activeTrucksRef.current = activeTrucks }, [activeTrucks])
+  useEffect(() => { liveReportsRef.current = liveReports }, [liveReports])
 
   // ── Load Leaflet CSS + JS once ──────────────────────────────────────────────
   useEffect(() => {
@@ -137,65 +93,80 @@ export default function MiniMap() {
     drawLayers(map)
   }, [leafletReady])
 
+  // ── Live Tracking Polling ───────────────────────────────────────────────────
+  useEffect(() => {
+    const fetchActiveShifts = () => {
+      api.get('/api/driver/shift/active_shifts/')
+        .then(res => setActiveTrucks(res.data))
+        .catch(console.error)
+    }
+    const fetchReports = () => {
+      api.get('/api/watcher/reports/map_pins/')
+        .then(res => setLiveReports(res.data))
+        .catch(console.error)
+    }
+    fetchActiveShifts()
+    fetchReports()
+    const shiftsIntv = setInterval(fetchActiveShifts, 10000)
+    const reportsIntv = setInterval(fetchReports, 30000)
+    return () => {
+      clearInterval(shiftsIntv)
+      clearInterval(reportsIntv)
+    }
+  }, [])
+
+  // ── Redraw when active trucks or reports change ─────────────────────────────
+  useEffect(() => {
+    if (!mapInstance.current) return
+    drawLayers(mapInstance.current)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTrucks, liveReports])
+
+  function clearLayers(map) {
+    Object.values(layersRef.current).forEach(l => {
+      try { map.removeLayer(l) } catch {}
+    })
+    layersRef.current = {}
+  }
+
   // ── Draw all map layers ─────────────────────────────────────────────────────
   function drawLayers(map) {
+    clearLayers(map)
     const L = window.L
 
-    // Truck routes
-    TRUCK_ROUTES.forEach(route => {
-      const donePts = route.waypoints.slice(0, route.completedUpTo + 1)
-      const remPts = route.waypoints.slice(route.completedUpTo)
-
-      const doneLine = L.polyline(donePts, {
-        color: route.color, weight: 4, opacity: 0.95,
-        lineCap: 'round', lineJoin: 'round',
-      }).addTo(map)
-
-      const remLine = L.polyline(remPts, {
-        color: route.color, weight: 3, opacity: 0.45, dashArray: '9,7',
-      }).addTo(map)
-
-      const onClick = () => { setSelectedRoute(route); setPanelOpen(true) }
-      doneLine.on('click', onClick)
-      remLine.on('click', onClick)
-
-      // Stop dots
-      route.waypoints.forEach((coord, i) => {
-        const done = i <= route.completedUpTo
-        const circle = L.circleMarker(coord, {
-          radius: done ? 6 : 4,
-          fillColor: done ? route.color : '#1e293b',
-          color: route.color, weight: 2,
-          opacity: 1, fillOpacity: done ? 1 : 0.55,
-        }).addTo(map)
-        circle.on('click', onClick)
-        layersRef.current[`stop-${route.id}-${i}`] = circle
-      })
-
-      layersRef.current[`done-${route.id}`] = doneLine
-      layersRef.current[`rem-${route.id}`] = remLine
-    })
-
-    // Truck markers at current position
-    TRUCK_ROUTES.forEach(route => {
-      const pos = route.waypoints[route.completedUpTo]
+    // Truck markers at current position (LIVE)
+    activeTrucksRef.current.forEach(truck => {
+      const pos = [truck.lat, truck.lng]
       const icon = L.divIcon({
-        html: makeTruckIconHtml(route.color, route.truckId),
+        html: makeTruckIconHtml("#14b8a6", truck.truckId),
         className: '', iconSize: [36, 44], iconAnchor: [18, 44],
       })
       const m = L.marker(pos, { icon }).addTo(map)
-      m.on('click', () => { setSelectedRoute(route); setPanelOpen(true) })
-      layersRef.current[`truck-${route.id}`] = m
+      
+      const mockRoute = {
+        id: truck.id,
+        truckId: truck.truckId,
+        driver: truck.driver,
+        barangay: "Live Tracking",
+        status: "collecting",
+        capacity: 50,
+        collectedCount: 0,
+        totalPoints: 0,
+        eta: "N/A",
+        color: "#14b8a6"
+      }
+      m.on('click', () => { setSelectedRoute(mockRoute); setPanelOpen(true) })
+      layersRef.current[`live-truck-${truck.id}`] = m
     })
 
-    // Garbage report markers
-    GARBAGE_REPORTS.forEach(r => {
+    // Garbage report markers (LIVE)
+    liveReportsRef.current.forEach(r => {
       const icon = L.divIcon({
         html: reportIconHtml(r.severity),
         className: '', iconSize: [24, 30], iconAnchor: [6, 30],
       })
       const m = L.marker([r.lat, r.lng], { icon }).addTo(map)
-      m.bindPopup(`<b>⚠️ ${r.type.replace('_', ' ')}</b><br/><small>${r.address}</small>`)
+      m.bindPopup(`<b>⚠️ ${r.waste_type || 'garbage'}</b><br/><small>${r.notes || 'No description'}</small>`)
       layersRef.current[`rep-${r.id}`] = m
     })
   }
@@ -241,8 +212,6 @@ export default function MiniMap() {
         </div>
       )}
 
-
-
       {/* ── EXPAND BUTTON (top-right) ── */}
       <button
         onClick={() => navigate('/map')}
@@ -270,12 +239,12 @@ export default function MiniMap() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px #22c55e' }} />
           <span style={{ color: '#cbd5e1', fontSize: 11 }}>
-            {TRUCK_ROUTES.filter(r => r.status === 'collecting').length} Active Trucks
+            {activeTrucks.length} Active Trucks
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#f59e0b', boxShadow: '0 0 6px #f59e0b' }} />
-          <span style={{ color: '#cbd5e1', fontSize: 11 }}>{GARBAGE_REPORTS.length} Reports Nearby</span>
+          <span style={{ color: '#cbd5e1', fontSize: 11 }}>{liveReports.length} Reports Nearby</span>
         </div>
       </div>
 

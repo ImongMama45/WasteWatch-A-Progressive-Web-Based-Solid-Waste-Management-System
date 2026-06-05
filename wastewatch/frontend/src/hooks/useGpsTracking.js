@@ -5,22 +5,25 @@
  * Geolocation API and syncs it to the backend on a configurable interval.
  *
  * Usage:
- *   const { position, error, accuracy, isTracking } = useGpsTracking({
+ *   const { position, error, accuracy, isTracking, lastSyncedAt, syncFailed } = useGpsTracking({
  *     intervalMs: 10000,   // POST to backend every 10 s (default)
  *     enabled: true,       // set false to pause (e.g. shift not started)
  *   })
  *
  * Returns:
- *   position   – { lat, lng } | null
- *   accuracy   – metres | null
- *   error      – error message string | null
- *   isTracking – boolean (true once first fix arrives)
+ *   position     – { lat, lng } | null
+ *   accuracy     – metres | null
+ *   error        – error message string | null
+ *   isTracking   – boolean (true once first fix arrives)
+ *   lastSyncedAt – Date | null (last successful backend sync)
+ *   syncFailed   – boolean (true after 3+ consecutive backend failures)
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import api from '../api/client'
 
 const DEFAULT_INTERVAL_MS = 10_000   // send to backend every 10 s
+const SYNC_FAIL_THRESHOLD  = 3       // warn after this many consecutive failures
 const GEO_OPTIONS = {
   enableHighAccuracy: true,
   maximumAge: 5_000,   // accept cached position up to 5 s old
@@ -28,13 +31,16 @@ const GEO_OPTIONS = {
 }
 
 export default function useGpsTracking({ intervalMs = DEFAULT_INTERVAL_MS, enabled = true } = {}) {
-  const [position, setPosition] = useState(null)   // { lat, lng }
-  const [accuracy, setAccuracy] = useState(null)   // metres
-  const [error, setError] = useState(null)   // string | null
-  const [isTracking, setIsTracking] = useState(false)
+  const [position, setPosition]         = useState(null)   // { lat, lng }
+  const [accuracy, setAccuracy]         = useState(null)   // metres
+  const [error, setError]               = useState(null)   // string | null
+  const [isTracking, setIsTracking]     = useState(false)
+  const [lastSyncedAt, setLastSyncedAt] = useState(null)   // Date | null
+  const [syncFailed, setSyncFailed]     = useState(false)  // true after 3 consecutive fails
 
-  const lastSentAt = useRef(0)   // timestamp of last API POST
-  const watchId = useRef(null)
+  const lastSentAt      = useRef(0)   // timestamp of last API POST attempt
+  const failCountRef    = useRef(0)   // consecutive backend failure count
+  const watchId         = useRef(null)
 
   // ── Send position to backend (throttled) ───────────────────────────────────
   const syncToBackend = useCallback((lat, lng, acc) => {
@@ -42,8 +48,18 @@ export default function useGpsTracking({ intervalMs = DEFAULT_INTERVAL_MS, enabl
     if (now - lastSentAt.current < intervalMs) return   // throttle
 
     lastSentAt.current = now
-    api.post('/api/driver/location/', { latitude: lat, longitude: lng, accuracy: acc })
-      .catch(() => { })   // silently ignore offline / API errors
+    api.post('/api/driver/truck-locations/', { latitude: lat, longitude: lng, accuracy: acc })
+      .then(() => {
+        failCountRef.current = 0
+        setSyncFailed(false)
+        setLastSyncedAt(new Date())
+      })
+      .catch(() => {
+        failCountRef.current += 1
+        if (failCountRef.current >= SYNC_FAIL_THRESHOLD) {
+          setSyncFailed(true)
+        }
+      })
   }, [intervalMs])
 
   // ── Start / stop watchPosition ─────────────────────────────────────────────
@@ -91,5 +107,6 @@ export default function useGpsTracking({ intervalMs = DEFAULT_INTERVAL_MS, enabl
     }
   }, [enabled, syncToBackend])
 
-  return { position, accuracy, error, isTracking }
+  return { position, accuracy, error, isTracking, lastSyncedAt, syncFailed }
 }
+

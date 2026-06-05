@@ -72,8 +72,8 @@ export default function DriverDashboard() {
   // ── Shift timer (persists across refreshes) ────────────────────────────────
   const { shiftActive, startTime, formattedTime, startShift, endShift } = useShiftTimer()
 
-  // ── GPS (for issue reports) ────────────────────────────────────────────
-  const { position: gpsPosition } = useGpsTracking({ enabled: shiftActive })
+  // ── GPS (for issue reports + sync health) ─────────────────────────────────
+  const { position: gpsPosition, syncFailed, lastSyncedAt } = useGpsTracking({ enabled: shiftActive })
 
   const progress = route.totalStops > 0 ? Math.round((route.completedStops / route.totalStops) * 100) : 0
   const activeStatus = STATUSES.find(s => s.key === status) || STATUSES[0]
@@ -83,22 +83,32 @@ export default function DriverDashboard() {
   useEffect(() => {
     Promise.all([
       api.get('/api/driver/route-assignments/today/').catch(() => ({ data: null })),
-      api.get('/api/driver/trucks/shift/status/').catch(() => ({ data: null })),
+      api.get('/api/driver/shift/status/').catch(() => ({ data: null })),
     ]).then(([routeRes, shiftRes]) => {
       if (routeRes.data) setRoute(r => ({ ...r, ...routeRes.data }))
+      // Sync timer from backend if backend says active but localStorage was cleared
+      if (shiftRes.data?.shift_active && !shiftActive && shiftRes.data?.started_at) {
+        startShift(shiftRes.data.started_at)
+      }
     }).finally(() => setLoading(false))
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  function handleShiftToggle() {
+  async function handleShiftToggle() {
     if (!shiftActive) {
       navigate('/driver/flow')
     } else {
-      const result = endShift()
-      api.post('/api/driver/shift/end/', {
-        started_at: result.startTime?.toISOString(),
-        ended_at: result.endTime?.toISOString(),
-        duration_ms: result.durationMs,
-      }).catch(() => { })
+      try {
+        const endTime = new Date()
+        const durationMs = startTime ? (endTime - new Date(startTime)) : 0
+        await api.post('/api/driver/shift/end/', {
+          started_at: startTime ? new Date(startTime).toISOString() : null,
+          ended_at: endTime.toISOString(),
+          duration_ms: durationMs,
+        })
+        endShift()
+      } catch (err) {
+        alert(err.response?.data?.error || 'Failed to end shift. Please try again.')
+      }
     }
   }
 
@@ -147,6 +157,25 @@ export default function DriverDashboard() {
           <p className="text-muted text-sm">
             {route.truck} · {route.barangay} · {route.name}
           </p>
+
+          {/* ── GPS SYNC WARNING ── */}
+          {shiftActive && syncFailed && (
+            <div style={{
+              background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.4)',
+              borderRadius: 10, padding: '8px 14px', marginTop: 10,
+              display: 'flex', alignItems: 'center', gap: 10, animation: 'fadeSlideIn .3s ease',
+            }}>
+              <span style={{ fontSize: 18 }}>⚠️</span>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 12, color: '#ef4444' }}>GPS Sync Paused — No Network</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  {lastSyncedAt
+                    ? `Last synced at ${lastSyncedAt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
+                    : 'Location not yet synced to server'}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className='mobile-schedule'>
             <HomeCarousel role="driver" userBarangay={user?.barangay_name} onReport={() => navigate('/report/submit')} />
@@ -336,7 +365,10 @@ export default function DriverDashboard() {
                 </button>
                 {shiftActive && (
                   <button id="driver-end-shift" className="abtn btn"
-                    onClick={() => { setShiftActive(false); api.post('/api/driver/shift/end/').catch(() => { }) }}
+                    onClick={() => {
+                      setShiftActive(false);
+                      api.post('/api/driver/shift/end/').catch(err => alert(err.response?.data?.error || 'Failed to end shift'))
+                    }}
                     style={{
                       flex: 1, padding: '16px 14px', borderRadius: 14,
                       fontFamily: 'var(--font-head)', fontSize: 13, fontWeight: 700,

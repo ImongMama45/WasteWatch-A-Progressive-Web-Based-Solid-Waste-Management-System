@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import { useAuth } from '../context/AuthContext'   // ← added
+import api from '../api/client'
 
 export const LUCENA_CENTER = [13.9373, 121.6170];
 
@@ -27,40 +28,14 @@ export function getZoneType(brgy_name) {
 // Roles that may confirm or dismiss garbage reports
 const REPORT_MODERATOR_ROLES = ["watcher", "brgy_official", "admin"]
 
-export const TRUCK_ROUTES = [
-  {
-    id: "T01", truckId: "Truck 01", driver: "Pedro Santos", barangay: "Ibabang Dupay Zone 1",
-    status: "collecting", capacity: 75, collectedCount: 11, totalPoints: 15,
-    eta: "1:45 PM", nextCollection: "Thursday, 8:00 AM", lastUpdate: "5 min ago", color: "#14b8a6",
-    completedUpTo: 7,
-    waypoints: [[13.9460, 121.6085], [13.9472, 121.6102], [13.9480, 121.6120], [13.9488, 121.6138], [13.9475, 121.6155], [13.9460, 121.6160], [13.9448, 121.6145], [13.9440, 121.6128], [13.9452, 121.6110], [13.9464, 121.6095]]
-  },
-  {
-    id: "T02", truckId: "Truck 02", driver: "Juan Dela Cruz", barangay: "Ibabang Dupay Zone 3",
-    status: "collecting", capacity: 60, collectedCount: 9, totalPoints: 15,
-    eta: "2:30 PM", nextCollection: "Friday, 8:00 AM", lastUpdate: "2 min ago", color: "#f59e0b",
-    completedUpTo: 8,
-    waypoints: [[13.9400, 121.6135], [13.9410, 121.6150], [13.9420, 121.6165], [13.9432, 121.6178], [13.9440, 121.6190], [13.9448, 121.6200], [13.9438, 121.6208], [13.9425, 121.6202], [13.9415, 121.6188], [13.9408, 121.6170], [13.9402, 121.6152]]
-  },
-  {
-    id: "T03", truckId: "Truck 03", driver: "Maria Reyes", barangay: "Cotta Commercial District",
-    status: "en_route", capacity: 30, collectedCount: 4, totalPoints: 12,
-    eta: "3:15 PM", nextCollection: "Friday, 7:00 AM", lastUpdate: "12 min ago", color: "#a78bfa",
-    completedUpTo: 3,
-    waypoints: [[13.9330, 121.6095], [13.9340, 121.6110], [13.9352, 121.6125], [13.9362, 121.6140], [13.9370, 121.6155], [13.9362, 121.6168], [13.9350, 121.6162], [13.9338, 121.6148]]
-  },
-];
+export const TRUCK_ROUTES = [];
 
 export const DUMP_SITES = [
   { id: "D1", name: "Main Landfill — Gulang-Gulang", lat: 13.9295, lng: 121.6230, capacity: 82 },
   { id: "D2", name: "Transfer Station — Cotta", lat: 13.9345, lng: 121.6085, capacity: 55 },
 ];
 
-export const GARBAGE_REPORTS = [
-  { id: "R1", lat: 13.9415, lng: 121.6175, type: "overflow", severity: "high", address: "Ibabang Dupay Zone 3", reported: "30 min ago" },
-  { id: "R2", lat: 13.9358, lng: 121.6130, type: "illegal_dumping", severity: "medium", address: "Near Cotta District", reported: "2 hrs ago" },
-  { id: "R3", lat: 13.9482, lng: 121.6145, type: "missed", severity: "low", address: "Zone 1 Side Street", reported: "1 day ago" },
-];
+export const GARBAGE_REPORTS = [];
 
 export const ZONE_META = {
   residential: { label: "Residential", icon: "🏠", color: "#4ade80" },
@@ -122,9 +97,16 @@ export default function MapView() {
     routes: true, trucks: true, dumpSites: true, reports: true,
   })
   const [barangayGeo, setBarangayGeo] = useState(null)
+  const [activeTrucks, setActiveTrucks] = useState([])
+  const [liveReports, setLiveReports] = useState([])
 
   const activeFiltersRef = useRef(activeFilters)
+  const activeTrucksRef  = useRef(activeTrucks)
+  const liveReportsRef   = useRef(liveReports)
+
   useEffect(() => { activeFiltersRef.current = activeFilters }, [activeFilters])
+  useEffect(() => { activeTrucksRef.current  = activeTrucks  }, [activeTrucks])
+  useEffect(() => { liveReportsRef.current   = liveReports   }, [liveReports])
 
   useEffect(() => {
     fetch('/data/lucena_barangays.geojson')
@@ -161,12 +143,36 @@ export default function MapView() {
     mapInstanceRef.current = map
   }, [mapReady])
 
-  // Redraw whenever map is ready, GeoJSON loads, or filters change
+  // Live Tracking Polling — trucks every 10s
+  useEffect(() => {
+    const fetchActiveShifts = () => {
+      api.get('/api/driver/shift/active_shifts/')
+        .then(res => setActiveTrucks(res.data))
+        .catch(console.error)
+    }
+    fetchActiveShifts()
+    const intv = setInterval(fetchActiveShifts, 10000)
+    return () => clearInterval(intv)
+  }, [])
+
+  // Live Reports Polling — map pins every 30s
+  useEffect(() => {
+    const fetchReports = () => {
+      api.get('/api/watcher/reports/map_pins/')
+        .then(res => setLiveReports(res.data))
+        .catch(console.error)
+    }
+    fetchReports()
+    const intv = setInterval(fetchReports, 30_000)
+    return () => clearInterval(intv)
+  }, [])
+
+  // Redraw whenever map is ready, GeoJSON loads, filters, trucks, or reports change
   useEffect(() => {
     if (!mapInstanceRef.current) return
     drawAll(mapInstanceRef.current)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, barangayGeo, activeFilters])
+  }, [mapReady, barangayGeo, activeFilters, activeTrucks, liveReports])
 
   function clearLayers() {
     const map = mapInstanceRef.current
@@ -256,14 +262,30 @@ export default function MapView() {
       })
     }
 
-    // ── Truck markers ──
+    // ── Truck markers (LIVE) ──
     if (activeFilters.trucks) {
-      TRUCK_ROUTES.forEach(route => {
-        const pos  = route.waypoints[route.completedUpTo]
-        const icon = L.divIcon({ html: makeTruckIcon(route.color, route.truckId), className: "", iconSize: [44, 52], iconAnchor: [22, 52] })
-        const m    = L.marker(pos, { icon }).addTo(map)
-        m.on("click", () => { setSelectedRoute(route); setPanelMode("route"); setPanelOpen(true) })
-        layersRef.current[`truck-${route.id}`] = m
+      activeTrucksRef.current.forEach(truck => {
+        const icon = L.divIcon({ html: makeTruckIcon("#14b8a6", truck.truckId), className: "", iconSize: [44, 52], iconAnchor: [22, 52] })
+        const m    = L.marker([truck.lat, truck.lng], { icon }).addTo(map)
+        
+        // Mock a route object for the panel based on live data
+        const mockRoute = {
+          id: truck.id,
+          truckId: truck.truckId,
+          driver: truck.driver,
+          barangay: "Live Tracking",
+          status: "collecting",
+          capacity: 50,
+          collectedCount: 0,
+          totalPoints: 0,
+          eta: "N/A",
+          nextCollection: "N/A",
+          lastUpdate: new Date(truck.last_update).toLocaleTimeString(),
+          color: "#14b8a6"
+        }
+        
+        m.on("click", () => { setSelectedRoute(mockRoute); setPanelMode("route"); setPanelOpen(true) })
+        layersRef.current[`live-truck-${truck.id}`] = m
       })
     }
 
@@ -280,9 +302,9 @@ export default function MapView() {
       })
     }
 
-    // ── Garbage reports ──
+    // ── Garbage reports (LIVE) ──
     if (activeFilters.reports) {
-      GARBAGE_REPORTS.forEach(report => {
+      liveReportsRef.current.forEach(report => {
         const icon = L.divIcon({ html: garbageReportIconHtml(report.severity), className: "", iconSize: [30, 36], iconAnchor: [8, 36] })
         const m    = L.marker([report.lat, report.lng], { icon }).addTo(map)
         m.on("click", () => { setSelectedReport(report); setPanelMode("report"); setPanelOpen(true) })
@@ -505,8 +527,10 @@ export default function MapView() {
               <div style={{ padding: "0 20px 24px" }}>
                 {panelMode === "route"  && selectedRoute  && <RoutePanel  route={selectedRoute}   statusColors={statusColors} statusLabels={statusLabels} />}
                 {panelMode === "zone"   && selectedZone   && <ZonePanel   zone={selectedZone} />}
-                {/* ↓ pass canModerate so ReportPanel knows whether to show action buttons */}
-                {panelMode === "report" && selectedReport && <ReportPanel report={selectedReport} />}
+                {panelMode === "report" && selectedReport && <ReportPanel report={selectedReport} onStatusChange={() => {
+                  api.get('/api/watcher/reports/map_pins/').then(res => setLiveReports(res.data)).catch(console.error)
+                  setPanelOpen(false)
+                }} />}
               </div>
             </div>
           </>
@@ -596,51 +620,67 @@ function ZonePanel({ zone }) {
 }
 
 // ─── ReportPanel — Confirm / Dismiss shown only to authorised roles ───────────
-function ReportPanel({ report }) {
-  const { user } = useAuth()   // ← pull current user from AuthContext
+function ReportPanel({ report, onStatusChange }) {
+  const { user } = useAuth()
 
-  // True when the logged-in user's role can moderate reports
-  const canModerate = REPORT_MODERATOR_ROLES.includes(user?.role)
-
+  const canModerate    = REPORT_MODERATOR_ROLES.includes(user?.role)
   const severityColors = { high: "#ef4444", medium: "#f59e0b", low: "#22c55e" }
   const typeLabels     = { overflow: "Overflow", illegal_dumping: "Illegal Dumping", missed: "Missed Pickup" }
+
+  const reportedStr = report.reported
+    ? new Date(report.reported).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
+    : 'Unknown'
+
+  const statusLabel = {
+    pending:  'Pending Review',
+    approved: 'Approved',
+    resolved: 'Resolved',
+    rejected: 'Dismissed',
+  }[report.status] ?? report.status
+
+  function handleConfirm() {
+    api.post('/api/watcher/confirmations/', { report: report.id })
+      .then(() => onStatusChange?.())
+      .catch(console.error)
+  }
+
+  function handleDismiss() {
+    api.patch(`/api/watcher/reports/${report.id}/`, { status: 'rejected' })
+      .then(() => onStatusChange?.())
+      .catch(console.error)
+  }
 
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
         <div style={{ fontSize: 30 }}>⚠️</div>
         <div style={{ flex: 1 }}>
-          <div style={{ color: "white", fontWeight: 800, fontSize: 17 }}>{typeLabels[report.type]}</div>
+          <div style={{ color: "white", fontWeight: 800, fontSize: 17 }}>{typeLabels[report.type] ?? report.type}</div>
           <div style={{ color: "#94a3b8", fontSize: 12 }}>{report.address}</div>
         </div>
         <div style={{ background: `${severityColors[report.severity]}22`, border: `1px solid ${severityColors[report.severity]}`, borderRadius: 20, padding: "4px 12px" }}>
-          <span style={{ color: severityColors[report.severity], fontSize: 12, fontWeight: 700 }}>{report.severity.toUpperCase()}</span>
+          <span style={{ color: severityColors[report.severity], fontSize: 12, fontWeight: 700 }}>{report.severity?.toUpperCase()}</span>
         </div>
       </div>
 
-      <Row label="REPORT TYPE" value={typeLabels[report.type]} />
-      <Row label="REPORTED"    value={report.reported} />
-      <Row label="STATUS"      value="Pending Review" accent />
+      <Row label="REPORT TYPE"  value={typeLabels[report.type] ?? report.type} />
+      <Row label="REPORTED"     value={reportedStr} />
+      <Row label="STATUS"       value={statusLabel} accent />
 
-      {/* ── Action buttons — visible to Watcher, Brgy_Official, Admin only ── */}
+      {report.description && (
+        <div style={{ marginTop: 10, padding: "10px 12px", background: "rgba(255,255,255,0.04)", borderRadius: 10, color: "#cbd5e1", fontSize: 12, lineHeight: 1.5 }}>
+          {report.description}
+        </div>
+      )}
+
       {canModerate ? (
         <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-          <button style={{ flex: 1, background: "rgba(34,197,94,0.1)",  border: "1px solid #22c55e", color: "#22c55e", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✅ Confirm</button>
-          <button style={{ flex: 1, background: "rgba(239,68,68,0.1)", border: "1px solid #ef4444", color: "#ef4444", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✕ Dismiss</button>
+          <button onClick={handleConfirm} style={{ flex: 1, background: "rgba(34,197,94,0.1)",  border: "1px solid #22c55e", color: "#22c55e", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✅ Confirm</button>
+          <button onClick={handleDismiss} style={{ flex: 1, background: "rgba(239,68,68,0.1)", border: "1px solid #ef4444", color: "#ef4444", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✕ Dismiss</button>
         </div>
       ) : (
-        /* Read-only notice for residents / drivers / other roles */
-        <div style={{
-          marginTop: 18, padding: "10px 14px",
-          background: "rgba(255,255,255,0.04)",
-          border: "1px solid rgba(255,255,255,0.08)",
-          borderRadius: 10,
-          display: "flex", alignItems: "center", gap: 8,
-        }}>
-          <span style={{ fontSize: 16 }}></span>
-          <span style={{ color: "#64748b", fontSize: 12 }}>
-            photo
-          </span>
+        <div style={{ marginTop: 18, padding: "10px 14px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#64748b", fontSize: 12 }}>
+          ℹ️ Only Watchers, Barangay Officials, and Admins can moderate reports.
         </div>
       )}
     </>

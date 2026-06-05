@@ -107,7 +107,7 @@ export function useOfflineReports() {
   // ── Try to push one report to the backend ────────────────────────────────────
   const pushReport = useCallback(async (report) => {
     try {
-      await api.post('/api/reports/', {
+      await api.post('/api/watcher/reports/', {
         waste_type : report.wasteType,
         severity   : report.severity,
         notes      : report.notes,

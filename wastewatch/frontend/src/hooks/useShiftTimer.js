@@ -53,8 +53,8 @@ export default function useShiftTimer() {
     return () => clearInterval(intervalRef.current)
   }, [startTime, shiftActive])
 
-  const startShift = useCallback(() => {
-    const now = new Date()
+  const startShift = useCallback((fromTimestamp = null) => {
+    const now = fromTimestamp ? new Date(fromTimestamp) : new Date()
     setStartTime(now)
     try { localStorage.setItem(STORAGE_KEY, now.toISOString()) } catch { }
   }, [])

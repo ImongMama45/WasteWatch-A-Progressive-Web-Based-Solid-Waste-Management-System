@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
@@ -64,7 +65,8 @@ class CollectionSchedule(models.Model):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
 
     def __str__(self):
-        return f"Schedule {self.id} - {self.barangay.name if self.barangay else 'City-wide'}"
+        names = ', '.join(b.name for b in self.barangays.all()[:3])
+        return f"Schedule {self.id} - {names or 'City-wide'}"
 
 class RouteAssignment(models.Model):
     driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='route_assignments')
@@ -86,16 +88,35 @@ class PickupStatus(models.Model):
         ('FAILED', 'Failed'),
     ]
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='EN_ROUTE')
-    updated_at = models.DateTimeField(auto_now=True)
+    # Stop detail fields — used by the driver collection log UI
+    stop_order  = models.PositiveIntegerField(default=0, help_text='Order of this stop in the route')
+    address     = models.CharField(max_length=255, blank=True)
+    note        = models.TextField(blank=True)
+    photo_url   = models.URLField(blank=True)
+    collected_at = models.DateTimeField(null=True, blank=True, help_text='When the driver marked this stop collected')
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['stop_order']
 
     def __str__(self):
         return f"Pickup {self.id} - {self.status}"
 
 class TruckLocation(models.Model):
     driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='truck_locations')
+    truck = models.ForeignKey(Truck, on_delete=models.CASCADE, related_name='locations', null=True, blank=True)
+    shift = models.ForeignKey('DriverShift', on_delete=models.CASCADE, related_name='locations', null=True, blank=True)
     latitude = models.DecimalField(max_digits=9, decimal_places=6)
     longitude = models.DecimalField(max_digits=9, decimal_places=6)
-    timestamp = models.DateTimeField(auto_now=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            # Hot path: fetch latest location per shift for replay/history
+            models.Index(fields=['shift', '-timestamp'], name='truckloc_shift_ts_idx'),
+            # Hot path: per-driver location history
+            models.Index(fields=['driver', '-timestamp'], name='truckloc_driver_ts_idx'),
+        ]
 
     def __str__(self):
         return f"{self.driver} @ ({self.latitude}, {self.longitude})"
@@ -226,6 +247,46 @@ class WasteDelivery(models.Model):
 
     def __str__(self):
         return f"{self.truck} → {self.dumpsite} | {self.date} | {self.net_weight} kg"
+
+class DriverShift(models.Model):
+    driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='shifts')
+    truck = models.ForeignKey(Truck, on_delete=models.SET_NULL, null=True, blank=True, related_name='shifts')
+    duty_type = models.CharField(max_length=50, default='normal')
+    started_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    duration_ms = models.BigIntegerField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    op_status = models.CharField(
+        max_length=20,
+        default='on_duty',
+        help_text="Operational status: on_duty | on_route | delayed"
+    )
+    current_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    current_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    last_location_update = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['driver'],
+                condition=Q(is_active=True),
+                name='unique_active_shift_per_driver'
+            ),
+            models.UniqueConstraint(
+                fields=['truck'],
+                condition=Q(is_active=True),
+                name='unique_active_shift_per_truck'
+            )
+        ]
+        indexes = [
+            # Hot path: live map — filter all active shifts fast
+            models.Index(fields=['is_active'], name='drivershift_is_active_idx'),
+            # Hot path: analytics — driver shift history ordered by time
+            models.Index(fields=['driver', '-started_at'], name='drivershift_driver_started_idx'),
+        ]
+
+    def __str__(self):
+        return f"Shift for {self.driver} - Active: {self.is_active}"
 
 class CalendarEvent(models.Model):
     title = models.CharField(max_length=200)
