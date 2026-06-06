@@ -15,49 +15,64 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import Navbar from '../../../components/Navbar'
-
-// ─── MOCK ROUTE PROGRESS ──────────────────────────────────────────────────────
-// TODO: Replace with real data from route context / API
-
-const MOCK_STOPS = [
-  { id: 1, name: 'Brgy. Hall, Zone A', status: 'completed', time: '6:42 AM' },
-  { id: 2, name: 'Public Market, Purok 2', status: 'completed', time: '7:05 AM' },
-  { id: 3, name: 'Covered Court, Zone B', status: 'completed', time: '7:28 AM' },
-  { id: 4, name: 'Dump Site Collection', status: 'completed', time: '7:51 AM' },
-  { id: 5, name: 'Isabang Elem. School', status: 'completed', time: null },
-  { id: 6, name: 'St. Ferdinand Park', status: 'completed', time: null },
-  { id: 7, name: 'Lucena Memorial Park', status: 'completed', time: null },
-  { id: 8, name: 'Brgy. Isabang Hall', status: 'completed', time: null },
-  { id: 9, name: 'Ilang Ilang St. Corner', status: 'completed', time: null },
-  { id: 10, 'name': 'Final Disposal Point', status: 'pending', time: null },
-]
+import api from '../../../api/client'
 
 export default function StopCompletedModule({ setRouteState }) {
   const { user } = useAuth()
   const firstName = user?.full_name?.split(' ')[0] || 'Driver'
 
   const [showRouteList, setShowRouteList] = useState(false)
+  const [schedule, setSchedule] = useState(null)
+  const [loading, setLoading] = useState(true)
 
-  // TODO: pull from route context / API
-  const stops = MOCK_STOPS
+  // Fetch driver schedule waypoints
+  useEffect(() => {
+    if (!user?.id) return
+    setLoading(true)
+    api.get('/api/driver/collection-schedules/')
+      .then(res => {
+        const match = res.data.find(s => String(s.driver) === String(user.id))
+        setSchedule(match || null)
+      })
+      .catch(() => setSchedule(null))
+      .finally(() => setLoading(false))
+  }, [user])
+
+  const currentStopIndex = parseInt(sessionStorage.getItem('ww_current_stop_index') || '1', 10)
+
+  // Map schedule waypoints to stop objects
+  // slice(1) to ignore index 0 which is typically the base/start point
+  const stops = (schedule?.waypoints || []).slice(1).map((wp, i) => {
+    const wpIndex = i + 1
+    const isCompleted = wpIndex <= currentStopIndex
+    return {
+      id: wpIndex,
+      name: wp.name || `Stop ${wpIndex}`,
+      status: isCompleted ? 'completed' : 'pending',
+      time: isCompleted ? 'Completed' : null
+    }
+  })
+
   const completed = stops.filter(s => s.status === 'completed').length
   const total = stops.length
-  const progress = Math.round((completed / total) * 100)
+  const progress = total > 0 ? Math.round((completed / total) * 100) : 0
 
   // Mark route complete in session so EndShiftModule knows which mode to show
   useEffect(() => {
-    if (progress === 100) {
+    if (total > 0 && progress === 100) {
       sessionStorage.setItem('ww_route_complete', 'true')
       sessionStorage.setItem('ww_completed_stops', String(completed))
       sessionStorage.setItem('ww_total_stops', String(total))
     } else {
       sessionStorage.setItem('ww_route_complete', 'false')
     }
-  }, [progress])
+  }, [progress, completed, total])
 
-  const isRouteComplete = progress === 100
+  const isRouteComplete = total > 0 && progress === 100
 
   function handleNextStop() {
+    const nextIndex = currentStopIndex + 1
+    sessionStorage.setItem('ww_current_stop_index', String(nextIndex))
     sessionStorage.setItem('ww_route_state', 'navigating')
     setRouteState('navigating')
   }
@@ -65,6 +80,24 @@ export default function StopCompletedModule({ setRouteState }) {
   function handleEndShift() {
     sessionStorage.setItem('ww_route_state', 'end_shift')
     setRouteState('end_shift')
+  }
+
+  if (loading) {
+    return (
+      <div style={{
+        minHeight: '100vh', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', background: '#f8fafc',
+        fontFamily: 'var(--font-body)', gap: 12
+      }}>
+        <div style={{
+          width: 36, height: 36, borderRadius: '50%',
+          border: '3px solid #e2e8f0', borderTopColor: '#0f172a',
+          animation: 'scmPulse 1.2s linear infinite'
+        }} />
+        <style>{`@keyframes scmPulse { to { transform: rotate(360deg); } }`}</style>
+        <span style={{ fontSize: 13, color: '#64748b', fontWeight: 600 }}>Loading route progress...</span>
+      </div>
+    )
   }
 
   return (

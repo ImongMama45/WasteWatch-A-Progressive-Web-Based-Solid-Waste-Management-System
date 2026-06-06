@@ -94,7 +94,7 @@ class PickupStatusSerializer(serializers.ModelSerializer):
 class TruckLocationSerializer(serializers.ModelSerializer):
     class Meta:
         model = TruckLocation
-        fields = ['id', 'latitude', 'longitude', 'timestamp', 'driver', 'truck', 'shift']
+        fields = ['id', 'latitude', 'longitude', 'accuracy', 'timestamp', 'driver', 'truck', 'shift']
         read_only_fields = ['driver', 'truck', 'shift', 'timestamp']
 
 class CompletionReportSerializer(serializers.ModelSerializer):

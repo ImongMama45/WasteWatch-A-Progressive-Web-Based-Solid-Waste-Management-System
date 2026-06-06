@@ -21,9 +21,10 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import api from '../api/client'
+import useShiftTimer from '../hooks/useShiftTimer' // ← ADD THIS
 
 const DEFAULT_INTERVAL_MS = 10_000   // send to backend every 10 s
-const SYNC_FAIL_THRESHOLD  = 3       // warn after this many consecutive failures
+const SYNC_FAIL_THRESHOLD = 3       // warn after this many consecutive failures
 const GEO_OPTIONS = {
   enableHighAccuracy: true,
   maximumAge: 5_000,   // accept cached position up to 5 s old
@@ -31,16 +32,16 @@ const GEO_OPTIONS = {
 }
 
 export default function useGpsTracking({ intervalMs = DEFAULT_INTERVAL_MS, enabled = true } = {}) {
-  const [position, setPosition]         = useState(null)   // { lat, lng }
-  const [accuracy, setAccuracy]         = useState(null)   // metres
-  const [error, setError]               = useState(null)   // string | null
-  const [isTracking, setIsTracking]     = useState(false)
+  const [position, setPosition] = useState(null)   // { lat, lng }
+  const [accuracy, setAccuracy] = useState(null)   // metres
+  const [error, setError] = useState(null)   // string | null
+  const [isTracking, setIsTracking] = useState(false)
   const [lastSyncedAt, setLastSyncedAt] = useState(null)   // Date | null
-  const [syncFailed, setSyncFailed]     = useState(false)  // true after 3 consecutive fails
+  const [syncFailed, setSyncFailed] = useState(false)  // true after 3 consecutive fails
 
-  const lastSentAt      = useRef(0)   // timestamp of last API POST attempt
-  const failCountRef    = useRef(0)   // consecutive backend failure count
-  const watchId         = useRef(null)
+  const lastSentAt = useRef(0)   // timestamp of last API POST attempt
+  const failCountRef = useRef(0)   // consecutive backend failure count
+  const watchId = useRef(null)
 
   // ── Send position to backend (throttled) ───────────────────────────────────
   const syncToBackend = useCallback((lat, lng, acc) => {
@@ -48,14 +49,21 @@ export default function useGpsTracking({ intervalMs = DEFAULT_INTERVAL_MS, enabl
     if (now - lastSentAt.current < intervalMs) return   // throttle
 
     lastSentAt.current = now
-    api.post('/api/driver/truck-locations/', { latitude: lat, longitude: lng, accuracy: acc })
+    // Round coordinates and accuracy to prevent DRF DecimalField precision validation failures.
+    const roundedLat = Math.round(lat * 1e6) / 1e6
+    const roundedLng = Math.round(lng * 1e6) / 1e6
+    const roundedAcc = acc != null ? Math.round(acc * 100) / 100 : null
+    api.post('/api/driver/truck-locations/', { latitude: roundedLat, longitude: roundedLng, accuracy: roundedAcc })
       .then(() => {
         failCountRef.current = 0
         setSyncFailed(false)
         setLastSyncedAt(new Date())
       })
-      .catch(() => {
+      .catch(err => {
+        console.error('Truck location sync failed:', err.response?.data || err)
+
         failCountRef.current += 1
+
         if (failCountRef.current >= SYNC_FAIL_THRESHOLD) {
           setSyncFailed(true)
         }

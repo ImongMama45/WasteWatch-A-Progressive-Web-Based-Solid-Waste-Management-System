@@ -4,33 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import DashboardLayout from '../components/DashboardLayout'
 
 // Mock extra data for demo purposes since the backend might not have all fields yet
-const MOCK_EXTRA_DATA = {
-  admin: { label: 'System Administrator' },
-  driver: {
-    truck: 'Isuzu Elf (T-01)',
-    plate: 'LCN-001',
-    crew: 'Jose Bautista, Carlo Ramos',
-    routesAssigned: 42,
-  },
-  brgy_official: {
-    barangay: 'Cotta',
-    reportsHandled: 156,
-  },
-  watcher: {
-    barangay: 'Gulang-Gulang',
-    reportsHandled: 84,
-  },
-  citizen: {
-    reportsSubmitted: 12,
-  }
-}
-
-const MOCK_ACTIVITIES = [
-  { id: 1, action: 'Resolved report #102 in Cotta', time: '2 hours ago' },
-  { id: 2, action: 'Logged in from new device', time: '1 day ago' },
-  { id: 3, action: 'Updated contact number', time: '3 days ago' },
-]
-
+   
 export default function Profile() {
   const { user } = useAuth()
   const navigate = useNavigate()

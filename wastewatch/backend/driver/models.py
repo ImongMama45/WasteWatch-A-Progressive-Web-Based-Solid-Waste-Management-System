@@ -108,6 +108,8 @@ class TruckLocation(models.Model):
     shift = models.ForeignKey('DriverShift', on_delete=models.CASCADE, related_name='locations', null=True, blank=True)
     latitude = models.DecimalField(max_digits=9, decimal_places=6)
     longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    accuracy = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True,
+                                   help_text='GPS accuracy radius in metres')
     timestamp = models.DateTimeField(auto_now_add=True)
 
     class Meta:

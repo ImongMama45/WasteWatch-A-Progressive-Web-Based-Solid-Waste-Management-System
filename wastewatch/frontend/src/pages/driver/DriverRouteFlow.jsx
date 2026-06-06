@@ -33,7 +33,7 @@ export default function DriverRouteFlow() {
   // Resume mid-shift if driver navigated away from navigating screen
   const savedState = sessionStorage.getItem('ww_route_state')
   const [routeState, setRouteState] = useState(
-    savedState === 'navigating' ? 'navigating' : 'assignment'
+    () => sessionStorage.getItem('ww_route_state') || 'assignment'
   )
 
   // Persist current route state so we can resume

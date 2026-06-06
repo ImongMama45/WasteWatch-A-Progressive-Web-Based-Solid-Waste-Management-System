@@ -1,11 +1,8 @@
 /**
  * DriverDashboard.jsx — Driver Home Screen
  * -----------------------------------------
- * Mobile-first, matches BrgyDashboard desktop layout:
- *  - page → page-grid → main column + .sidebar
- *  - stat-grid / stat-card with .label / .value
- *  - section-title, form-label, card classes
- *  - Syne headings, DM Sans body (via CSS vars)
+ * Route progress + schedule pulled from /api/driver/collection-schedules/
+ * to match NavigationModule.jsx's data source.
  */
 
 import { useState, useEffect } from 'react'
@@ -18,37 +15,6 @@ import useGpsTracking from '../../hooks/useGpsTracking'
 import IssueReporter from './components/IssueReporter'
 import HomeCarousel from '../../components/carousel/HomeCarousel'
 
-// ─── MOCK DATA ────────────────────────────────────────────────────────────────
-
-const MOCK_ROUTE = {
-  id: 1,
-  name: 'Isabang–Brgy.12 Route',
-  barangay: 'Barangay Isabang',
-  totalStops: 10,
-  completedStops: 3,
-  distanceKm: 24,
-  startTime: '6:00 AM',
-  estEnd: '10:30 AM',
-  truck: 'TRUCK WT-042',
-}
-
-const MOCK_CURRENT_STOP = {
-  address: 'Barangay Hall, Brgy. 8',
-  type: 'Mixed Waste',
-  eta: '3 mins',
-}
-
-const MOCK_NEXT_STOP = {
-  address: 'Public Market, Brgy. 9',
-  distance: '0.8 km',
-}
-
-const MOCK_SCHEDULE = [
-  { day: 'Monday', zone: 'Zone A', time: '6:00 – 10:00 AM', done: true },
-  { day: 'Wednesday', zone: 'Zone B', time: 'No Schedule', done: false },
-  { day: 'Friday', zone: 'Zone C', time: '6:00 – 10:00 AM', done: false },
-]
-
 // ─── STATUS CONFIG ─────────────────────────────────────────────────────────────
 
 const STATUSES = [
@@ -58,41 +24,160 @@ const STATUSES = [
   { key: 'issue', label: 'Issue', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
 ]
 
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+
+/** Convert a days string/array from the schedule into a human-readable label */
+function formatDays(days) {
+  if (!days) return '—'
+  if (Array.isArray(days)) return days.join(', ')
+  return String(days)
+}
+
+/** Derive a schedule-table row list from the real schedule object */
+function buildScheduleRows(schedule) {
+  if (!schedule) return []
+
+  const DAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long' })
+
+  // schedule.days might be a string like "Monday, Wednesday, Friday"
+  // or an array. Normalise to an array of day names.
+  let activeDays = []
+  if (Array.isArray(schedule.days)) {
+    activeDays = schedule.days
+  } else if (typeof schedule.days === 'string') {
+    activeDays = schedule.days.split(',').map(d => d.trim())
+  }
+
+  // Build one row per day-of-week that appears in activeDays
+  return DAY_ORDER
+    .filter(d => activeDays.includes(d))
+    .map(day => ({
+      day,
+      zone: schedule.zone || schedule.barangay || '—',
+      time: schedule.start_time && schedule.end_time
+        ? `${schedule.start_time} – ${schedule.end_time}`
+        : schedule.start_time || '—',
+      done: day === today
+        ? (schedule.completed === true)  // mark done if today's shift is completed
+        : DAY_ORDER.indexOf(day) < DAY_ORDER.indexOf(today),
+      isToday: day === today,
+    }))
+}
+
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 
 export default function DriverDashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
 
-  const [route, setRoute] = useState(MOCK_ROUTE)
+  // Profile / truck info
+  const [profile, setProfile] = useState({ route: '—', truck: '—', barangay: '—' })
+
+  // Real schedule from the same endpoint NavigationModule uses
+  const [schedule, setSchedule] = useState(null)
+  const [scheduleRows, setScheduleRows] = useState([])
+
+  // Derived route progress from schedule waypoints + sessionStorage stop index
+  const [routeStats, setRouteStats] = useState({
+    totalStops: 0,
+    completedStops: 0,
+    distanceKm: 0,
+    startTime: '—',
+    estEnd: '—',
+  })
+
   const [status, setStatus] = useState('on_route')
   const [loading, setLoading] = useState(true)
   const [issueOpen, setIssueOpen] = useState(false)
 
-  // ── Shift timer (persists across refreshes) ────────────────────────────────
   const { shiftActive, startTime, formattedTime, startShift, endShift } = useShiftTimer()
-
-  // ── GPS (for issue reports + sync health) ─────────────────────────────────
   const { position: gpsPosition, syncFailed, lastSyncedAt } = useGpsTracking({ enabled: shiftActive })
 
-  const progress = route.totalStops > 0 ? Math.round((route.completedStops / route.totalStops) * 100) : 0
   const activeStatus = STATUSES.find(s => s.key === status) || STATUSES[0]
   const firstName = user?.full_name?.split(' ')[0] || 'Driver'
-  const stopsLeft = route.totalStops - route.completedStops
 
+  const progress = routeStats.totalStops > 0
+    ? Math.round((routeStats.completedStops / routeStats.totalStops) * 100)
+    : 0
+  const stopsLeft = routeStats.totalStops - routeStats.completedStops
+
+  // ── Data fetch ──────────────────────────────────────────────────────────────
   useEffect(() => {
+    if (!user?.id) return
+
     Promise.all([
-      api.get('/api/driver/route-assignments/today/').catch(() => ({ data: null })),
+      api.get('/api/driver/shift/profile/').catch(() => ({ data: null })),
       api.get('/api/driver/shift/status/').catch(() => ({ data: null })),
-    ]).then(([routeRes, shiftRes]) => {
-      if (routeRes.data) setRoute(r => ({ ...r, ...routeRes.data }))
-      // Sync timer from backend if backend says active but localStorage was cleared
+      api.get('/api/driver/collection-schedules/').catch(() => ({ data: [] })),
+    ]).then(([profileRes, shiftRes, schedulesRes]) => {
+
+      // ── Profile ──
+      if (profileRes.data) {
+        setProfile({
+          route: profileRes.data.route || '—',
+          truck: profileRes.data.truck || '—',
+          barangay: profileRes.data.barangay || '—',
+        })
+      }
+
+      // ── Shift sync ──
       if (shiftRes.data?.shift_active && !shiftActive && shiftRes.data?.started_at) {
         startShift(shiftRes.data.started_at)
       }
-    }).finally(() => setLoading(false))
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+      // ── Schedule ──
+      const scheduleList = Array.isArray(schedulesRes.data) ? schedulesRes.data : []
+      const match = scheduleList.find(s => String(s.driver) === String(user.id))
+      setSchedule(match || null)
+
+      if (match) {
+        // Build schedule table rows
+        setScheduleRows(buildScheduleRows(match))
+
+        // Derive route progress from waypoints + persisted stop index
+        const waypoints = match.waypoints || []
+        const totalStops = Math.max(waypoints.length - 1, 0) // exclude depot/start (index 0)
+
+        const savedIndex = parseInt(sessionStorage.getItem('ww_current_stop_index') || '1', 10)
+        // completedStops = stops BEFORE the current index (stops already visited)
+        const completedStops = Math.max(0, savedIndex - 1)
+
+        // Rough distance: sum haversine between consecutive waypoints
+        let totalDistKm = 0
+        for (let i = 1; i < waypoints.length; i++) {
+          totalDistKm += haversinKm(
+            waypoints[i - 1].lat, waypoints[i - 1].lng,
+            waypoints[i].lat, waypoints[i].lng
+          )
+        }
+
+        setRouteStats({
+          totalStops,
+          completedStops,
+          distanceKm: Math.round(totalDistKm),
+          startTime: match.start_time || '—',
+          estEnd: match.end_time || '—',
+        })
+      }
+    }).finally(() => setLoading(false))
+  }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-derive completedStops when navigation updates sessionStorage
+  // (NavigationModule updates ww_current_stop_index on each stop advance)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const savedIndex = parseInt(sessionStorage.getItem('ww_current_stop_index') || '1', 10)
+      const completed = Math.max(0, savedIndex - 1)
+      setRouteStats(prev => {
+        if (prev.completedStops === completed) return prev
+        return { ...prev, completedStops: completed }
+      })
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // ── Shift toggle ─────────────────────────────────────────────────────────────
   async function handleShiftToggle() {
     if (!shiftActive) {
       navigate('/driver/flow')
@@ -112,18 +197,13 @@ export default function DriverDashboard() {
     }
   }
 
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <>
       <style>{`
-        @keyframes fadeSlideIn {
-          from { opacity:0; transform:translateY(-8px); }
-          to   { opacity:1; transform:translateY(0); }
-        }
-        @keyframes slideDown {
-          from { opacity:0; transform:translateY(-5px); }
-          to   { opacity:1; transform:translateY(0); }
-        }
-        @keyframes dd-pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+        @keyframes fadeSlideIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes slideDown   { from{opacity:0;transform:translateY(-5px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes dd-pulse    { 0%,100%{opacity:1} 50%{opacity:.5} }
         .dcard { transition: box-shadow .18s, border-color .18s; }
         .dcard:hover { box-shadow: 0 4px 18px rgba(0,0,0,.09); }
         .abtn  { transition: opacity .15s, transform .1s; cursor:pointer; }
@@ -155,7 +235,7 @@ export default function DriverDashboard() {
             </span>
           </div>
           <p className="text-muted text-sm">
-            {route.truck} · {route.barangay} · {route.name}
+            {profile.truck} · {profile.barangay} · {profile.route}
           </p>
 
           {/* ── GPS SYNC WARNING ── */}
@@ -177,7 +257,7 @@ export default function DriverDashboard() {
             </div>
           )}
 
-          <div className='mobile-schedule'>
+          <div className="mobile-schedule">
             <HomeCarousel role="driver" userBarangay={user?.barangay_name} onReport={() => navigate('/report/submit')} />
           </div>
 
@@ -209,8 +289,6 @@ export default function DriverDashboard() {
           )}
         </div>
 
-        {/* ── HomeCarousel — mobile only ── */}
-
         <div className="page-grid">
 
           {/* ════════════════════════════════════════
@@ -221,15 +299,14 @@ export default function DriverDashboard() {
             {/* ── STAT CARDS ── */}
             <div className="stat-grid" style={{ marginBottom: 20 }}>
               {[
-                { label: 'Stops Done', value: route.completedStops, },
-                { label: 'Stops Left', value: stopsLeft, },
-                { label: 'Distance', value: `${route.distanceKm}km`, },
-                { label: 'Total Stops', value: route.totalStops },
+                { label: 'Stops Done', value: loading ? '…' : routeStats.completedStops },
+                { label: 'Stops Left', value: loading ? '…' : stopsLeft },
+                { label: 'Distance', value: loading ? '…' : `${routeStats.distanceKm}km` },
+                { label: 'Total Stops', value: loading ? '…' : routeStats.totalStops },
               ].map(s => (
                 <div key={s.label} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
-                  <div style={{ position: 'absolute', top: 12, right: 14, fontSize: 18, opacity: .15 }}>{s.icon}</div>
                   <div className="label">{s.label}</div>
-                  <div className="value" style={{ color: s.color, fontSize: 30 }}>{s.value}</div>
+                  <div className="value" style={{ fontSize: 30 }}>{s.value}</div>
                 </div>
               ))}
             </div>
@@ -244,13 +321,34 @@ export default function DriverDashboard() {
                   border: `1px solid ${status === 'issue' ? 'rgba(239,68,68,0.3)' : 'rgba(46,204,113,0.3)'}`,
                   fontSize: 9, fontWeight: 800, padding: '3px 10px', borderRadius: 20, letterSpacing: '.07em',
                 }}>
-                  {status === 'issue' ? '⚠ DELAYED' : 'IN PROGRESS'}
+                  {loading
+                    ? 'LOADING…'
+                    : status === 'issue'
+                      ? '⚠ DELAYED'
+                      : routeStats.totalStops === 0
+                        ? 'NO SCHEDULE'
+                        : 'IN PROGRESS'}
                 </span>
               </div>
+
+              {/* Route name / days */}
+              {schedule && (
+                <div style={{
+                  fontSize: 12, color: 'var(--text-muted)', marginBottom: 10,
+                  display: 'flex', gap: 8, flexWrap: 'wrap',
+                }}>
+                  <span>📅 {formatDays(schedule.days)}</span>
+                  {schedule.zone && <span>· {schedule.zone}</span>}
+                  {schedule.barangay && <span>· {schedule.barangay}</span>}
+                </div>
+              )}
+
               <div style={{ marginBottom: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                   <span className="text-muted text-sm">Progress (Today)</span>
-                  <span style={{ fontSize: 13, fontWeight: 700 }}>{route.completedStops} / {route.totalStops} stops</span>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>
+                    {routeStats.completedStops} / {routeStats.totalStops} stops
+                  </span>
                 </div>
                 <div style={{ background: 'var(--bg)', borderRadius: 99, height: 8, overflow: 'hidden' }}>
                   <div style={{
@@ -263,11 +361,12 @@ export default function DriverDashboard() {
                   {progress}% complete
                 </div>
               </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
                 {[
-                  { label: 'Start Time', value: route.startTime },
-                  { label: 'Est. End', value: route.estEnd },
-                  { label: 'Distance', value: `${route.distanceKm} km` },
+                  { label: 'Start Time', value: routeStats.startTime },
+                  { label: 'Est. End', value: routeStats.estEnd },
+                  { label: 'Distance', value: `${routeStats.distanceKm} km` },
                 ].map(item => (
                   <div key={item.label} style={{
                     background: 'var(--bg)', borderRadius: 10, padding: '10px', textAlign: 'center',
@@ -278,8 +377,9 @@ export default function DriverDashboard() {
                 ))}
               </div>
             </div>
+
+            {/* ── STATUS TOGGLE + CTA ── */}
             <div className="status-card-mobile-only">
-              {/* ── STATUS TOGGLE ── */}
               <div style={{ marginBottom: 20 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                   <h3 className="section-title" style={{ margin: 0 }}>Current Status</h3>
@@ -307,68 +407,26 @@ export default function DriverDashboard() {
                 </div>
               </div>
 
-              {/* ── CURRENT STOP (shift active only) ──
-              {shiftActive && (
-                <div style={{ marginBottom: 20, animation: 'slideDown .2s' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                    <h3 className="section-title" style={{ margin: 0 }}>Current Stop</h3>
-                    <button onClick={() => navigate('/driver/route')}
-                      style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                      Full Route ›
-                    </button>
-                  </div>
-                  <div className="dcard" style={{
-                    background: 'linear-gradient(135deg,#2ecc71,#27ae60)',
-                    borderRadius: 14, padding: '16px 14px', marginBottom: 10, position: 'relative', overflow: 'hidden',
-                  }}>
-                    <div style={{ position: 'absolute', right: -16, top: -16, width: 70, height: 70, borderRadius: '50%', background: 'rgba(255,255,255,0.08)' }} />
-                    <div style={{ fontSize: 9, fontWeight: 800, color: 'rgba(0,0,0,0.5)', letterSpacing: '.07em', marginBottom: 4 }}>🔄 RUNNING STOP</div>
-                    <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 18, color: '#0d1117', marginBottom: 6 }}>
-                      {MOCK_CURRENT_STOP.address}
-                    </div>
-                    <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                      <span style={{ background: 'rgba(0,0,0,0.12)', color: '#0d1117', fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 20 }}>
-                        📍 {MOCK_CURRENT_STOP.type}
-                      </span>
-                      <span style={{ fontSize: 11, color: 'rgba(0,0,0,0.6)', fontWeight: 600 }}>ETA: {MOCK_CURRENT_STOP.eta}</span>
-                    </div>
-                  </div>
-                  <div className="card dcard" style={{ padding: '12px 16px', cursor: 'pointer' }} onClick={() => navigate('/driver/route')}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div>
-                        <div className="form-label">NEXT STOP</div>
-                        <div style={{ fontSize: 14, fontWeight: 600, marginTop: 2 }}>{MOCK_NEXT_STOP.address}</div>
-                        <div className="text-muted text-sm" style={{ marginTop: 2 }}>📍 {MOCK_NEXT_STOP.distance}</div>
-                      </div>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                        strokeLinecap="round" strokeLinejoin="round" width="16" height="16"
-                        style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
-                        <polyline points="9 18 15 12 9 6" />
-                      </svg>
-                    </div>
-                  </div>
-                </div>
-              )} */}
-
               {/* ── MAIN CTA ── */}
               <div style={{ display: 'flex', gap: 10, marginBottom: 24 }}>
                 <button id="driver-main-cta" className="abtn btn"
-                  onClick={handleShiftToggle}
+                  onClick={() => shiftActive ? navigate('/driver/flow') : handleShiftToggle()}
                   style={{
                     flex: 2, padding: '16px 20px', borderRadius: 14,
                     fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 800,
-                    background: shiftActive ? 'linear-gradient(135deg,#2ecc71,#27ae60)' : 'linear-gradient(135deg,#3b82f6,#2563eb)',
+                    background: shiftActive
+                      ? 'linear-gradient(135deg,#2ecc71,#27ae60)'
+                      : 'linear-gradient(135deg,#3b82f6,#2563eb)',
                     color: '#fff', border: 'none',
-                    boxShadow: shiftActive ? '0 4px 18px rgba(46,204,113,0.35)' : '0 4px 18px rgba(59,130,246,0.35)',
+                    boxShadow: shiftActive
+                      ? '0 4px 18px rgba(46,204,113,0.35)'
+                      : '0 4px 18px rgba(59,130,246,0.35)',
                   }}>
                   {shiftActive ? '🚛 Resume Route' : '▶ Start Duty'}
                 </button>
                 {shiftActive && (
                   <button id="driver-end-shift" className="abtn btn"
-                    onClick={() => {
-                      setShiftActive(false);
-                      api.post('/api/driver/shift/end/').catch(err => alert(err.response?.data?.error || 'Failed to end shift'))
-                    }}
+                    onClick={handleShiftToggle}
                     style={{
                       flex: 1, padding: '16px 14px', borderRadius: 14,
                       fontFamily: 'var(--font-head)', fontSize: 13, fontWeight: 700,
@@ -380,6 +438,7 @@ export default function DriverDashboard() {
                 )}
               </div>
             </div>
+
             {/* ── LIVE MAP ── */}
             <div style={{ marginBottom: 24 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -392,40 +451,75 @@ export default function DriverDashboard() {
               <MiniMap />
             </div>
 
-            {/* ── COLLECTION SCHEDULE ── */}
+            {/* ── COLLECTION SCHEDULE (real data) ── */}
             <div style={{ marginBottom: 24 }}>
               <h3 className="section-title">Collection Schedule</h3>
               <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                {MOCK_SCHEDULE.map((s, i) => (
-                  <div key={i} style={{
-                    display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px',
-                    borderBottom: i < MOCK_SCHEDULE.length - 1 ? '1px solid var(--border)' : 'none',
-                  }}>
-                    <div style={{
-                      width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-                      background: s.done ? 'rgba(46,204,113,0.12)' : 'var(--surface-2)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
-                    }}>
-                      {s.done ? '✅' : '📅'}
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, fontSize: 14 }}>{s.day}</div>
-                      <div className="text-muted text-sm">{s.zone} · {route.barangay}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: s.time === 'No Schedule' ? 'var(--text-muted)' : 'var(--text)' }}>
-                        {s.time}
-                      </div>
-                      <span style={{
-                        fontSize: 9, fontWeight: 800, padding: '2px 8px', borderRadius: 20, letterSpacing: '.05em',
-                        background: s.done ? 'rgba(46,204,113,0.1)' : s.time === 'No Schedule' ? 'rgba(148,163,184,0.1)' : 'rgba(243,156,18,0.1)',
-                        color: s.done ? 'var(--accent)' : s.time === 'No Schedule' ? 'var(--text-muted)' : 'var(--warning)',
-                      }}>
-                        {s.done ? 'DONE' : s.time === 'No Schedule' ? 'N/A' : 'UPCOMING'}
-                      </span>
-                    </div>
+                {loading ? (
+                  <div style={{ padding: '20px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                    Loading schedule…
                   </div>
-                ))}
+                ) : scheduleRows.length === 0 ? (
+                  <div style={{ padding: '20px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                    No schedule assigned yet.
+                  </div>
+                ) : (
+                  scheduleRows.map((s, i) => (
+                    <div key={i} style={{
+                      display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px',
+                      borderBottom: i < scheduleRows.length - 1 ? '1px solid var(--border)' : 'none',
+                      background: s.isToday ? 'rgba(46,204,113,0.04)' : 'transparent',
+                    }}>
+                      <div style={{
+                        width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+                        background: s.done ? 'rgba(46,204,113,0.12)' : s.isToday ? 'rgba(59,130,246,0.1)' : 'var(--surface-2)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
+                      }}>
+                        {s.done ? '✅' : s.isToday ? '🚛' : '📅'}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>
+                          {s.day}
+                          {s.isToday && (
+                            <span style={{
+                              marginLeft: 6, fontSize: 9, fontWeight: 800,
+                              background: 'rgba(59,130,246,0.1)', color: 'var(--info)',
+                              padding: '2px 7px', borderRadius: 20, letterSpacing: '.05em',
+                            }}>TODAY</span>
+                          )}
+                        </div>
+                        <div className="text-muted text-sm">{s.zone} · {profile.barangay}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{
+                          fontSize: 12, fontWeight: 600,
+                          color: s.time === '—' ? 'var(--text-muted)' : 'var(--text)',
+                        }}>
+                          {s.time}
+                        </div>
+                        <span style={{
+                          fontSize: 9, fontWeight: 800, padding: '2px 8px', borderRadius: 20, letterSpacing: '.05em',
+                          background: s.done
+                            ? 'rgba(46,204,113,0.1)'
+                            : s.isToday
+                              ? 'rgba(59,130,246,0.1)'
+                              : s.time === '—'
+                                ? 'rgba(148,163,184,0.1)'
+                                : 'rgba(243,156,18,0.1)',
+                          color: s.done
+                            ? 'var(--accent)'
+                            : s.isToday
+                              ? 'var(--info)'
+                              : s.time === '—'
+                                ? 'var(--text-muted)'
+                                : 'var(--warning)',
+                        }}>
+                          {s.done ? 'DONE' : s.isToday ? 'ACTIVE' : s.time === '—' ? 'N/A' : 'UPCOMING'}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
 
@@ -455,47 +549,56 @@ export default function DriverDashboard() {
                   }}>
                   📋 Collection Log
                 </button>
-
               </div>
             </div>
 
             {/* Route Summary */}
             <div className="card">
               <h3 className="section-title" style={{ marginBottom: 12, fontSize: 15 }}>Route Summary</h3>
-              {[
-                { label: 'Stops Done', value: route.completedStops, color: 'var(--accent)' },
-                { label: 'Stops Left', value: stopsLeft, color: 'var(--warning)' },
-                { label: 'Total Stops', value: route.totalStops, color: 'var(--text)' },
-                { label: 'Distance', value: `${route.distanceKm} km`, color: 'var(--info)' },
-              ].map(s => (
-                <div key={s.label} style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  padding: '9px 0', borderBottom: '1px solid var(--border)',
-                }}>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{s.label}</span>
-                  <span style={{ fontSize: 18, fontWeight: 800, color: s.color, fontFamily: 'var(--font-head)' }}>
-                    {s.value}
-                  </span>
-                </div>
-              ))}
+              {loading ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: '8px 0' }}>Loading…</div>
+              ) : (
+                [
+                  { label: 'Stops Done', value: routeStats.completedStops, color: 'var(--accent)' },
+                  { label: 'Stops Left', value: stopsLeft, color: 'var(--warning)' },
+                  { label: 'Total Stops', value: routeStats.totalStops, color: 'var(--text)' },
+                  { label: 'Distance', value: `${routeStats.distanceKm} km`, color: 'var(--info)' },
+                ].map(s => (
+                  <div key={s.label} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '9px 0', borderBottom: '1px solid var(--border)',
+                  }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{s.label}</span>
+                    <span style={{ fontSize: 18, fontWeight: 800, color: s.color, fontFamily: 'var(--font-head)' }}>
+                      {s.value}
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
 
             {/* Collection Schedule */}
             <div className="card">
               <h3 className="section-title" style={{ marginBottom: 12, fontSize: 15 }}>Collection Schedule</h3>
-              {MOCK_SCHEDULE.map((s, i) => (
-                <div key={i} style={{
-                  display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0',
-                  borderBottom: i < MOCK_SCHEDULE.length - 1 ? '1px solid var(--border)' : 'none',
-                }}>
-                  <span style={{ fontSize: 14 }}>{s.done ? '✅' : '📅'}</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{s.day}</div>
-                    <div className="text-muted text-xs">{s.zone}</div>
+              {loading ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading…</div>
+              ) : scheduleRows.length === 0 ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No schedule.</div>
+              ) : (
+                scheduleRows.map((s, i) => (
+                  <div key={i} style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0',
+                    borderBottom: i < scheduleRows.length - 1 ? '1px solid var(--border)' : 'none',
+                  }}>
+                    <span style={{ fontSize: 14 }}>{s.done ? '✅' : s.isToday ? '🚛' : '📅'}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{s.day}</div>
+                      <div className="text-muted text-xs">{s.zone}</div>
+                    </div>
+                    <div className="text-muted text-xs" style={{ textAlign: 'right' }}>{s.time}</div>
                   </div>
-                  <div className="text-muted text-xs" style={{ textAlign: 'right' }}>{s.time}</div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
 
             {/* Driver Profile */}
@@ -512,7 +615,7 @@ export default function DriverDashboard() {
                 </div>
                 <div>
                   <div className="form-label">Truck</div>
-                  <div style={{ fontSize: 14 }}>{route.truck}</div>
+                  <div style={{ fontSize: 14 }}>{profile.truck}</div>
                 </div>
                 <div>
                   <div className="form-label">Status</div>
@@ -539,29 +642,27 @@ export default function DriverDashboard() {
 
           </div>
         </div>
-      </div >
+      </div>
 
-      {/* ── FLOATING REPORT ISSUE BUTTON (visible during active shift) ── */}
-      {
-        shiftActive && (
-          <button
-            id="floating-report-issue"
-            onClick={() => setIssueOpen(true)}
-            style={{
-              position: 'fixed', bottom: 80, right: 20, zIndex: 800,
-              background: 'linear-gradient(135deg,#ef4444,#dc2626)',
-              color: '#fff', border: 'none', borderRadius: '50%',
-              width: 54, height: 54, fontSize: 22,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 6px 20px rgba(239,68,68,0.45)',
-              cursor: 'pointer', transition: 'transform .15s',
-            }}
-            title="Report Issue"
-          >
-            ⚠
-          </button>
-        )
-      }
+      {/* ── FLOATING REPORT ISSUE BUTTON ── */}
+      {shiftActive && (
+        <button
+          id="floating-report-issue"
+          onClick={() => setIssueOpen(true)}
+          style={{
+            position: 'fixed', bottom: 80, right: 20, zIndex: 800,
+            background: 'linear-gradient(135deg,#ef4444,#dc2626)',
+            color: '#fff', border: 'none', borderRadius: '50%',
+            width: 54, height: 54, fontSize: 22,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 6px 20px rgba(239,68,68,0.45)',
+            cursor: 'pointer', transition: 'transform .15s',
+          }}
+          title="Report Issue"
+        >
+          ⚠
+        </button>
+      )}
 
       {/* ── ISSUE REPORTER BOTTOM SHEET ── */}
       <IssueReporter
@@ -571,4 +672,17 @@ export default function DriverDashboard() {
       />
     </>
   )
+}
+
+// ─── UTIL ─────────────────────────────────────────────────────────────────────
+
+function haversinKm(lat1, lng1, lat2, lng2) {
+  const R = 6371
+  const toRad = d => (d * Math.PI) / 180
+  const dLat = toRad(lat2 - lat1)
+  const dLng = toRad(lng2 - lng1)
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }

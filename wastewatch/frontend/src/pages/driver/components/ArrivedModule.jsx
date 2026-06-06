@@ -17,7 +17,7 @@
  *  - Show actual stop address from API instead of sessionStorage mock
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import api from '../../../api/client'
 import Navbar from '../../../components/Navbar'
 
@@ -35,10 +35,24 @@ const QUICK_NOTES = [
 export default function ArrivedModule({ setRouteState }) {
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [stop, setStop] = useState(null)
+  const [loading, setLoading] = useState(true)
 
-  // TODO: pull real stop data from route context / API
-  const stopName = sessionStorage.getItem('ww_current_stop') || 'Barangay Isabang Dump Site'
-  const barangay = sessionStorage.getItem('ww_barangay') || 'BARANGAY ISABANG'
+  // Fetch the current active stop details from backend
+  useEffect(() => {
+    setLoading(true)
+    api.get('/api/driver/stops/current/')
+      .then(res => {
+        if (res.data) {
+          setStop(res.data)
+        }
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [])
+
+  const stopName = stop?.address || sessionStorage.getItem('ww_current_stop') || 'Barangay Isabang Dump Site'
+  const barangay = stop?.barangay || sessionStorage.getItem('ww_barangay') || 'BARANGAY ISABANG'
 
   function selectPreset(preset) {
     setNote(prev => prev ? `${prev}, ${preset}` : preset)
@@ -47,21 +61,41 @@ export default function ArrivedModule({ setRouteState }) {
   async function handleConfirm() {
     setSubmitting(true)
 
-    // TODO: replace stop_id with real value from route context
-    try {
-      await api.post('/api/driver/stops/current/collect/', {
-        note: note.trim() || null,
-        collected_at: new Date().toISOString(),
-        lat: sessionStorage.getItem('ww_gps_lat') || null,
-        lng: sessionStorage.getItem('ww_gps_lng') || null,
-      })
-    } catch {
-      // Optimistic — proceed even if network fails
+    const stopId = stop?.id
+    if (stopId) {
+      try {
+        await api.post(`/api/driver/stops/${stopId}/collect/`, {
+          note: note.trim() || null,
+          collected_at: new Date().toISOString(),
+          lat: sessionStorage.getItem('ww_gps_lat') || null,
+          lng: sessionStorage.getItem('ww_gps_lng') || null,
+        })
+      } catch (err) {
+        console.error('Failed to confirm collection:', err)
+      }
     }
 
-    sessionStorage.setItem('ww_route_state', 'navigating')  // next stop returns to nav
+    sessionStorage.setItem('ww_route_state', 'completed')
     setSubmitting(false)
     setRouteState('completed')
+  }
+
+  if (loading) {
+    return (
+      <div style={{
+        minHeight: '100vh', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', background: '#f8fafc',
+        fontFamily: 'var(--font-body)', gap: 12
+      }}>
+        <div style={{
+          width: 36, height: 36, borderRadius: '50%',
+          border: '3px solid #e2e8f0', borderTopColor: '#0f172a',
+          animation: 'amPulse 1.2s linear infinite'
+        }} />
+        <style>{`@keyframes amPulse { to { transform: rotate(360deg); } }`}</style>
+        <span style={{ fontSize: 13, color: '#64748b', fontWeight: 600 }}>Loading stop details...</span>
+      </div>
+    )
   }
 
   return (
@@ -166,7 +200,6 @@ export default function ArrivedModule({ setRouteState }) {
               border: '1.5px solid #e2e8f0', background: '#fff',
               fontSize: 14, color: '#0f172a', resize: 'none',
               fontFamily: 'var(--font-body)',
-              outline: 'none',
             }}
           />
         </div>

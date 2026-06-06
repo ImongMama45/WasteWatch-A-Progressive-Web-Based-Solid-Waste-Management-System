@@ -2,11 +2,13 @@
  * NavigationModule.jsx
  * ---------------------
  * Module 4 — Core driver UI during active route execution.
+ * Powered by Leaflet + OpenRouteService (ORS).
  * Matches reference image: Grab/delivery driver-style operational screen.
  *
+ * 
  * Sections:
  *  ① Stop info header (dark card — dump site + route info)
- *  ② Map area (placeholder) with turn-by-turn direction overlay
+ *  ② Leaflet Map area with turn-by-turn direction overlay (from ORS)
  *  ③ Stats bar — arrival, ETA mins, distance, total km
  *  ④ Action — "On the way…" status + "Arrived" CTA
  *
@@ -14,35 +16,25 @@
  *  - setRouteState: fn → call setRouteState("arrived") on arrival
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import useShiftTimer from '../../../hooks/useShiftTimer'
 import useGpsTracking from '../../../hooks/useGpsTracking'
-import BottomNav from '../../../components/BottomNav'
 import Navbar from '../../../components/Navbar'
-
-// ─── MOCK ROUTE DATA ──────────────────────────────────────────────────────────
-
-const MOCK_STOP = {
-  current: 1,
-  total: 10,
-  route: 'Purok 2  Route#3',
-  siteName: 'Dump Site Collection',
-  barangay: 'BARANGAY ISABANG',
-  address: 'Barangay Isabang, Purok 2',
-  landmark: 'Ilang Ilang Marinduque',
-  etaMinutes: 10,
-  arrivalTime: '1:40',
-  distanceKm: 700,
-  totalKmTravelled: 700,
-}
-
-const MOCK_DIRECTION = { instruction: 'Turn left', distanceM: 105 }
+import api from '../../../api/client'
+import { useAuth } from '../../../context/AuthContext'
 
 // ─── GPS STATUS PILL ─────────────────────────────────────────────────────────
 
-function GpsStatusPill({ isTracking, error }) {
-  const label = error ? 'GPS Lost' : isTracking ? 'GPS Active' : 'GPS…'
-  const color = error ? '#ef4444' : isTracking ? '#2ecc71' : '#f59e0b'
+function GpsStatusPill({ isTracking, error, accuracy }) {
+  const isPoor = accuracy !== null && accuracy !== undefined && accuracy >= 50
+  const label = error
+    ? 'GPS Lost'
+    : !isTracking
+      ? 'GPS…'
+      : accuracy !== null && accuracy !== undefined
+        ? `GPS ±${Math.round(accuracy)}m`
+        : 'GPS Active'
+  const color = error ? '#ef4444' : isPoor ? '#f59e0b' : isTracking ? '#2ecc71' : '#f59e0b'
   return (
     <div style={{
       display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -101,14 +93,9 @@ function StatCell({ value, label }) {
   )
 }
 
-// ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
-
 // ─── GPS GEOFENCE UTILS ───────────────────────────────────────────────────────
-// TODO: Replace DEST_LAT / DEST_LNG with real stop coordinates from API
 
-const DEST_LAT = 13.9488   // mock: Barangay Isabang Dump Site
-const DEST_LNG = 121.6138
-const ARRIVAL_RADIUS_M = 100   // meters — tighten once real coords are in
+const ARRIVAL_RADIUS_M = 100 // meters
 
 function haversineDistance(lat1, lng1, lat2, lng2) {
   const R = 6371000
@@ -121,25 +108,255 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
+// ORS Helper to decode polyline
+function decodePolyline(encoded) {
+  let points = [];
+  let index = 0, len = encoded.length;
+  let lat = 0, lng = 0;
+  while (index < len) {
+    let b, shift = 0, result = 0;
+    do {
+      b = encoded.charAt(index++).charCodeAt(0) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    let dlat = ((result & 1) !== 0 ? ~(result >> 1) : (result >> 1));
+    lat += dlat;
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.charAt(index++).charCodeAt(0) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    let dlng = ((result & 1) !== 0 ? ~(result >> 1) : (result >> 1));
+    lng += dlng;
+    points.push([lat / 1E5, lng / 1E5]);
+  }
+  return points;
+}
+
+// ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
+
 export default function NavigationModule({ setRouteState }) {
-  const stop = MOCK_STOP
-  const dir = MOCK_DIRECTION
-
-  const { formattedTime } = useShiftTimer()
-  const { position: gpsPos, isTracking, error: gpsError } = useGpsTracking({ enabled: true, intervalMs: 5000 })
-
-  // ── GPS Geofence: unlock Arrived when within ARRIVAL_RADIUS_M ────────────
-  // TODO: replace DEST_LAT/DEST_LNG with stop.lat / stop.lng from API response
-  const distanceToStop = gpsPos
-    ? haversineDistance(gpsPos.lat, gpsPos.lng, DEST_LAT, DEST_LNG)
-    : null
-  const isNearDestination = distanceToStop !== null && distanceToStop <= ARRIVAL_RADIUS_M
-
-  // DEV OVERRIDE — remove before production
-  // Uncomment next line to test the arrived state without real GPS:
-  // const isNearDestination = true
-
+  const { user } = useAuth()
+  const { formattedTime, shiftActive } = useShiftTimer()
+  const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } = useGpsTracking({ enabled: shiftActive, intervalMs: 5000 })
   const isExtendedMode = sessionStorage.getItem('ww_extended_mode') === 'true'
+
+  // Developer Mock GPS — mockGps bypasses real GPS (accuracy check also bypassed for dev)
+  const [mockGps, setMockGps] = useState(null)
+  const gpsPos = mockGps || realGpsPos
+  const isMockActive = mockGps !== null
+
+  // Map and Route State
+  const mapRef = useRef(null)
+  const mapInstance = useRef(null)
+  const driverMarker = useRef(null)
+  const routeLayer = useRef(null)
+  const [leafletReady, setLeafletReady] = useState(false)
+  const [schedule, setSchedule] = useState(null)
+  const [mapLoading, setMapLoading] = useState(true)
+
+  // Navigation State
+  const [currentStopIndex, setCurrentStopIndex] = useState(() => {
+    const saved = sessionStorage.getItem('ww_current_stop_index')
+    return saved ? parseInt(saved, 10) : 1
+  })
+  const [orsData, setOrsData] = useState(null)
+  const [totalKmTravelled, setTotalKmTravelled] = useState(0) // Mocked or calculated
+
+  // Extract variables
+  const waypoints = schedule?.waypoints || []
+  const currentTarget = waypoints[currentStopIndex] || null
+
+  const destLat = currentTarget?.lat
+  const destLng = currentTarget?.lng
+
+  // Haversine distance to next stop
+  const distanceToStop = gpsPos && destLat && destLng
+    ? haversineDistance(gpsPos.lat, gpsPos.lng, destLat, destLng)
+    : null
+
+  const GPS_ACCURACY_THRESHOLD = 50 // metres — arrivals require accuracy better than this
+
+  // Arrived if within radius AND GPS accuracy is good enough to trust it.
+  // Mock GPS (dev button) bypasses the accuracy requirement intentionally.
+  const hasGoodAccuracy = isMockActive || gpsAccuracy === null || gpsAccuracy < GPS_ACCURACY_THRESHOLD
+  const isNearDestination = distanceToStop !== null && distanceToStop <= ARRIVAL_RADIUS_M && hasGoodAccuracy
+
+  // 1. Load Leaflet CDN
+  useEffect(() => {
+    if (window.L) { setLeafletReady(true); return }
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+    document.head.appendChild(link)
+    const script = document.createElement('script')
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+    script.onload = () => setLeafletReady(true)
+    document.head.appendChild(script)
+  }, [])
+
+  // 2. Fetch driver's schedule
+  useEffect(() => {
+    if (!user?.id) return
+    setMapLoading(true)
+    api.get('/api/driver/collection-schedules/')
+      .then(res => {
+        const match = res.data.find(s => String(s.driver) === String(user.id))
+        setSchedule(match || null)
+
+        // Start at index 1 because index 0 is typically the base/start point
+        const savedIndex = sessionStorage.getItem('ww_current_stop_index')
+        if (savedIndex) {
+          setCurrentStopIndex(parseInt(savedIndex, 10))
+        } else if (match?.waypoints?.length > 1) {
+          setCurrentStopIndex(1)
+          sessionStorage.setItem('ww_current_stop_index', '1')
+        }
+      })
+      .catch(() => setSchedule(null))
+      .finally(() => setMapLoading(false))
+  }, [user?.id])
+
+  // 3. Draw Leaflet map & Driver Marker
+  useEffect(() => {
+    if (!leafletReady || !mapRef.current || mapInstance.current || mapLoading) return
+    const L = window.L
+    const map = L.map(mapRef.current, { center: [13.9373, 121.617], zoom: 15, zoomControl: false })
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap', maxZoom: 19,
+    }).addTo(map)
+    mapInstance.current = map
+
+    // Driver Marker
+    const driverIcon = L.divIcon({
+      html: `<div style="background:#2563eb;border:3px solid white;border-radius:50%;width:18px;height:18px;box-shadow:0 0 10px rgba(37,99,235,0.6);"></div>`,
+      className: '', iconSize: [18, 18], iconAnchor: [9, 9],
+    })
+
+    // Initial marker at Lucena if no GPS
+    driverMarker.current = L.marker([gpsPos?.lat || 13.9373, gpsPos?.lng || 121.617], { icon: driverIcon, zIndexOffset: 1000 }).addTo(map)
+
+    // Add Stop markers
+    if (waypoints.length > 0) {
+      waypoints.slice(1).forEach((wp, i) => {
+        const stopIcon = L.divIcon({
+          html: `<div style="background:#f59e0b;border:2px solid white;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;color:white;font-size:10px;font-weight:800;box-shadow:0 2px 6px rgba(0,0,0,.4);">${i + 1}</div>`,
+          className: '', iconSize: [22, 22], iconAnchor: [11, 11],
+        })
+        L.marker([wp.lat, wp.lng], { icon: stopIcon }).addTo(map).bindPopup(`<b>${wp.label || `Stop ${i + 1}`}</b>`)
+      })
+    }
+  }, [leafletReady, schedule, mapLoading])
+
+  // 4. Fetch ORS Directions
+  useEffect(() => {
+    // Only fetch if we have a valid end (currentTarget)
+    if (!currentTarget) return
+
+    const startLng = gpsPos ? gpsPos.lng : (waypoints[0]?.lng || 121.617)
+    const startLat = gpsPos ? gpsPos.lat : (waypoints[0]?.lat || 13.9373)
+
+    const orsApiKey = import.meta.env.VITE_ORS_API_KEY
+    if (!orsApiKey) {
+      console.warn("VITE_ORS_API_KEY is missing. Using straight line fallback.")
+      return
+    }
+
+    // ORS uses [lng, lat] format. Include up to 40 remaining stops to stay under ORS limits.
+    const remainingStops = waypoints.slice(currentStopIndex, currentStopIndex + 40).map(wp => [wp.lng, wp.lat])
+    const coordinates = [
+      [startLng, startLat],
+      ...remainingStops
+    ]
+
+    fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json, application/geo+json, application/gpx+xml, img/png; charset=utf-8',
+        'Content-Type': 'application/json',
+        'Authorization': orsApiKey
+      },
+      body: JSON.stringify({
+        coordinates: coordinates,
+        instructions: true,
+      })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.routes && data.routes.length > 0) {
+          setOrsData(data.routes[0])
+
+          // Draw the route on the map
+          if (mapInstance.current && window.L) {
+            const L = window.L
+            if (routeLayer.current) {
+              mapInstance.current.removeLayer(routeLayer.current)
+            }
+            const decoded = decodePolyline(data.routes[0].geometry)
+            routeLayer.current = L.polyline(decoded, { color: '#3b82f6', weight: 6, opacity: 0.8 }).addTo(mapInstance.current)
+
+            // Optionally fit bounds, but might be jarring while driving.
+            // mapInstance.current.fitBounds(routeLayer.current.getBounds(), { padding: [30,30] })
+          }
+        }
+      })
+      .catch(console.error)
+  }, [gpsPos?.lat, gpsPos?.lng, currentTarget])
+
+  // Update Driver Marker Position & Pan Map
+  useEffect(() => {
+    if (gpsPos && driverMarker.current && mapInstance.current) {
+      driverMarker.current.setLatLng([gpsPos.lat, gpsPos.lng])
+      // Smooth pan to driver
+      mapInstance.current.panTo([gpsPos.lat, gpsPos.lng])
+    }
+  }, [gpsPos])
+
+  // Cleanup map
+  useEffect(() => {
+    return () => {
+      if (mapInstance.current) { mapInstance.current.remove(); mapInstance.current = null }
+    }
+  }, [])
+
+  // Handle Stop Arrival
+  const handleArrived = () => {
+    if (currentTarget) {
+      sessionStorage.setItem('ww_current_stop', currentTarget.name || `Stop ${currentStopIndex}`)
+    }
+    sessionStorage.setItem('ww_route_state', 'arrived')
+    setRouteState('arrived')
+  }
+
+  // Current Instruction
+  let instructionText = 'Follow the road'
+  let instructionDistance = ''
+  let etaMinutes = '--'
+  let arrivalTimeStr = '--:--'
+  let distanceKmStr = '--'
+
+  if (orsData) {
+    const segmentToNextStop = orsData.segments[0]
+    if (segmentToNextStop && segmentToNextStop.steps && segmentToNextStop.steps.length > 0) {
+      const currentStep = segmentToNextStop.steps[0] // Simplify: just show the first upcoming step
+      instructionText = currentStep.instruction
+      instructionDistance = Math.round(currentStep.distance) + 'm'
+    }
+
+    // Summary info (ETA/distance to NEXT STOP, not the whole route)
+    if (segmentToNextStop) {
+      const durationSec = segmentToNextStop.duration
+      etaMinutes = Math.ceil(durationSec / 60)
+
+      const arrTime = new Date(Date.now() + durationSec * 1000)
+      arrivalTimeStr = arrTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+      distanceKmStr = (segmentToNextStop.distance / 1000).toFixed(1)
+    }
+  }
 
   return (
     <>
@@ -150,30 +367,99 @@ export default function NavigationModule({ setRouteState }) {
       `}</style>
 
       <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        background: '#f8fafc',
-        fontFamily: 'var(--font-body)',
-        overflowX: 'hidden',
+        height: '100vh', display: 'flex', flexDirection: 'column',
+        fontFamily: 'var(--font-body)', overflow: 'hidden', position: 'relative'
       }}>
 
-        {/* ── ① STOP INFO HEADER ── */}
+        {/* ── ② MAP AREA (Background) ── */}
+        <div style={{ position: 'absolute', inset: 0, zIndex: 0, background: '#2a3441' }}>
+          <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+
+          {/* Location re-center button */}
+          {/* Dev Mock GPS Buttons — DEV only */}
+          {import.meta.env.DEV && (
+            <div style={{
+              position: 'absolute', top: '50%', right: 14, marginTop: 54,
+              zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 8,
+            }}>
+              {/* Teleport to Current Stop */}
+              <button
+                onClick={() => {
+                  if (!currentTarget) return
+                  setMockGps({ lat: Number(currentTarget.lat), lng: Number(currentTarget.lng) })
+                  if (mapInstance.current) {
+                    mapInstance.current.panTo([Number(currentTarget.lat), Number(currentTarget.lng)])
+                  }
+                }}
+                title="Teleport to Current Stop"
+                style={{
+                  width: 44, height: 44, borderRadius: '50%',
+                  background: '#f59e0b', border: '2px solid #fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', fontSize: 20,
+                }}
+              >
+                📍
+              </button>
+
+              {/* Teleport to Next Stop */}
+              <button
+                onClick={() => {
+                  const nextStop = waypoints[currentStopIndex + 1]
+                  if (!nextStop) return
+                  setMockGps({ lat: Number(nextStop.lat), lng: Number(nextStop.lng) })
+                  if (mapInstance.current) {
+                    mapInstance.current.panTo([Number(nextStop.lat), Number(nextStop.lng)])
+                  }
+                }}
+                title="Teleport to Next Stop"
+                disabled={!waypoints[currentStopIndex + 1]}
+                style={{
+                  width: 44, height: 44, borderRadius: '50%',
+                  background: waypoints[currentStopIndex + 1] ? '#8b5cf6' : '#cbd5e1',
+                  border: '2px solid #fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: waypoints[currentStopIndex + 1] ? 'pointer' : 'not-allowed',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.2)', fontSize: 20,
+                }}
+              >
+                ⏭
+              </button>
+
+              {/* Clear Mock GPS */}
+              {mockGps && (
+                <button
+                  onClick={() => setMockGps(null)}
+                  title="Clear Mock GPS (use real GPS)"
+                  style={{
+                    width: 44, height: 44, borderRadius: '50%',
+                    background: '#ef4444', border: '2px solid #fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', fontSize: 16,
+                    fontWeight: 800, color: '#fff',
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── ① STOP INFO HEADER (Floating Top) ── */}
         <div style={{
-          background: '#1e2a3a',
-          padding: '16px 18px 18px',
-          color: '#fff',
+          position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
+          background: 'rgba(30, 42, 58, 0.92)', backdropFilter: 'blur(8px)',
+          padding: '16px 18px 18px', color: '#fff',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
         }}>
-          {/* Status pills row */}
           <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-            <GpsStatusPill isTracking={isTracking} error={gpsError} />
+            <GpsStatusPill isTracking={isTracking} error={gpsError} accuracy={gpsAccuracy} />
             <ConnPill />
-            {/* Extended collection mode indicator */}
             {isExtendedMode && (
               <div style={{
                 display: 'inline-flex', alignItems: 'center', gap: 5,
-                background: 'rgba(245,158,11,0.15)',
-                border: '1px solid rgba(245,158,11,0.5)',
+                background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.5)',
                 borderRadius: 20, padding: '3px 10px',
               }}>
                 <span style={{
@@ -186,10 +472,8 @@ export default function NavigationModule({ setRouteState }) {
               </div>
             )}
             <div style={{
-              marginLeft: 'auto',
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              background: 'rgba(255,255,255,0.08)',
-              borderRadius: 20, padding: '3px 10px',
+              marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5,
+              background: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: '3px 10px',
             }}>
               <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.65)', letterSpacing: '.04em' }}>
                 ⏱ {formattedTime}
@@ -197,211 +481,113 @@ export default function NavigationModule({ setRouteState }) {
             </div>
           </div>
 
-          {/* Site name + stop counter */}
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
             <span style={{ fontSize: 20, marginTop: 2 }}>📍</span>
             <div>
               <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, marginBottom: 2 }}>
-                {stop.siteName}
+                {currentTarget?.label || `Stop ${currentStopIndex}`}
               </div>
               <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>
-                {stop.current} out of {stop.total} Route : {stop.route}
+                {currentStopIndex} out of {waypoints.length - 1} · {schedule?.days || ''}
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Divider */}
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', margin: '12px 0' }} />
-
-          {/* Location details */}
+        {/* Turn direction card (Floating below header) */}
+        <div style={{
+          position: 'absolute', top: 120, left: 14, right: 14, zIndex: 10,
+          background: 'rgba(255,255,255,0.96)', borderRadius: 14, padding: '14px 18px',
+          display: 'flex', alignItems: 'center', gap: 16,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.2)', backdropFilter: 'blur(6px)',
+        }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: 10, flexShrink: 0,
+            background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="#0f172a" strokeWidth="2.5"
+              strokeLinecap="round" strokeLinejoin="round" width="24" height="24">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </div>
           <div>
-            <div style={{ fontWeight: 900, fontSize: 14, letterSpacing: '.04em', marginBottom: 3 }}>
-              {stop.barangay}
+            <div style={{ fontFamily: 'var(--font-head)', fontSize: 20, fontWeight: 900, color: '#0f172a' }}>
+              {instructionText}
             </div>
-            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.65)', marginBottom: 2 }}>{stop.address}</div>
-            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>{stop.landmark}</div>
-          </div>
-        </div>
-
-        {/* ── ② MAP AREA ── */}
-        <div style={{ position: 'relative', height: 260, background: '#2a3441', flexShrink: 0 }}>
-          {/* Grid road texture */}
-          <div style={{
-            position: 'absolute', inset: 0,
-            backgroundImage: `
-              linear-gradient(rgba(255,255,255,0.04) 1px, transparent 0),
-              linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 0)
-            `,
-            backgroundSize: '28px 28px',
-          }} />
-
-          {/* Simulated route path */}
-          <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
-            viewBox="0 0 400 260" preserveAspectRatio="none">
-            <polyline
-              points="20,200 80,200 120,140 220,140 260,100 360,100 400,60"
-              fill="none" stroke="#22d3ee" strokeWidth="6"
-              strokeLinecap="round" strokeLinejoin="round" opacity="0.8"
-            />
-            {/* Driver position dot */}
-            <circle cx="120" cy="140" r="10" fill="#fff" stroke="#22d3ee" strokeWidth="3" />
-            <circle cx="120" cy="140" r="4" fill="#22d3ee" />
-          </svg>
-
-          {/* Turn direction card */}
-          <div style={{
-            position: 'absolute', top: 14, left: 14, right: 14,
-            background: 'rgba(255,255,255,0.96)',
-            borderRadius: 14,
-            padding: '14px 18px',
-            display: 'flex', alignItems: 'center', gap: 16,
-            boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
-            backdropFilter: 'blur(6px)',
-          }}>
-            {/* Turn arrow */}
-            <div style={{
-              width: 44, height: 44, borderRadius: 10, flexShrink: 0,
-              background: '#f1f5f9',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="#0f172a" strokeWidth="2.5"
-                strokeLinecap="round" strokeLinejoin="round" width="24" height="24">
-                <polyline points="15 18 9 12 15 6" />
-              </svg>
-            </div>
-            <div>
-              <div style={{ fontFamily: 'var(--font-head)', fontSize: 20, fontWeight: 900, color: '#0f172a' }}>
-                {dir.instruction}
-              </div>
-              <div style={{ fontSize: 14, color: '#64748b', fontWeight: 600 }}>
-                {dir.distanceM}m
-              </div>
+            <div style={{ fontSize: 14, color: '#64748b', fontWeight: 600 }}>
+              {instructionDistance}
             </div>
           </div>
-
-          {/* Location re-center button */}
-          <button style={{
-            position: 'absolute', bottom: 14, left: 14,
-            width: 40, height: 40, borderRadius: '50%',
-            background: '#1d4ed8', border: 'none',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', boxShadow: '0 2px 10px rgba(29,78,216,0.4)',
-          }}>
-            <svg viewBox="0 0 24 24" fill="white" width="18" height="18">
-              <path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z" />
-            </svg>
-          </button>
-
-          {/* View Full button */}
-          <button style={{
-            position: 'absolute', bottom: 14, right: 14,
-            background: 'rgba(255,255,255,0.92)',
-            border: '1px solid rgba(0,0,0,0.1)',
-            borderRadius: 20, padding: '6px 14px',
-            fontSize: 12, fontWeight: 700, color: '#0f172a',
-            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5,
-            backdropFilter: 'blur(4px)',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-          }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-              strokeLinecap="round" strokeLinejoin="round" width="12" height="12">
-              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
-            </svg>
-            View Full
-          </button>
         </div>
 
-        {/* ── ③ STATS BAR ── */}
+        {/* ── BOTTOM PANEL (Floating Bottom) ── */}
         <div style={{
-          background: '#fff',
-          borderBottom: '1px solid #e2e8f0',
-          padding: '14px 12px',
-          display: 'flex',
-          alignItems: 'center',
-        }}>
-          <StatCell value={stop.arrivalTime} label="arrival" />
-          <div style={{ width: 1, height: 32, background: '#e2e8f0' }} />
-          <StatCell value={stop.etaMinutes} label="min" />
-          <div style={{ width: 1, height: 32, background: '#e2e8f0' }} />
-          <StatCell value={stop.distanceKm} label="km" />
-          <div style={{ width: 1, height: 32, background: '#e2e8f0' }} />
-          <StatCell value={stop.totalKmTravelled} label="total km travelled" />
-        </div>
-
-        {/* ── ④ ACTION AREA ── */}
-        <div style={{
-          flex: 1, padding: '20px 20px 28px',
+          position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10,
+          background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(12px)',
+          borderTopLeftRadius: 24, borderTopRightRadius: 24,
+          boxShadow: '0 -4px 24px rgba(0,0,0,0.1)',
           display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center',
+          paddingBottom: 24
         }}>
+          {/* Drag handle pill */}
+          <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2, margin: '12px auto' }} />
 
-          {/* Status text — changes when GPS confirms arrival */}
-          <p style={{
-            fontFamily: 'var(--font-head)',
-            fontSize: 18, fontWeight: 800,
-            color: isNearDestination ? '#0f172a' : '#64748b',
-            textAlign: 'center',
-            marginBottom: 10,
-            transition: 'color .3s',
+          {/* ── ③ STATS BAR ── */}
+          <div style={{
+            padding: '4px 12px 16px', display: 'flex', alignItems: 'center',
+            borderBottom: '1px solid rgba(0,0,0,0.06)'
           }}>
-            {isNearDestination ? 'You have arrived' : 'On the way to the dump site'}
-          </p>
+            <StatCell value={arrivalTimeStr} label="arrival" />
+            <div style={{ width: 1, height: 32, background: '#e2e8f0' }} />
+            <StatCell value={etaMinutes} label="min" />
+            <div style={{ width: 1, height: 32, background: '#e2e8f0' }} />
+            <StatCell value={distanceKmStr} label="km" />
+          </div>
 
-          {/* Distance hint when not yet at destination */}
-          {!isNearDestination && distanceToStop !== null && (
-            <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12 }}>
-              {distanceToStop > 1000
-                ? `${(distanceToStop / 1000).toFixed(1)} km to destination`
-                : `${Math.round(distanceToStop)} m to destination`
-              }
+          {/* ── ④ ACTION AREA ── */}
+          <div style={{ padding: '20px 20px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <p style={{
+              fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800,
+              color: isNearDestination ? '#0f172a' : '#64748b',
+              textAlign: 'center', marginBottom: 6, transition: 'color .3s',
+            }}>
+              {isNearDestination ? 'You have arrived' : 'On the way to next stop'}
             </p>
-          )}
-          {!isNearDestination && distanceToStop === null && (
-            <p style={{ fontSize: 12, color: '#f59e0b', marginBottom: 12 }}>
-              📡 Waiting for GPS signal…
-            </p>
-          )}
 
-          {/* Arrived button — locked until GPS confirms proximity */}
-          <button
-            id="arrived-btn"
-            disabled={!isNearDestination}
-            onClick={() => {
-              sessionStorage.setItem('ww_route_state', 'arrived')
-              setRouteState('arrived')
-            }}
-            style={{
-              width: '100%',
-              maxWidth: 320,
-              padding: '18px',
-              borderRadius: 30,
-              border: 'none',
-              fontFamily: 'var(--font-head)',
-              fontSize: 16,
-              fontWeight: 900,
-              letterSpacing: '.06em',
-              transition: 'all .35s ease',
-              cursor: isNearDestination ? 'pointer' : 'not-allowed',
-              // Locked = gray; Unlocked by GPS = dark navy (matches reference)
-              background: isNearDestination ? '#0f172a' : '#e2e8f0',
-              color: isNearDestination ? '#ffffff' : '#94a3b8',
-              boxShadow: isNearDestination
-                ? '0 6px 20px rgba(15,23,42,0.3)'
-                : 'none',
-            }}
-          >
-            {isNearDestination ? 'Done' : 'Confirm on Arrival'}
-          </button>
+            {!isNearDestination && distanceToStop !== null && (
+              <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12 }}>
+                {distanceToStop > 1000
+                  ? `${(distanceToStop / 1000).toFixed(1)} km to destination`
+                  : `${Math.round(distanceToStop)} m to destination`
+                }
+              </p>
+            )}
+            {!isNearDestination && distanceToStop === null && (
+              <p style={{ fontSize: 12, color: '#f59e0b', marginBottom: 12 }}>
+                📡 Waiting for GPS signal…
+              </p>
+            )}
 
-          {/* GPS unlock hint */}
-          {!isNearDestination && (
-            <p style={{ fontSize: 11, color: '#cbd5e1', marginTop: 10, textAlign: 'center' }}>
-              Button unlocks automatically when GPS confirms your location
-            </p>
-          )}
+            <button
+              id="arrived-btn"
+              disabled={!isNearDestination}
+              onClick={handleArrived}
+              style={{
+                width: '100%', maxWidth: 320, padding: '18px', borderRadius: 30, border: 'none',
+                fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900,
+                letterSpacing: '.06em', transition: 'all .35s ease',
+                cursor: isNearDestination ? 'pointer' : 'not-allowed',
+                background: isNearDestination ? '#0f172a' : '#e2e8f0',
+                color: isNearDestination ? '#ffffff' : '#94a3b8',
+                boxShadow: isNearDestination ? '0 6px 20px rgba(15,23,42,0.3)' : 'none',
+              }}
+            >
+              {isNearDestination ? 'Confirm Arrival' : 'Confirm on Arrival'}
+            </button>
+          </div>
         </div>
       </div>
-      <BottomNav />
+
     </>
   )
 }
