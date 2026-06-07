@@ -12,7 +12,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useOnline } from '../hooks/useOnline'
-import { NAV_ICONS, SIDEBAR_NAV, flattenNavItems, getRoleNavItems } from './DashboardLayout'
+import { NAV_ICONS, SIDEBAR_NAV, getRoleNavItems, flattenNavItems } from '../api/navConfig'
 
 // ─── tiny CSS injected once ───────────────────────────────────────────────────
 const NAVBAR_CSS = `
@@ -393,6 +393,11 @@ const BellIcon = () => (
   </svg>
 )
 
+// ─── Helper: check if group has an active child ──────────────────────────────
+function groupContainsActive(group, currentPath) {
+  return group.items?.some(item => item.path === currentPath)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function Navbar() {
@@ -427,8 +432,8 @@ export default function Navbar() {
 
   const role = user?.role?.toLowerCase() || 'citizen'
 
-  // ── FIX: use imported SIDEBAR_NAV, not a bare reference ──
-  const baseItems = SIDEBAR_NAV[role] || SIDEBAR_NAV.citizen
+  // ── FIX: use getRoleNavItems and flattenNavItems for consistency ──
+  const baseItems = flattenNavItems(getRoleNavItems(role))
 
   const mobileNavItems = user
     ? [

@@ -32,7 +32,6 @@ export default function BarangaySelect({ barangays, value, onChange, label = 'Pu
           backgroundSize: '14px',
           boxSizing: 'border-box',
         }}
-        required
         disabled={isLoading}
       >
         <option value="" disabled>{isLoading ? 'Loading barangays...' : label}</option>

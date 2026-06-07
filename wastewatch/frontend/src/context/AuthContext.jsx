@@ -102,8 +102,15 @@ export function AuthProvider({ children }) {
     return res.data
   }
 
+  async function updateUser(newData) {
+    const res = await api.patch('/api/auth/me/', newData)
+    setUser(res.data)
+    saveUserCache(res.data)
+    return res.data
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, barangays, login, logout, register }}>
+    <AuthContext.Provider value={{ user, loading, barangays, login, logout, register, updateUser }}>
       {children}
     </AuthContext.Provider>
   )

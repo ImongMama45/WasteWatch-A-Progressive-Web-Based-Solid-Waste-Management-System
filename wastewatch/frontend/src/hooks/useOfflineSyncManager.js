@@ -14,6 +14,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useOnline } from './useOnline'
 import { getQueue } from './useOfflineQueue'
+import { useAuth } from '../context/AuthContext'
 import api from '../api/client'
 
 // ─── Priority map ─────────────────────────────────────────────────────────────
@@ -28,15 +29,18 @@ const MAX_RETRY = 3
 const ENDPOINTS = {
   reports: {
     url: '/api/watcher/reports/',
-    transform: (r) => ({
-      waste_type: r.wasteType,
-      severity: r.severity,
-      notes: r.notes,
-      latitude: r.location?.lat != null ? Math.round(r.location.lat * 1e6) / 1e6 : null,
-      longitude: r.location?.lng != null ? Math.round(r.location.lng * 1e6) / 1e6 : null,
-      address: r.location?.address,
-      created_at: r.createdAt,
-    }),
+    transform: (r) => {
+      const payload = {
+        issue_type:  r.issue_type || 'overflow',
+        severity:    r.severity   || 'medium',
+        description: r.description || '',
+        address:     r.address || '',
+        created_at:  r.createdAt,
+      }
+      if (r.latitude  != null && !isNaN(r.latitude))  payload.latitude  = Math.round(r.latitude  * 1e6) / 1e6
+      if (r.longitude != null && !isNaN(r.longitude)) payload.longitude = Math.round(r.longitude * 1e6) / 1e6
+      return payload
+    },
   },
   analytics_queue: {
     url: '/api/analytics/kpi/',
@@ -51,13 +55,16 @@ const ENDPOINTS = {
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useOfflineSyncManager() {
-  const isOnline = useOnline()
-  const inFlight = useRef(new Set())
-  const syncingRef = useRef(false)
+  const isOnline    = useOnline()
+  const { user }    = useAuth()
+  const inFlight    = useRef(new Set())
+  const syncingRef  = useRef(false)
 
   const [isSyncing, setIsSyncing] = useState(false)
   const [lastSyncAt, setLastSyncAt] = useState(null)
   const [summary, setSummary] = useState({ synced: 0, failed: 0, remaining: 0 })
+
+  const currentOwnerId = (user && user.id) ? String(user.id) : 'anonymous'
 
   // ── Push a single item ──────────────────────────────────────────────────────
   const pushItem = useCallback(async (storeName, item) => {
@@ -100,7 +107,12 @@ export function useOfflineSyncManager() {
 
         // Sort by priority then severity
         const pending = all
-          .filter(r => r.status === 'pending')
+          .filter(r => {
+            if (r.status !== 'pending') return false
+            // Session isolation check
+            const rOwner = r.ownerId ? String(r.ownerId) : 'anonymous'
+            return rOwner === currentOwnerId
+          })
           .sort((a, b) => {
             const pa = PRIORITY_MAP[a.severity] ?? a.priority ?? 2
             const pb = PRIORITY_MAP[b.severity] ?? b.priority ?? 2

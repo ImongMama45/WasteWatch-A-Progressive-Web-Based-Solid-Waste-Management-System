@@ -15,21 +15,20 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useOnline } from '../hooks/useOnline'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const WASTE_TYPES = [
-  { value: 'biodegradable', label: 'Biodegradable', emoji: '🌿', color: '#22c55e', bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.4)' },
-  { value: 'residual',      label: 'Residual',      emoji: '🗑️', color: '#94a3b8', bg: 'rgba(148,163,184,0.1)', border: 'rgba(148,163,184,0.4)' },
-  { value: 'recyclable',    label: 'Recyclable',    emoji: '♻️', color: '#3b82f6', bg: 'rgba(59,130,246,0.12)', border: 'rgba(59,130,246,0.4)' },
-  { value: 'special',       label: 'Special',       emoji: '⚠️', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.4)' },
+  { value: 'overflow',        label: 'Overflow',        emoji: '🗑️', color: '#ef4444', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.4)' },
+  { value: 'missed',          label: 'Missed',          emoji: '🚛', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.4)' },
+  { value: 'illegal_dumping', label: 'Illegal Dump',    emoji: '⚠️', color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', border: 'rgba(124,58,237,0.4)' },
 ]
 
 const SEVERITIES = [
   { value: 'low',      label: 'Low',      color: '#22c55e', desc: 'Minor issue'  },
   { value: 'medium',   label: 'Medium',   color: '#f59e0b', desc: 'Needs attention' },
   { value: 'high',     label: 'High',     color: '#ef4444', desc: 'Urgent'       },
-  { value: 'critical', label: 'Critical', color: '#7c3aed', desc: 'Emergency'    },
 ]
 
 // ─── GPS helpers ──────────────────────────────────────────────────────────────
@@ -80,7 +79,8 @@ function readFileAsBase64(file) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
-  const [wasteType,   setWasteType]   = useState('residual')
+  const isOnline = useOnline()
+  const [wasteType,   setWasteType]   = useState('overflow')
   const [severity,    setSeverity]    = useState('medium')
   const [notes,       setNotes]       = useState('')
   const [location,    setLocation]    = useState(null)
@@ -99,7 +99,7 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
   // ── Reset on open ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (isOpen) {
-      setWasteType('residual')
+      setWasteType('overflow')
       setSeverity('medium')
       setNotes('')
       setLocation(null)
@@ -189,10 +189,12 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
     setSubmitting(true)
     try {
       const report = await onSubmit({
-        wasteType,
+        issue_type: wasteType,
         severity,
-        notes,
-        location,
+        description: notes,
+        latitude:  location?.lat,
+        longitude: location?.lng,
+        address:   location?.address,
         photo: photo.base64,   // full data-URI stored offline
       })
       if (report) {
@@ -208,8 +210,8 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
 
   if (!isOpen) return null
 
-  const selectedWaste    = WASTE_TYPES.find(w => w.value === wasteType)
-  const selectedSeverity = SEVERITIES.find(s => s.value === severity)
+  const selectedWaste    = WASTE_TYPES.find(w => w.value === wasteType) || WASTE_TYPES[0]
+  const selectedSeverity = SEVERITIES.find(s => s.value === severity) || SEVERITIES[0]
   const canSubmit        = !!photo && !submitting
 
   return (
@@ -394,8 +396,8 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
                   </button>
                 ))}
               </div>
-              <p className="orb-severity-desc" style={{ color: selectedSeverity.color }}>
-                {selectedSeverity.desc}
+              <p className="orb-severity-desc" style={{ color: selectedSeverity?.color || '#64748b' }}>
+                {selectedSeverity?.desc || ''}
               </p>
             </div>
 
@@ -416,10 +418,10 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
             </div>
 
             {/* ── Summary chip ── */}
-            <div className="orb-summary" style={{ borderColor: selectedWaste.border }}>
-              <span style={{ color: selectedWaste.color }}>{selectedWaste.emoji} {selectedWaste.label}</span>
+            <div className="orb-summary" style={{ borderColor: (selectedWaste && selectedWaste.border) || 'transparent' }}>
+              <span style={{ color: (selectedWaste && selectedWaste.color) || '#64748b' }}>{(selectedWaste && selectedWaste.emoji) || '🏷️'} {(selectedWaste && selectedWaste.label) || 'Waste'}</span>
               <span className="orb-summary__sep">·</span>
-              <span style={{ color: selectedSeverity.color }}>🔥 {selectedSeverity.label}</span>
+              <span style={{ color: (selectedSeverity && selectedSeverity.color) || '#64748b' }}>🔥 {(selectedSeverity && selectedSeverity.label) || 'Severity'}</span>
               <span className="orb-summary__sep">·</span>
               <span style={{ color: '#64748b' }}>📍 {location ? 'Located' : 'No GPS'}</span>
               <span className="orb-summary__sep">·</span>
@@ -446,7 +448,7 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
                 ? <><span className="orb-spinner" /> Saving…</>
                 : !photo
                   ? '📷 Mag-attach ng Photo muna'
-                  : 'Submit Report (Offline)'}
+                  : isOnline ? 'Submit Report' : 'Submit Report (Offline)'}
             </button>
 
           </div>

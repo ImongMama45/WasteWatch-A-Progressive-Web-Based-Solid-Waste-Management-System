@@ -140,8 +140,6 @@ class RegisterSerializer(serializers.Serializer):
     def validate(self, data):
         if data.get('password') != data.pop('password2', None):
             raise serializers.ValidationError({'password': 'Ang password ay hindi tugma.'})
-        if not data.get('barangay'):
-            raise serializers.ValidationError({'barangay': 'Mangyaring piliin ang iyong barangay.'})
         return data
 
     # ── Create ──────────────────────────────────────────────────────────────
@@ -149,6 +147,9 @@ class RegisterSerializer(serializers.Serializer):
     def create(self, validated_data):
         password = validated_data.pop('password')
         barangay = validated_data.pop('barangay')
+        
+        print(f"DEBUG: RegisterSerializer.create - Saving user with barangay_id: {barangay.id if barangay else None} ({barangay.name if barangay else 'None'})")
+        
         # Ensure role is popped if it exists in validated_data to avoid multiple values
         validated_data.pop('role', None) 
         

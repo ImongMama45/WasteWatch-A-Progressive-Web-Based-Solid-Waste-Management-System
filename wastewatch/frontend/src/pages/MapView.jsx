@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from "react";
+import { useNavigate, useLocation } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import { useAuth } from '../context/AuthContext'
 import api from '../api/client'
@@ -15,10 +17,13 @@ import {
 export const LUCENA_CENTER = [13.9373, 121.6170];
 
 export const ZONE_TYPE_MAP = {
+// ... (rest of ZONE_TYPE_MAP)
+
   "Barangay 1 (Pob.)": "commercial", "Barangay 2 (Pob.)": "commercial",
   "Barangay 3 (Pob.)": "commercial", "Barangay 4 (Pob.)": "commercial",
   "Barangay 5 (Pob.)": "commercial", "Barangay 6 (Pob.)": "commercial",
   "Barangay 7 (Pob.)": "commercial", "Barangay 8 (Pob.)": "commercial",
+  "Barangay 9 (Pob.)": "commercial",
   "Barangay 9 (Pob.)": "commercial",
   "Barangay 10 (Pob.)": "commercial", "Barangay 11 (Pob.)": "commercial",
   "Gulang-Gulang": "industrial", "Cotta": "industrial",
@@ -39,6 +44,8 @@ export const DUMP_SITES = [
   { id: "D2", name: "Transfer Station — Cotta", lat: 13.9345, lng: 121.6085, capacity: 55 },
 ];
 export const GARBAGE_REPORTS = [];
+
+const TYPE_LABELS = { overflow: "Overflow", illegal_dumping: "Illegal Dumping", missed: "Missed Pickup" };
 
 export const ZONE_META = {
   residential: { label: "Residential", icon: "🏠", color: "#4ade80" },
@@ -185,9 +192,10 @@ function injectStopMarkerStyles() {
 
 export default function MapView() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { user } = useAuth()
   const mapRef = useRef(null)
-  const mapInstanceRef = useRef(null)
+  const [mapInstance, setMapInstance] = useState(null)
   const layersRef = useRef({})
 
   // ── Barangay stop markers (drawn separately from main layers) ─────────────
@@ -211,6 +219,7 @@ export default function MapView() {
     routes: true, trucks: true, dumpSites: true, reports: true,
   })
   const [barangayGeo, setBarangayGeo] = useState(null)
+  const [reports, setReports] = useState([])
   const [activeTrucks, setActiveTrucks] = useState([])
   const [liveReports, setLiveReports] = useState([])
 
@@ -234,6 +243,8 @@ export default function MapView() {
   const liveReportsRef  = useRef(liveReports)
   const barangayDataRef = useRef(barangayData)   // ← NEW: mirrors barangayData for drawAll
   const selectedZoneRef = useRef(selectedZone)   // ← NEW: mirrors selectedZone for drawAll
+  const liveReportsRef = useRef(liveReports)
+  const mapInstanceRef = useRef(null) // Added for stability with drawAll
 
   useEffect(() => { activeFiltersRef.current = activeFilters }, [activeFilters])
   useEffect(() => { activeTrucksRef.current  = activeTrucks  }, [activeTrucks])
@@ -257,7 +268,44 @@ export default function MapView() {
       .then(r => r.json())
       .then(setBarangayGeo)
       .catch(err => console.error("Failed to load barangay GeoJSON:", err))
+    
+    fetchReports()
   }, [])
+
+  // ── Handle focus from navigation state ──
+  useEffect(() => {
+    if (!mapInstance || !reports.length) return
+    
+    const focus = location.state?.focusReport
+    if (!focus) return
+
+    // Find in current data
+    const found = reports.find(r => r.id === focus.id) || focus
+
+    const lat = found.latitude || found.lat || found.location?.lat
+    const lng = found.longitude || found.lng || found.location?.lng
+
+    if (lat && lng) {
+      console.log('[MapView] Focusing on report:', found.id)
+      mapInstance.setView([lat, lng], 18)
+      setSelectedReport(found)
+      setPanelMode("report")
+      setPanelOpen(true)
+      
+      // Clear state so it doesn't re-focus on every render
+      navigate(location.pathname, { replace: true, state: {} })
+    }
+  }, [mapInstance, reports, location.state, navigate, location.pathname])
+
+  async function fetchReports() {
+    try {
+      const res = await api.get('/api/watcher/reports/map_pins/')
+      console.log(`[MapView] Fetched ${res.data.length} approved reports`)
+      setReports(res.data)
+    } catch (err) {
+      console.error("Failed to fetch reports:", err)
+    }
+  }
 
   const statusColors = { collecting: "#22c55e", en_route: "#f59e0b", idle: "#64748b", done: "#3b82f6" }
   const statusLabels = { collecting: "Collecting", en_route: "En Route", idle: "Idle", done: "Done" }
@@ -265,10 +313,6 @@ export default function MapView() {
   // ── Load Leaflet CDN ──────────────────────────────────────────────────────
   useEffect(() => {
     if (window.L) { setMapReady(true); return }
-    const link = document.createElement("link")
-    link.rel = "stylesheet"
-    link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    document.head.appendChild(link)
     const script = document.createElement("script")
     script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
     script.onload = () => setMapReady(true)
@@ -277,14 +321,28 @@ export default function MapView() {
 
   // ── Init map ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!mapReady || !mapRef.current || mapInstanceRef.current) return
+    if (!mapReady || !mapRef.current || mapInstance) return
     const L = window.L
     const map = L.map(mapRef.current, { center: LUCENA_CENTER, zoom: 14, zoomControl: false })
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "© OpenStreetMap contributors", maxZoom: 19,
     }).addTo(map)
     L.control.zoom({ position: "topright" }).addTo(map)
+    
+    setMapInstance(map)
     mapInstanceRef.current = map
+
+    // Fix for fragmented tiles
+    setTimeout(() => map.invalidateSize(), 100)
+    const observer = new ResizeObserver(() => map.invalidateSize())
+    observer.observe(mapRef.current)
+
+    return () => {
+      observer.disconnect()
+      map.remove()
+      setMapInstance(null)
+      mapInstanceRef.current = null
+    }
   }, [mapReady])
 
   // ── Live truck tracking — poll every 10 s ─────────────────────────────────
@@ -616,8 +674,7 @@ function drawBarangayStops(stops) {
   }
   // ─── MAIN LAYER DRAW ─────────────────────────────────────────────────────
 
-  function clearLayers() {
-    const map = mapInstanceRef.current
+  function clearLayers(map) {
     Object.values(layersRef.current).forEach(l => { try { map.removeLayer(l) } catch { } })
     layersRef.current = {}
     // Note: barangayMarkersRef is intentionally NOT cleared here — those
@@ -627,7 +684,7 @@ function drawBarangayStops(stops) {
   function drawAll(map) {
     const L = window.L
     if (!L) return
-    clearLayers()
+    clearLayers(map)
 
     // ── Barangay GeoJSON zones ──
     if (barangayGeo) {
@@ -809,12 +866,23 @@ function drawBarangayStops(stops) {
 
     
 
-    // ── Live garbage reports ──
+    // ── Garbage reports ──
     if (activeFilters.reports) {
-      liveReportsRef.current.forEach(report => {
-        const icon = L.divIcon({ html: garbageReportIconHtml(report.severity), className: "", iconSize: [30, 36], iconAnchor: [8, 36] })
-        const m = L.marker([report.lat, report.lng], { icon }).addTo(map)
-        m.on("click", () => { setSelectedReport(report); setPanelMode("report"); setPanelOpen(true) })
+      reports.forEach(report => {
+        const lat = report.latitude || report.lat
+        const lng = report.longitude || report.lng
+        if (!lat || !lng) return
+
+        const icon = L.divIcon({ 
+          html: garbageReportIconHtml(report.severity), 
+          className: "", iconSize: [30, 36], iconAnchor: [8, 36] 
+        })
+        const m = L.marker([lat, lng], { icon }).addTo(map)
+        m.on("click", () => { 
+          setSelectedReport(report)
+          setPanelMode("report")
+          setPanelOpen(true) 
+        })
         layersRef.current[`report-${report.id}`] = m
       })
     }
@@ -1312,19 +1380,47 @@ function ReportPanel({ report, onStatusChange }) {
   const severityColors = { high: "#ef4444", medium: "#f59e0b", low: "#22c55e" }
   const typeLabels = { overflow: "Overflow", illegal_dumping: "Illegal Dumping", missed: "Missed Pickup" }
 
-  const reportedStr = report.reported
-    ? new Date(report.reported).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
+  const reportedStr = report.created_at || report.reported
+    ? new Date(report.created_at || report.reported).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
     : 'Unknown'
 
-  const statusLabel = { pending: 'Pending Review', approved: 'Approved', resolved: 'Resolved', rejected: 'Dismissed' }[report.status] ?? report.status
+  const statusLabel = { 
+    pending: 'Pending Review', 
+    approved: 'Approved (Visible)', 
+    resolved: 'Resolved (Collected)', 
+    rejected: 'Rejected (Hidden)' 
+  }[report.status] ?? report.status?.toUpperCase()
 
-  function handleConfirm() {
-    api.post('/api/watcher/confirmations/', { report: report.id })
-      .then(() => onStatusChange?.()).catch(console.error)
+  function handleApprove() {
+    api.post(`/api/watcher/reports/${report.id}/approve/`)
+      .then(() => onStatusChange?.())
+      .catch(err => {
+        console.error(err)
+        alert(err.response?.data?.error || 'Failed to approve report')
+      })
   }
-  function handleDismiss() {
-    api.patch(`/api/watcher/reports/${report.id}/`, { status: 'rejected' })
-      .then(() => onStatusChange?.()).catch(console.error)
+
+  function handleReject() {
+    const reason = prompt('Please enter a reason for rejection:')
+    if (reason === null) return // Cancelled
+    if (!reason.trim()) return alert('Reason is required for rejection.')
+    
+    api.post(`/api/watcher/reports/${report.id}/reject/`, { rejection_reason: reason })
+      .then(() => onStatusChange?.())
+      .catch(err => {
+        console.error(err)
+        alert(err.response?.data?.error || 'Failed to reject report')
+      })
+  }
+
+  function handleResolve() {
+    // This creates a confirmation which marks report as RESOLVED
+    api.post('/api/watcher/confirmations/', { report: report.id })
+      .then(() => onStatusChange?.())
+      .catch(err => {
+        console.error(err)
+        alert('Failed to resolve report')
+      })
   }
 
   return (
@@ -1332,27 +1428,48 @@ function ReportPanel({ report, onStatusChange }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
         <div style={{ fontSize: 30 }}>⚠️</div>
         <div style={{ flex: 1 }}>
-          <div style={{ color: "white", fontWeight: 800, fontSize: 17 }}>{typeLabels[report.type] ?? report.type}</div>
-          <div style={{ color: "#94a3b8", fontSize: 12 }}>{report.address}</div>
+          <div style={{ color: "white", fontWeight: 800, fontSize: 17 }}>{typeLabels[report.issue_type || report.type] ?? (report.issue_type || report.type)}</div>
+          <div style={{ color: "#94a3b8", fontSize: 12 }}>{report.barangay_name || report.address}</div>
         </div>
         <div style={{ background: `${severityColors[report.severity]}22`, border: `1px solid ${severityColors[report.severity]}`, borderRadius: 20, padding: "4px 12px" }}>
           <span style={{ color: severityColors[report.severity], fontSize: 12, fontWeight: 700 }}>{report.severity?.toUpperCase()}</span>
         </div>
       </div>
-      <Row label="REPORT TYPE" value={typeLabels[report.type] ?? report.type} />
+      <Row label="REPORT TYPE" value={typeLabels[report.issue_type || report.type] ?? (report.issue_type || report.type)} />
       <Row label="REPORTED" value={reportedStr} />
       <Row label="STATUS" value={statusLabel} accent />
-      {report.description && (
+      
+      {report.rejection_reason && (
+        <Row label="REASON" value={report.rejection_reason} />
+      )}
+
+      {report.description || report.notes ? (
         <div style={{ marginTop: 10, padding: "10px 12px", background: "rgba(255,255,255,0.04)", borderRadius: 10, color: "#cbd5e1", fontSize: 12, lineHeight: 1.5 }}>
-          {report.description}
+          {report.description || report.notes}
+        </div>
+      ) : null}
+
+      {report.image && (
+        <div style={{ marginTop: 12, borderRadius: 10, overflow: 'hidden' }}>
+           <img src={report.image} alt="Evidence" style={{ width: '100%', height: 'auto' }} />
         </div>
       )}
-      {canModerate ? (
+
+      {canModerate && (
         <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-          <button onClick={handleConfirm} style={{ flex: 1, background: "rgba(34,197,94,0.1)", border: "1px solid #22c55e", color: "#22c55e", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✅ Confirm</button>
-          <button onClick={handleDismiss} style={{ flex: 1, background: "rgba(239,68,68,0.1)", border: "1px solid #ef4444", color: "#ef4444", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✕ Dismiss</button>
+          {report.status === 'pending' && (
+            <>
+              <button onClick={handleApprove} style={{ flex: 1, background: "rgba(34,197,94,0.1)", border: "1px solid #22c55e", color: "#22c55e", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✅ Approve</button>
+              <button onClick={handleReject} style={{ flex: 1, background: "rgba(239,68,68,0.1)", border: "1px solid #ef4444", color: "#ef4444", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✕ Reject</button>
+            </>
+          )}
+          {report.status === 'approved' && (
+            <button onClick={handleResolve} style={{ flex: 1, background: "rgba(34,197,94,0.1)", border: "1px solid #22c55e", color: "#22c55e", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>🏁 Mark Resolved</button>
+          )}
         </div>
-      ) : (
+      )}
+      
+      {!canModerate && (
         <div style={{ marginTop: 18, padding: "10px 14px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#64748b", fontSize: 12 }}>
           ℹ️ Only Watchers, Barangay Officials, and Admins can moderate reports.
         </div>

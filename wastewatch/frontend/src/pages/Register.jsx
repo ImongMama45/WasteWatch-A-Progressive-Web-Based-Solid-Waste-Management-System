@@ -35,7 +35,6 @@ export default function Register() {
     const errs = {}
     if (!form.full_name.trim()) errs.full_name = 'Full name is required.'
     if (!form.email.trim()) errs.email = 'Email is required.'
-    if (!form.barangay) errs.barangay = 'Please select your barangay.'
     if (form.password.length < 8) errs.password = 'Password must be at least 8 characters.'
     if (form.password !== form.password2) errs.password2 = 'Passwords do not match.'
     return errs
@@ -98,11 +97,12 @@ export default function Register() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Barangay</label>
+            <label className="form-label">Barangay (Opsyonal)</label>
             <BarangaySelect
               barangays={barangays}
               value={form.barangay}
               onChange={id => setForm(prev => ({ ...prev, barangay: id }))}
+              label="Piliin ang barangay (Opsyonal)"
             />
             {errors.barangay && <p className="form-error">{errors.barangay}</p>}
           </div>

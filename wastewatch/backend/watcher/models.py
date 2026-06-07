@@ -78,8 +78,11 @@ class GarbageReport(models.Model):
     )
 
     # GPS coordinates — store as decimals for accuracy
-    latitude  = models.DecimalField(max_digits=9,  decimal_places=6)
-    longitude = models.DecimalField(max_digits=10, decimal_places=6)
+    latitude  = models.DecimalField(max_digits=9,  decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+
+    # Address / Landmark
+    address = models.CharField(max_length=255, blank=True)
 
     # Photo evidence
     image = CloudinaryField(
@@ -103,6 +106,7 @@ class GarbageReport(models.Model):
     )
 
     description = models.TextField(blank=True)
+    tags = models.CharField(max_length=255, blank=True, help_text='Comma-separated tags')
 
     # Lifecycle status — starts as pending, admin/official changes it
     status = models.CharField(
@@ -111,8 +115,45 @@ class GarbageReport(models.Model):
         default=ReportStatus.PENDING,
     )
 
+    # Audit fields
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='approved_reports',
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+
+    rejected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='rejected_reports',
+    )
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)  # Tracks when status changes
+
+    def save(self, *args, **kwargs):
+        """
+        Gracefully handle Cloudinary upload failures.
+        If credentials missing or invalid, clear image and proceed.
+        """
+        from cloudinary.exceptions import AuthorizationRequired
+        try:
+            super().save(*args, **kwargs)
+        except (ValueError, AuthorizationRequired) as e:
+            # If "Must supply api_key" or "Unknown API key", clear image and retry
+            if 'api_key' in str(e).lower():
+                print(f'[GarbageReport] Cloudinary config error: {e}. Saving without image.')
+                self.image = None
+                super().save(*args, **kwargs)
+            else:
+                raise e
 
     class Meta:
         ordering = ['-created_at']  # Newest first

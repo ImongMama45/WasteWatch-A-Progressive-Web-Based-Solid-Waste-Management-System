@@ -1,14 +1,55 @@
 // MiniMap.jsx — Embedded map widget for the WasteWatch Dashboard
-// Drop into src/components/MiniMap.jsx
-// Requires Leaflet CDN in index.html:
-//   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-//   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../api/client'
 
+// ─── SHARED MOCK DATA ────────
+
 const LUCENA_CENTER = [13.9373, 121.617]
+
+const TRUCK_ROUTES = [
+  {
+    id: 'T01', truckId: 'Truck 01', driver: 'Pedro Santos',
+    barangay: 'Ibabang Dupay Zone 1', status: 'collecting',
+    capacity: 75, collectedCount: 11, totalPoints: 15,
+    eta: '1:45 PM', color: '#14b8a6',
+    waypoints: [
+      [13.946, 121.6085], [13.9472, 121.6102], [13.948, 121.612],
+      [13.9488, 121.6138], [13.9475, 121.6155], [13.946, 121.616],
+      [13.9448, 121.6145], [13.944, 121.6128], [13.9452, 121.611],
+      [13.9464, 121.6095],
+    ],
+    completedUpTo: 7,
+  },
+  {
+    id: 'T02', truckId: 'Truck 02', driver: 'Juan Dela Cruz',
+    barangay: 'Ibabang Dupay Zone 3', status: 'collecting',
+    capacity: 60, collectedCount: 9, totalPoints: 15,
+    eta: '2:30 PM', color: '#f59e0b',
+    waypoints: [
+      [13.94, 121.6135], [13.941, 121.615], [13.942, 121.6165],
+      [13.9432, 121.6178], [13.944, 121.619], [13.9448, 121.62],
+      [13.9438, 121.6208], [13.9425, 121.6202], [13.9415, 121.6188],
+      [13.9408, 121.617], [13.9402, 121.6152],
+    ],
+    completedUpTo: 8,
+  },
+  {
+    id: 'T03', truckId: 'Truck 03', driver: 'Maria Reyes',
+    barangay: 'Cotta Commercial', status: 'en_route',
+    capacity: 30, collectedCount: 4, totalPoints: 12,
+    eta: '3:15 PM', color: '#a78bfa',
+    waypoints: [
+      [13.933, 120.6095], [13.934, 121.611], [13.9352, 121.6125],
+      [13.9362, 121.614], [13.937, 121.6155], [13.9362, 121.6168],
+      [13.935, 121.6162], [13.9338, 121.6148],
+    ],
+    completedUpTo: 3,
+  },
+]
+
+const TYPE_LABELS = { overflow: 'Overflow', illegal_dumping: 'Illegal Dumping', missed: 'Missed Pickup' }
 
 // ─── ICON HELPERS ─────────────────────────────────────────────────────────────
 
@@ -37,16 +78,18 @@ const reportIconHtml = (severity) => {
 }
 
 const STATUS_LABELS = { collecting: 'Collecting', en_route: 'En Route', idle: 'Idle', done: 'Done' }
+const STATUS_COLORS = { collecting: '#22c55e', en_route: '#f59e0b', idle: '#64748b', done: '#3b82f6' }
 
 export default function MiniMap() {
   const navigate = useNavigate()
   const mapRef = useRef(null)
-  const mapInstance = useRef(null)
+  const [mapInstance, setMapInstance] = useState(null)
   const layersRef = useRef({})
 
   const [leafletReady, setLeafletReady] = useState(false)
   const [selectedRoute, setSelectedRoute] = useState(null)
   const [panelOpen, setPanelOpen] = useState(false)
+  const [reports, setReports] = useState([])
   const [activeTrucks, setActiveTrucks] = useState([])
   const [liveReports, setLiveReports] = useState([])
 
@@ -55,31 +98,23 @@ export default function MiniMap() {
   useEffect(() => { activeTrucksRef.current = activeTrucks }, [activeTrucks])
   useEffect(() => { liveReportsRef.current = liveReports }, [liveReports])
 
-  // ── Load Leaflet CSS + JS once ──────────────────────────────────────────────
   useEffect(() => {
     if (window.L) { setLeafletReady(true); return }
-
-    const link = document.createElement('link')
-    link.rel = 'stylesheet'
-    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
-    document.head.appendChild(link)
-
     const script = document.createElement('script')
     script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
     script.onload = () => setLeafletReady(true)
     document.head.appendChild(script)
   }, [])
 
-  // ── Init map once Leaflet is ready ──────────────────────────────────────────
   useEffect(() => {
-    if (!leafletReady || !mapRef.current || mapInstance.current) return
+    if (!leafletReady || !mapRef.current || mapInstance) return
 
     const L = window.L
     const map = L.map(mapRef.current, {
       center: LUCENA_CENTER,
       zoom: 14,
       zoomControl: false,
-      scrollWheelZoom: false, // disabled in widget — full map has it
+      scrollWheelZoom: false,
     })
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -89,8 +124,17 @@ export default function MiniMap() {
 
     L.control.zoom({ position: 'bottomright' }).addTo(map)
 
-    mapInstance.current = map
-    drawLayers(map)
+    setMapInstance(map)
+
+    setTimeout(() => map.invalidateSize(), 150)
+    const observer = new ResizeObserver(() => map.invalidateSize())
+    observer.observe(mapRef.current)
+
+    return () => {
+      observer.disconnect()
+      map.remove()
+      setMapInstance(null)
+    }
   }, [leafletReady])
 
   // ── Live Tracking Polling ───────────────────────────────────────────────────
@@ -101,6 +145,9 @@ export default function MiniMap() {
         .catch(console.error)
     }
     const fetchReports = () => {
+      api.get('/api/watcher/reports/public_map/')
+        .then(res => setReports(res.data))
+        .catch(console.error)
       api.get('/api/watcher/reports/map_pins/')
         .then(res => setLiveReports(res.data))
         .catch(console.error)
@@ -115,12 +162,11 @@ export default function MiniMap() {
     }
   }, [])
 
-  // ── Redraw when active trucks or reports change ─────────────────────────────
+  // ── Redraw when state changes ─────────────────────────────
   useEffect(() => {
-    if (!mapInstance.current) return
-    drawLayers(mapInstance.current)
+    if (mapInstance) drawLayers(mapInstance)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTrucks, liveReports])
+  }, [mapInstance, reports, activeTrucks, liveReports])
 
   function clearLayers(map) {
     Object.values(layersRef.current).forEach(l => {
@@ -129,12 +175,40 @@ export default function MiniMap() {
     layersRef.current = {}
   }
 
-  // ── Draw all map layers ─────────────────────────────────────────────────────
   function drawLayers(map) {
-    clearLayers(map)
     const L = window.L
+    if (!L) return
+    clearLayers(map)
 
-    // Truck markers at current position (LIVE)
+    // Draw Mock Static Routes
+    TRUCK_ROUTES.forEach(route => {
+      const donePts = route.waypoints.slice(0, route.completedUpTo + 1)
+      const remPts = route.waypoints.slice(route.completedUpTo)
+
+      const doneLine = L.polyline(donePts, { color: route.color, weight: 4, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }).addTo(map)
+      const remLine = L.polyline(remPts, { color: route.color, weight: 3, opacity: 0.45, dashArray: '9,7' }).addTo(map)
+
+      const onClick = () => { setSelectedRoute(route); setPanelOpen(true) }
+      doneLine.on('click', onClick)
+      remLine.on('click', onClick)
+
+      route.waypoints.forEach((coord, i) => {
+        const done = i <= route.completedUpTo
+        const circle = L.circleMarker(coord, {
+          radius: done ? 6 : 4,
+          fillColor: done ? route.color : '#1e293b',
+          color: route.color, weight: 2,
+          opacity: 1, fillOpacity: done ? 1 : 0.55,
+        }).addTo(map)
+        circle.on('click', onClick)
+        layersRef.current[`stop-${route.id}-${i}`] = circle
+      })
+
+      layersRef.current[`done-${route.id}`] = doneLine
+      layersRef.current[`rem-${route.id}`] = remLine
+    })
+
+    // Truck markers (LIVE)
     activeTrucksRef.current.forEach(truck => {
       const pos = [truck.lat, truck.lng]
       const icon = L.divIcon({
@@ -159,55 +233,43 @@ export default function MiniMap() {
       layersRef.current[`live-truck-${truck.id}`] = m
     })
 
-    // Garbage report markers (LIVE)
-    liveReportsRef.current.forEach(r => {
-      const icon = L.divIcon({
-        html: reportIconHtml(r.severity),
-        className: '', iconSize: [24, 30], iconAnchor: [6, 30],
-      })
-      const m = L.marker([r.lat, r.lng], { icon }).addTo(map)
-      m.bindPopup(`<b>⚠️ ${r.waste_type || 'garbage'}</b><br/><small>${r.notes || 'No description'}</small>`)
+    // Garbage reports (Static from Public Map)
+    reports.forEach(r => {
+      const lat = r.latitude || r.lat
+      const lng = r.longitude || r.lng
+      if (lat == null || lng == null) return
+
+      const icon = L.divIcon({ html: reportIconHtml(r.severity), className: '', iconSize: [24, 30], iconAnchor: [6, 30] })
+      const m = L.marker([lat, lng], { icon }).addTo(map)
+      m.bindPopup(`<b>⚠️ ${TYPE_LABELS[r.issue_type] || r.issue_type || 'Garbage'}</b><br/><small>${r.barangay_name || r.address || ''}</small><br/>${r.description || ''}`)
       layersRef.current[`rep-${r.id}`] = m
+    })
+
+    // Garbage reports (Live Pins)
+    liveReportsRef.current.forEach(r => {
+      const lat = r.lat || r.latitude
+      const lng = r.lng || r.longitude
+      if (lat == null || lng == null) return
+
+      const icon = L.divIcon({ html: reportIconHtml(r.severity), className: '', iconSize: [24, 30], iconAnchor: [6, 30] })
+      const m = L.marker([lat, lng], { icon }).addTo(map)
+      m.bindPopup(`<b>⚠️ ${TYPE_LABELS[r.issue_type] || r.issue_type || 'Garbage'}</b><br/><small>${r.barangay_name || r.address || ''}</small><br/>${r.description || ''}`)
+      layersRef.current[`live-rep-${r.id}`] = m
     })
   }
 
-  const pct = selectedRoute
-    ? Math.round((selectedRoute.collectedCount / selectedRoute.totalPoints) * 100)
-    : 0
+  const pct = selectedRoute ? Math.round((selectedRoute.collectedCount / selectedRoute.totalPoints) * 100) : 0
 
   return (
-    <div className="ww-minimap" style={{
-      position: 'relative',
-      zIndex: 0,
-      isolation: 'isolate',
-      borderRadius: 14,
-      overflow: 'hidden',
-      border: '1px solid rgba(20,184,166,0.2)',
-    }}>
-
-      {/* Scoped Leaflet z-index reset — prevents map panes escaping into navbar/bottom nav */}
+    <div className="ww-minimap" style={{ position: 'relative', zIndex: 0, isolation: 'isolate', borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(20,184,166,0.2)' }}>
       <style>{`
-        .ww-minimap .leaflet-pane,
-        .ww-minimap .leaflet-control-container { z-index: 1 !important; }
-        .ww-minimap .leaflet-top,
-        .ww-minimap .leaflet-bottom { z-index: 2 !important; }
+        .ww-minimap .leaflet-pane, .ww-minimap .leaflet-control-container { z-index: 1 !important; }
+        .ww-minimap .leaflet-top, .ww-minimap .leaflet-bottom { z-index: 2 !important; }
         @keyframes mmSlideDown { from { opacity:0; transform:translateY(-8px) } to { opacity:1; transform:translateY(0) } }
       `}</style>
-
-      {/* ── MAP CONTAINER ── */}
-      <div
-        ref={mapRef}
-        style={{ width: '100%', height: 240, background: '#0f172a', position: 'relative', zIndex: 0 }}
-      />
-
-      {/* Loading overlay */}
+      <div ref={mapRef} style={{ width: '100%', height: 240, background: '#0f172a', position: 'relative', zIndex: 0 }} />
       {!leafletReady && (
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: '#0f172a',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          borderRadius: 14,
-        }}>
+        <div style={{ position: 'absolute', inset: 0, background: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 14 }}>
           <span style={{ color: '#14b8a6', fontSize: 13, fontWeight: 600 }}>Loading map…</span>
         </div>
       )}
@@ -244,90 +306,24 @@ export default function MiniMap() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#f59e0b', boxShadow: '0 0 6px #f59e0b' }} />
-          <span style={{ color: '#cbd5e1', fontSize: 11 }}>{liveReports.length} Reports Nearby</span>
+          <span style={{ color: '#cbd5e1', fontSize: 11 }}>{liveReports.length + reports.length} Reports Nearby</span>
         </div>
       </div>
-
-      {/* ── ROUTE DETAIL PANEL (slides in below map) ── */}
       {panelOpen && selectedRoute && (
-        <div style={{
-          background: '#0f172a',
-          borderTop: `2px solid ${selectedRoute.color}`,
-          padding: '14px 16px 16px',
-          animation: 'mmSlideDown 0.25s ease',
-        }}>
-
-
-          {/* Header */}
+        <div style={{ background: '#0f172a', borderTop: `2px solid ${selectedRoute.color}`, padding: '14px 16px 16px', animation: 'mmSlideDown 0.25s ease' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
             <span style={{ fontSize: 22 }}>🚛</span>
-            <div style={{ flex: 1 }}>
-              <div style={{ color: 'white', fontWeight: 800, fontSize: 15 }}>{selectedRoute.truckId}</div>
-              <div style={{ color: '#94a3b8', fontSize: 11 }}>{selectedRoute.driver} · {selectedRoute.barangay}</div>
-            </div>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 5,
-              background: `${STATUS_COLORS[selectedRoute.status]}1a`,
-              border: `1px solid ${STATUS_COLORS[selectedRoute.status]}`,
-              borderRadius: 20, padding: '3px 10px',
-            }}>
-              <div style={{ width: 6, height: 6, borderRadius: '50%', background: STATUS_COLORS[selectedRoute.status] }} />
-              <span style={{ color: STATUS_COLORS[selectedRoute.status], fontSize: 11, fontWeight: 700 }}>
-                {STATUS_LABELS[selectedRoute.status]}
-              </span>
-            </div>
-            <button
-              onClick={() => setPanelOpen(false)}
-              style={{ background: 'none', border: 'none', color: '#64748b', fontSize: 18, cursor: 'pointer', padding: 0 }}
-            >✕</button>
+            <div style={{ flex: 1 }}><div style={{ color: 'white', fontWeight: 800, fontSize: 15 }}>{selectedRoute.truckId}</div><div style={{ color: '#94a3b8', fontSize: 11 }}>{selectedRoute.driver} · {selectedRoute.barangay}</div></div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${STATUS_COLORS[selectedRoute.status]}1a`, border: `1px solid ${STATUS_COLORS[selectedRoute.status]}`, borderRadius: 20, padding: '3px 10px' }}><div style={{ width: 6, height: 6, borderRadius: '50%', background: STATUS_COLORS[selectedRoute.status] }} /><span style={{ color: STATUS_COLORS[selectedRoute.status], fontSize: 11, fontWeight: 700 }}>{STATUS_LABELS[selectedRoute.status]}</span></div>
+            <button onClick={() => setPanelOpen(false)} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: 18, cursor: 'pointer', padding: 0 }}>✕</button>
           </div>
-
-          {/* Quick stats row */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 12 }}>
-            {[
-              { label: 'ETA', value: selectedRoute.eta },
-              { label: 'Stops', value: `${selectedRoute.collectedCount}/${selectedRoute.totalPoints}` },
-              { label: 'Capacity', value: `${selectedRoute.capacity}%` },
-            ].map(s => (
-              <div key={s.label} style={{
-                background: '#1e293b', borderRadius: 10, padding: '8px 10px', textAlign: 'center',
-              }}>
-                <div style={{ color: '#64748b', fontSize: 10, fontWeight: 600, marginBottom: 3 }}>{s.label}</div>
-                <div style={{ color: selectedRoute.color, fontSize: 14, fontWeight: 800 }}>{s.value}</div>
-              </div>
+            {[{ label: 'ETA', value: selectedRoute.eta }, { label: 'Stops', value: `${selectedRoute.collectedCount}/${selectedRoute.totalPoints}` }, { label: 'Capacity', value: `${selectedRoute.capacity}%` }].map(s => (
+              <div key={s.label} style={{ background: '#1e293b', borderRadius: 10, padding: '8px 10px', textAlign: 'center' }}><div style={{ color: '#64748b', fontSize: 10, fontWeight: 600, marginBottom: 3 }}>{s.label}</div><div style={{ color: selectedRoute.color, fontSize: 14, fontWeight: 800 }}>{s.value}</div></div>
             ))}
           </div>
-
-          {/* Progress bar */}
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-              <span style={{ color: '#94a3b8', fontSize: 10, fontWeight: 600 }}>ROUTE PROGRESS</span>
-              <span style={{ color: 'white', fontSize: 11, fontWeight: 700 }}>{pct}%</span>
-            </div>
-            <div style={{ background: '#1e293b', borderRadius: 6, height: 8 }}>
-              <div style={{
-                height: '100%', width: `${pct}%`,
-                background: `linear-gradient(90deg,${selectedRoute.color},#22c55e)`,
-                borderRadius: 6, transition: 'width 0.4s',
-              }} />
-            </div>
-          </div>
-
-          {/* Action buttons */}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={() => navigate('/map')}
-              style={{
-                flex: 1, background: `${selectedRoute.color}22`,
-                border: `1px solid ${selectedRoute.color}`,
-                color: selectedRoute.color, borderRadius: 10,
-                padding: '9px', fontWeight: 700, fontSize: 12, cursor: 'pointer',
-              }}
-            >
-              🗺 View Full Route
-            </button>
-
-          </div>
+          <div style={{ marginBottom: 10 }}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}><span style={{ color: '#94a3b8', fontSize: 10, fontWeight: 600 }}>ROUTE PROGRESS</span><span style={{ color: 'white', fontSize: 11, fontWeight: 700 }}>{pct}%</span></div><div style={{ background: '#1e293b', borderRadius: 6, height: 8 }}><div style={{ height: '100%', width: `${pct}%`, background: `linear-gradient(90deg,${selectedRoute.color},#22c55e)`, borderRadius: 6, transition: 'width 0.4s' }} /></div></div>
+          <div style={{ display: 'flex', gap: 8 }}><button onClick={() => navigate('/map')} style={{ flex: 1, background: `${selectedRoute.color}22`, border: `1px solid ${selectedRoute.color}`, color: selectedRoute.color, borderRadius: 10, padding: '9px', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>🗺 View Full Route</button></div>
         </div>
       )}
     </div>

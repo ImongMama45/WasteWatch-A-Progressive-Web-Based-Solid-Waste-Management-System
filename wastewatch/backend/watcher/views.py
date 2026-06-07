@@ -1,4 +1,5 @@
-from rest_framework import viewsets, permissions
+from django.utils import timezone
+from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import GarbageReport, CollectionConfirmation, GarbageHotspot, Escalation, ReportStatus
@@ -19,67 +20,133 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        
-        # Public-facing queries (like for maps) usually filter for 'approved'
-        # Check if a 'status' query param is passed, or if we should default to filtering
-        status_filter = self.request.query_params.get('status')
+        qs = GarbageReport.objects.all()
         
         # 1. Anonymous users see only approved reports
         if not user.is_authenticated:
-            qs = GarbageReport.objects.filter(status=ReportStatus.APPROVED)
+            return qs.filter(status=ReportStatus.APPROVED)
         
         # 2. Admins see everything
-        elif user.role == 'admin':
-            qs = GarbageReport.objects.all()
+        if user.role == 'admin':
+            return qs
             
-        # 3. Barangay Officials see reports in their barangay
-        elif user.role == 'brgy_official':
-            qs = GarbageReport.objects.filter(barangay=user.barangay)
+        # 3. Barangay Officials see reports in their assigned barangay
+        if user.role == 'brgy_official':
+            if user.barangay:
+                return qs.filter(barangay=user.barangay)
+            return qs.none() # Or all if they have no barangay? User requirement says "Receive ONLY reports within their barangay"
             
-        # 4. Citizens see their own reports PLUS all approved reports from others
-        else:
-            from django.db.models import Q
-            qs = GarbageReport.objects.filter(
-                Q(user=user) | Q(status=ReportStatus.APPROVED)
-            )
-
-        if status_filter:
-            qs = qs.filter(status=status_filter)
-            
-        return qs
+        # 4. Citizens/Watchers see their own reports PLUS all approved reports
+        from django.db.models import Q
+        return qs.filter(
+            Q(user=user) | Q(status=ReportStatus.APPROVED)
+        )
 
     def perform_create(self, serializer):
         # Automatically set to PENDING on creation
-        # user=None if guest
         user = self.request.user if self.request.user.is_authenticated else None
-        serializer.save(user=user, status=ReportStatus.PENDING)
+        
+        # If barangay not provided, try to find it from address string
+        barangay = serializer.validated_data.get('barangay')
+        address = serializer.validated_data.get('address', '')
+        
+        if not barangay and address:
+            from accounts.models import Barangay
+            # Try to find barangay name in address
+            # Sort by length descending to match "Barangay 10" before "Barangay 1"
+            all_brgys = Barangay.objects.all()
+            for brgy in sorted(all_brgys, key=lambda x: len(x.name), reverse=True):
+                if brgy.name.lower() in address.lower():
+                    barangay = brgy
+                    break
+        
+        # Fallback to user's barangay if still not found
+        if not barangay and user and user.barangay:
+            barangay = user.barangay
+            
+        serializer.save(user=user, status=ReportStatus.PENDING, barangay=barangay)
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=True, methods=['post', 'patch'], permission_classes=[permissions.IsAuthenticated])
     def approve(self, request, pk=None):
+        """PENDING -> APPROVED. Saves audit trail."""
         if request.user.role not in ['admin', 'brgy_official']:
             return Response({'error': 'Not authorized'}, status=403)
         
         report = self.get_object()
-        report.status = ReportStatus.APPROVED
-        report.save()
-        return Response({'status': 'approved'})
+        
+        # Security: Barangay official can only approve reports in their barangay
+        if request.user.role == 'brgy_official' and report.barangay != request.user.barangay:
+            return Response({'error': 'Cannot approve reports outside your barangay'}, status=status.HTTP_403_FORBIDDEN)
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+        report.status = ReportStatus.APPROVED
+        report.approved_by = request.user
+        report.approved_at = timezone.now()
+        report.save()
+        return Response(GarbageReportSerializer(report).data)
+
+    @action(detail=True, methods=['post', 'patch'], permission_classes=[permissions.IsAuthenticated])
     def reject(self, request, pk=None):
+        """PENDING -> REJECTED. Saves reason and audit trail."""
         if request.user.role not in ['admin', 'brgy_official']:
             return Response({'error': 'Not authorized'}, status=403)
         
         report = self.get_object()
+        
+        # Security: Barangay official can only reject reports in their barangay
+        if request.user.role == 'brgy_official' and report.barangay != request.user.barangay:
+            return Response({'error': 'Cannot reject reports outside your barangay'}, status=status.HTTP_403_FORBIDDEN)
+
+        reason = request.data.get('rejection_reason', '')
+        if not reason:
+            return Response({'rejection_reason': 'This field is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
         report.status = ReportStatus.REJECTED
+        report.rejected_by = request.user
+        report.rejected_at = timezone.now()
+        report.rejection_reason = reason
         report.save()
-        return Response({'status': 'rejected'})
+        return Response(GarbageReportSerializer(report).data)
 
     @action(detail=False, methods=['get'])
-    def public_map(self, request):
-        """Returns only approved reports for the public map."""
+    def public(self, request):
+        """Returns ONLY approved reports for the public map."""
         approved_reports = GarbageReport.objects.filter(status=ReportStatus.APPROVED)
         serializer = self.get_serializer(approved_reports, many=True)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def map_pins(self, request):
+        """
+        Public-facing map pins endpoint.
+        Returns ONLY APPROVED reports for everyone.
+        (Special roles like admin/watcher can use the main list endpoint to see PENDING)
+        """
+        qs = GarbageReport.objects.filter(status=ReportStatus.APPROVED).exclude(
+            latitude__isnull=True
+        ).exclude(
+            longitude__isnull=True
+        )
+
+        data = []
+        for r in qs.select_related('barangay')[:300]:
+            try:
+                data.append({
+                    'id':            r.id,
+                    'lat':           float(r.latitude),
+                    'lng':           float(r.longitude),
+                    'issue_type':    r.issue_type,
+                    'severity':      r.severity,
+                    'status':        r.status,
+                    'barangay_name': r.barangay.name if r.barangay else 'Unknown',
+                    'address':       r.address,
+                    'reported':      r.created_at.isoformat(),
+                    'description':   r.description,
+                    'image':         r.image.url if r.image else None,
+                })
+            except (TypeError, ValueError, AttributeError):
+                continue
+
+        return Response(data)
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
@@ -91,44 +158,6 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
             'resolved': qs.filter(status=ReportStatus.RESOLVED).count(),
             'rejected': qs.filter(status=ReportStatus.REJECTED).count(),
         })
-
-    @action(detail=False, methods=['get'], url_path='map_pins')
-    def map_pins(self, request):
-        """
-        Returns geolocated garbage reports for the live map.
-        - Admin / Watcher / Brgy Official / Driver: all pending + approved reports city-wide.
-        - Citizen: only reports from their own barangay.
-        Excludes reports with missing coordinates.
-        """
-        user = request.user
-        base_qs = GarbageReport.objects.exclude(
-            latitude=None
-        ).exclude(
-            longitude=None
-        ).filter(status__in=[ReportStatus.PENDING, ReportStatus.APPROVED])
-
-        if user.role in _MAP_FULL_ACCESS_ROLES:
-            qs = base_qs
-        elif user.barangay_id:
-            qs = base_qs.filter(barangay=user.barangay)
-        else:
-            qs = base_qs.none()
-
-        data = [
-            {
-                'id':        r.id,
-                'lat':       float(r.latitude),
-                'lng':       float(r.longitude),
-                'type':      r.issue_type,
-                'severity':  r.severity,
-                'status':    r.status,
-                'address':   r.barangay.name if r.barangay else 'Unknown',
-                'reported':  r.created_at,
-                'description': r.description,
-            }
-            for r in qs.select_related('barangay')[:200]  # hard cap for map performance
-        ]
-        return Response(data)
 
 class CollectionConfirmationViewSet(viewsets.ModelViewSet):
     queryset = CollectionConfirmation.objects.all()

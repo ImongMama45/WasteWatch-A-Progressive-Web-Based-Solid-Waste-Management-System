@@ -65,11 +65,6 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
       return
     }
 
-    if (!form.barangay) {
-      setError('Please select your barangay.')
-      return
-    }
-
     setLoading(true)
     try {
       const payload = {
@@ -223,8 +218,8 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
             <input className="form-input" style={{ marginBottom: 8, background: 'var(--surface-2)' }} type="email" name="email" value={form.email} onChange={handleChange} placeholder="Email" required />
             
             <div style={{ width: '100%', textAlign: 'left', marginBottom: 8 }}>
-              <label style={{ fontSize: 11, fontWeight: 700, marginBottom: 4, display: 'block' }}>Barangay</label>
-              <BarangaySelect barangays={barangays} value={form.barangay} onChange={id => setForm(f => ({ ...f, barangay: id }))} />
+              <label style={{ fontSize: 11, fontWeight: 700, marginBottom: 4, display: 'block' }}>Barangay (Opsyonal)</label>
+              <BarangaySelect barangays={barangays} value={form.barangay} onChange={id => setForm(f => ({ ...f, barangay: id }))} label="Piliin ang barangay (Opsyonal)" />
             </div>
 
             <input className="form-input" style={{ marginBottom: 8, background: 'var(--surface-2)' }} type="password" name="password" value={form.password} onChange={handleChange} placeholder="Password" required />

@@ -4,6 +4,8 @@ from .models import GarbageReport, CollectionConfirmation, GarbageHotspot, Escal
 class GarbageReportSerializer(serializers.ModelSerializer):
     barangay_name = serializers.CharField(source='barangay.name', read_only=True)
     user_name = serializers.SerializerMethodField()
+    approved_by_name = serializers.CharField(source='approved_by.full_name', read_only=True)
+    rejected_by_name = serializers.CharField(source='rejected_by.full_name', read_only=True)
     
     class Meta:
         model = GarbageReport

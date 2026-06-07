@@ -78,9 +78,9 @@ export default function BrgyDashboard() {
   const trucksRef = useRef(null);
   const navigate = useNavigate()
 
-  const [stats, setStats] = useState({ approved: 0, rejected: 0 })
+  const [stats, setStats] = useState({ pending: 0, approved: 0, rejected: 0, resolved: 0 })
   const [loading, setLoading] = useState(true)
-  const [pendingReports, setPendingReports] = useState(MOCK_PENDING_REPORTS)
+  const [pendingReports, setPendingReports] = useState([])
   const [trucks, setTrucks] = useState(MOCK_TRUCKS)
   const [activeMainTab, setActiveMainTab] = useState('validation')
   const [reportFilter, setReportFilter] = useState('All')
@@ -89,24 +89,63 @@ export default function BrgyDashboard() {
   const [toast, setToast] = useState(null)
 
   useEffect(() => {
-    api.get('/api/brgy/stats/').catch(() => { }).finally(() => setLoading(false))
+    fetchStats()
+    fetchPendingReports()
   }, [])
+
+  async function fetchStats() {
+    try {
+      const res = await api.get('/api/watcher/reports/stats/')
+      setStats(res.data)
+    } catch (err) {
+      console.error('Failed to fetch stats:', err)
+    }
+  }
+
+  async function fetchPendingReports() {
+    setLoading(true)
+    try {
+      // get_queryset handles filtering by user's barangay for brgy_official
+      const res = await api.get('/api/watcher/reports/?status=pending')
+      setPendingReports(res.data)
+    } catch (err) {
+      console.error('Failed to fetch pending reports:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   function showToast(msg) {
     setToast(msg)
     setTimeout(() => setToast(null), 3000)
   }
 
-  function handleApprove(id) {
-    setPendingReports(prev => prev.filter(r => r.id !== id))
-    setExpandedReport(null)
-    showToast('✅ Report approved and added to driver schedule.')
+  async function handleApprove(id) {
+    try {
+      await api.post(`/api/watcher/reports/${id}/approve/`)
+      setPendingReports(prev => prev.filter(r => r.id !== id))
+      setExpandedReport(null)
+      fetchStats()
+      showToast('✅ Report approved and added to driver schedule.')
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to approve report')
+    }
   }
 
-  function handleReject(id) {
-    setPendingReports(prev => prev.filter(r => r.id !== id))
-    setExpandedReport(null)
-    showToast('✕ Report rejected.')
+  async function handleReject(id) {
+    const reason = prompt('Please enter rejection reason:')
+    if (reason === null) return
+    if (!reason.trim()) return alert('Reason required')
+
+    try {
+      await api.post(`/api/watcher/reports/${id}/reject/`, { rejection_reason: reason })
+      setPendingReports(prev => prev.filter(r => r.id !== id))
+      setExpandedReport(null)
+      fetchStats()
+      showToast('✕ Report rejected.')
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to reject report')
+    }
   }
 
   function handleFlagTruck(truckId) {
