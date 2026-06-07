@@ -175,6 +175,7 @@ function PaCard({ icon, iconVariant, title, subtitle, children }) {
 export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod, selectedRoute }) {
   const period = selectedPeriod || 'This Week'
   const kpi = KPI[period] || KPI['This Week']
+
   const trucks = TRUCK_DATA[period] || TRUCK_DATA['This Week']
   const brgy = BRGY_DATA[period] || BRGY_DATA['This Week']
   const trend = TREND_DATA[period] || TREND_DATA['This Week']
@@ -185,13 +186,11 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
 
   return (
     <>
-      {/* ── KPI Row ── */}
       {(() => {
         const fleetScore = Math.round((completionRate * 0.5) + (resolutionRate * 0.3) + (kpi.avgFill * 0.2))
         const fleetUtil = kpi.avgFill
         const scoreVariant = fleetScore >= 80 ? 'green' : fleetScore >= 60 ? 'amber' : 'red'
         const utilVariant = fleetUtil >= 80 ? 'red' : fleetUtil >= 55 ? 'amber' : 'green'
-
         const cards = [
           {
             id: 'fleet-score',
@@ -243,29 +242,21 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
             bar: fleetUtil,
           },
         ]
-
         return (
           <div className="ac-kpi-grid ac-kpi-grid--5" style={{ marginBottom: 20 }}>
             {cards.map(c => (
               <div key={c.id} className={`ac-kpi-card ac-kpi-card--${c.variant} ac-kpi-card--v2`}>
-                {/* accent glow */}
                 <div className="ac-kpi-v2-glow" />
-
-                {/* header row */}
                 <div className="ac-kpi-v2-head">
                   <div className="ac-kpi-icon">
                     <span className="msi" style={{ fontSize: 18 }}>{c.icon}</span>
                   </div>
                   <span className="ac-kpi-label">{c.label}</span>
                 </div>
-
-                {/* value */}
                 <div className="ac-kpi-v2-val-row">
                   <span className="ac-kpi-value">{c.value}</span>
                   {c.unit && <span className="ac-kpi-v2-unit">{c.unit}</span>}
                 </div>
-
-                {/* optional progress bar */}
                 {c.bar !== undefined && (
                   <div className="ac-kpi-v2-track">
                     <div
@@ -274,19 +265,13 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                     />
                   </div>
                 )}
-
-                {/* sub-label */}
                 <div className="ac-kpi-v2-sub">{c.sub}</div>
               </div>
             ))}
           </div>
         )
       })()}
-
-      {/* ── Row 1: Truck Efficiency + Issue Trend ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-
-        {/* Fleet Performance Leaderboard */}
         {(() => {
           const ranked = [...trucks]
             .map(t => {
@@ -298,41 +283,34 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
               return { ...t, score, status }
             })
             .sort((a, b) => b.score - a.score)
-
           const STATUS_META = {
             top: { label: 'Top', bg: 'rgba(46,204,113,.12)', color: 'var(--accent)', border: 'rgba(46,204,113,.3)' },
             good: { label: 'Good', bg: 'rgba(93,173,226,.12)', color: 'var(--info)', border: 'rgba(93,173,226,.3)' },
             fair: { label: 'Fair', bg: 'rgba(243,156,18,.12)', color: 'var(--warning)', border: 'rgba(243,156,18,.3)' },
             poor: { label: 'At Risk', bg: 'rgba(231,76,60,.12)', color: 'var(--danger)', border: 'rgba(231,76,60,.3)' },
           }
-
           const RANK_STYLES = [
             { bg: 'linear-gradient(135deg,#f6c94e,#e0a800)', color: '#7a5100', label: '🥇' },
             { bg: 'linear-gradient(135deg,#c0c7d1,#8e9aaa)', color: '#3a4350', label: '🥈' },
             { bg: 'linear-gradient(135deg,#d4876a,#a85f3d)', color: '#5c2d12', label: '🥉' },
             { bg: 'var(--border)', color: 'var(--text-muted)', label: '' },
           ]
-
           return (
             <PaCard icon="emoji_events" iconVariant="blue" title="Fleet Performance Leaderboard" subtitle="Per-vehicle score · routes, stops & utilisation">
-              {/* Legend row */}
               <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
                 {Object.entries(STATUS_META).map(([k, m]) => (
                   <span key={k} style={{
                     fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
                     background: m.bg, color: m.color, border: `1px solid ${m.border}`,
                     letterSpacing: '.05em', textTransform: 'uppercase',
-                  }}>{m.label}</span>
+                  }}>{ m.label }</span>
                 ))}
               </div>
-
-              {/* Leaderboard rows */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {ranked.map((t, i) => {
                   const rs = RANK_STYLES[Math.min(i, 3)]
                   const sm = STATUS_META[t.status]
                   const isBest = i === 0
-
                   return (
                     <div key={t.id} style={{
                       background: isBest ? 'rgba(246,201,78,.05)' : 'var(--bg)',
@@ -341,9 +319,7 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                       padding: '10px 12px',
                       transition: 'border-color .18s, transform .18s',
                     }}>
-                      {/* Top row: rank + id + status chip + score */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
-                        {/* Rank badge */}
                         <div style={{
                           width: 26, height: 26, borderRadius: 7, flexShrink: 0,
                           background: rs.bg, color: rs.color,
@@ -352,8 +328,6 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                         }}>
                           {i < 3 ? rs.label : `#${i + 1}`}
                         </div>
-
-                        {/* Truck ID + driver */}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{t.id}</span>
@@ -369,30 +343,22 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                             {t.driver}
                           </div>
                         </div>
-
-                        {/* Status chip */}
                         <span style={{
                           fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 20, flexShrink: 0,
                           background: sm.bg, color: sm.color, border: `1px solid ${sm.border}`,
                           textTransform: 'uppercase', letterSpacing: '.05em',
                         }}>{sm.label}</span>
-
-                        {/* Score */}
                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
                           <div style={{ fontSize: 18, fontWeight: 800, color: sm.color, fontFamily: 'var(--font-head)', lineHeight: 1 }}>{t.score}</div>
                           <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 600 }}>/100</div>
                         </div>
                       </div>
-
-                      {/* Score bar */}
                       <div style={{ background: 'var(--border)', borderRadius: 20, height: 4, overflow: 'hidden', marginBottom: 7 }}>
                         <div style={{
                           width: `${t.score}%`, height: '100%', borderRadius: 20,
                           background: sm.color, transition: 'width .55s cubic-bezier(.4,0,.2,1)',
                         }} />
                       </div>
-
-                      {/* Stat pills */}
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         {[
                           { icon: 'check_circle', val: `${t.completed}/${t.routes}`, label: 'routes', color: 'var(--accent)' },
@@ -418,10 +384,7 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
             </PaCard>
           )
         })()}
-
-        {/* Issue Trend Line */}
         <PaCard icon="trending_up" iconVariant="amber" title="Daily Issue Trend" subtitle="Reported incidents per day">
-          {/* Mini stats */}
           <div style={{ display: 'flex', gap: 20, marginBottom: 16 }}>
             {[
               { label: 'Peak Day', value: TREND_LABELS[trend.indexOf(Math.max(...trend))], color: 'var(--danger)' },
@@ -434,9 +397,7 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
               </div>
             ))}
           </div>
-
           <TrendLine values={trend} labels={TREND_LABELS} color="var(--danger)" />
-
           <div style={{ marginTop: 16 }}>
             <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.06em', marginBottom: 8, textTransform: 'uppercase' }}>
               Issue Type Breakdown
@@ -450,11 +411,7 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
           </div>
         </PaCard>
       </div>
-
-      {/* ── Row 2: Reports per Barangay + Waste Collected ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-
-        {/* Barangay Performance Leaderboard */}
         {(() => {
           const maxReports = Math.max(...brgy.map(b => b.reports), 1)
           const ranked = [...brgy]
@@ -467,32 +424,26 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
               return { ...b, resRate, density, score, needsAttn, tier }
             })
             .sort((a, b) => b.score - a.score)
-
           const TIER = {
             excellent: { color: 'var(--accent)', bg: 'rgba(46,204,113,.1)', border: 'rgba(46,204,113,.28)' },
             good: { color: 'var(--info)', bg: 'rgba(93,173,226,.1)', border: 'rgba(93,173,226,.28)' },
             fair: { color: 'var(--warning)', bg: 'rgba(243,156,18,.1)', border: 'rgba(243,156,18,.28)' },
             poor: { color: 'var(--danger)', bg: 'rgba(231,76,60,.1)', border: 'rgba(231,76,60,.28)' },
           }
-
           const MEDALS = ['🥇', '🥈', '🥉']
-
           return (
             <PaCard icon="leaderboard" iconVariant="red" title="Barangay Performance Leaderboard" subtitle="Service score · resolution efficiency · activity">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
                 {ranked.map((b, i) => {
                   const tm = TIER[b.tier]
                   const isTop = i === 0
-
                   return (
                     <div key={b.name} style={{
                       background: isTop ? 'rgba(246,201,78,.04)' : 'var(--bg)',
                       border: `1px solid ${isTop ? 'rgba(246,201,78,.22)' : tm.border}`,
                       borderRadius: 11, padding: '10px 12px',
                     }}>
-                      {/* Row 1: rank · name · badges · score */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
-                        {/* Rank badge */}
                         <div style={{
                           width: 26, height: 26, borderRadius: 7, flexShrink: 0,
                           background: i < 3
@@ -504,8 +455,6 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                         }}>
                           {i < 3 ? MEDALS[i] : `#${i + 1}`}
                         </div>
-
-                        {/* Name */}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
@@ -528,21 +477,15 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                             {b.resolved}/{b.reports} resolved · {b.reports} total reports
                           </div>
                         </div>
-
-                        {/* Service score */}
                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
                           <div style={{ fontSize: 18, fontWeight: 800, color: tm.color, fontFamily: 'var(--font-head)', lineHeight: 1 }}>{b.score}</div>
                           <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 600 }}>score</div>
                         </div>
                       </div>
-
-                      {/* Resolution efficiency bar (split green/red) */}
                       <div style={{ display: 'flex', height: 5, borderRadius: 20, overflow: 'hidden', background: 'var(--border)', marginBottom: 6 }}>
                         <div style={{ width: `${b.resRate}%`, background: tm.color, transition: 'width .55s cubic-bezier(.4,0,.2,1)' }} />
                         <div style={{ width: `${100 - b.resRate}%`, background: 'rgba(231,76,60,.25)', transition: 'width .55s cubic-bezier(.4,0,.2,1)' }} />
                       </div>
-
-                      {/* Stat pills */}
                       <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                         <div style={{
                           display: 'flex', alignItems: 'center', gap: 3,
@@ -576,8 +519,6 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
             </PaCard>
           )
         })()}
-
-        {/* Waste Collected per Barangay */}
         <PaCard icon="scale" iconVariant="blue" title="Waste Collected (kg)" subtitle="Per barangay, current period">
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 100, marginBottom: 8 }}>
             {brgy.map(b => <Bar key={b.name} value={b.kg} max={maxKg} color="var(--info)" height={100} />)}
@@ -589,7 +530,6 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
               </span>
             ))}
           </div>
-
           <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.06em', marginBottom: 8, textTransform: 'uppercase' }}>
             Top Reporters
           </div>
@@ -607,8 +547,6 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
           ))}
         </PaCard>
       </div>
-
-      {/* ── Route Reliability Analysis ── */}
       {(() => {
         const enriched = trucks.map(t => {
           const missRate = t.routes > 0 ? (t.missed / t.routes) * 100 : 0
@@ -617,27 +555,19 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
           const category = reliability >= 90 ? 'excellent' : reliability >= 75 ? 'good' : reliability >= 50 ? 'needs-work' : 'critical'
           return { ...t, missRate, reliability, completion, category }
         })
-
         const fleetAvg = Math.round(enriched.reduce((s, t) => s + t.reliability, 0) / enriched.length)
-
         const CAT = {
           excellent: { label: 'Excellent', color: 'var(--accent)', bg: 'rgba(46,204,113,.1)', border: 'rgba(46,204,113,.3)', icon: 'verified' },
           good: { label: 'Good', color: 'var(--info)', bg: 'rgba(93,173,226,.1)', border: 'rgba(93,173,226,.3)', icon: 'thumb_up' },
           'needs-work': { label: 'Needs Work', color: 'var(--warning)', bg: 'rgba(243,156,18,.1)', border: 'rgba(243,156,18,.3)', icon: 'warning' },
           critical: { label: 'Critical', color: 'var(--danger)', bg: 'rgba(231,76,60,.1)', border: 'rgba(231,76,60,.3)', icon: 'error' },
         }
-
         const catCounts = Object.keys(CAT).map(k => ({
           key: k, ...CAT[k], count: enriched.filter(t => t.category === k).length,
         }))
-
         return (
           <PaCard icon="verified_user" iconVariant="green" title="Route Reliability Analysis" subtitle="Per-vehicle reliability score · completion rate · fleet average">
-
-            {/* ── Summary strip ── */}
             <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 16, alignItems: 'center', marginBottom: 20 }}>
-
-              {/* Fleet avg donut-like ring */}
               <div style={{ position: 'relative', width: 80, height: 80, flexShrink: 0 }}>
                 <svg width="80" height="80" viewBox="0 0 80 80">
                   <circle cx="40" cy="40" r="32" fill="none" stroke="var(--border)" strokeWidth="8" />
@@ -656,8 +586,6 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                   <span style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 600 }}>avg</span>
                 </div>
               </div>
-
-              {/* Category breakdown pills */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                 {catCounts.map(c => (
                   <div key={c.key} style={{
@@ -673,8 +601,6 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                   </div>
                 ))}
               </div>
-
-              {/* Fleet label */}
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 2 }}>Fleet avg</div>
                 <div style={{ fontSize: 26, fontWeight: 800, fontFamily: 'var(--font-head)', lineHeight: 1, color: fleetAvg >= 90 ? 'var(--accent)' : fleetAvg >= 75 ? 'var(--info)' : fleetAvg >= 50 ? 'var(--warning)' : 'var(--danger)' }}>
@@ -683,39 +609,30 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                 <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>reliability</div>
               </div>
             </div>
-
-            {/* ── Per-truck rows ── */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
               {enriched.map(t => {
                 const cm = CAT[t.category]
                 const aboveAvg = t.reliability >= fleetAvg
-
                 return (
                   <div key={t.id} style={{
                     background: 'var(--bg)', border: `1px solid ${cm.border}`,
                     borderRadius: 12, padding: '12px 14px', position: 'relative', overflow: 'hidden',
                   }}>
-                    {/* subtle tinted corner */}
                     <div style={{
                       position: 'absolute', top: -20, right: -20, width: 60, height: 60,
                       borderRadius: '50%', background: cm.bg, pointerEvents: 'none',
                     }} />
-
-                    {/* Header */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
                       <div>
                         <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)' }}>{t.id}</div>
                         <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 110 }}>{t.driver}</div>
                       </div>
-                      {/* Category chip */}
                       <span style={{
                         fontSize: 8, fontWeight: 800, padding: '2px 7px', borderRadius: 20,
                         background: cm.bg, color: cm.color, border: `1px solid ${cm.border}`,
                         textTransform: 'uppercase', letterSpacing: '.05em', flexShrink: 0,
                       }}>{cm.label}</span>
                     </div>
-
-                    {/* Reliability score + fleet delta */}
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
                       <span style={{ fontSize: 28, fontWeight: 800, fontFamily: 'var(--font-head)', color: cm.color, lineHeight: 1 }}>{t.reliability}</span>
                       <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>%</span>
@@ -728,16 +645,12 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                         {aboveAvg ? '▲' : '▼'} {Math.abs(t.reliability - fleetAvg)}% vs avg
                       </span>
                     </div>
-
-                    {/* Reliability bar */}
                     <div style={{ background: 'var(--border)', borderRadius: 20, height: 5, overflow: 'hidden', marginBottom: 8 }}>
                       <div style={{
                         width: `${t.reliability}%`, height: '100%', borderRadius: 20,
                         background: cm.color, transition: 'width .55s cubic-bezier(.4,0,.2,1)',
                       }} />
                     </div>
-
-                    {/* Completion % + missed count */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         <span className="msi" style={{ fontSize: 12, color: 'var(--accent)' }}>check_circle</span>

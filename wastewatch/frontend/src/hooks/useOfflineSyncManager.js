@@ -20,32 +20,32 @@ import api from '../api/client'
 // ─── Priority map ─────────────────────────────────────────────────────────────
 
 const PRIORITY_MAP = { critical: 0, high: 1, medium: 2, low: 3 }
-const MAX_BATCH    = 5
-const MAX_RETRY    = 3
+const MAX_BATCH = 5
+const MAX_RETRY = 3
 
 // ─── Endpoint registry ────────────────────────────────────────────────────────
 // Maps queue store names to API endpoints + payload transformers
 
 const ENDPOINTS = {
   reports: {
-    url       : '/api/watcher/reports/',
-    transform : (r) => ({
-      waste_type : r.wasteType,
-      severity   : r.severity,
-      notes      : r.notes,
-      latitude   : r.location?.lat,
-      longitude  : r.location?.lng,
-      address    : r.location?.address,
-      created_at : r.createdAt,
+    url: '/api/watcher/reports/',
+    transform: (r) => ({
+      waste_type: r.wasteType,
+      severity: r.severity,
+      notes: r.notes,
+      latitude: r.location?.lat != null ? Math.round(r.location.lat * 1e6) / 1e6 : null,
+      longitude: r.location?.lng != null ? Math.round(r.location.lng * 1e6) / 1e6 : null,
+      address: r.location?.address,
+      created_at: r.createdAt,
     }),
   },
   analytics_queue: {
-    url       : '/api/analytics/kpi/',
-    transform : (r) => r.payload,
+    url: '/api/analytics/kpi/',
+    transform: (r) => r.payload,
   },
   events_queue: {
-    url       : '/api/watcher/escalations/',
-    transform : (r) => r.payload,
+    url: '/api/watcher/escalations/',
+    transform: (r) => r.payload,
   },
 }
 
@@ -57,9 +57,9 @@ export function useOfflineSyncManager() {
   const inFlight    = useRef(new Set())
   const syncingRef  = useRef(false)
 
-  const [isSyncing,  setIsSyncing]  = useState(false)
+  const [isSyncing, setIsSyncing] = useState(false)
   const [lastSyncAt, setLastSyncAt] = useState(null)
-  const [summary,    setSummary]    = useState({ synced: 0, failed: 0, remaining: 0 })
+  const [summary, setSummary] = useState({ synced: 0, failed: 0, remaining: 0 })
 
   const currentOwnerId = (user && user.id) ? String(user.id) : 'anonymous'
 
@@ -68,7 +68,7 @@ export function useOfflineSyncManager() {
     if (inFlight.current.has(item.id)) return null
     inFlight.current.add(item.id)
 
-    const ep    = ENDPOINTS[storeName]
+    const ep = ENDPOINTS[storeName]
     const queue = getQueue(storeName)
 
     try {
@@ -79,7 +79,7 @@ export function useOfflineSyncManager() {
       return { ok: true, id: item.id }
     } catch {
       const retryCount = (item.retryCount || 0) + 1
-      const status     = retryCount >= MAX_RETRY ? 'failed' : 'pending'
+      const status = retryCount >= MAX_RETRY ? 'failed' : 'pending'
       await queue.updateItem(item.id, { status, retryCount })
       return { ok: false, id: item.id }
     } finally {
@@ -93,14 +93,14 @@ export function useOfflineSyncManager() {
     syncingRef.current = true
     setIsSyncing(true)
 
-    let totalSynced  = 0
-    let totalFailed  = 0
-    let totalRemain  = 0
+    let totalSynced = 0
+    let totalFailed = 0
+    let totalRemain = 0
 
     try {
       for (const storeName of Object.keys(ENDPOINTS)) {
         const queue = getQueue(storeName)
-        const all   = await queue.getAll()
+        const all = await queue.getAll()
 
         // Sort by priority then severity
         const pending = all
@@ -120,12 +120,12 @@ export function useOfflineSyncManager() {
 
         // Process in batches
         for (let i = 0; i < pending.length; i += MAX_BATCH) {
-          const batch   = pending.slice(i, i + MAX_BATCH)
+          const batch = pending.slice(i, i + MAX_BATCH)
           const results = await Promise.all(batch.map(item => pushItem(storeName, item)))
           results.forEach(r => {
             if (!r) return
-            if (r.ok)   { totalSynced++;  totalRemain-- }
-            else        { totalFailed++ }
+            if (r.ok) { totalSynced++; totalRemain-- }
+            else { totalFailed++ }
           })
         }
       }

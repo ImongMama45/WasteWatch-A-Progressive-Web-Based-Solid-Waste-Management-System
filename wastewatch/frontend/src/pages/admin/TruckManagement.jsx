@@ -7,11 +7,12 @@
  * - Assign driver and crew members
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useTrucks } from '../../hooks/useTrucks'
 import { useUsers } from '../../hooks/useUsers'
+import api from '../../api/client'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -197,9 +198,189 @@ function TruckModal({ truck, onSave, onClose, drivers, crewPool }) {
   )
 }
 
+function RouteModal({ driverId, driverName, onClose }) {
+  const mapRef = useRef(null)
+  const mapInstance = useRef(null)
+  const [leafletReady, setLeafletReady] = useState(false)
+  const [schedule, setSchedule] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  // Load Leaflet CDN dynamically if not present
+  useEffect(() => {
+    if (window.L) {
+      setLeafletReady(true)
+      return
+    }
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+    document.head.appendChild(link)
+
+    const script = document.createElement('script')
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+    script.onload = () => setLeafletReady(true)
+    document.head.appendChild(script)
+  }, [])
+
+  // Fetch driver schedule
+  useEffect(() => {
+    setLoading(true)
+    api.get('/api/driver/collection-schedules/')
+      .then(res => {
+        const matchingSchedule = res.data.find(s => String(s.driver) === String(driverId))
+        setSchedule(matchingSchedule || null)
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [driverId])
+
+  // Initialize and draw Map once Leaflet is ready and schedule is loaded
+  useEffect(() => {
+    if (!leafletReady || !mapRef.current || mapInstance.current || loading) return
+
+    const L = window.L
+
+    // Default center to Lucena
+    const center = [13.9373, 121.617]
+    const map = L.map(mapRef.current, {
+      center: center,
+      zoom: 14,
+    })
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap',
+      maxZoom: 19,
+    }).addTo(map)
+
+    mapInstance.current = map
+
+    if (schedule && schedule.waypoints && schedule.waypoints.length > 0) {
+      const waypoints = schedule.waypoints
+      const latlngs = waypoints.map(w => [w.lat, w.lng])
+
+      // Draw route line
+      const polyline = L.polyline(latlngs, {
+        color: '#2ecc71',
+        weight: 5,
+        opacity: 0.8,
+        dashArray: '10, 8'
+      }).addTo(map)
+
+      // Draw start point marker
+      const startWp = waypoints[0]
+      const startIcon = L.divIcon({
+        html: `<div style="background:#2ecc71;width:12px;height:12px;border-radius:50%;border:2px solid white;box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>`,
+        className: '',
+        iconSize: [12, 12],
+        iconAnchor: [6, 6]
+      })
+      L.marker([startWp.lat, startWp.lng], { icon: startIcon }).addTo(map).bindPopup('Start Point')
+
+      // Draw stop markers
+      waypoints.slice(1).forEach((wp, index) => {
+        const stopIcon = L.divIcon({
+          html: `<div style="background:#3498db;width:16px;height:16px;border-radius:50%;color:white;font-size:9px;font-weight:bold;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 0 6px rgba(0,0,0,0.5);">${index + 1}</div>`,
+          className: '',
+          iconSize: [16, 16],
+          iconAnchor: [8, 8]
+        })
+        L.marker([wp.lat, wp.lng], { icon: stopIcon }).addTo(map).bindPopup(`Stop ${index + 1}: ${wp.label || ''}`)
+      })
+
+      // Fit map bounds to show full route
+      map.fitBounds(polyline.getBounds(), { padding: [30, 30] })
+    }
+  }, [leafletReady, schedule, loading])
+
+  // Cleanup map instance on unmount
+  useEffect(() => {
+    return () => {
+      if (mapInstance.current) {
+        mapInstance.current.remove()
+        mapInstance.current = null
+      }
+    }
+  }, [])
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)',
+      zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 16,
+    }} onClick={onClose}>
+      <div style={{
+        background: 'var(--surface)', borderRadius: 16, padding: 24,
+        width: '100%', maxWidth: 600, maxHeight: '95vh', overflowY: 'auto',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+      }} onClick={e => e.stopPropagation()}>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div>
+            <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: 0 }}>
+              Route Map
+            </h3>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Assigned to: {driverName}</span>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#888', padding: 0 }}>×</button>
+        </div>
+
+        <div style={{ position: 'relative', width: '100%', height: 350, background: '#1e293b', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+          <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+
+          {(loading || !leafletReady) && (
+            <div style={{
+              position: 'absolute', inset: 0, background: 'rgba(30, 41, 59, 0.85)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 14, fontWeight: 600
+            }}>
+              {loading ? 'Fetching route schedule...' : 'Loading map...'}
+            </div>
+          )}
+
+          {!loading && leafletReady && !schedule && (
+            <div style={{
+              position: 'absolute', inset: 0, background: 'rgba(30, 41, 59, 0.9)',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#fff', padding: 20, textAlign: 'center'
+            }}>
+              <span style={{ fontSize: 36, marginBottom: 10 }}>📍</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: '#e74c3c' }}>No Route Configured</span>
+              <span style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>This driver does not have a route schedule assigned.</span>
+            </div>
+          )}
+        </div>
+
+        {schedule && (
+          <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: 12, fontSize: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Barangays:</span>
+              <span style={{ fontWeight: 600 }}>{schedule.barangay_names || '—'}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Days:</span>
+              <span style={{ fontWeight: 600 }}>{schedule.days || '—'}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Time Schedule:</span>
+              <span style={{ fontWeight: 600 }}>{schedule.start_time?.slice(0, 5)} - {schedule.end_time?.slice(0, 5)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Total Waypoints:</span>
+              <span style={{ fontWeight: 600 }}>{schedule.waypoints?.length || 0} stops</span>
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+          <button className="btn btn-outline" style={{ minWidth: 100 }} onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function TruckManagement() {
+  const navigate = useNavigate()
   const { trucks, loading, saveTruck, deleteTruck: apiDeleteTruck } = useTrucks()
   const { drivers, crew: crewPool } = useUsers()
 
@@ -208,6 +389,7 @@ export default function TruckManagement() {
   const [modal, setModal] = useState(null)   // null | 'add' | truck object
   const [expanded, setExpanded] = useState(null)
   const [toast, setToast] = useState(null)
+  const [viewRouteDriver, setViewRouteDriver] = useState(null)
 
   function showToast(msg) {
     setToast(msg)
@@ -272,6 +454,15 @@ export default function TruckManagement() {
           onClose={() => setModal(null)}
           drivers={drivers}
           crewPool={crewPool}
+        />
+      )}
+
+      {/* Route Map Modal */}
+      {viewRouteDriver && (
+        <RouteModal
+          driverId={viewRouteDriver.id}
+          driverName={viewRouteDriver.name}
+          onClose={() => setViewRouteDriver(null)}
         />
       )}
 
@@ -434,14 +625,23 @@ export default function TruckManagement() {
                         <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px' }}>
                           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 8 }}>DRIVER</div>
                           {truck.driver_name ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <div style={{
-                                width: 32, height: 32, borderRadius: '50%',
-                                background: 'var(--accent)', color: '#0d1117',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                fontWeight: 800, fontSize: 13,
-                              }}>{truck.driver_name[0]}</div>
-                              <span style={{ fontSize: 13, fontWeight: 600 }}>{truck.driver_name}</span>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <div style={{
+                                  width: 32, height: 32, borderRadius: '50%',
+                                  background: 'var(--accent)', color: '#0d1117',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  fontWeight: 800, fontSize: 13,
+                                }}>{truck.driver_name[0]}</div>
+                                <span style={{ fontSize: 13, fontWeight: 600 }}>{truck.driver_name}</span>
+                              </div>
+                              <button
+                                className="btn btn-outline btn-sm"
+                                style={{ fontSize: 11, padding: '4px 10px', height: 'fit-content' }}
+                                onClick={() => setViewRouteDriver({ id: truck.driver, name: truck.driver_name })}
+                              >
+                                🗺️ Show Route
+                              </button>
                             </div>
                           ) : (
                             <span style={{ fontSize: 12, color: '#e74c3c' }}>Not assigned</span>

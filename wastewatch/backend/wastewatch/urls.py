@@ -22,6 +22,9 @@ urlpatterns = [
 
     # JSON API — consumed by the React Vite frontend
     path('api/', include('wastewatch.api_urls')),
+    path('api/driver/', include('driver.urls')),
+    path('api/analytics/', include('analytics.urls')),
+    
 
 ]
 

@@ -142,8 +142,8 @@ export default function DriverStatusPanel() {
 
   useEffect(() => {
     Promise.all([
-      api.get('/api/driver/profile/').catch(() => ({ data: null })),
-      api.get('/api/driver/route/today/').catch(() => ({ data: null })),
+      api.get('/api/driver/shift/profile/').catch(() => ({ data: null })),
+      api.get('/api/driver/route-assignments/today/').catch(() => ({ data: null })),
     ]).then(([profRes, routeRes]) => {
       if (profRes.data) setDriver(d => ({ ...d, ...profRes.data }))
       if (routeRes.data) setRoute(r => ({ ...r, ...routeRes.data }))
@@ -156,16 +156,21 @@ export default function DriverStatusPanel() {
 
   async function handleEndShift() {
     setEnding(true)
-    const result = endShift()
-    setOpStatus('off_shift')
     try {
+      const endTime = new Date()
+      const durationMs = startTime ? (endTime - new Date(startTime)) : 0
       await api.post('/api/driver/shift/end/', {
-        started_at: result.startTime?.toISOString(),
-        ended_at: result.endTime?.toISOString(),
-        duration_ms: result.durationMs,
+        started_at: startTime ? new Date(startTime).toISOString() : null,
+        ended_at: endTime.toISOString(),
+        duration_ms: durationMs,
       })
-    } catch { }
-    setEnding(false)
+      endShift()
+      setOpStatus('off_shift')
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to end shift. Please try again.')
+    } finally {
+      setEnding(false)
+    }
   }
 
   function handleStatusChange(newStatus) {

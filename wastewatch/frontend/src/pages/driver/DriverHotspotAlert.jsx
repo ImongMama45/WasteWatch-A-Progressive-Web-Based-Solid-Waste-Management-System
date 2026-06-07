@@ -108,7 +108,7 @@ function AlertCard({ alert, onNoted, onAddToRoute }) {
 
   async function handleNoted() {
     setLoading('noted')
-    try { await api.post(`/api/driver/hotspots/${alert.id}/noted/`) } catch { }
+    try { await api.post(`/api/watcher/hotspots/${alert.id}/noted/`) } catch { }
     setLoading(null)
     setNoted(true)
     onNoted?.(alert.id)
@@ -116,7 +116,7 @@ function AlertCard({ alert, onNoted, onAddToRoute }) {
 
   async function handleAddToRoute() {
     setLoading('route')
-    try { await api.post(`/api/driver/hotspots/${alert.id}/add-to-route/`) } catch { }
+    try { await api.post(`/api/watcher/hotspots/${alert.id}/add-to-route/`) } catch { }
     setLoading(null)
     setAdded(true)
     onAddToRoute?.(alert.id)
@@ -272,11 +272,14 @@ export default function DriverHotspotAlert() {
   const { position: gpsPosition, isTracking } = useGpsTracking({ enabled: true })
 
   useEffect(() => {
-    api.get('/api/driver/hotspots/nearby/')
-      .then(res => { if (res.data) setAlerts(res.data) })
+    const params = gpsPosition
+      ? `?lat=${gpsPosition.lat}&lng=${gpsPosition.lng}`
+      : ''
+    api.get(`/api/watcher/hotspots/nearby/${params}`)
+      .then(res => { if (res.data?.length) setAlerts(res.data) })
       .catch(() => { })
       .finally(() => setLoading(false))
-  }, [])
+  }, [gpsPosition?.lat, gpsPosition?.lng])
 
   // Sorted + filtered list
   const displayedAlerts = useMemo(() => {

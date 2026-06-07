@@ -51,6 +51,8 @@ const TRUCK_ROUTES = [
 
 const TYPE_LABELS = { overflow: 'Overflow', illegal_dumping: 'Illegal Dumping', missed: 'Missed Pickup' }
 
+// ─── ICON HELPERS ─────────────────────────────────────────────────────────────
+
 const makeTruckIconHtml = (color, label) => `
   <div style="position:relative;width:36px;height:44px;">
     <div style="background:${color};border:2px solid white;border-radius:50% 50% 50% 0;
@@ -75,8 +77,8 @@ const reportIconHtml = (severity) => {
   </div>`
 }
 
-const STATUS_COLORS = { collecting: '#22c55e', en_route: '#f59e0b', idle: '#64748b', done: '#3b82f6' }
 const STATUS_LABELS = { collecting: 'Collecting', en_route: 'En Route', idle: 'Idle', done: 'Done' }
+const STATUS_COLORS = { collecting: '#22c55e', en_route: '#f59e0b', idle: '#64748b', done: '#3b82f6' }
 
 export default function MiniMap() {
   const navigate = useNavigate()
@@ -88,6 +90,13 @@ export default function MiniMap() {
   const [selectedRoute, setSelectedRoute] = useState(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [reports, setReports] = useState([])
+  const [activeTrucks, setActiveTrucks] = useState([])
+  const [liveReports, setLiveReports] = useState([])
+
+  const activeTrucksRef = useRef(activeTrucks)
+  const liveReportsRef = useRef(liveReports)
+  useEffect(() => { activeTrucksRef.current = activeTrucks }, [activeTrucks])
+  useEffect(() => { liveReportsRef.current = liveReports }, [liveReports])
 
   useEffect(() => {
     if (window.L) { setLeafletReady(true); return }
@@ -128,28 +137,50 @@ export default function MiniMap() {
     }
   }, [leafletReady])
 
+  // ── Live Tracking Polling ───────────────────────────────────────────────────
   useEffect(() => {
+    const fetchActiveShifts = () => {
+      api.get('/api/driver/shift/active_shifts/')
+        .then(res => setActiveTrucks(res.data))
+        .catch(console.error)
+    }
+    const fetchReports = () => {
+      api.get('/api/watcher/reports/public_map/')
+        .then(res => setReports(res.data))
+        .catch(console.error)
+      api.get('/api/watcher/reports/map_pins/')
+        .then(res => setLiveReports(res.data))
+        .catch(console.error)
+    }
+    fetchActiveShifts()
     fetchReports()
+    const shiftsIntv = setInterval(fetchActiveShifts, 10000)
+    const reportsIntv = setInterval(fetchReports, 30000)
+    return () => {
+      clearInterval(shiftsIntv)
+      clearInterval(reportsIntv)
+    }
   }, [])
 
-  async function fetchReports() {
-    try {
-      const res = await api.get('/api/watcher/reports/public_map/')
-      setReports(res.data)
-    } catch (err) {
-      console.error('Failed to fetch reports:', err)
-    }
-  }
-
+  // ── Redraw when state changes ─────────────────────────────
   useEffect(() => {
     if (mapInstance) drawLayers(mapInstance)
-  }, [mapInstance, reports])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapInstance, reports, activeTrucks, liveReports])
+
+  function clearLayers(map) {
+    Object.values(layersRef.current).forEach(l => {
+      try { map.removeLayer(l) } catch {}
+    })
+    layersRef.current = {}
+  }
 
   function drawLayers(map) {
     const L = window.L
-    Object.values(layersRef.current).forEach(l => { try { map.removeLayer(l) } catch { } })
-    layersRef.current = {}
+    if (!L) return
+    clearLayers(map)
 
+    // Draw Mock Static Routes
     TRUCK_ROUTES.forEach(route => {
       const donePts = route.waypoints.slice(0, route.completedUpTo + 1)
       const remPts = route.waypoints.slice(route.completedUpTo)
@@ -177,19 +208,45 @@ export default function MiniMap() {
       layersRef.current[`rem-${route.id}`] = remLine
     })
 
-    TRUCK_ROUTES.forEach(route => {
-      const pos = route.waypoints[route.completedUpTo]
-      const icon = L.divIcon({ html: makeTruckIconHtml(route.color, route.truckId), className: '', iconSize: [36, 44], iconAnchor: [18, 44] })
+    // Truck markers (LIVE)
+    activeTrucksRef.current.forEach(truck => {
+      const pos = [truck.lat, truck.lng]
+      const icon = L.divIcon({
+        html: makeTruckIconHtml("#14b8a6", truck.truckId),
+        className: '', iconSize: [36, 44], iconAnchor: [18, 44],
+      })
       const m = L.marker(pos, { icon }).addTo(map)
-      m.on('click', () => { setSelectedRoute(route); setPanelOpen(true) })
-      layersRef.current[`truck-${route.id}`] = m
+      
+      const mockRoute = {
+        id: truck.id,
+        truckId: truck.truckId,
+        driver: truck.driver,
+        barangay: "Live Tracking",
+        status: "collecting",
+        capacity: 50,
+        collectedCount: 0,
+        totalPoints: 0,
+        eta: "N/A",
+        color: "#14b8a6"
+      }
+      m.on('click', () => { setSelectedRoute(mockRoute); setPanelOpen(true) })
+      layersRef.current[`live-truck-${truck.id}`] = m
     })
 
+    // Garbage reports (Static from Public Map)
     reports.forEach(r => {
       const icon = L.divIcon({ html: reportIconHtml(r.severity), className: '', iconSize: [24, 30], iconAnchor: [6, 30] })
-      const m = L.marker([r.latitude, r.longitude], { icon }).addTo(map)
-      m.bindPopup(`<b>⚠️ ${TYPE_LABELS[r.issue_type] || r.issue_type}</b><br/><small>${r.barangay_name}</small>`)
+      const m = L.marker([r.latitude || r.lat, r.longitude || r.lng], { icon }).addTo(map)
+      m.bindPopup(`<b>⚠️ ${TYPE_LABELS[r.issue_type] || r.waste_type || 'Garbage'}</b><br/><small>${r.barangay_name || r.notes || ''}</small>`)
       layersRef.current[`rep-${r.id}`] = m
+    })
+
+    // Garbage reports (Live Pins)
+    liveReportsRef.current.forEach(r => {
+      const icon = L.divIcon({ html: reportIconHtml(r.severity), className: '', iconSize: [24, 30], iconAnchor: [6, 30] })
+      const m = L.marker([r.lat, r.lng], { icon }).addTo(map)
+      m.bindPopup(`<b>⚠️ ${r.waste_type || 'Garbage'}</b><br/><small>${r.notes || ''}</small>`)
+      layersRef.current[`live-rep-${r.id}`] = m
     })
   }
 
@@ -208,10 +265,41 @@ export default function MiniMap() {
           <span style={{ color: '#14b8a6', fontSize: 13, fontWeight: 600 }}>Loading map…</span>
         </div>
       )}
-      <button onClick={() => navigate('/map')} style={{ position: 'absolute', top: 10, right: 10, zIndex: 400, background: 'rgba(20,184,166,0.9)', border: 'none', color: 'white', borderRadius: 8, padding: '5px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 10px rgba(20,184,166,0.4)', display: 'flex', alignItems: 'center', gap: 5 }}>⛶ Full Map</button>
-      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(to top,rgba(15,23,42,0.95),rgba(15,23,42,0))', padding: '20px 14px 10px', display: 'flex', gap: 16, alignItems: 'flex-end', zIndex: 400, pointerEvents: 'none' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}><div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px #22c55e' }} /><span style={{ color: '#cbd5e1', fontSize: 11 }}>{TRUCK_ROUTES.filter(r => r.status === 'collecting').length} Active Trucks</span></div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}><div style={{ width: 7, height: 7, borderRadius: '50%', background: '#f59e0b', boxShadow: '0 0 6px #f59e0b' }} /><span style={{ color: '#cbd5e1', fontSize: 11 }}>{reports.length} Reports Nearby</span></div>
+
+      {/* ── EXPAND BUTTON (top-right) ── */}
+      <button
+        onClick={() => navigate('/map')}
+        style={{
+          position: 'absolute', top: 10, right: 10, zIndex: 400,
+          background: 'rgba(20,184,166,0.9)', border: 'none',
+          color: 'white', borderRadius: 8, padding: '5px 10px',
+          fontSize: 11, fontWeight: 700, cursor: 'pointer',
+          boxShadow: '0 2px 10px rgba(20,184,166,0.4)',
+          display: 'flex', alignItems: 'center', gap: 5,
+        }}
+      >
+        ⛶ Full Map
+      </button>
+
+      {/* ── STATS BAR (bottom of map) ── */}
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0,
+        background: 'linear-gradient(to top,rgba(15,23,42,0.95),rgba(15,23,42,0))',
+        padding: '20px 14px 10px',
+        display: 'flex', gap: 16, alignItems: 'flex-end',
+        zIndex: 400,
+        pointerEvents: 'none',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px #22c55e' }} />
+          <span style={{ color: '#cbd5e1', fontSize: 11 }}>
+            {activeTrucks.length} Active Trucks
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#f59e0b', boxShadow: '0 0 6px #f59e0b' }} />
+          <span style={{ color: '#cbd5e1', fontSize: 11 }}>{liveReports.length + reports.length} Reports Nearby</span>
+        </div>
       </div>
       {panelOpen && selectedRoute && (
         <div style={{ background: '#0f172a', borderTop: `2px solid ${selectedRoute.color}`, padding: '14px 16px 16px', animation: 'mmSlideDown 0.25s ease' }}>

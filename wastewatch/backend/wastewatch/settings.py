@@ -12,7 +12,12 @@ SECRET_KEY = 'django-insecure-change-this-in-production-use-env-variable'
 
 DEBUG = True
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    '.ngrok-free.app',
+    '.ngrok-free.dev',
+]
 
 # ---------------------------------------------------------------------------
 # Application definition
@@ -174,6 +179,11 @@ CORS_ALLOWED_ORIGINS = [
     'https://localhost:3000',
     'https://127.0.0.1:3000',
 ]
+
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://.*\.ngrok-free\.app$",
+    r"^https://.*\.ngrok-free\.dev$",
+]
 if lan_ip:
     CORS_ALLOWED_ORIGINS.append(f'http://{lan_ip}:3000')
     CORS_ALLOWED_ORIGINS.append(f'https://{lan_ip}:3000')
@@ -185,6 +195,9 @@ CSRF_TRUSTED_ORIGINS = [
     'http://127.0.0.1:3000',
     'https://localhost:3000',
     'https://127.0.0.1:3000',
+
+    'https://*.ngrok-free.app',
+    'https://*.ngrok-free.dev',
 ]
 if lan_ip:
     CSRF_TRUSTED_ORIGINS.append(f'http://{lan_ip}:3000')

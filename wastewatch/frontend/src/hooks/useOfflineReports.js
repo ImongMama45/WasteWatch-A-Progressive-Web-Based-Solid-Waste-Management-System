@@ -151,6 +151,9 @@ export function useOfflineReports() {
       formData.append('issue_type',  report.wasteType)
       formData.append('severity',    report.severity)
       formData.append('description', report.notes)
+      formData.append('address',     report.location?.address || '')
+      formData.append('created_at',  report.createdAt || new Date().toISOString())
+
       if (report.location?.lat) formData.append('latitude', report.location.lat)
       if (report.location?.lng) formData.append('longitude', report.location.lng)
       
