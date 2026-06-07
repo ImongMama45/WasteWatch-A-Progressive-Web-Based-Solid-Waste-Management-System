@@ -2,6 +2,7 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from datetime import timezone
+from django.utils.dateparse import parse_datetime
 from .models import (
     Truck,
     Dumpsite,
@@ -132,14 +133,48 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
     serializer_class = PickupStatusSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def get_queryset(self):
+        qs = (
+            super()
+            .get_queryset()
+            .select_related('driver', 'schedule', 'schedule__truck')
+        )
+
+        user = self.request.user
+        params = self.request.query_params
+
+        schedule_id = params.get('schedule_id')
+        if schedule_id:
+            qs = qs.filter(schedule_id=schedule_id)
+
+        driver_id = params.get('driver_id')
+        if driver_id:
+            qs = qs.filter(driver_id=driver_id)
+        elif getattr(user, 'role', None) == 'driver':
+            qs = qs.filter(driver=user)
+
+        updated_after = params.get('updated_after')
+        if updated_after:
+            parsed = parse_datetime(updated_after)
+            if parsed:
+                qs = qs.filter(updated_at__gt=parsed)
+
+        return qs.order_by('schedule_id', 'stop_order', '-updated_at')
+
     @action(detail=False, methods=['get'], url_path='current')
     def current(self, request):
         """
         Returns the driver's next uncompleted stop for today.
         Maps to GET /api/driver/stops/current/
         """
-        assignment = TruckCrewAssignment.objects.filter(driver=request.user, date=timezone.localdate(), is_active=True).first()
-        schedule = assignment.schedule if assignment else CollectionSchedule.objects.filter(driver=request.user).first()
+        today = timezone.localdate()
+        assignment = TruckCrewAssignment.objects.filter(driver=request.user, date=today, is_active=True).first()
+        if assignment and assignment.schedule:
+            schedule = assignment.schedule
+        else:
+            schedule = CollectionSchedule.objects.filter(driver=request.user, date=today).first()
+            if not schedule:
+                schedule = CollectionSchedule.objects.filter(driver=request.user).first()
         if schedule:
             stop = PickupStatus.objects.filter(
                 driver=request.user,
@@ -168,20 +203,30 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='collect')
     def collect(self, request, pk=None):
-        """
-        Driver marks a stop as collected.
-        Maps to POST /api/driver/stops/<id>/collect/
-        """
         stop = self.get_object()
         if stop.driver != request.user:
             return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
 
+        photo = request.FILES.get('photo')
+        if not photo:
+            return Response({'error': 'A proof photo is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
         stop.status = 'COMPLETED'
         stop.note = request.data.get('note') or stop.note
         stop.collected_at = timezone.now()
-        stop.save(update_fields=['status', 'note', 'collected_at', 'updated_at'])
-        return Response({'id': stop.id, 'status': stop.status, 'collected_at': stop.collected_at})
-
+        stop.photo_url = photo
+        stop.save(update_fields=['status', 'note', 'collected_at', 'photo_url', 'updated_at'])
+        return Response({
+            'id': stop.id,
+            'status': stop.status,
+            'collected_at': stop.collected_at,
+            'stop_order': stop.stop_order,
+            'schedule_id': stop.schedule_id,
+            'driver_id': stop.driver_id,
+            'photo_url': stop.photo_url.url if getattr(stop.photo_url, 'url', None) else stop.photo_url,
+            'updated_at': stop.updated_at,
+        })
+    
     @action(detail=False, methods=['get'], url_path='history/today')
     def history_today(self, request):
         """
@@ -234,13 +279,39 @@ class TruckLocationViewSet(viewsets.ModelViewSet):
 
         # 2. Update Live Tracking only when GPS accuracy is good enough
         #    This prevents the dashboard marker from jumping due to a bad fix.
+        MIN_MOVEMENT_M = 10
+        last = (
+            TruckLocation.objects
+            .filter(shift=active_shift)
+            .order_by('-timestamp')
+            .values('latitude', 'longitude')
+            .first()
+        )
+        if last:
+            dist = haversine(
+                float(last['latitude']), float(last['longitude']),
+                float(lat), float(lng)
+            )
+            if dist < MIN_MOVEMENT_M:
+                # Update live position on the shift but don't write a new row
+                if accuracy is None or accuracy <= ACCURACY_THRESHOLD:
+                    active_shift.current_latitude = lat
+                    active_shift.current_longitude = lng
+                    active_shift.last_location_update = timezone.now()
+                    active_shift.save(update_fields=[
+                        'current_latitude', 'current_longitude', 'last_location_update'
+                    ])
+                return Response({'skipped': True, 'reason': 'no_movement'}, status=200)
+
+        # Original logic follows — update live position and store the ping
         if accuracy is None or accuracy <= ACCURACY_THRESHOLD:
             active_shift.current_latitude = lat
             active_shift.current_longitude = lng
             active_shift.last_location_update = timezone.now()
-            active_shift.save(update_fields=['current_latitude', 'current_longitude', 'last_location_update'])
+            active_shift.save(update_fields=[
+                'current_latitude', 'current_longitude', 'last_location_update'
+            ])
 
-        # 3. Always store the raw historical ping (even poor-accuracy ones)
         location = TruckLocation.objects.create(
             driver=driver,
             truck=active_shift.truck,
@@ -351,6 +422,34 @@ class CalendarEventViewSet(viewsets.ModelViewSet):
     serializer_class = CalendarEventSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+def _thin_shift_locations(shift_id):
+    from django.db import connection
+
+    # Get all location IDs for this shift ordered by timestamp,
+    # then keep every 24th one (every ~2 minutes at 5s ping rate).
+    # Delete the rest.
+    location_ids = list(
+        TruckLocation.objects
+        .filter(shift_id=shift_id)
+        .order_by('timestamp')
+        .values_list('id', flat=True)
+    )
+
+    if len(location_ids) <= 24:
+        return  # Short shift — keep everything
+
+    # Keep every 24th record (indices 0, 24, 48, ...)
+    keep_ids = set(location_ids[i] for i in range(0, len(location_ids), 24))
+    delete_qs = TruckLocation.objects.filter(shift_id=shift_id).exclude(id__in=keep_ids)
+    deleted_count = delete_qs.count()
+    delete_qs.delete()
+
+    import logging
+    logging.getLogger(__name__).info(
+        f'Shift {shift_id}: thinned {deleted_count} location records, '
+        f'kept {len(keep_ids)} (~2-min intervals)'
+    )
+
 class DriverShiftViewSet(viewsets.ModelViewSet):
     queryset = DriverShift.objects.all()
     serializer_class = DriverShiftSerializer
@@ -363,16 +462,21 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
         driver_lat = request.data.get('latitude')
         driver_lng = request.data.get('longitude')
         
-        # Get today's assigned truck for the driver
+        # Get today's assigned truck for the driver.
         today = timezone.localdate()
         assignment = TruckCrewAssignment.objects.filter(
             driver=driver, date=today, is_active=True
         ).select_related('schedule').first()
-        truck = assignment.truck if assignment else None
+        schedule = assignment.schedule if assignment else None
+        if not schedule:
+            schedule = CollectionSchedule.objects.filter(driver=driver, date=today).first()
+            if not schedule:
+                schedule = CollectionSchedule.objects.filter(driver=driver).first()
+        truck = assignment.truck if assignment else (schedule.truck if schedule else None)
 
         # Vicinity check
-        if assignment and assignment.schedule and assignment.schedule.waypoints:
-            waypoints = assignment.schedule.waypoints
+        if schedule and schedule.waypoints:
+            waypoints = schedule.waypoints
             if waypoints and len(waypoints) > 0:
                 home_base = waypoints[0] # First waypoint is the home base
                 if driver_lat and driver_lng and 'lat' in home_base and 'lng' in home_base:
@@ -387,6 +491,9 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
                             }, status=status.HTTP_403_FORBIDDEN)
                     except ValueError:
                         pass # Invalid coordinates format
+
+
+        
 
         with transaction.atomic():
             # Check for existing active shifts
@@ -407,6 +514,7 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
             )
         return Response(DriverShiftSerializer(shift).data, status=status.HTTP_201_CREATED)
 
+
     @action(detail=False, methods=['post'], url_path='end')
     def end_shift(self, request):
         driver = request.user
@@ -423,6 +531,17 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
             shift.current_longitude   = None
             shift.last_location_update = None
             shift.save()
+        # ── Thin out this shift's location history outside the transaction ──
+        # Keep one ping every 2 minutes (retain every 24th row at 5s intervals).
+        # This preserves a usable trail for replay without storing 5,760 rows/shift.
+        # Runs after the shift is committed so a failure here doesn't block ending.
+        try:
+            _thin_shift_locations(shift.id)
+        except Exception as e:
+            # Non-fatal — log and continue. The full data is already saved.
+            import logging
+            logging.getLogger(__name__).warning(f'Location thinning failed for shift {shift.id}: {e}')
+
         return Response(DriverShiftSerializer(shift).data)
 
 
@@ -452,11 +571,18 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
                 else:
                     conn_status = 'offline'
 
+                truck = shift.truck
+                if not truck:
+                    schedule = CollectionSchedule.objects.filter(driver=shift.driver, date=timezone.localdate()).first()
+                    if not schedule:
+                        schedule = CollectionSchedule.objects.filter(driver=shift.driver).first()
+                    truck = schedule.truck if schedule else None
+
                 data.append({
                     'id': shift.id,
                     'driver': shift.driver.full_name or shift.driver.username,
-                    'truckId': shift.truck.plate_number if shift.truck else 'Unknown',
-                    'truckModel': shift.truck.model if shift.truck else 'Unknown',
+                    'truckId': truck.plate_number if truck else 'Unknown',
+                    'truckModel': truck.model if truck else 'Unknown',
                     'lat': float(shift.current_latitude),
                     'lng': float(shift.current_longitude),
                     'last_update': shift.last_location_update,
@@ -527,7 +653,6 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
         start_month = today.replace(day=1)
         start_week  = today - datetime.timedelta(days=today.weekday())
 
-        # Completed shifts this month — single aggregate query, no Python iteration
         from django.db.models import Sum, Count
         month_agg = DriverShift.objects.filter(
             driver=user, is_active=False, started_at__date__gte=start_month
@@ -537,7 +662,6 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
         total_hrs   = round(total_ms / 3_600_000, 1)
         avg_mins    = round((total_ms / 1000 / 60) / routes_done, 0) if routes_done else 0
 
-        # Weekly stops per day (Mon–Sun)
         days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
         weekly = []
         for i, day_name in enumerate(days):
@@ -549,7 +673,6 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
             ).count()
             weekly.append({'day': day_name, 'stops': count})
 
-        # Trend: avg duration_ms of last 8 completed shifts → minutes
         recent = list(
             DriverShift.objects.filter(driver=user, is_active=False, duration_ms__isnull=False)
             .order_by('-started_at')[:8]
@@ -567,59 +690,68 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
             'weekly': weekly,
             'trend':  trend,
         })
+    # ↑ analytics ends here — barangay_stops is a SEPARATE method below
 
-        @action(detail=False, methods=['get'], url_path='barangay_stops')
-        def barangay_stops(self, request):
-            """
-            Returns active trucks + stop markers for a given barangay.
-            Stop status is derived from PickupStatus (COMPLETED = collected, next uncompleted = current).
-            Route polyline is intentionally excluded — driver-only.
-            GET /api/driver/shift/barangay_stops/?barangay_name=<name>
-            """
-            barangay_name = request.query_params.get('barangay_name', '').strip()
-            if not barangay_name:
-                return Response({'error': 'barangay_name is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    @action(detail=False, methods=['get'], url_path='barangay_stops',
+            permission_classes=[permissions.IsAuthenticated])
+    def barangay_stops(self, request):
+        """
+        Returns active trucks + stop markers for a given barangay.
+        GET /api/driver/shift/barangay_stops/?barangay_name=<name>
+        """
+        barangay_name = request.query_params.get('barangay_name', '').strip()
+        if not barangay_name:
+            return Response({'error': 'barangay_name is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            now = timezone.now()
-            result_trucks, result_stops = [], []
+        now = timezone.now()
+        result_trucks, result_stops = [], []
 
-            for shift in DriverShift.objects.filter(is_active=True).select_related('driver', 'truck'):
-                schedule = CollectionSchedule.objects.filter(
-                    driver=shift.driver,
-                    barangays__name=barangay_name,
-                ).first()
-                if not schedule:
-                    continue
+        for shift in DriverShift.objects.filter(is_active=True).select_related('driver', 'truck'):
+            schedule = CollectionSchedule.objects.filter(
+                driver=shift.driver,
+                barangays__name=barangay_name,
+            ).first()
+            if not schedule:
+                continue
 
-                age = (now - shift.last_location_update).total_seconds() if shift.last_location_update else None
-                conn = 'active' if age and age <= 60 else 'weak_signal' if age and age <= 300 else 'offline'
+            age = (now - shift.last_location_update).total_seconds() if shift.last_location_update else None
+            conn = 'active' if age and age <= 60 else 'weak_signal' if age and age <= 300 else 'offline'
 
-                if shift.current_latitude and shift.current_longitude:
-                    result_trucks.append({
-                        'id': shift.id, 'driver': shift.driver.full_name,
-                        'truckId': shift.truck.plate_number if shift.truck else 'Unknown',
-                        'lat': float(shift.current_latitude), 'lng': float(shift.current_longitude),
-                        'status': conn,
-                    })
+            if shift.current_latitude and shift.current_longitude:
+                result_trucks.append({
+                    'id': shift.id, 'driver': shift.driver.full_name,
+                    'truckId': shift.truck.plate_number if shift.truck else 'Unknown',
+                    'lat': float(shift.current_latitude), 'lng': float(shift.current_longitude),
+                    'status': conn,
+                })
 
-                completed_orders = set(PickupStatus.objects.filter(
-                    driver=shift.driver, schedule=schedule, status='COMPLETED',
-                ).values_list('stop_order', flat=True))
+            completed_orders = set(PickupStatus.objects.filter(
+                driver=shift.driver, schedule=schedule, status='COMPLETED',
+            ).values_list('stop_order', flat=True))
 
-                nxt = PickupStatus.objects.filter(
-                    driver=shift.driver, schedule=schedule,
-                ).exclude(status='COMPLETED').order_by('stop_order').first()
-                current_order = nxt.stop_order if nxt else None
+            failed_orders = set(PickupStatus.objects.filter(
+                driver=shift.driver, schedule=schedule, status='FAILED',
+            ).values_list('stop_order', flat=True))
 
-                for i, wp in enumerate(schedule.waypoints or []):
-                    if i == 0:
-                        continue  # skip home base waypoint
-                    st = 'collected' if i in completed_orders else 'current' if i == current_order else 'upcoming'
-                    result_stops.append({
-                        'lat': float(wp.get('lat', 0)), 'lng': float(wp.get('lng', 0)),
-                        'label': wp.get('label', f'Stop {i}'),
-                        'status': st, 'stop_order': i,
-                        'driver_id': shift.driver.id, 'driver_name': shift.driver.full_name,
-                    })
+            nxt = PickupStatus.objects.filter(
+                driver=shift.driver, schedule=schedule,
+            ).exclude(status__in=['COMPLETED', 'FAILED']).order_by('stop_order').first()
+            current_order = nxt.stop_order if nxt else None
 
-            return Response({'trucks': result_trucks, 'stops': result_stops})
+            for i, wp in enumerate(schedule.waypoints or []):
+                if i == 0:
+                    continue  # skip home base
+                st = (
+                    'collected' if i in completed_orders
+                    else 'missed' if i in failed_orders
+                    else 'current' if i == current_order
+                    else 'upcoming'
+                )
+                result_stops.append({
+                    'lat': float(wp.get('lat', 0)), 'lng': float(wp.get('lng', 0)),
+                    'label': wp.get('label', f'Stop {i}'),
+                    'status': st, 'stop_order': i,
+                    'driver_id': shift.driver.id, 'driver_name': shift.driver.full_name,
+                })
+
+        return Response({'trucks': result_trucks, 'stops': result_stops})

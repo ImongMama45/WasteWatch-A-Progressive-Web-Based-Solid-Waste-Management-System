@@ -98,6 +98,8 @@
     const barangayGeoRef = useRef(barangayGeo)
     useEffect(() => { barangayGeoRef.current = barangayGeo }, [barangayGeo])
 
+    const pendingDeletesRef = useRef({})
+
     function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
     // Fetch initial lookups
@@ -141,10 +143,22 @@
       document.head.appendChild(s)
     }, [])
 
-    // Init map
+    // Init map (also re-run when builder tab becomes active so map initializes when shown)
     useEffect(() => {
-      if (!mapReady || !mapRef.current || mapInst.current) return
+      console.log('map init effect:', { activeTab, mapReady, mapRef: !!mapRef.current, hasMapInst: !!mapInst.current })
+      if (activeTab !== 'builder') return
+      if (!mapReady || !mapRef.current) return
+      if (mapInst.current) {
+        const existingContainer = mapInst.current.getContainer()
+        if (existingContainer !== mapRef.current) {
+          console.log('map init effect: stale map instance detected, removing old map')
+          try { mapInst.current.remove() } catch (err) { console.error('failed to remove stale map', err) }
+          mapInst.current = null
+        }
+      }
+      if (mapInst.current) return
       const L = window.L
+      console.log('creating leaflet map...')
       const map = L.map(mapRef.current, { center: LUCENA_CENTER, zoom: 14, zoomControl: false })
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors', maxZoom: 19,
@@ -168,7 +182,81 @@
         setAddMode(false)
       })
       mapInst.current = map
-    }, [mapReady])
+      console.log('map initialized', map)
+      try {
+        const ctr = map.getContainer()
+        console.log('map container size (init):', { w: ctr.clientWidth, h: ctr.clientHeight, offsetW: ctr.offsetWidth, offsetH: ctr.offsetHeight })
+        console.log('map container style (init):', { display: getComputedStyle(ctr).display, visibility: getComputedStyle(ctr).visibility, position: getComputedStyle(ctr).position })
+        let ancestor = ctr
+        while (ancestor && ancestor.tagName !== 'HTML') {
+          console.log('ancestor', ancestor.tagName, ancestor.className, { display: getComputedStyle(ancestor).display, visibility: getComputedStyle(ancestor).visibility, width: getComputedStyle(ancestor).width, height: getComputedStyle(ancestor).height })
+          ancestor = ancestor.parentNode
+        }
+        console.log('leaflet tiles count (init):', document.querySelectorAll('.leaflet-tile').length)
+      } catch (err) {}
+      // Ensure Leaflet calculates correct size when container is visible
+      setTimeout(() => { try { console.log('invalidateSize (init)'); map.invalidateSize() } catch (err) {} }, 200)
+    }, [mapReady, activeTab])
+
+    // Helper to create the map if it wasn't initialized by the effect
+    function createMapIfNeeded() {
+      console.log('createMapIfNeeded called', { mapInst: !!mapInst.current, mapReady, activeTab, mapRef: !!mapRef.current })
+      try {
+        if (mapInst.current) {
+          if (mapInst.current.getContainer() !== mapRef.current) {
+            console.log('createMapIfNeeded: stale map instance detected, removing old map')
+            try { mapInst.current.remove() } catch (err) { console.error('failed to remove stale map', err) }
+            mapInst.current = null
+          }
+        }
+        if (mapInst.current) return mapInst.current
+        if (!window.L || !mapRef.current) return null
+        const L = window.L
+        console.log('createMapIfNeeded: instantiating map')
+        const map = L.map(mapRef.current, { center: LUCENA_CENTER, zoom: 14, zoomControl: false })
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap contributors', maxZoom: 19,
+        }).addTo(map)
+        L.control.zoom({ position: 'topright' }).addTo(map)
+        map.on('click', e => {
+          if (!addModeRef.current) return
+          const { lat, lng } = e.latlng
+          const label = `Stop ${stopsRef.current.length + 1}`
+
+          const detectedName = detectBarangay(lat, lng, barangayGeoRef.current)
+          if (detectedName) {
+            const b = barangaysRef.current.find(x => x.name === detectedName)
+            if (b && !selectedBarangaysRef.current.includes(b.id)) {
+              setSelectedBarangays(prev => [...prev, b.id])
+              showToast(`📍 Auto-added Barangay: ${b.name}`)
+            }
+          }
+
+          setStops(prev => [...prev, { lat, lng, label }])
+          setAddMode(false)
+        })
+        mapInst.current = map
+        console.log('createMapIfNeeded: map created', map)
+        setTimeout(() => { try { console.log('invalidateSize (createMapIfNeeded)'); map.invalidateSize(); const ctr = map.getContainer(); console.log('map container size (create):', { w: ctr.clientWidth, h: ctr.clientHeight }); console.log('leaflet tiles count (create):', document.querySelectorAll('.leaflet-tile').length) } catch (err) {} }, 200)
+        return map
+      } catch (err) {
+        console.error('createMapIfNeeded', err)
+        return null
+      }
+    }
+
+    // Recompute map size when the tab becomes visible or window resizes
+    useEffect(() => {
+      if (mapInst.current) {
+        try { mapInst.current.invalidateSize() } catch (err) {}
+      }
+    }, [mapReady, activeTab])
+
+    useEffect(() => {
+      const onResize = () => { if (mapInst.current) try { mapInst.current.invalidateSize() } catch (err) {} }
+      window.addEventListener('resize', onResize)
+      return () => window.removeEventListener('resize', onResize)
+    }, [])
 
     // Redraw route on map
     useEffect(() => {
@@ -232,7 +320,7 @@
         layersRef.current.push(line)
         if (step >= 2) map.fitBounds(line.getBounds(), { padding: [40, 40] })
       }
-    }, [stops, dumpsite, mapReady, step, startPoint])
+    }, [stops, dumpsite, mapReady, step, startPoint, activeTab])
 
     // cursor
     useEffect(() => {
@@ -294,7 +382,9 @@
     }
 
     function handleEdit(s) {
+      console.log('handleEdit called', { id: s?.id, name: s?.barangay_names })
       setActiveTab('builder')
+      setStep(2)
       setEditId(s.id)
       setTruck(s.truck || '')
       setDriver(s.driver || '')
@@ -306,18 +396,109 @@
       
       // Parse waypoints back into startPoint and stops
       if (s.waypoints && s.waypoints.length > 0) {
-        const wps = [...s.waypoints]
-        setStartPoint(wps.shift()) // First waypoint is startPoint
+        const wps = [...s.waypoints].map(w => ({ ...w, lat: parseFloat(w.lat), lng: parseFloat(w.lng) }))
+        const sp = wps.shift()
+        setStartPoint({ ...sp, lat: parseFloat(sp.lat), lng: parseFloat(sp.lng) }) // First waypoint is startPoint
         setStops(wps)
+
+        // Ensure the map recalculates size and fits bounds after switching to builder
+        const allPoints = [sp, ...wps]
+        let ensureAttempts = 0
+        const tryEnsureMap = () => {
+          ensureAttempts += 1
+          console.log('tryEnsureMap attempt', { attempt: ensureAttempts, hasMap: !!mapInst.current })
+          const map = mapInst.current
+          const L = window.L
+          if (!map || !L) {
+            if (ensureAttempts < 20) return setTimeout(tryEnsureMap, 200)
+            return console.warn('tryEnsureMap aborted: map or L missing')
+          }
+          try {
+            map.invalidateSize()
+            const ctr = map.getContainer()
+            const w = ctr?.clientWidth || 0
+            const h = ctr?.clientHeight || 0
+            console.log('map container size (tryEnsureMap):', { w, h })
+            if (ctr) {
+              const style = getComputedStyle(ctr)
+              console.log('map container style (tryEnsureMap):', { display: style.display, visibility: style.visibility, position: style.position, overflow: style.overflow, width: style.width, height: style.height })
+              let ancestor = ctr
+              while (ancestor && ancestor.tagName !== 'HTML') {
+                const ancestorStyle = getComputedStyle(ancestor)
+                console.log('ancestor', ancestor.tagName, ancestor.className, { display: ancestorStyle.display, visibility: ancestorStyle.visibility, width: ancestorStyle.width, height: ancestorStyle.height })
+                ancestor = ancestor.parentNode
+              }
+            }
+            console.log('leaflet tiles count (tryEnsureMap):', document.querySelectorAll('.leaflet-tile').length)
+            // If container is not yet laid out, retry a few times
+            if ((w === 0 || h === 0) && ensureAttempts < 20) {
+              console.log('container size zero, retrying tryEnsureMap')
+              return setTimeout(tryEnsureMap, 200)
+            }
+            console.log('tryEnsureMap: container ready, applying fit/center')
+            if (allPoints.length > 1) {
+              const coords = allPoints.map(p => [p.lat, p.lng])
+              const tempLine = L.polyline(coords)
+              map.fitBounds(tempLine.getBounds(), { padding: [40, 40] })
+              console.log('tryEnsureMap: fitBounds applied')
+            } else if (sp && sp.lat && sp.lng) {
+              map.setView([sp.lat, sp.lng], 14)
+              console.log('tryEnsureMap: setView to start point')
+            }
+          } catch (err) {
+            console.error('tryEnsureMap error', err)
+          }
+        }
+        setTimeout(tryEnsureMap, 250)
+        // Ensure a map exists (create if the effect didn't run)
+        setTimeout(() => { try { createMapIfNeeded() } catch (err) {} }, 300)
       } else {
         setStartPoint(HOME_BASE)
         setStops([])
+        setTimeout(() => { try { if (mapInst.current) mapInst.current.invalidateSize() } catch (err) {} }, 200)
       }
     }
 
     function handleView(s) {
       handleEdit(s)
       // You could also add a read-only mode flag here if desired.
+    }
+
+    function undoDelete(id, item) {
+      const t = pendingDeletesRef.current[id]
+      if (t) {
+        clearTimeout(t)
+        delete pendingDeletesRef.current[id]
+        setSchedules(prev => [item, ...prev])
+        setToast('↩️ Deletion undone')
+        setTimeout(() => setToast(null), 2000)
+      }
+    }
+
+    function handleDelete(s) {
+      // Optimistic UI: remove locally and allow short undo window before server delete
+      setSchedules(prev => prev.filter(x => x.id !== s.id))
+
+      const toastEl = (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span>🗑️ Route deleted</span>
+          <button className="rb-btn" onClick={() => undoDelete(s.id, s)} style={{ background: 'transparent', color: '#f39c12', border: '1px solid rgba(243,156,18,0.15)', padding: '6px 10px', borderRadius: 8, fontWeight: 800 }}>Undo</button>
+        </div>
+      )
+      setToast(toastEl)
+      setTimeout(() => setToast(null), 5000)
+
+      const t = setTimeout(async () => {
+        try {
+          await api.delete(`/api/driver/collection-schedules/${s.id}/`)
+        } catch (err) {
+          console.error(err)
+          showToast('❌ Failed to delete on server')
+        }
+        delete pendingDeletesRef.current[s.id]
+      }, 5000)
+
+      pendingDeletesRef.current[s.id] = t
     }
 
     const handleCreateEvent = async (e) => {
@@ -490,7 +671,7 @@
 
             {/* MAP */}
             <div className="card" style={{ padding: 0, overflow: 'hidden', borderRadius: 14, height: 540, position: 'relative' }}>
-              <div ref={mapRef} style={{ position: 'absolute', inset: 0, zIndex: 1 }} />
+              <div ref={mapRef} style={{ position: 'absolute', inset: 0, zIndex: 1, outline: '2px dashed rgba(46,204,113,0.6)' }} />
               {!mapReady && (
                 <div style={{ position: 'absolute', inset: 0, background: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5 }}>
                   <span style={{ color: '#5dade2', fontWeight: 600 }}>Loading Map…</span>
@@ -805,6 +986,9 @@
                       </button>
                       <button className="rb-btn" onClick={() => handleEdit(s)} style={{ background: 'rgba(243,156,18,0.1)', color: '#f39c12', border: '1px solid rgba(243,156,18,0.3)', borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700 }}>
                         Edit
+                      </button>
+                      <button className="rb-btn" onClick={() => handleDelete(s)} style={{ background: 'transparent', color: '#e74c3c', border: '1px solid rgba(231,76,60,0.12)', borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700 }}>
+                        Delete
                       </button>
                     </div>
                   </div>

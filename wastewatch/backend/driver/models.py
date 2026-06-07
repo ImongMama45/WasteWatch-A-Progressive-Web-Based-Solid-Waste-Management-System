@@ -1,6 +1,8 @@
 from django.db import models
 from django.db.models import Q
 from django.contrib.auth import get_user_model
+from django.db import transaction
+from cloudinary.models import CloudinaryField
 
 User = get_user_model()
 
@@ -64,6 +66,42 @@ class CollectionSchedule(models.Model):
     ]
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
 
+    def save(self, *args, **kwargs):
+        creating = self.pk is None
+        super().save(*args, **kwargs)
+        self.sync_pickup_statuses()
+
+    def sync_pickup_statuses(self):
+        if not self.pk:
+            return
+
+        stops = [wp for idx, wp in enumerate(self.waypoints or []) if idx > 0]
+        desired_order_set = set(range(1, len(stops) + 1))
+        existing_statuses = {ps.stop_order: ps for ps in self.pickups.all()}
+
+        with transaction.atomic():
+            for order, waypoint in enumerate(stops, start=1):
+                address = ''
+                if isinstance(waypoint, dict):
+                    address = waypoint.get('label') or waypoint.get('address') or ''
+                if order in existing_statuses:
+                    ps = existing_statuses[order]
+                    ps.driver = self.driver
+                    ps.schedule = self
+                    ps.address = address
+                    ps.save(update_fields=['driver', 'schedule', 'address'])
+                else:
+                    self.pickups.create(
+                        driver=self.driver,
+                        status='EN_ROUTE',
+                        stop_order=order,
+                        address=address,
+                    )
+
+            stale_ids = [ps.id for order, ps in existing_statuses.items() if order not in desired_order_set]
+            if stale_ids:
+                PickupStatus.objects.filter(id__in=stale_ids).delete()
+
     def __str__(self):
         names = ', '.join(b.name for b in self.barangays.all()[:3])
         return f"Schedule {self.id} - {names or 'City-wide'}"
@@ -92,7 +130,7 @@ class PickupStatus(models.Model):
     stop_order  = models.PositiveIntegerField(default=0, help_text='Order of this stop in the route')
     address     = models.CharField(max_length=255, blank=True)
     note        = models.TextField(blank=True)
-    photo_url   = models.URLField(blank=True)
+    photo_url   = CloudinaryField('collection proof', folder='pickup-proofs/', null=True, blank=True)
     collected_at = models.DateTimeField(null=True, blank=True, help_text='When the driver marked this stop collected')
     updated_at  = models.DateTimeField(auto_now=True)
 

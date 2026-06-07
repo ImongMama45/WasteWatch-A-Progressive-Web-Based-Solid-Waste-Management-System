@@ -180,10 +180,10 @@ export default function NavigationModule({ setRouteState }) {
 
   const GPS_ACCURACY_THRESHOLD = 50 // metres — arrivals require accuracy better than this
 
-  // Arrived if within radius AND GPS accuracy is good enough to trust it.
-  // Mock GPS (dev button) bypasses the accuracy requirement intentionally.
-  const hasGoodAccuracy = isMockActive || gpsAccuracy === null || gpsAccuracy < GPS_ACCURACY_THRESHOLD
-  const isNearDestination = distanceToStop !== null && distanceToStop <= ARRIVAL_RADIUS_M && hasGoodAccuracy
+  // Arrived if within radius.
+  // Mock GPS (dev button) still bypasses accuracy checks for status logic only.
+  const hasGoodAccuracy = isMockActive || gpsAccuracy == null || gpsAccuracy <= GPS_ACCURACY_THRESHOLD
+  const isNearDestination = distanceToStop !== null && distanceToStop <= ARRIVAL_RADIUS_M
 
   // 1. Load Leaflet CDN
   useEffect(() => {

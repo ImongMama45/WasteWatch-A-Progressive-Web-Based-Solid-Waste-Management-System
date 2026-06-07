@@ -24,6 +24,21 @@ const STATUSES = [
   { key: 'issue', label: 'Issue', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
 ]
 
+const ROUTE_SESSION_KEYS = [
+  'ww_route_state',
+  'ww_current_stop_index',
+  'ww_stop_statuses',
+  'ww_current_stop',
+  'ww_route_complete',
+  'ww_extended_mode',
+  'ww_completed_stops',
+  'ww_total_stops',
+]
+
+function clearRouteSession() {
+  ROUTE_SESSION_KEYS.forEach(key => sessionStorage.removeItem(key))
+}
+
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
 /** Convert a days string/array from the schedule into a human-readable label */
@@ -91,16 +106,21 @@ export default function DriverDashboard() {
   const [loading, setLoading] = useState(true)
   const [issueOpen, setIssueOpen] = useState(false)
 
-  const { shiftActive, startTime, formattedTime, startShift, endShift } = useShiftTimer()
+  const { shiftActive, startTime, formattedTime, startShift } = useShiftTimer()
   const { position: gpsPosition, syncFailed, lastSyncedAt } = useGpsTracking({ enabled: shiftActive })
 
   const activeStatus = STATUSES.find(s => s.key === status) || STATUSES[0]
   const firstName = user?.full_name?.split(' ')[0] || 'Driver'
 
-  const progress = routeStats.totalStops > 0
-    ? Math.round((routeStats.completedStops / routeStats.totalStops) * 100)
+  // When no active shift, always show zero progress regardless of stale state
+  const displayStats = shiftActive ? routeStats : {
+    totalStops: 0, completedStops: 0, distanceKm: 0,
+    startTime: '—', estEnd: '—',
+  }
+  const displayProgress = displayStats.totalStops > 0
+    ? Math.round((displayStats.completedStops / displayStats.totalStops) * 100)
     : 0
-  const stopsLeft = routeStats.totalStops - routeStats.completedStops
+  const displayStopsLeft = displayStats.totalStops - displayStats.completedStops
 
   // ── Data fetch ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -177,24 +197,33 @@ export default function DriverDashboard() {
     return () => clearInterval(interval)
   }, [])
 
-  // ── Shift toggle ─────────────────────────────────────────────────────────────
-  async function handleShiftToggle() {
+  // Reset progress immediately when the driver is off duty.
+  useEffect(() => {
     if (!shiftActive) {
-      navigate('/driver/flow')
-    } else {
-      try {
-        const endTime = new Date()
-        const durationMs = startTime ? (endTime - new Date(startTime)) : 0
-        await api.post('/api/driver/shift/end/', {
-          started_at: startTime ? new Date(startTime).toISOString() : null,
-          ended_at: endTime.toISOString(),
-          duration_ms: durationMs,
-        })
-        endShift()
-      } catch (err) {
-        alert(err.response?.data?.error || 'Failed to end shift. Please try again.')
-      }
+      setRouteStats({
+        totalStops: 0,
+        completedStops: 0,
+        distanceKm: 0,
+        startTime: '—',
+        estEnd: '—',
+      })
+      setSchedule(null)
+      setScheduleRows([])
     }
+  }, [shiftActive])
+
+  // ── Shift toggle ─────────────────────────────────────────────────────────────
+  function handleShiftToggle() {
+    if (!shiftActive) {
+      clearRouteSession()
+      navigate('/driver/flow')
+      return
+    }
+
+    // If the driver is currently on shift, route them to the end-shift flow
+    // instead of ending the shift immediately from the dashboard.
+    sessionStorage.setItem('ww_route_state', 'end_shift')
+    navigate('/driver/flow')
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -299,10 +328,10 @@ export default function DriverDashboard() {
             {/* ── STAT CARDS ── */}
             <div className="stat-grid" style={{ marginBottom: 20 }}>
               {[
-                { label: 'Stops Done', value: loading ? '…' : routeStats.completedStops },
-                { label: 'Stops Left', value: loading ? '…' : stopsLeft },
-                { label: 'Distance', value: loading ? '…' : `${routeStats.distanceKm}km` },
-                { label: 'Total Stops', value: loading ? '…' : routeStats.totalStops },
+                { label: 'Stops Done', value: loading ? '…' : displayStats.completedStops },
+                { label: 'Stops Left', value: loading ? '…' : displayStopsLeft },
+                { label: 'Distance', value: loading ? '…' : `${displayStats.distanceKm}km` },
+                { label: 'Total Stops', value: loading ? '…' : displayStats.totalStops },
               ].map(s => (
                 <div key={s.label} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
                   <div className="label">{s.label}</div>
@@ -325,7 +354,7 @@ export default function DriverDashboard() {
                     ? 'LOADING…'
                     : status === 'issue'
                       ? '⚠ DELAYED'
-                      : routeStats.totalStops === 0
+                      : displayStats.totalStops === 0
                         ? 'NO SCHEDULE'
                         : 'IN PROGRESS'}
                 </span>
@@ -347,26 +376,26 @@ export default function DriverDashboard() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                   <span className="text-muted text-sm">Progress (Today)</span>
                   <span style={{ fontSize: 13, fontWeight: 700 }}>
-                    {routeStats.completedStops} / {routeStats.totalStops} stops
+                    {displayStats.completedStops} / {displayStats.totalStops} stops
                   </span>
                 </div>
                 <div style={{ background: 'var(--bg)', borderRadius: 99, height: 8, overflow: 'hidden' }}>
                   <div style={{
                     height: '100%', borderRadius: 99,
                     background: 'linear-gradient(90deg,#2ecc71,#27ae60)',
-                    width: `${progress}%`, transition: 'width .4s ease',
+                    width: `${displayProgress}%`, transition: 'width .4s ease',
                   }} />
                 </div>
                 <div style={{ textAlign: 'right', fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
-                  {progress}% complete
+                  {displayProgress}% complete
                 </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
                 {[
-                  { label: 'Start Time', value: routeStats.startTime },
-                  { label: 'Est. End', value: routeStats.estEnd },
-                  { label: 'Distance', value: `${routeStats.distanceKm} km` },
+                  { label: 'Start Time', value: displayStats.startTime },
+                  { label: 'Est. End', value: displayStats.estEnd },
+                  { label: 'Distance', value: `${displayStats.distanceKm} km` },
                 ].map(item => (
                   <div key={item.label} style={{
                     background: 'var(--bg)', borderRadius: 10, padding: '10px', textAlign: 'center',
@@ -559,10 +588,10 @@ export default function DriverDashboard() {
                 <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: '8px 0' }}>Loading…</div>
               ) : (
                 [
-                  { label: 'Stops Done', value: routeStats.completedStops, color: 'var(--accent)' },
-                  { label: 'Stops Left', value: stopsLeft, color: 'var(--warning)' },
-                  { label: 'Total Stops', value: routeStats.totalStops, color: 'var(--text)' },
-                  { label: 'Distance', value: `${routeStats.distanceKm} km`, color: 'var(--info)' },
+                  { label: 'Stops Done', value: displayStats.completedStops, color: 'var(--accent)' },
+                  { label: 'Stops Left', value: displayStopsLeft, color: 'var(--warning)' },
+                  { label: 'Total Stops', value: displayStats.totalStops, color: 'var(--text)' },
+                  { label: 'Distance', value: `${displayStats.distanceKm} km`, color: 'var(--info)' },
                 ].map(s => (
                   <div key={s.label} style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',

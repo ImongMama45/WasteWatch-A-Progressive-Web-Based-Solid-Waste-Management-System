@@ -7,13 +7,12 @@
  * 2. `/dashboard` → role-based authenticated dashboard
  * 3. Login/Register are accessible but not forced
  * 4. PrivateRoute redirects with ?next= so users return after login
- * 5. MobileOnlyRoute blocks desktop from camera/GPS pages
+ * 5. Route-based pages are available on all screen sizes
  */
 
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import PrivateRoute from './components/PrivateRoute'
-import MobileOnlyRoute from './components/MobileOnlyRoute'
 import DashboardLayout from './components/DashboardLayout'
 
 // Public pages
@@ -74,8 +73,8 @@ export default function App() {
           <Route path="/register" element={<AuthOverlay mode="register" />} />
           <Route path="/about" element={<AboutPage />} />
           <Route path="/map" element={<MapView />} />
-          <Route path="/announcements" element={<NewsPage />} />X
-          <Route path="/schedule" element={<CollectionSchedule />} />X
+          <Route path="/announcements" element={<NewsPage />} />
+          <Route path="/schedule" element={<CollectionSchedule />} />
 
           {/* ── PROTECTED — all screen sizes ── */}
           <Route path="/dashboard" element={
@@ -145,9 +144,7 @@ export default function App() {
           {/* ── DRIVER MODULE ── */}
           <Route path="/driver/flow" element={
             <PrivateRoute>
-              <MobileOnlyRoute>
-                <DriverRouteFlow />
-              </MobileOnlyRoute>
+              <DriverRouteFlow />
             </PrivateRoute>
           } />
 
@@ -195,20 +192,15 @@ export default function App() {
 
           } />
 
-          {/* ── PROTECTED + MOBILE ONLY (camera + GPS) ── */}
           <Route path="/report/submit" element={
             <PrivateRoute>
-              <MobileOnlyRoute>
-                <ReportForm />
-              </MobileOnlyRoute>
+              <ReportForm />
             </PrivateRoute>
           } />
 
           <Route path="/collection/confirm" element={
             <PrivateRoute>
-              <MobileOnlyRoute>
-                <ConfirmCollection />
-              </MobileOnlyRoute>
+              <ConfirmCollection />
             </PrivateRoute>
           } />
 

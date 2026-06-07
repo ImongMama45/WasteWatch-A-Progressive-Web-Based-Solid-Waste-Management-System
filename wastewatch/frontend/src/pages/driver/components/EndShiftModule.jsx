@@ -29,6 +29,21 @@ import Navbar from '../../../components/Navbar'
 
 const BASE_ARRIVAL_RADIUS_M = 150   // slightly larger than stop radius
 
+const ROUTE_SESSION_KEYS = [
+  'ww_route_state',
+  'ww_current_stop_index',
+  'ww_stop_statuses',
+  'ww_current_stop',
+  'ww_route_complete',
+  'ww_extended_mode',
+  'ww_completed_stops',
+  'ww_total_stops',
+]
+
+function clearRouteSession() {
+  ROUTE_SESSION_KEYS.forEach(key => sessionStorage.removeItem(key))
+}
+
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
 function haversineDistance(lat1, lng1, lat2, lng2) {
@@ -357,6 +372,7 @@ export default function EndShiftModule({ setRouteState }) {
         duration_ms: durationMs,
       })
       endShift()
+      clearRouteSession()
       setSubmitted(true)
     } catch (err) {
       console.error('shift/end error:', err.response?.data)
@@ -379,7 +395,9 @@ export default function EndShiftModule({ setRouteState }) {
         duration_ms: durationMs,
       })
       endShift()
-      sessionStorage.clear()
+      // Clear all route-specific session keys so DriverFlow restarts
+      // from AssignmentModule (the first step) on next entry.
+      clearRouteSession()
       navigate('/dashboard', { replace: true })
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to end shift. Please try again.')
@@ -655,7 +673,7 @@ export default function EndShiftModule({ setRouteState }) {
               Stay safe, {firstName}.
             </p>
             <button
-              onClick={() => { sessionStorage.clear(); navigate('/dashboard', { replace: true }) }}
+              onClick={() => { navigate('/dashboard', { replace: true }) }}
               style={{
                 width: '100%', maxWidth: 320, padding: '16px', borderRadius: 30,
                 background: '#0f172a', color: '#fff', border: 'none',
