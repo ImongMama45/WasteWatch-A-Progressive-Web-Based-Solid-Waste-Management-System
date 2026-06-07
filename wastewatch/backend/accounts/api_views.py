@@ -47,16 +47,24 @@ class BarangayViewSet(viewsets.ModelViewSet):
 
 # ── Helper: serialize a User to a safe dict ──────────────────────────────────
 def user_to_dict(user):
+    """
+    Helper to convert a User model instance into a JSON-serializable dict.
+    Used by /api/auth/me/ and admin user list.
+    """
     return {
         'id':            user.id,
-        'full_name':     user.full_name,
-        'email':         user.email,
+        'full_name':     user.full_name or '',
+        'email':         user.email or '',
         'role':          user.role,
-        'employee_type': user.employee_type,
+        'employee_type': user.employee_type or '',
+        'barangay':      user.barangay_id,
         'barangay_id':   user.barangay_id,
         'barangay_name': user.barangay.name if user.barangay else None,
+        'dumpsite':      user.dumpsite_id,
         'dumpsite_id':   user.dumpsite_id,
         'dumpsite_name': user.dumpsite.name if user.dumpsite else None,
+        'is_active':     user.is_active,
+        'created_at':    user.created_at.isoformat() if user.created_at else None,
     }
 
 
@@ -125,6 +133,8 @@ def api_register_view(request):
     data = _json_body(request)
     if data is None:
         return JsonResponse({'error': 'Invalid JSON payload.'}, status=400)
+
+    print(f"DEBUG: api_register_view - Received barangay: {data.get('barangay')}")
 
     serializer = RegisterSerializer(data=data)
     if serializer.is_valid():

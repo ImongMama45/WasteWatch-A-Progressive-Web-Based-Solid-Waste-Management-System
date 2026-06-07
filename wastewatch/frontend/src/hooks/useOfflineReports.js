@@ -108,17 +108,19 @@ export function useOfflineReports() {
   // ── Add a new report (always queued locally first) ───────────────────────────
   const addReport = useCallback(async (fields) => {
     const record = {
-      id         : crypto.randomUUID(),
-      ownerId    : currentOwnerId, // Explicit: '123' or 'anonymous'
-      wasteType  : fields.wasteType  || 'overflow',
-      severity   : fields.severity   || 'medium',
-      notes      : fields.notes      || '',
-      location   : fields.location   || { lat: null, lng: null, address: 'Unknown' },
-      photo      : fields.photo      || null, // base64
-      createdAt  : new Date().toISOString(),
-      status     : 'pending',
-      syncedAt   : null,
-      retryCount : 0,
+      id          : crypto.randomUUID(),
+      ownerId     : currentOwnerId, // Explicit: '123' or 'anonymous'
+      issue_type  : fields.issue_type  || 'overflow',
+      severity    : fields.severity    || 'medium',
+      description : fields.description || '',
+      latitude    : (typeof fields.latitude === 'number' && !isNaN(fields.latitude)) ? fields.latitude : null,
+      longitude   : (typeof fields.longitude === 'number' && !isNaN(fields.longitude)) ? fields.longitude : null,
+      address     : fields.address     || 'Unknown',
+      photo       : fields.photo       || null, // base64
+      createdAt   : new Date().toISOString(),
+      status      : 'pending',
+      syncedAt    : null,
+      retryCount  : 0,
     }
     await idbPut(record)
     setReports(prev => [record, ...prev])
@@ -148,14 +150,14 @@ export function useOfflineReports() {
   const pushReport = useCallback(async (report) => {
     try {
       const formData = new FormData()
-      formData.append('issue_type',  report.wasteType)
+      formData.append('issue_type',  report.issue_type)
       formData.append('severity',    report.severity)
-      formData.append('description', report.notes)
-      formData.append('address',     report.location?.address || '')
+      formData.append('description', report.description)
+      formData.append('address',     report.address || '')
       formData.append('created_at',  report.createdAt || new Date().toISOString())
 
-      if (report.location?.lat) formData.append('latitude', report.location.lat)
-      if (report.location?.lng) formData.append('longitude', report.location.lng)
+      if (report.latitude  != null && !isNaN(report.latitude))  formData.append('latitude',  report.latitude)
+      if (report.longitude != null && !isNaN(report.longitude)) formData.append('longitude', report.longitude)
       
       if (report.photo) {
         const blob = base64ToBlob(report.photo)
@@ -164,15 +166,16 @@ export function useOfflineReports() {
         }
       }
 
-      await api.post('/api/watcher/reports/', formData, {
+      const response = await api.post('/api/watcher/reports/', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
+      console.log(`[useOfflineReports] Synced report ${report.id}`, response.data)
       
       const updated = { ...report, status: 'synced', syncedAt: new Date().toISOString() }
       await idbPut(updated)
       return updated
     } catch (err) {
-      console.error('[useOfflineReports] pushReport error:', err)
+      console.error(`[useOfflineReports] Failed to sync report ${report.id}:`, err.response?.data || err.message)
       const retryCount = (report.retryCount || 0) + 1
       const status     = retryCount >= MAX_RETRY ? 'failed' : 'pending'
       const updated    = { ...report, status, retryCount }
@@ -185,13 +188,6 @@ export function useOfflineReports() {
   const syncAll = useCallback(async () => {
     if (!isOnline || syncingRef.current) return
     
-    // GUARD: Block sync if logged out and trying to sync user reports, 
-    // or if we want to force login for sync.
-    if (currentOwnerId === 'anonymous') {
-      console.warn('[useOfflineReports] Sync blocked: User must be logged in to sync reports.')
-      return
-    }
-
     syncingRef.current = true
     setIsSyncing(true)
     try {

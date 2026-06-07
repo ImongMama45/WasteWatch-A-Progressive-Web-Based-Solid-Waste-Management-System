@@ -24,7 +24,7 @@ const FALLBACK_SCHEDULE = [
 export default function CollectionSchedule() {
   const { user } = useAuth()
   const role = user?.role?.toLowerCase() || 'citizen'
-  const barangay = user?.barangay || 'Cotta'
+  const barangay = user?.barangay_name || String(user?.barangay || 'Cotta')
 
   const [expandedId, setExpandedId] = useState(null)
 
@@ -33,9 +33,6 @@ export default function CollectionSchedule() {
 
   const showDetails = ['brgy_official', 'watcher', 'driver', 'admin'].includes(role)
   const isDriver = role === 'driver'  
-
-  // Add this import at the top with your other useState import
-  // useState is already imported, just add this helper:
 
   // ── Add this inside the component, after the existing state declarations ──────
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -81,7 +78,7 @@ export default function CollectionSchedule() {
         <div style={{ marginBottom: 24 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
             <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 24, fontWeight: 800, margin: 0 }}>Collection Schedule</h2>
-            <span style={{ background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)', fontSize: 10, fontWeight: 800, padding: '3px 10px', borderRadius: 20 }}>BRGY. {barangay.toUpperCase()}</span>
+            <span style={{ background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)', fontSize: 10, fontWeight: 800, padding: '3px 10px', borderRadius: 20 }}>BRGY. {String(barangay).toUpperCase()}</span>
           </div>
           <p className="text-muted text-sm">View garbage collection schedules and routes for your area.</p>
         </div>

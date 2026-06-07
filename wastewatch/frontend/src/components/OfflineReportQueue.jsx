@@ -28,10 +28,13 @@ const STATUS_META = {
 }
 
 const WASTE_EMOJI = {
-  biodegradable : '🌿',
-  residual      : '🗑️',
-  recyclable    : '♻️',
-  special       : '⚠️',
+  overflow         : '🗑️',
+  missed           : '🚛',
+  illegal_dumping  : '⚠️',
+  biodegradable    : '🌿',
+  residual         : '🗑️',
+  recyclable       : '♻️',
+  special          : '⚠️',
 }
 
 const SEV_COLOR = {
@@ -43,25 +46,32 @@ const SEV_COLOR = {
 
 function formatDate(iso) {
   if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 // ─── Single report row ────────────────────────────────────────────────────────
 
-function ReportRow({ report, isOnline, onRetry }) {
+function ReportRow({ report, isOnline, onRetry, onClick }) {
   const meta   = STATUS_META[report.status] || STATUS_META.pending
   const isPending = report.status === 'pending'
+  const retryCount = typeof report.retryCount === 'number' && !isNaN(report.retryCount) ? report.retryCount : 0
 
   return (
-    <div className="orq-row" style={{ borderLeftColor: meta.color }}>
+    <div
+      className="orq-row"
+      style={{ borderLeftColor: meta.color, cursor: 'pointer' }}
+      onClick={() => onClick?.(report)}
+    >
       <div className="orq-row__left">
         <span className="orq-row__emoji">
-          {WASTE_EMOJI[report.wasteType] || '🗑️'}
+          {WASTE_EMOJI[report.issue_type] || '🗑️'}
         </span>
         <div className="orq-row__info">
           <div className="orq-row__top">
             <span className="orq-row__type">
-              {report.wasteType?.charAt(0).toUpperCase() + report.wasteType?.slice(1)}
+              {report.issue_type?.charAt(0).toUpperCase() + report.issue_type?.slice(1)}
             </span>
             <span
               className="orq-row__sev"
@@ -72,10 +82,10 @@ function ReportRow({ report, isOnline, onRetry }) {
             {isPending && <span className="orq-row__pulse" />}
           </div>
           <span className="orq-row__addr">
-            {report.location?.address || 'No location'}
+            {report.address || 'No location'}
           </span>
-          {report.notes && (
-            <span className="orq-row__notes">{report.notes}</span>
+          {report.description && (
+            <span className="orq-row__notes">{report.description}</span>
           )}
           <span className="orq-row__date">{formatDate(report.createdAt)}</span>
         </div>
@@ -92,16 +102,16 @@ function ReportRow({ report, isOnline, onRetry }) {
         {report.status === 'failed' && isOnline && (
           <button
             className="orq-retry-btn"
-            onClick={() => onRetry(report.id)}
+            onClick={(e) => { e.stopPropagation(); onRetry(report.id) }}
             aria-label="Retry sync"
           >
             🔄 Retry
           </button>
         )}
 
-        {report.retryCount > 0 && report.status !== 'synced' && (
+        {retryCount > 0 && report.status !== 'synced' && (
           <span className="orq-row__retries">
-            {report.retryCount}/{3} attempts
+            {retryCount}/{3} attempts
           </span>
         )}
       </div>
@@ -112,12 +122,13 @@ function ReportRow({ report, isOnline, onRetry }) {
 // ─── Section group ────────────────────────────────────────────────────────────
 
 function Section({ title, count, color, children, defaultOpen = true }) {
-  if (count === 0) return null
+  const displayCount = typeof count === 'number' && !isNaN(count) ? count : 0
+  if (displayCount === 0) return null
   return (
     <details className="orq-section" open={defaultOpen}>
       <summary className="orq-section__summary">
         <span className="orq-section__title" style={{ color }}>{title}</span>
-        <span className="orq-section__count" style={{ background: `${color}20`, color }}>{count}</span>
+        <span className="orq-section__count" style={{ background: `${color}20`, color }}>{displayCount}</span>
       </summary>
       <div className="orq-section__body">{children}</div>
     </details>
@@ -136,11 +147,15 @@ export default function OfflineReportQueue({
   onSyncNow,
   onRetry,
   onNewReport,
+  onReportClick,
 }) {
   const { user } = useAuth()
   const pending = reports.filter(r => r.status === 'pending')
   const failed  = reports.filter(r => r.status === 'failed')
   const synced  = reports.filter(r => r.status === 'synced')
+
+  const dispPending = typeof pendingCount === 'number' && !isNaN(pendingCount) ? pendingCount : pending.length
+  const dispFailed  = typeof failedCount === 'number' && !isNaN(failedCount) ? failedCount : failed.length
 
   return (
     <div className="orq-wrap">
@@ -156,7 +171,7 @@ export default function OfflineReportQueue({
           <div>
             <h2 className="orq-header__title">{user ? 'My Reports' : 'Community Reports'}</h2>
             <p className="orq-header__sub">
-              {lastSync
+              {lastSync instanceof Date && !isNaN(lastSync.getTime())
                 ? `Synced ${lastSync.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}`
                 : 'Not synced this session'}
             </p>
@@ -173,12 +188,12 @@ export default function OfflineReportQueue({
       {/* ── Summary chips ── */}
       {reports.length > 0 && (
         <div className="orq-chips">
-          <span className="orq-chip orq-chip--pending">{pendingCount} Pending</span>
+          <span className="orq-chip orq-chip--pending">{dispPending} Pending</span>
           <span className="orq-chip orq-chip--synced">{synced.length} Synced</span>
-          {failedCount > 0 && (
-            <span className="orq-chip orq-chip--failed">{failedCount} Failed</span>
+          {dispFailed > 0 && (
+            <span className="orq-chip orq-chip--failed">{dispFailed} Failed</span>
           )}
-          {isOnline && pendingCount > 0 && !isSyncing && (
+          {isOnline && dispPending > 0 && !isSyncing && (
             <button className="orq-chip orq-chip--sync-btn" onClick={onSyncNow}>
               ⚡ Sync Now
             </button>
@@ -209,15 +224,15 @@ export default function OfflineReportQueue({
         ) : (
           <>
             <Section title="⏳ Pending Sync" count={pending.length} color="#f59e0b" defaultOpen>
-              {pending.map(r => <ReportRow key={r.id} report={r} isOnline={isOnline} onRetry={onRetry} />)}
+              {pending.map(r => <ReportRow key={r.id} report={r} isOnline={isOnline} onRetry={onRetry} onClick={onReportClick} />)}
             </Section>
 
             <Section title="❌ Failed" count={failed.length} color="#ef4444" defaultOpen>
-              {failed.map(r => <ReportRow key={r.id} report={r} isOnline={isOnline} onRetry={onRetry} />)}
+              {failed.map(r => <ReportRow key={r.id} report={r} isOnline={isOnline} onRetry={onRetry} onClick={onReportClick} />)}
             </Section>
 
             <Section title="✅ Synced" count={synced.length} color="#22c55e" defaultOpen={false}>
-              {synced.map(r => <ReportRow key={r.id} report={r} isOnline={isOnline} onRetry={onRetry} />)}
+              {synced.map(r => <ReportRow key={r.id} report={r} isOnline={isOnline} onRetry={onRetry} onClick={onReportClick} />)}
             </Section>
           </>
         )}

@@ -19,6 +19,12 @@ const ISSUE_TYPES = [
   { value: 'illegal_dumping', label: 'Illegal Dumping' },
 ]
 
+const SEVERITIES = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+]
+
 const ALL_TAGS = ['Near School', 'Near market', 'Side Road', 'Residential', 'Highway', 'Near River']
 
 export default function ReportForm() {
@@ -26,29 +32,42 @@ export default function ReportForm() {
   const navigate = useNavigate()
   const fileRef = useRef(null)
 
-  const [gps, setGps] = useState({ lat: null, lng: null, status: 'detecting' })
+  const [gps, setGps] = useState({ lat: null, lng: null, status: 'detecting', address: '' })
   const [barangays, setBarangays] = useState([])
   const [preview, setPreview] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [errors, setErrors] = useState({})
   const [selectedTags, setSelectedTags] = useState([])
   const [showMoreTags, setShowMoreTags] = useState(false)
+  const [isManualLocation, setIsManualLocation] = useState(false)
 
   const [form, setForm] = useState({
     issue_type: '',
+    severity: 'medium',
     description: '',
     image: null,
+    manual_address: '',
   })
 
   // Silently capture GPS on mount
   useEffect(() => {
     if (!navigator.geolocation) {
-      setGps({ lat: null, lng: null, status: 'error' })
+      setGps({ lat: null, lng: null, status: 'error', address: '' })
       return
     }
     navigator.geolocation.getCurrentPosition(
-      pos => setGps({ lat: pos.coords.latitude, lng: pos.coords.longitude, status: 'ready' }),
-      () => setGps({ lat: null, lng: null, status: 'error' }),
+      async (pos) => {
+        const { latitude: lat, longitude: lng } = pos.coords
+        setGps(prev => ({ ...prev, lat, lng, status: 'ready' }))
+        
+        // Reverse geocode
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`)
+          const data = await res.json()
+          setGps(prev => ({ ...prev, address: data.display_name || '' }))
+        } catch { }
+      },
+      () => setGps({ lat: null, lng: null, status: 'error', address: '' }),
       { enableHighAccuracy: true, timeout: 10000 }
     )
   }, [])
@@ -81,40 +100,88 @@ export default function ReportForm() {
   async function handleSubmit() {
     const errs = {}
     if (!form.issue_type) errs.issue_type = 'Please select an issue type.'
-    if (gps.status !== 'ready') errs.gps = 'Location could not be detected. Please enable GPS and try again.'
+    if (!isManualLocation && gps.status !== 'ready') {
+      errs.gps = 'Location could not be detected. Please enable GPS or enter address manually.'
+    }
+    if (isManualLocation && !form.manual_address) {
+      errs.manual_address = 'Please enter the location address.'
+    }
     if (Object.keys(errs).length) { setErrors(errs); return }
 
     setSubmitting(true)
     const fd = new FormData()
-    fd.append('latitude', gps.lat)
-    fd.append('longitude', gps.lng)
+    if (!isManualLocation) {
+      if (isGpsValid(gps.lat)) fd.append('latitude', Number(gps.lat).toFixed(6))
+      if (isGpsValid(gps.lng)) fd.append('longitude', Number(gps.lng).toFixed(6))
+      fd.append('address', gps.address || '')
+    } else {
+      fd.append('address', form.manual_address)
+    }
+    
     fd.append('issue_type', form.issue_type)
+    fd.append('severity', form.severity)
     fd.append('description', form.description)
     fd.append('tags', selectedTags.join(','))
     if (form.image) fd.append('image', form.image)
-    if (user?.barangay_id) fd.append('barangay', user.barangay_id)
+    if (user?.barangay) fd.append('barangay', user.barangay)
+
+    // Debug: log FormData entries
+    console.log('[ReportForm] Submitting payload:')
+    for (let [key, val] of fd.entries()) {
+      console.log(`  ${key}:`, val instanceof File ? `File(${val.name})` : val)
+    }
 
     try {
-      await api.post('/api/watcher/reports/', fd, {
+      const response = await api.post('/api/watcher/reports/', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
-      navigate('/dashboard', { state: { success: 'Report submitted!' } })
+      console.log('[ReportForm] Success:', response.data)
+      navigate('/map', {
+        state: {
+          success: 'Report submitted!',
+          focusReport: response.data
+        }
+      })
     } catch (err) {
       const data = err.response?.data || {}
-      const mapped = {}
-      for (const [k, v] of Object.entries(data)) mapped[k] = Array.isArray(v) ? v[0] : v
-      setErrors(mapped)
+      console.error('[ReportForm] Submission error:')
+      
+      let errorDetails = ''
+      if (typeof data === 'string') {
+        errorDetails = data
+      } else {
+        errorDetails = Object.entries(data)
+          .map(([k, v]) => {
+            const val = Array.isArray(v) ? v[0] : v
+            return typeof val === 'object' ? JSON.stringify(val) : `${k}: ${val}`
+          })
+          .join('\n')
+      }
+      
+      alert(`Report failed:\n${errorDetails}`)
+
+      if (typeof data === 'object') {
+        Object.keys(data).forEach(key => {
+          console.error(`  Field "${key}":`, data[key])
+        })
+        const mapped = {}
+        for (const [k, v] of Object.entries(data)) {
+          mapped[k] = Array.isArray(v) ? v[0] : v
+        }
+        setErrors(mapped)
+      }
     } finally {
       setSubmitting(false)
     }
   }
 
   const visibleTags = showMoreTags ? ALL_TAGS : ALL_TAGS.slice(0, 3)
+  const isGpsValid = (val) => val !== null && val !== undefined && !isNaN(Number(val))
   const locationDisplay = gps.status === 'ready'
-    ? `Auto-detected : N: ${gps.lat?.toFixed(4)}`
+    ? (gps.address || `Auto-detected: ${isGpsValid(gps.lat) ? Number(gps.lat).toFixed(4) : '?'}, ${isGpsValid(gps.lng) ? Number(gps.lng).toFixed(4) : '?'}`)
     : gps.status === 'detecting'
       ? 'Detecting your location…'
-      : 'Location unavailable — please enable GPS'
+      : 'Location unavailable'
 
   return (
     <>
@@ -134,35 +201,84 @@ export default function ReportForm() {
             Issue Details
           </h3>
 
-          {/* Issue Type */}
-          <div className="form-group">
-            <label className="form-label">Issue Type</label>
-            <select
-              className={`form-input ${errors.issue_type ? 'error' : ''}`}
-              name="issue_type"
-              value={form.issue_type}
-              onChange={handleChange}
-            >
-              {ISSUE_TYPES.map(t => (
-                <option key={t.value} value={t.value} disabled={t.value === ''}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
-            {errors.issue_type && <p className="form-error">{errors.issue_type}</p>}
+          {/* Issue Type & Severity */}
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <div className="form-group" style={{ flex: 1, minWidth: 200 }}>
+              <label className="form-label">Issue Type</label>
+              <select
+                className={`form-input ${errors.issue_type ? 'error' : ''}`}
+                name="issue_type"
+                value={form.issue_type}
+                onChange={handleChange}
+              >
+                {ISSUE_TYPES.map(t => (
+                  <option key={t.value} value={t.value} disabled={t.value === ''}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+              {errors.issue_type && <p className="form-error">{errors.issue_type}</p>}
+            </div>
+
+            <div className="form-group" style={{ flex: 1, minWidth: 200 }}>
+              <label className="form-label">Severity</label>
+              <select
+                className="form-input"
+                name="severity"
+                value={form.severity}
+                onChange={handleChange}
+              >
+                {SEVERITIES.map(s => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          {/* Location — read-only GPS */}
+          {/* Location — GPS with manual toggle */}
           <div className="form-group">
-            <label className="form-label">Location</label>
-            <div className="gps-field">
-              <span className={`gps-dot ${gps.status}`} />
-              <span style={{ fontSize: 13, color: gps.status === 'ready' ? 'var(--text)' : 'var(--text-muted)' }}>
-                {locationDisplay}
-              </span>
-              {gps.status === 'detecting' && <span className="gps-spinner" />}
-            </div>
+            <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+              Location
+              <button 
+                type="button" 
+                onClick={() => setIsManualLocation(!isManualLocation)}
+                style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, cursor: 'pointer', padding: 0 }}
+              >
+                {isManualLocation ? 'Use GPS' : 'Enter Manually'}
+              </button>
+            </label>
+            
+            {!isManualLocation ? (
+              <div className="gps-field">
+                <span className={`gps-dot ${gps.status}`} />
+                <span style={{ fontSize: 13, color: gps.status === 'ready' ? 'var(--text)' : 'var(--text-muted)' }}>
+                  {locationDisplay}
+                </span>
+                {gps.status === 'detecting' && <span className="gps-spinner" />}
+                {gps.status === 'error' && (
+                   <button 
+                     type="button" 
+                     className="btn btn-sm" 
+                     style={{ marginLeft: 10, padding: '2px 8px', fontSize: 11 }}
+                     onClick={() => window.location.reload()}
+                   >
+                     Retry
+                   </button>
+                )}
+              </div>
+            ) : (
+              <input
+                className={`form-input ${errors.manual_address ? 'error' : ''}`}
+                name="manual_address"
+                placeholder="Enter nearby landmark or street address"
+                value={form.manual_address}
+                onChange={handleChange}
+              />
+            )}
             {errors.gps && <p className="form-error">{errors.gps}</p>}
+            {errors.manual_address && <p className="form-error">{errors.manual_address}</p>}
           </div>
 
           {/* Tags */}

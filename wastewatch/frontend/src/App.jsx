@@ -74,8 +74,8 @@ export default function App() {
           <Route path="/register" element={<AuthOverlay mode="register" />} />
           <Route path="/about" element={<AboutPage />} />
           <Route path="/map" element={<MapView />} />
-          <Route path="/announcements" element={<NewsPage />} />X
-          <Route path="/schedule" element={<CollectionSchedule />} />X
+          <Route path="/announcements" element={<NewsPage />} />
+          <Route path="/schedule" element={<CollectionSchedule />} />
 
           {/* ── PROTECTED — all screen sizes ── */}
           <Route path="/dashboard" element={

@@ -29,15 +29,18 @@ const MAX_RETRY = 3
 const ENDPOINTS = {
   reports: {
     url: '/api/watcher/reports/',
-    transform: (r) => ({
-      waste_type: r.wasteType,
-      severity: r.severity,
-      notes: r.notes,
-      latitude: r.location?.lat != null ? Math.round(r.location.lat * 1e6) / 1e6 : null,
-      longitude: r.location?.lng != null ? Math.round(r.location.lng * 1e6) / 1e6 : null,
-      address: r.location?.address,
-      created_at: r.createdAt,
-    }),
+    transform: (r) => {
+      const payload = {
+        issue_type:  r.issue_type || 'overflow',
+        severity:    r.severity   || 'medium',
+        description: r.description || '',
+        address:     r.address || '',
+        created_at:  r.createdAt,
+      }
+      if (r.latitude  != null && !isNaN(r.latitude))  payload.latitude  = Math.round(r.latitude  * 1e6) / 1e6
+      if (r.longitude != null && !isNaN(r.longitude)) payload.longitude = Math.round(r.longitude * 1e6) / 1e6
+      return payload
+    },
   },
   analytics_queue: {
     url: '/api/analytics/kpi/',

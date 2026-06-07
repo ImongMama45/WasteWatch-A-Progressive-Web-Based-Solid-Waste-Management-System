@@ -1,7 +1,6 @@
 // MapView.jsx — WasteWatch Admin/Watcher/Barangay Official Map
-
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import { useAuth } from '../context/AuthContext'
 import api from '../api/client'
@@ -9,6 +8,8 @@ import api from '../api/client'
 export const LUCENA_CENTER = [13.9373, 121.6170];
 
 export const ZONE_TYPE_MAP = {
+// ... (rest of ZONE_TYPE_MAP)
+
   "Barangay 1 (Pob.)": "commercial", "Barangay 2 (Pob.)": "commercial",
   "Barangay 3 (Pob.)": "commercial", "Barangay 4 (Pob.)": "commercial",
   "Barangay 5 (Pob.)": "commercial", "Barangay 6 (Pob.)": "commercial",
@@ -115,6 +116,7 @@ function makeStopMarkerHtml(stopOrder, status) {
 
 export default function MapView() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { user } = useAuth()
   const mapRef = useRef(null)
   const [mapInstance, setMapInstance] = useState(null)
@@ -162,9 +164,35 @@ export default function MapView() {
     fetchReports()
   }, [])
 
+  // ── Handle focus from navigation state ──
+  useEffect(() => {
+    if (!mapInstance || !reports.length) return
+    
+    const focus = location.state?.focusReport
+    if (!focus) return
+
+    // Find in current data
+    const found = reports.find(r => r.id === focus.id) || focus
+
+    const lat = found.latitude || found.lat || found.location?.lat
+    const lng = found.longitude || found.lng || found.location?.lng
+
+    if (lat && lng) {
+      console.log('[MapView] Focusing on report:', found.id)
+      mapInstance.setView([lat, lng], 18)
+      setSelectedReport(found)
+      setPanelMode("report")
+      setPanelOpen(true)
+      
+      // Clear state so it doesn't re-focus on every render
+      navigate(location.pathname, { replace: true, state: {} })
+    }
+  }, [mapInstance, reports, location.state, navigate, location.pathname])
+
   async function fetchReports() {
     try {
-      const res = await api.get('/api/watcher/reports/public_map/')
+      const res = await api.get('/api/watcher/reports/map_pins/')
+      console.log(`[MapView] Fetched ${res.data.length} approved reports`)
       setReports(res.data)
     } catch (err) {
       console.error("Failed to fetch reports:", err)
@@ -223,12 +251,6 @@ export default function MapView() {
 
   // ── Live reports — poll every 30 s ───────────────────────────────────────
   useEffect(() => {
-    const fetchReports = () => {
-      api.get('/api/watcher/reports/map_pins/')
-        .then(res => setLiveReports(res.data))
-        .catch(console.error)
-    }
-    fetchReports()
     const intv = setInterval(fetchReports, 30_000)
     return () => clearInterval(intv)
   }, [])
@@ -238,7 +260,7 @@ export default function MapView() {
     if (!mapInstanceRef.current) return
     drawAll(mapInstanceRef.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, barangayGeo, activeFilters, reports, activeTrucks, liveReports])
+  }, [mapReady, barangayGeo, activeFilters, reports, activeTrucks])
 
   // ── Fetch barangay stops when a zone is selected ──────────────────────────
   // Draws stop markers (colour-coded like ShiftRouteModule) WITHOUT the route.
@@ -449,21 +471,24 @@ export default function MapView() {
       })
     }
 
-    // ── Live garbage reports ──
+    // ── Garbage reports ──
     if (activeFilters.reports) {
-      // Draw static reports
       reports.forEach(report => {
-        const icon = L.divIcon({ html: garbageReportIconHtml(report.severity), className: "", iconSize: [30, 36], iconAnchor: [8, 36] })
-        const m    = L.marker([report.latitude || report.lat, report.longitude || report.lng], { icon }).addTo(map)
-        m.on("click", () => { setSelectedReport(report); setPanelMode("report"); setPanelOpen(true) })
+        const lat = report.latitude || report.lat
+        const lng = report.longitude || report.lng
+        if (!lat || !lng) return
+
+        const icon = L.divIcon({ 
+          html: garbageReportIconHtml(report.severity), 
+          className: "", iconSize: [30, 36], iconAnchor: [8, 36] 
+        })
+        const m = L.marker([lat, lng], { icon }).addTo(map)
+        m.on("click", () => { 
+          setSelectedReport(report)
+          setPanelMode("report")
+          setPanelOpen(true) 
+        })
         layersRef.current[`report-${report.id}`] = m
-      })
-      // Draw live-polled reports
-      liveReportsRef.current.forEach(report => {
-        const icon = L.divIcon({ html: garbageReportIconHtml(report.severity), className: "", iconSize: [30, 36], iconAnchor: [8, 36] })
-        const m = L.marker([report.lat, report.lng], { icon }).addTo(map)
-        m.on("click", () => { setSelectedReport(report); setPanelMode("report"); setPanelOpen(true) })
-        layersRef.current[`live-report-${report.id}`] = m
       })
     }
 
@@ -838,15 +863,43 @@ function ReportPanel({ report, onStatusChange }) {
     ? new Date(report.created_at || report.reported).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
     : 'Unknown'
 
-  const statusLabel = { pending: 'Pending Review', approved: 'Approved', resolved: 'Resolved', rejected: 'Dismissed' }[report.status] ?? report.status?.toUpperCase()
+  const statusLabel = { 
+    pending: 'Pending Review', 
+    approved: 'Approved (Visible)', 
+    resolved: 'Resolved (Collected)', 
+    rejected: 'Rejected (Hidden)' 
+  }[report.status] ?? report.status?.toUpperCase()
 
-  function handleConfirm() {
-    api.post('/api/watcher/confirmations/', { report: report.id })
-      .then(() => onStatusChange?.()).catch(console.error)
+  function handleApprove() {
+    api.post(`/api/watcher/reports/${report.id}/approve/`)
+      .then(() => onStatusChange?.())
+      .catch(err => {
+        console.error(err)
+        alert(err.response?.data?.error || 'Failed to approve report')
+      })
   }
-  function handleDismiss() {
-    api.patch(`/api/watcher/reports/${report.id}/`, { status: 'rejected' })
-      .then(() => onStatusChange?.()).catch(console.error)
+
+  function handleReject() {
+    const reason = prompt('Please enter a reason for rejection:')
+    if (reason === null) return // Cancelled
+    if (!reason.trim()) return alert('Reason is required for rejection.')
+    
+    api.post(`/api/watcher/reports/${report.id}/reject/`, { rejection_reason: reason })
+      .then(() => onStatusChange?.())
+      .catch(err => {
+        console.error(err)
+        alert(err.response?.data?.error || 'Failed to reject report')
+      })
+  }
+
+  function handleResolve() {
+    // This creates a confirmation which marks report as RESOLVED
+    api.post('/api/watcher/confirmations/', { report: report.id })
+      .then(() => onStatusChange?.())
+      .catch(err => {
+        console.error(err)
+        alert('Failed to resolve report')
+      })
   }
 
   return (
@@ -865,6 +918,10 @@ function ReportPanel({ report, onStatusChange }) {
       <Row label="REPORTED" value={reportedStr} />
       <Row label="STATUS" value={statusLabel} accent />
       
+      {report.rejection_reason && (
+        <Row label="REASON" value={report.rejection_reason} />
+      )}
+
       {report.description || report.notes ? (
         <div style={{ marginTop: 10, padding: "10px 12px", background: "rgba(255,255,255,0.04)", borderRadius: 10, color: "#cbd5e1", fontSize: 12, lineHeight: 1.5 }}>
           {report.description || report.notes}
@@ -877,12 +934,21 @@ function ReportPanel({ report, onStatusChange }) {
         </div>
       )}
 
-      {canModerate ? (
+      {canModerate && (
         <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-          <button onClick={handleConfirm} style={{ flex: 1, background: "rgba(34,197,94,0.1)", border: "1px solid #22c55e", color: "#22c55e", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✅ Confirm</button>
-          <button onClick={handleDismiss} style={{ flex: 1, background: "rgba(239,68,68,0.1)", border: "1px solid #ef4444", color: "#ef4444", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✕ Dismiss</button>
+          {report.status === 'pending' && (
+            <>
+              <button onClick={handleApprove} style={{ flex: 1, background: "rgba(34,197,94,0.1)", border: "1px solid #22c55e", color: "#22c55e", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✅ Approve</button>
+              <button onClick={handleReject} style={{ flex: 1, background: "rgba(239,68,68,0.1)", border: "1px solid #ef4444", color: "#ef4444", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✕ Reject</button>
+            </>
+          )}
+          {report.status === 'approved' && (
+            <button onClick={handleResolve} style={{ flex: 1, background: "rgba(34,197,94,0.1)", border: "1px solid #22c55e", color: "#22c55e", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>🏁 Mark Resolved</button>
+          )}
         </div>
-      ) : (
+      )}
+      
+      {!canModerate && (
         <div style={{ marginTop: 18, padding: "10px 14px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#64748b", fontSize: 12 }}>
           ℹ️ Only Watchers, Barangay Officials, and Admins can moderate reports.
         </div>

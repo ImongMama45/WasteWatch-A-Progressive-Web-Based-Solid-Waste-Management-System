@@ -189,10 +189,12 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit }) {
     setSubmitting(true)
     try {
       const report = await onSubmit({
-        wasteType,
+        issue_type: wasteType,
         severity,
-        notes,
-        location,
+        description: notes,
+        latitude:  location?.lat,
+        longitude: location?.lng,
+        address:   location?.address,
         photo: photo.base64,   // full data-URI stored offline
       })
       if (report) {

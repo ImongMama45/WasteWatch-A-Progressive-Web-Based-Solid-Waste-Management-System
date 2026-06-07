@@ -35,6 +35,13 @@ urlpatterns = [
     
     # ── CRUD Resources ────────────────────────────────────────────────────────
     path('barangays/', auth_api.BarangayViewSet.as_view({'get': 'list'}), name='api-barangays-legacy'),
+    
+    # New paths for simplified report management
+    path('reports/public/', watcher_urls.views.GarbageReportViewSet.as_view({'get': 'public'}), name='api-reports-public'),
+    path('reports/<int:pk>/approve/', watcher_urls.views.GarbageReportViewSet.as_view({'post': 'approve', 'patch': 'approve'}), name='api-report-approve'),
+    path('reports/<int:pk>/reject/', watcher_urls.views.GarbageReportViewSet.as_view({'post': 'reject', 'patch': 'reject'}), name='api-report-reject'),
+    path('barangay/reports/', watcher_urls.views.GarbageReportViewSet.as_view({'get': 'list'}), name='api-barangay-reports'),
+
     path('accounts/',  include(router.urls)),
     path('driver/',    include(driver_urls.router.urls)),
     path('watcher/',   include(watcher_urls.urlpatterns)),

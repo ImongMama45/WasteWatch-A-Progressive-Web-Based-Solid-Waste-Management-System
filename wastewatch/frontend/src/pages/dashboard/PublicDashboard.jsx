@@ -557,6 +557,10 @@ export default function PublicDashboard() {
   // ── Handlers ──────────────────────────────────────────────────────────────────
   const handleSyncNow = useCallback(() => syncNow(), [syncNow])
   const handleSubmitReport = useCallback(async (fields) => addReport(fields), [addReport])
+  const handleReportClick = useCallback((report) => {
+    if (!report.location?.lat || !report.location?.lng) return
+    navigate('/map', { state: { focusReport: report } })
+  }, [navigate])
 
   // ── Derived ───────────────────────────────────────────────────────────────────
   const nextCollection = schedule.find(s => s.isNext) || schedule[0]
@@ -826,6 +830,7 @@ export default function PublicDashboard() {
                 onSyncNow={handleSyncNow}
                 onRetry={retryReport}
                 onNewReport={() => setShowBuilder(true)}
+                onReportClick={handleReportClick}
               />
             </div>
 
@@ -921,7 +926,7 @@ export default function PublicDashboard() {
           </div>
           <div className="ld-footer__col">
             <h4 className="ld-footer__col-title">Platform</h4>
-            <a href="#">About</a>
+            <a href="#" onClick={e => { e.preventDefault(); navigate('/about') }}>About</a>
             <a href="#">FAQ</a>
             <a href="#">Guidelines</a>
             <a href="#">Para sa Negosyo</a>

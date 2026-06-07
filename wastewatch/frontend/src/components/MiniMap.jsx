@@ -235,17 +235,25 @@ export default function MiniMap() {
 
     // Garbage reports (Static from Public Map)
     reports.forEach(r => {
+      const lat = r.latitude || r.lat
+      const lng = r.longitude || r.lng
+      if (lat == null || lng == null) return
+
       const icon = L.divIcon({ html: reportIconHtml(r.severity), className: '', iconSize: [24, 30], iconAnchor: [6, 30] })
-      const m = L.marker([r.latitude || r.lat, r.longitude || r.lng], { icon }).addTo(map)
-      m.bindPopup(`<b>⚠️ ${TYPE_LABELS[r.issue_type] || r.waste_type || 'Garbage'}</b><br/><small>${r.barangay_name || r.notes || ''}</small>`)
+      const m = L.marker([lat, lng], { icon }).addTo(map)
+      m.bindPopup(`<b>⚠️ ${TYPE_LABELS[r.issue_type] || r.issue_type || 'Garbage'}</b><br/><small>${r.barangay_name || r.address || ''}</small><br/>${r.description || ''}`)
       layersRef.current[`rep-${r.id}`] = m
     })
 
     // Garbage reports (Live Pins)
     liveReportsRef.current.forEach(r => {
+      const lat = r.lat || r.latitude
+      const lng = r.lng || r.longitude
+      if (lat == null || lng == null) return
+
       const icon = L.divIcon({ html: reportIconHtml(r.severity), className: '', iconSize: [24, 30], iconAnchor: [6, 30] })
-      const m = L.marker([r.lat, r.lng], { icon }).addTo(map)
-      m.bindPopup(`<b>⚠️ ${r.waste_type || 'Garbage'}</b><br/><small>${r.notes || ''}</small>`)
+      const m = L.marker([lat, lng], { icon }).addTo(map)
+      m.bindPopup(`<b>⚠️ ${TYPE_LABELS[r.issue_type] || r.issue_type || 'Garbage'}</b><br/><small>${r.barangay_name || r.address || ''}</small><br/>${r.description || ''}`)
       layersRef.current[`live-rep-${r.id}`] = m
     })
   }

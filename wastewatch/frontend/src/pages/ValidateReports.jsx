@@ -65,6 +65,10 @@ export default function ValidateReports() {
     setTimeout(() => setToast(null), 3200)
   }
 
+  function openRejectModal(id) {
+    setRejectModal(id)
+  }
+
   async function handleApprove(id) {
     try {
       await api.post(`/api/watcher/reports/${id}/approve/`)
@@ -79,8 +83,8 @@ export default function ValidateReports() {
   async function confirmReject() {
     if (!rejectReason.trim()) return
     try {
-      await api.post(`/api/watcher/reports/${rejectModal}/reject/`)
-      setReports(prev => prev.map(r => r.id !== rejectModal ? r : { ...r, status: 'rejected' }))
+      await api.post(`/api/watcher/reports/${rejectModal}/reject/`, { rejection_reason: rejectReason })
+      setReports(prev => prev.map(r => r.id !== rejectModal ? r : { ...r, status: 'rejected', rejection_reason: rejectReason }))
       setRejectModal(null)
       setRejectReason('')
       showToast('Report rejected and moved to History.')
