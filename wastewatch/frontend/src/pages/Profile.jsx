@@ -2,11 +2,25 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import DashboardLayout from '../components/DashboardLayout'
+import BarangaySelect from '../components/BarangaySelect'
 
 // Mock extra data for demo purposes since the backend might not have all fields yet
-   
+const MOCK_EXTRA_DATA = {
+  admin: { access: 'Full' },
+  driver: { truck: 'Truck 04', plate: 'ABC 1234', crew: 'Juan, Pedro' },
+  brgy_official: { reportsHandled: 42 },
+  watcher: { reportsHandled: 128 },
+  citizen: { status: 'Active' }
+}
+
+const MOCK_ACTIVITIES = [
+  { id: 1, action: 'Changed password', time: '2 hours ago' },
+  { id: 2, action: 'Updated profile picture', time: 'Yesterday' },
+  { id: 3, action: 'Logged in from new device', time: '3 days ago' }
+]
+
 export default function Profile() {
-  const { user } = useAuth()
+  const { user, barangays, updateUser } = useAuth()
   const navigate = useNavigate()
 
   const [isEditing, setIsEditing] = useState(false)
@@ -17,7 +31,7 @@ export default function Profile() {
     fullName: user?.full_name || '',
     email: user?.email || '',
     phone: user?.phone_number || '0912 345 6789', // Mock fallback
-    barangay: user?.barangay || 'Cotta',         // Mock fallback
+    barangay: user?.barangay || '',               // Store the ID here
   })
 
   // Password state
@@ -36,10 +50,18 @@ export default function Profile() {
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
-  function handleSaveProfile(e) {
+  async function handleSaveProfile(e) {
     e.preventDefault()
-    setIsEditing(false)
-    showToast('Profile updated successfully.')
+    try {
+      await updateUser({
+        full_name: form.fullName,
+        barangay: form.barangay
+      })
+      setIsEditing(false)
+      showToast('Profile updated successfully.')
+    } catch (err) {
+      showToast('❌ Failed to update profile.')
+    }
   }
 
   function handleSavePassword(e) {
@@ -66,7 +88,7 @@ export default function Profile() {
 
       <style>{`
         .profile-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
-        .section-title { font-family: var(--font-head); font-weight: 800; font-size: 16px; margin: 0 0 16px; display: flex; alignItems: center; gap: 8px; }
+        .section-title { font-family: var(--font-head); font-weight: 800; font-size: 16px; margin: 0 0 16px; display: flex; align-items: center; gap: 8px; }
         .info-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); }
         .info-row:last-child { border-bottom: none; }
         .info-label { font-size: 12px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; text-transform: uppercase; width: 140px; flex-shrink: 0; }
@@ -91,7 +113,7 @@ export default function Profile() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <span className="role-badge">{role.replace('_', ' ')}</span>
               {(role === 'brgy_official' || role === 'watcher' || role === 'citizen') && (
-                <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>📍 Brgy. {form.barangay}</span>
+                <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>📍 Brgy. {user.barangay_name || 'Unassigned'}</span>
               )}
             </div>
           </div>
@@ -117,7 +139,7 @@ export default function Profile() {
                   </div>
                   <div>
                     <label className="form-label">Email</label>
-                    <input className="form-input" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required />
+                    <input className="form-input" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} disabled style={{ opacity: 0.6, cursor: 'not-allowed' }} />
                   </div>
                   <div>
                     <label className="form-label">Contact Number</label>
@@ -125,8 +147,13 @@ export default function Profile() {
                   </div>
                   {(role === 'brgy_official' || role === 'watcher' || role === 'citizen') && (
                     <div>
-                      <label className="form-label">Barangay</label>
-                      <input className="form-input" value={form.barangay} onChange={e => setForm({ ...form, barangay: e.target.value })} />
+                      <label className="form-label">Barangay (Opsyonal)</label>
+                      <BarangaySelect 
+                        barangays={barangays}
+                        value={form.barangay}
+                        onChange={id => setForm({ ...form, barangay: id })}
+                        label="Piliin ang barangay (Opsyonal)"
+                      />
                     </div>
                   )}
                 </div>
@@ -139,11 +166,11 @@ export default function Profile() {
               <div>
                 <div className="info-row">
                   <div className="info-label">Full Name</div>
-                  <div className="info-value">{form.fullName}</div>
+                  <div className="info-value">{user.full_name}</div>
                 </div>
                 <div className="info-row">
                   <div className="info-label">Email Address</div>
-                  <div className="info-value">{form.email}</div>
+                  <div className="info-value">{user.email}</div>
                 </div>
                 <div className="info-row">
                   <div className="info-label">Contact Number</div>
@@ -152,7 +179,7 @@ export default function Profile() {
                 {(role === 'brgy_official' || role === 'watcher' || role === 'citizen') && (
                   <div className="info-row">
                     <div className="info-label">Barangay</div>
-                    <div className="info-value">{form.barangay}</div>
+                    <div className="info-value">{user.barangay_name || 'Not assigned'}</div>
                   </div>
                 )}
               </div>
@@ -191,7 +218,7 @@ export default function Profile() {
               <>
                 <div className="info-row">
                   <div className="info-label">Jurisdiction</div>
-                  <div className="info-value">Barangay {form.barangay}</div>
+                  <div className="info-value">Barangay {user.barangay_name || 'Unassigned'}</div>
                 </div>
                 <div className="info-row">
                   <div className="info-label">Reports Handled</div>
