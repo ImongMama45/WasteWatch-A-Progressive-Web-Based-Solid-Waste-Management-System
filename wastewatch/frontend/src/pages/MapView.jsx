@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'
-import { useAuth } from '../context/AuthContext'   // ← added
+import { useAuth } from '../context/AuthContext'
+import api from '../api/client'
 
 export const LUCENA_CENTER = [13.9373, 121.6170];
 
@@ -62,6 +63,8 @@ export const GARBAGE_REPORTS = [
   { id: "R3", lat: 13.9482, lng: 121.6145, type: "missed", severity: "low", address: "Zone 1 Side Street", reported: "1 day ago" },
 ];
 
+const TYPE_LABELS = { overflow: "Overflow", illegal_dumping: "Illegal Dumping", missed: "Missed Pickup" };
+
 export const ZONE_META = {
   residential: { label: "Residential", icon: "🏠", color: "#4ade80" },
   commercial:  { label: "Commercial",  icon: "🏪", color: "#fb923c" },
@@ -105,7 +108,7 @@ const youIconHtml = `
 export default function MapView() {
   const navigate = useNavigate()
   const mapRef = useRef(null)
-  const mapInstanceRef = useRef(null)
+  const [mapInstance, setMapInstance] = useState(null)
   const layersRef = useRef({})
 
   const [fabOpen, setFabOpen] = useState(false)
@@ -122,6 +125,7 @@ export default function MapView() {
     routes: true, trucks: true, dumpSites: true, reports: true,
   })
   const [barangayGeo, setBarangayGeo] = useState(null)
+  const [reports, setReports] = useState([])
 
   const activeFiltersRef = useRef(activeFilters)
   useEffect(() => { activeFiltersRef.current = activeFilters }, [activeFilters])
@@ -131,18 +135,25 @@ export default function MapView() {
       .then(r => r.json())
       .then(setBarangayGeo)
       .catch(err => console.error("Failed to load barangay GeoJSON:", err))
+    
+    fetchReports()
   }, [])
+
+  async function fetchReports() {
+    try {
+      const res = await api.get('/api/watcher/reports/public_map/')
+      setReports(res.data)
+    } catch (err) {
+      console.error("Failed to fetch reports:", err)
+    }
+  }
 
   const statusColors = { collecting: "#22c55e", en_route: "#f59e0b", idle: "#64748b", done: "#3b82f6" }
   const statusLabels = { collecting: "Collecting", en_route: "En Route", idle: "Idle", done: "Done" }
 
-  // Load Leaflet CDN
+  // Load Leaflet JS
   useEffect(() => {
     if (window.L) { setMapReady(true); return }
-    const link = document.createElement("link")
-    link.rel = "stylesheet"
-    link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    document.head.appendChild(link)
     const script = document.createElement("script")
     script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
     script.onload = () => setMapReady(true)
@@ -151,25 +162,36 @@ export default function MapView() {
 
   // Init map
   useEffect(() => {
-    if (!mapReady || !mapRef.current || mapInstanceRef.current) return
+    if (!mapReady || !mapRef.current || mapInstance) return
     const L = window.L
     const map = L.map(mapRef.current, { center: LUCENA_CENTER, zoom: 14, zoomControl: false })
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "© OpenStreetMap contributors", maxZoom: 19,
     }).addTo(map)
     L.control.zoom({ position: "topright" }).addTo(map)
-    mapInstanceRef.current = map
+    
+    setMapInstance(map)
+
+    // Fix for fragmented tiles
+    setTimeout(() => map.invalidateSize(), 100)
+    const observer = new ResizeObserver(() => map.invalidateSize())
+    observer.observe(mapRef.current)
+
+    return () => {
+      observer.disconnect()
+      map.remove()
+      setMapInstance(null)
+    }
   }, [mapReady])
 
-  // Redraw whenever map is ready, GeoJSON loads, or filters change
+  // Redraw whenever map instance, GeoJSON loads, or filters change
   useEffect(() => {
-    if (!mapInstanceRef.current) return
-    drawAll(mapInstanceRef.current)
+    if (!mapInstance) return
+    drawAll(mapInstance)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, barangayGeo, activeFilters])
+  }, [mapInstance, barangayGeo, activeFilters, reports])
 
-  function clearLayers() {
-    const map = mapInstanceRef.current
+  function clearLayers(map) {
     Object.values(layersRef.current).forEach(l => { try { map.removeLayer(l) } catch { } })
     layersRef.current = {}
   }
@@ -177,7 +199,7 @@ export default function MapView() {
   function drawAll(map) {
     const L = window.L
     if (!L) return
-    clearLayers()
+    clearLayers(map)
 
     // ── Barangay GeoJSON zones ──
     if (barangayGeo) {
@@ -282,9 +304,9 @@ export default function MapView() {
 
     // ── Garbage reports ──
     if (activeFilters.reports) {
-      GARBAGE_REPORTS.forEach(report => {
+      reports.forEach(report => {
         const icon = L.divIcon({ html: garbageReportIconHtml(report.severity), className: "", iconSize: [30, 36], iconAnchor: [8, 36] })
-        const m    = L.marker([report.lat, report.lng], { icon }).addTo(map)
+        const m    = L.marker([report.latitude, report.longitude], { icon }).addTo(map)
         m.on("click", () => { setSelectedReport(report); setPanelMode("report"); setPanelOpen(true) })
         layersRef.current[`report-${report.id}`] = m
       })
@@ -603,24 +625,29 @@ function ReportPanel({ report }) {
   const canModerate = REPORT_MODERATOR_ROLES.includes(user?.role)
 
   const severityColors = { high: "#ef4444", medium: "#f59e0b", low: "#22c55e" }
-  const typeLabels     = { overflow: "Overflow", illegal_dumping: "Illegal Dumping", missed: "Missed Pickup" }
 
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
         <div style={{ fontSize: 30 }}>⚠️</div>
         <div style={{ flex: 1 }}>
-          <div style={{ color: "white", fontWeight: 800, fontSize: 17 }}>{typeLabels[report.type]}</div>
-          <div style={{ color: "#94a3b8", fontSize: 12 }}>{report.address}</div>
+          <div style={{ color: "white", fontWeight: 800, fontSize: 17 }}>{TYPE_LABELS[report.issue_type] || report.issue_type}</div>
+          <div style={{ color: "#94a3b8", fontSize: 12 }}>{report.barangay_name}</div>
         </div>
         <div style={{ background: `${severityColors[report.severity]}22`, border: `1px solid ${severityColors[report.severity]}`, borderRadius: 20, padding: "4px 12px" }}>
           <span style={{ color: severityColors[report.severity], fontSize: 12, fontWeight: 700 }}>{report.severity.toUpperCase()}</span>
         </div>
       </div>
 
-      <Row label="REPORT TYPE" value={typeLabels[report.type]} />
-      <Row label="REPORTED"    value={report.reported} />
-      <Row label="STATUS"      value="Pending Review" accent />
+      <Row label="REPORT TYPE" value={TYPE_LABELS[report.issue_type] || report.issue_type} />
+      <Row label="REPORTED"    value={new Date(report.created_at).toLocaleString()} />
+      <Row label="STATUS"      value={report.status.toUpperCase()} accent />
+      
+      {report.image && (
+        <div style={{ marginTop: 12, borderRadius: 10, overflow: 'hidden' }}>
+           <img src={report.image} alt="Evidence" style={{ width: '100%', height: 'auto' }} />
+        </div>
+      )}
 
       {/* ── Action buttons — visible to Watcher, Brgy_Official, Admin only ── */}
       {canModerate ? (
@@ -650,7 +677,7 @@ function ReportPanel({ report }) {
 function Row({ label, value, accent }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-      <span style={{ color: "#0a0c0e", fontSize: 11, fontWeight: 600 }}>{label}</span>
+      <span style={{ color: "#e2e8f0", fontSize: 11, fontWeight: 600 }}>{label}</span>
       <span style={{ color: accent ? "#14b8a6" : "#e2e8f0", fontSize: 13, fontWeight: accent ? 700 : 400 }}>{value}</span>
     </div>
   )

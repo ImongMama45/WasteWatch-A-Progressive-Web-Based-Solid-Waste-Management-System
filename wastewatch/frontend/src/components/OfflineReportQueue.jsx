@@ -1,3 +1,5 @@
+import { useAuth } from '../context/AuthContext'
+
 /**
  * components/OfflineReportQueue.jsx
  * -----------------------------------
@@ -135,6 +137,7 @@ export default function OfflineReportQueue({
   onRetry,
   onNewReport,
 }) {
+  const { user } = useAuth()
   const pending = reports.filter(r => r.status === 'pending')
   const failed  = reports.filter(r => r.status === 'failed')
   const synced  = reports.filter(r => r.status === 'synced')
@@ -151,7 +154,7 @@ export default function OfflineReportQueue({
             </svg>
           </div>
           <div>
-            <h2 className="orq-header__title">My Reports</h2>
+            <h2 className="orq-header__title">{user ? 'My Reports' : 'Community Reports'}</h2>
             <p className="orq-header__sub">
               {lastSync
                 ? `Synced ${lastSync.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}`

@@ -14,6 +14,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useOnline } from './useOnline'
 import { getQueue } from './useOfflineQueue'
+import { useAuth } from '../context/AuthContext'
 import api from '../api/client'
 
 // ─── Priority map ─────────────────────────────────────────────────────────────
@@ -52,12 +53,15 @@ const ENDPOINTS = {
 
 export function useOfflineSyncManager() {
   const isOnline    = useOnline()
+  const { user }    = useAuth()
   const inFlight    = useRef(new Set())
   const syncingRef  = useRef(false)
 
   const [isSyncing,  setIsSyncing]  = useState(false)
   const [lastSyncAt, setLastSyncAt] = useState(null)
   const [summary,    setSummary]    = useState({ synced: 0, failed: 0, remaining: 0 })
+
+  const currentOwnerId = (user && user.id) ? String(user.id) : 'anonymous'
 
   // ── Push a single item ──────────────────────────────────────────────────────
   const pushItem = useCallback(async (storeName, item) => {
@@ -100,7 +104,12 @@ export function useOfflineSyncManager() {
 
         // Sort by priority then severity
         const pending = all
-          .filter(r => r.status === 'pending')
+          .filter(r => {
+            if (r.status !== 'pending') return false
+            // Session isolation check
+            const rOwner = r.ownerId ? String(r.ownerId) : 'anonymous'
+            return rOwner === currentOwnerId
+          })
           .sort((a, b) => {
             const pa = PRIORITY_MAP[a.severity] ?? a.priority ?? 2
             const pb = PRIORITY_MAP[b.severity] ?? b.priority ?? 2

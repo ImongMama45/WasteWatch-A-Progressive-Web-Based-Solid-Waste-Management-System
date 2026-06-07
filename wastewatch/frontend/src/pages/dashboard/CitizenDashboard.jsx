@@ -13,12 +13,14 @@
  *  - Collection schedule (highlighted next day)
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
 import HomeCarousel from '../../components/carousel/HomeCarousel'
+import OfflineReportBuilder from '../../components/OfflineReportBuilder'
+import { useOfflineReports } from '../../hooks/useOfflineReports'
 
 const STATUS_META = {
   pending: { label: 'Pending', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' },
@@ -40,6 +42,7 @@ const SEVERITY_COLORS = { high: '#ef4444', medium: '#f59e0b', low: '#22c55e' }
 export default function CitizenDashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const { addReport } = useOfflineReports()
 
   const [myReports, setMyReports] = useState([])
   const [stats, setStats] = useState({ total: 0, pending: 0, resolved: 0 })
@@ -48,6 +51,7 @@ export default function CitizenDashboard() {
   const [loading, setLoading] = useState(true)
   const [reportsTab, setReportsTab] = useState('all')   // all | pending | resolved
   const [crewAssignment, setCrewAssignment] = useState(null)
+  const [showBuilder, setShowBuilder] = useState(false)
 
   const nextDay = schedule.find(s => s.isNext) || schedule[0]
 
@@ -74,6 +78,10 @@ export default function CitizenDashboard() {
     }
   }, [user?.employee_type])
 
+  const handleSubmitReport = useCallback(async (fields) => {
+    await addReport(fields)
+    setShowBuilder(false)
+  }, [addReport])
 
   const filteredReports = myReports.filter(r => {
     if (reportsTab === 'all') return true
@@ -114,11 +122,13 @@ export default function CitizenDashboard() {
         </div>
 
         <div className='mobile-schedule'>
-          <HomeCarousel role="citizen" userBarangay={user?.barangay_name} onReport={() => navigate('/report/submit')} />
+          <HomeCarousel role="citizen" userBarangay={user?.barangay_name} onReport={() => setShowBuilder(true)} />
         </div>
 
         <div className="page-grid">
           <div>
+
+            {/* ... rest of the content ... */}
 
 
 
@@ -366,7 +376,7 @@ export default function CitizenDashboard() {
             <div id="my-reports-section" style={{ marginBottom: 20 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                 <h3 className="section-title" style={{ margin: 0 }}>My Reports</h3>
-                <button className="new-rptr-btn" onClick={() => navigate('/report/submit')}
+                <button className="new-rptr-btn" onClick={() => setShowBuilder(true)}
                   style={{
                     background: 'none', border: 'none', color: 'var(--accent)',
                     fontSize: 12, fontWeight: 700, cursor: 'pointer'
@@ -411,7 +421,7 @@ export default function CitizenDashboard() {
                     <div className="text-muted text-sm">See something? Tap "Report Issue" to let us know.</div>
                     <button className="cd-btn btn btn-primary"
                       style={{ marginTop: 14, fontSize: 12 }}
-                      onClick={() => navigate('/report/submit')}>
+                      onClick={() => setShowBuilder(true)}>
                       📸 Submit a Report
                     </button>
                   </div>
@@ -672,6 +682,12 @@ export default function CitizenDashboard() {
           </div>
         </div>
       </div>
+
+      <OfflineReportBuilder
+        isOpen={showBuilder}
+        onClose={() => setShowBuilder(false)}
+        onSubmit={handleSubmitReport}
+      />
     </>
   )
 }

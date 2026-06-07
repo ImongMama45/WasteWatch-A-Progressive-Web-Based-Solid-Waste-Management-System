@@ -24,13 +24,15 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useOnline } from './useOnline'
+import { useAuth } from '../context/AuthContext'
 import api from '../api/client'
 
 // ─── IndexedDB helpers ─────────────────────────────────────────────────────────
 
 const DB_NAME    = 'wastewatch_db'
-const DB_VERSION = 1
-const STORE      = 'reports'
+const DB_VERSION = 3
+const STORE_NAME = 'reports'
+
 const MAX_RETRY  = 3
 
 function openDB() {
@@ -38,8 +40,8 @@ function openDB() {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
     req.onupgradeneeded = (e) => {
       const db = e.target.result
-      if (!db.objectStoreNames.contains(STORE)) {
-        const store = db.createObjectStore(STORE, { keyPath: 'id' })
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' })
         store.createIndex('status',    'status',    { unique: false })
         store.createIndex('createdAt', 'createdAt', { unique: false })
       }
@@ -51,8 +53,8 @@ function openDB() {
 
 async function idbGetAll() {
   const db      = await openDB()
-  const tx      = db.transaction(STORE, 'readonly')
-  const store   = tx.objectStore(STORE)
+  const tx      = db.transaction(STORE_NAME, 'readonly')
+  const store   = tx.objectStore(STORE_NAME)
   return new Promise((resolve, reject) => {
     const req = store.getAll()
     req.onsuccess = () => resolve(req.result || [])
@@ -62,8 +64,8 @@ async function idbGetAll() {
 
 async function idbPut(record) {
   const db    = await openDB()
-  const tx    = db.transaction(STORE, 'readwrite')
-  const store = tx.objectStore(STORE)
+  const tx    = db.transaction(STORE_NAME, 'readwrite')
+  const store = tx.objectStore(STORE_NAME)
   return new Promise((resolve, reject) => {
     const req = store.put(record)
     req.onsuccess = () => resolve()
@@ -75,25 +77,44 @@ async function idbPut(record) {
 
 export function useOfflineReports() {
   const isOnline   = useOnline()
+  const { user }   = useAuth()
   const [reports,   setReports]   = useState([])
   const [isSyncing, setIsSyncing] = useState(false)
   const syncingRef = useRef(false)   // guard against double-firing
 
-  // ── Load all reports from IDB on mount ──────────────────────────────────────
+  // Current session owner ID ('anonymous' for guest)
+  // Force to string to avoid number/string mismatch issues
+  const currentOwnerId = (user && user.id) ? String(user.id) : 'anonymous'
+
+  // ── Load reports from IDB (filtered by session) ─────────────────────────────
   useEffect(() => {
+    // Clear immediately on ID change to avoid stale data flash
+    setReports([])
+
     idbGetAll()
-      .then(rows => setReports(rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt))))
+      .then(rows => {
+        // Strict filtering:
+        // - If logged in: show only reports where ownerId matches user.id (as string)
+        // - If guest: show only reports where ownerId === 'anonymous'
+        const filtered = rows.filter(r => {
+          const rOwner = r.ownerId ? String(r.ownerId) : 'anonymous'
+          return rOwner === currentOwnerId
+        })
+        setReports(filtered.sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
+      })
       .catch(err  => console.error('[useOfflineReports] load error:', err))
-  }, [])
+  }, [currentOwnerId])
 
   // ── Add a new report (always queued locally first) ───────────────────────────
   const addReport = useCallback(async (fields) => {
     const record = {
       id         : crypto.randomUUID(),
-      wasteType  : fields.wasteType  || 'residual',
+      ownerId    : currentOwnerId, // Explicit: '123' or 'anonymous'
+      wasteType  : fields.wasteType  || 'overflow',
       severity   : fields.severity   || 'medium',
       notes      : fields.notes      || '',
       location   : fields.location   || { lat: null, lng: null, address: 'Unknown' },
+      photo      : fields.photo      || null, // base64
       createdAt  : new Date().toISOString(),
       status     : 'pending',
       syncedAt   : null,
@@ -102,24 +123,53 @@ export function useOfflineReports() {
     await idbPut(record)
     setReports(prev => [record, ...prev])
     return record
-  }, [])
+  }, [currentOwnerId])
+
+  // ── Helper: base64 to Blob ──────────────────────────────────────────────────
+  function base64ToBlob(base64) {
+    if (!base64) return null
+    try {
+      const parts = base64.split(';base64,')
+      const contentType = parts[0].split(':')[1]
+      const raw = window.atob(parts[1])
+      const rawLength = raw.length
+      const uInt8Array = new Uint8Array(rawLength)
+      for (let i = 0; i < rawLength; ++i) {
+        uInt8Array[i] = raw.charCodeAt(i)
+      }
+      return new Blob([uInt8Array], { type: contentType })
+    } catch (e) {
+      console.error('Failed to convert base64 to blob', e)
+      return null
+    }
+  }
 
   // ── Try to push one report to the backend ────────────────────────────────────
   const pushReport = useCallback(async (report) => {
     try {
-      await api.post('/api/reports/', {
-        waste_type : report.wasteType,
-        severity   : report.severity,
-        notes      : report.notes,
-        latitude   : report.location?.lat,
-        longitude  : report.location?.lng,
-        address    : report.location?.address,
-        created_at : report.createdAt,
+      const formData = new FormData()
+      formData.append('issue_type',  report.wasteType)
+      formData.append('severity',    report.severity)
+      formData.append('description', report.notes)
+      if (report.location?.lat) formData.append('latitude', report.location.lat)
+      if (report.location?.lng) formData.append('longitude', report.location.lng)
+      
+      if (report.photo) {
+        const blob = base64ToBlob(report.photo)
+        if (blob) {
+          formData.append('image', blob, `report_${report.id}.jpg`)
+        }
+      }
+
+      await api.post('/api/watcher/reports/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
       })
+      
       const updated = { ...report, status: 'synced', syncedAt: new Date().toISOString() }
       await idbPut(updated)
       return updated
-    } catch {
+    } catch (err) {
+      console.error('[useOfflineReports] pushReport error:', err)
       const retryCount = (report.retryCount || 0) + 1
       const status     = retryCount >= MAX_RETRY ? 'failed' : 'pending'
       const updated    = { ...report, status, retryCount }
@@ -131,11 +181,24 @@ export function useOfflineReports() {
   // ── Sync all pending reports ─────────────────────────────────────────────────
   const syncAll = useCallback(async () => {
     if (!isOnline || syncingRef.current) return
+    
+    // GUARD: Block sync if logged out and trying to sync user reports, 
+    // or if we want to force login for sync.
+    if (currentOwnerId === 'anonymous') {
+      console.warn('[useOfflineReports] Sync blocked: User must be logged in to sync reports.')
+      return
+    }
+
     syncingRef.current = true
     setIsSyncing(true)
     try {
       const all     = await idbGetAll()
-      const pending = all.filter(r => r.status === 'pending')
+      // Only sync reports belonging to the CURRENT session user
+      const pending = all.filter(r => 
+        r.status === 'pending' && 
+        String(r.ownerId || 'anonymous') === currentOwnerId
+      )
+      
       if (pending.length === 0) return
 
       const results = await Promise.all(pending.map(pushReport))
@@ -152,20 +215,29 @@ export function useOfflineReports() {
       setIsSyncing(false)
       syncingRef.current = false
     }
-  }, [isOnline, pushReport])
+  }, [isOnline, pushReport, currentOwnerId])
 
   // ── Retry a single failed report ─────────────────────────────────────────────
   const retryReport = useCallback(async (id) => {
+    // GUARD: Block retry for anonymous sessions
+    if (currentOwnerId === 'anonymous') {
+      alert('Mangyaring mag-login para i-retry ang pag-sync ng report.')
+      return
+    }
+
     const all    = await idbGetAll()
     const report = all.find(r => r.id === id)
-    if (!report || !isOnline) return
+    // Guard: check ownership before retrying
+    const rOwner = report?.ownerId ? String(report.ownerId) : 'anonymous'
+    if (!report || !isOnline || rOwner !== currentOwnerId) return
+    
     const resetted = { ...report, status: 'pending', retryCount: 0 }
     await idbPut(resetted)
     const result = await pushReport(resetted)
     setReports(prev =>
       prev.map(r => r.id === id ? result : r)
     )
-  }, [isOnline, pushReport])
+  }, [isOnline, pushReport, currentOwnerId])
 
   // ── Auto-sync when coming back online ────────────────────────────────────────
   useEffect(() => {
