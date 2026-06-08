@@ -10,7 +10,7 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
-export default function PrivateRoute({ children }) {
+export default function PrivateRoute({ children, roles }) {
   const { user, loading } = useAuth()
   const location = useLocation()
 
@@ -29,8 +29,11 @@ export default function PrivateRoute({ children }) {
   }
 
   if (!user) {
-    // Preserve intended destination so we can redirect back after login
     return <Navigate to={`/login?next=${encodeURIComponent(location.pathname)}`} replace />
+  }
+
+  if (roles && !roles.includes(user.role)) {
+    return <Navigate to="/dashboard" replace />
   }
 
   return children

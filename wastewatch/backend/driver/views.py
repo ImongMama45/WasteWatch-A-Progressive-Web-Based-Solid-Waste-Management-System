@@ -164,68 +164,103 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='current')
     def current(self, request):
         """
-        Returns the driver's next uncompleted stop for today.
+        Returns the driver's next uncompleted stop.
+
+        Resolution order:
+        1. Today's TruckCrewAssignment → schedule
+        2. Today's CollectionSchedule for this driver
+        3. Any CollectionSchedule for this driver (date may be null for recurring)
+        4. Any uncompleted PickupStatus for this driver across all schedules
+
+        Auto-repair: if a schedule exists with waypoints but no PickupStatus rows,
+        sync_pickup_statuses() is called to create them before querying.
+
         Maps to GET /api/driver/stops/current/
         """
         today = timezone.localdate()
-        assignment = TruckCrewAssignment.objects.filter(driver=request.user, date=today, is_active=True).first()
-        if assignment and assignment.schedule:
+
+        # ── 1. Resolve schedule ──────────────────────────────────────────────
+        schedule = None
+
+        assignment = (
+            TruckCrewAssignment.objects
+            .filter(driver=request.user, date=today, is_active=True)
+            .select_related('schedule')
+            .first()
+        )
+        if assignment and assignment.schedule_id:
             schedule = assignment.schedule
-        else:
-            schedule = CollectionSchedule.objects.filter(driver=request.user, date=today).first()
-            if not schedule:
-                schedule = CollectionSchedule.objects.filter(driver=request.user).first()
+
+        if not schedule:
+            schedule = (
+                CollectionSchedule.objects
+                .filter(driver=request.user, date=today)
+                .first()
+            )
+
+        if not schedule:
+            # Covers recurring schedules where date is left null
+            schedule = (
+                CollectionSchedule.objects
+                .filter(driver=request.user)
+                .order_by('-id')
+                .first()
+            )
+
+        # ── 2. Auto-repair missing PickupStatus rows ──────────────────────────
+        # If a schedule has waypoints but no stops were ever synced, create them now.
         if schedule:
-            stop = PickupStatus.objects.filter(
-                driver=request.user,
-                schedule=schedule
-            ).exclude(status='COMPLETED').select_related('schedule').order_by('stop_order').first()
+            has_stops = PickupStatus.objects.filter(
+                driver=request.user, schedule=schedule
+            ).exists()
+            if not has_stops and schedule.waypoints and len(schedule.waypoints) > 1:
+                try:
+                    schedule.sync_pickup_statuses()
+                except Exception:
+                    pass  # non-fatal — fall through to last-resort query
+
+        # ── 3. Query next uncompleted stop ────────────────────────────────────
+        if schedule:
+            stop = (
+                PickupStatus.objects
+                .filter(driver=request.user, schedule=schedule)
+                .exclude(status='COMPLETED')
+                .select_related('schedule')
+                .order_by('stop_order')
+                .first()
+            )
         else:
-            stop = PickupStatus.objects.filter(
-                driver=request.user
-            ).exclude(status='COMPLETED').select_related('schedule').order_by('stop_order').first()
+            stop = None
+
+        # ── 4. Last resort: any uncompleted stop for this driver ──────────────
+        if not stop:
+            stop = (
+                PickupStatus.objects
+                .filter(driver=request.user)
+                .exclude(status='COMPLETED')
+                .select_related('schedule')
+                .order_by('stop_order')
+                .first()
+            )
 
         if not stop:
             return Response(None)  # null → frontend shows "no more stops"
 
-        schedule = stop.schedule
+        sched = stop.schedule
         return Response({
             'id':            stop.id,
             'order':         stop.stop_order,
-            'address':       stop.address or (schedule.area if schedule else 'Unknown'),
-            'barangay':      ', '.join(b.name for b in schedule.barangays.all()[:1]) if schedule else 'Unknown',
-            'zone':          schedule.area if schedule else '',
+            'address':       stop.address or (sched.area if sched else 'Unknown'),
+            'barangay':      (
+                ', '.join(b.name for b in sched.barangays.all()[:1])
+                if sched else 'Unknown'
+            ),
+            'zone':          sched.area if sched else '',
             'category':      'Mixed Waste',
-            'scheduledTime': schedule.start_time.strftime('%I:%M %p') if schedule else 'N/A',
+            'scheduledTime': sched.start_time.strftime('%I:%M %p') if sched else 'N/A',
             'distance':      '—',
             'notes':         stop.note,
-        })
-
-    @action(detail=True, methods=['post'], url_path='collect')
-    def collect(self, request, pk=None):
-        stop = self.get_object()
-        if stop.driver != request.user:
-            return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
-
-        photo = request.FILES.get('photo')
-        if not photo:
-            return Response({'error': 'A proof photo is required.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        stop.status = 'COMPLETED'
-        stop.note = request.data.get('note') or stop.note
-        stop.collected_at = timezone.now()
-        stop.photo_url = photo
-        stop.save(update_fields=['status', 'note', 'collected_at', 'photo_url', 'updated_at'])
-        return Response({
-            'id': stop.id,
-            'status': stop.status,
-            'collected_at': stop.collected_at,
-            'stop_order': stop.stop_order,
-            'schedule_id': stop.schedule_id,
-            'driver_id': stop.driver_id,
-            'photo_url': stop.photo_url.url if getattr(stop.photo_url, 'url', None) else stop.photo_url,
-            'updated_at': stop.updated_at,
-        })
+        })  
     
     @action(detail=False, methods=['get'], url_path='history/today')
     def history_today(self, request):
@@ -254,6 +289,84 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
                 'note':        s.note,
             })
         return Response(data)
+
+    @action(detail=False, methods=['post'], url_path='collect')
+    def collect(self, request):
+        """
+        Upload a collection proof photo by schedule + stop order.
+        Does NOT require a pre-existing PickupStatus pk.
+        Creates the PickupStatus row if it doesn't exist yet.
+
+        POST /api/driver/stops/collect/
+        Form fields: schedule_id, stop_order, photo, note, lat, lng, collected_at
+        """
+        schedule_id  = request.data.get('schedule_id')
+        stop_order   = request.data.get('stop_order')
+        photo        = request.FILES.get('photo')
+        note         = request.data.get('note', '').strip()
+        collected_at_raw = request.data.get('collected_at')
+
+        if not schedule_id:
+            return Response({'error': 'schedule_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if stop_order is None:
+            return Response({'error': 'stop_order is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            stop_order = int(stop_order)
+        except (ValueError, TypeError):
+            return Response({'error': 'stop_order must be an integer.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            schedule = CollectionSchedule.objects.get(pk=schedule_id, driver=request.user)
+        except CollectionSchedule.DoesNotExist:
+            return Response({'error': 'Schedule not found or not assigned to you.'}, status=status.HTTP_404_NOT_FOUND)
+
+        collected_at = timezone.now()
+        if collected_at_raw:
+            try:
+                parsed = parse_datetime(collected_at_raw)
+                if parsed:
+                    collected_at = parsed
+            except Exception:
+                pass
+
+        # Get or create — safe even if sync_pickup_statuses() never ran
+        ps, created = PickupStatus.objects.get_or_create(
+            driver=request.user,
+            schedule=schedule,
+            stop_order=stop_order,
+            defaults={
+                'status': 'COMPLETED',
+                'address': (schedule.waypoints or [{}])[stop_order].get('label', '') if len(schedule.waypoints or []) > stop_order else '',
+                'note': note,
+                'collected_at': collected_at,
+            },
+        )
+
+        if not created:
+            ps.status = 'COMPLETED'
+            ps.note = note
+            ps.collected_at = collected_at
+
+        if photo:
+            ps.photo_url = photo  # Cloudinary field handles upload on save
+
+        ps.save()
+
+        photo_url = None
+        if ps.photo_url:
+            try:
+                photo_url = ps.photo_url.url
+            except Exception:
+                pass
+
+        return Response({
+            'id':          ps.id,
+            'stop_order':  ps.stop_order,
+            'status':      ps.status,
+            'photo_url':   photo_url,
+            'collected_at': ps.collected_at,
+        }, status=status.HTTP_201_CREATED)
 
 class TruckLocationViewSet(viewsets.ModelViewSet):
     queryset = TruckLocation.objects.all().order_by('-timestamp')
@@ -478,19 +591,19 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
         if schedule and schedule.waypoints:
             waypoints = schedule.waypoints
             if waypoints and len(waypoints) > 0:
-                home_base = waypoints[0] # First waypoint is the home base
+                home_base = waypoints[0]
                 if driver_lat and driver_lng and 'lat' in home_base and 'lng' in home_base:
                     try:
                         dist = haversine(
                             float(driver_lat), float(driver_lng),
                             float(home_base['lat']), float(home_base['lng'])
                         )
-                        if dist > 1000: # 1000 meters / 1km radius
+                        if dist > 1000:   # ← hard 1 km radius
                             return Response({
-                                'error': f'You are too far from the home base ({int(dist)}m away). You must be within 1km to start your shift.'
-                            }, status=status.HTTP_403_FORBIDDEN)
+                                'error': f'You are too far from the home base ({int(dist)}m away)...'
+                            }, status=status.HTTP_403_FORBIDDEN)   # ← this is the 403
                     except ValueError:
-                        pass # Invalid coordinates format
+                        pass# Invalid coordinates format
 
 
         

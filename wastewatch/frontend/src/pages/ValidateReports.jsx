@@ -1,7 +1,7 @@
 /**
  * ValidateReports.jsx — Barangay Report Validation Page
  * -------------------------------------------------------
- * Route: /brgy/reports
+ * Route: /brgy/validate-reports
  */
 
 import { useState, useMemo, useEffect } from 'react'

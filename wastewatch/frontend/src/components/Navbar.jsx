@@ -1,18 +1,19 @@
 /**
  * components/Navbar.jsx
  * ----------------------
- * Fixed: imports SIDEBAR_NAV from DashboardLayout (was missing, causing
- * "SIDEBAR_NAV is not defined" crash on line 436).
- *
- * All logic, hooks, routes, and auth behaviour are unchanged.
- * Only the import line was patched.
+ * FIXES:
+ * 1. Drawer icons: was doing NAV_ICONS[icon] on emoji strings → now renders
+ *    the icon value directly when it's already a string/element, and only
+ *    looks up via ICONS (from DashboardLayout) when it's a key string.
+ * 2. Notifications: unified with DashboardLayout's style (English, consistent UI).
+ * 3. Removed duplicate/conflicting icon lookup logic.
  */
 
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useOnline } from '../hooks/useOnline'
-import { NAV_ICONS, SIDEBAR_NAV, getRoleNavItems, flattenNavItems } from '../api/navConfig'
+import { ICONS, NAV_ICONS, getRoleNavItems, flattenNavItems } from '../api/navConfig'
 
 // ─── tiny CSS injected once ───────────────────────────────────────────────────
 const NAVBAR_CSS = `
@@ -98,6 +99,7 @@ const NAVBAR_CSS = `
   color: #4a6741;
   border-radius: 8px;
   transition: background .15s;
+  display: flex; align-items: center; justify-content: center;
 }
 .ww-bell:hover { background: #e8f5e9; }
 
@@ -203,22 +205,30 @@ const NAVBAR_CSS = `
 /* ── Notification dropdown ── */
 .ww-notif-drop {
   position: fixed;
-  top: 68px; right: 12px;
+  top: 62px; right: 12px;
   width: 300px;
   background: #fff;
-  border: 1px solid #dce8d4;
-  border-radius: 14px;
-  z-index: 1100;
+  border: 1px solid rgba(0,0,0,0.1);
+  border-radius: 0 0 14px 14px;
+  /* z-index BELOW navbar (1000) so it never covers it */
+  z-index: 990;
   box-shadow: 0 8px 28px rgba(0,0,0,.12);
   overflow: hidden;
+  /* slide-down animation */
+  animation: wwNotifSlide .18s ease;
 }
 
-@media (min-width: 1024px) { .ww-notif-drop { right: 40px; } }
+@keyframes wwNotifSlide {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (min-width: 1024px) { .ww-notif-drop { right: 20px; } }
 
 .ww-notif-head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 13px 16px 10px;
-  border-bottom: 1px solid #eef3ea;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(0,0,0,0.07);
 }
 
 .ww-notif-head__title {
@@ -227,48 +237,49 @@ const NAVBAR_CSS = `
 
 .ww-notif-close {
   background: none; border: none; cursor: pointer;
-  font-size: 18px; color: #6a8f6a; line-height: 1; padding: 0;
+  font-size: 20px; color: rgba(0,0,0,0.4); line-height: 1; padding: 0;
 }
 .ww-notif-close:hover { color: #1a2e1a; }
 
 .ww-notif-item {
   display: flex; align-items: flex-start; gap: 10px;
   padding: 12px 16px;
-  border-bottom: 1px solid #eef3ea;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
   transition: background .1s;
 }
 .ww-notif-item:last-of-type { border-bottom: none; }
-.ww-notif-item:hover { background: #f0f7ec; }
-.ww-notif-item.unread { background: #f5fcf5; }
+.ww-notif-item:hover { background: rgba(0,0,0,0.03); }
+.ww-notif-item.unread { background: rgba(74,222,128,0.05); }
 
 .ww-notif-dot {
   width: 8px; height: 8px; min-width: 8px;
-  background: #2e7d32; border-radius: 50%;
+  background: #16a34a; border-radius: 50%;
   margin-top: 4px; flex-shrink: 0;
 }
 
 .ww-notif-item__title  { font-size: 13px; font-weight: 600; color: #1a2e1a; }
-.ww-notif-item__time   { font-size: 11px; color: #6a8f6a; margin-top: 2px; }
+.ww-notif-item__time   { font-size: 11px; color: rgba(0,0,0,0.4); margin-top: 2px; }
 
 .ww-notif-footer {
   padding: 10px 16px;
-  border-top: 1px solid #eef3ea;
+  border-top: 1px solid rgba(0,0,0,0.07);
 }
 .ww-notif-footer button {
   width: 100%; background: none; border: none;
-  color: #2e7d32; font-size: 12px; font-weight: 600;
+  color: #16a34a; font-size: 12px; font-weight: 600;
   cursor: pointer; font-family: inherit; padding: 0;
 }
 .ww-notif-footer button:hover { text-decoration: underline; }
 
-/* ── Mobile slide-in drawer ── */
+/* ── Mobile slide-in drawer — starts BELOW the navbar ── */
 .ww-drawer {
   position: fixed;
-  top: 0; left: 0; bottom: 0;
+  top: 60px; left: 0; bottom: 0;
   width: 280px;
   background: #fff;
   border-right: 1px solid #dce8d4;
-  z-index: 2000;
+  border-top: 1px solid #c8e6c9;
+  z-index: 990;
   display: flex; flex-direction: column;
   overflow-y: auto;
   animation: wwSlideIn .22s ease;
@@ -317,12 +328,30 @@ const NAVBAR_CSS = `
   letter-spacing: .06em;
 }
 
+/* Compact role strip (replaces old user block) */
+.ww-drawer__role-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 18px;
+  border-bottom: 1px solid #eef3ea;
+  background: #f8fdf8;
+}
+
+.ww-drawer__role-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #2e7d32;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 /* Drawer — nav items */
 .ww-drawer__nav { padding: 8px 0; flex: 1; }
 
 .ww-drawer__item {
   width: 100%; text-align: left;
-  padding: 13px 18px;
+  padding: 12px 18px;
   background: none; border: none;
   font-size: 14px; font-family: inherit;
   cursor: pointer;
@@ -343,9 +372,19 @@ const NAVBAR_CSS = `
   border-left-color: #2e7d32;
 }
 
+/* ── FIX: icon cell — fixed width, flex centering, no overflow ── */
 .ww-drawer__item__icon {
-  display: flex; align-items: center; justify-content: center;
-  width: 20px; flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  color: #4a6741;
+}
+
+.ww-drawer__item.active .ww-drawer__item__icon {
+  color: #2e7d32;
 }
 
 /* Drawer — footer buttons */
@@ -359,10 +398,12 @@ const NAVBAR_CSS = `
 
 /* ── Backdrop ── */
 .ww-backdrop {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,.35);
-  z-index: 1500;
-  backdrop-filter: blur(2px);
+  position: fixed;
+  /* start below the navbar so it never covers it */
+  top: 60px; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,.25);
+  z-index: 980;
+  backdrop-filter: blur(1px);
 }
 `
 
@@ -393,9 +434,33 @@ const BellIcon = () => (
   </svg>
 )
 
-// ─── Helper: check if group has an active child ──────────────────────────────
-function groupContainsActive(group, currentPath) {
-  return group.items?.some(item => item.path === currentPath)
+/**
+ * resolveIcon — FIX for the blank/raw-text icon bug.
+ *
+ * Nav items from getRoleNavItems/flattenNavItems carry an `icon` field that
+ * is either:
+ *   (a) an emoji string  e.g. "🏠"  → render as-is
+ *   (b) a key string     e.g. "dashboard", "map"  → look up in ICONS map
+ *   (c) already a React element → render as-is
+ *
+ * Previously the code only tried NAV_ICONS[icon] which is an emoji lookup
+ * object; keys like "dashboard" don't exist there so it returned undefined
+ * and fell back to rendering the raw key string ("dashboard").
+ */
+function resolveIcon(icon) {
+  if (!icon) return null
+
+  // Already a React element
+  if (typeof icon === 'object') return icon
+
+  // Try the SVG ICONS map first (keys like 'dashboard', 'map', 'truck'…)
+  if (ICONS && ICONS[icon]) return ICONS[icon]
+
+  // Try the emoji NAV_ICONS map
+  if (NAV_ICONS && NAV_ICONS[icon]) return NAV_ICONS[icon]
+
+  // It's already an emoji / plain string — render directly
+  return icon
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -409,10 +474,9 @@ export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
 
-  // Inject CSS once on mount
   useEffect(() => { injectStyles() }, [])
 
-  // Close drawer on route change
+  // Close drawer/notif on route change
   useEffect(() => { setMenuOpen(false); setNotifOpen(false) }, [location.pathname])
 
   // Lock body scroll when drawer is open
@@ -432,27 +496,31 @@ export default function Navbar() {
 
   const role = user?.role?.toLowerCase() || 'citizen'
 
-  // ── FIX: use getRoleNavItems and flattenNavItems for consistency ──
+  // Build mobile nav items from role config
   const baseItems = flattenNavItems(getRoleNavItems(role))
 
   const mobileNavItems = user
     ? [
-      ...baseItems.map(item => ({ path: item.path, icon: item.icon, label: item.label })),
-      ...(role === 'driver'
-        ? [{ path: '/collection/confirm', icon: '✅', label: 'Confirm Collection' }]
-        : []),
-    ]
+        ...baseItems.map(item => ({
+          path: item.path,
+          icon: item.icon,   // keep as-is; resolveIcon() handles it in render
+          label: item.label,
+        })),
+        ...(role === 'driver'
+          ? [{ path: '/collection/confirm', icon: 'check', label: 'Confirm Collection' }]
+          : []),
+      ]
     : [
-      { path: '/', icon: '🏠', label: 'Home' },
-      { path: '/login', icon: '🔑', label: 'Login' },
-      { path: '/register', icon: '📝', label: 'Register' },
-    ]
+        { path: '/',         icon: 'home',     label: 'Home'     },
+        { path: '/login',    icon: 'login',    label: 'Login'    },
+        { path: '/register', icon: 'register', label: 'Register' },
+      ]
 
   const desktopLinks = [
-    { path: '/', label: 'Home' },
-    { path: '/map', label: 'Map' },
-    { path: '/schedule', label: 'Schedule' },
-    { path: '/about', label: 'About' },
+    { path: '/',            label: 'Home'      },
+    { path: '/map',         label: 'Map'       },
+    { path: '/schedule',    label: 'Schedule'  },
+    { path: '/about',       label: 'About'     },
     ...(user ? [{ path: '/dashboard', label: 'Dashboard' }] : []),
   ]
 
@@ -461,7 +529,7 @@ export default function Navbar() {
       {/* ── Offline strip (below navbar) ── */}
       {!isOnline && (
         <div className="ww-offline-strip">
-          ⚠️ OFFLINE — mga pagbabago ay i-sync pagbalik ng koneksyon
+          ⚠️ OFFLINE — changes will sync when connection is restored
         </div>
       )}
 
@@ -483,9 +551,7 @@ export default function Navbar() {
             className="ww-brand"
             onClick={e => { e.preventDefault(); navTo('/') }}
           >
-            <span className="ww-brand__icon">
-              <LeafIcon />
-            </span>
+            <span className="ww-brand__icon"><LeafIcon /></span>
             <span className="ww-brand__name">WasteWatch</span>
           </a>
         </div>
@@ -505,11 +571,11 @@ export default function Navbar() {
 
         {/* Right: bell + auth */}
         <div className="ww-nav-right">
-
           <button
             className="ww-bell"
             onClick={() => { setNotifOpen(o => !o); setMenuOpen(false) }}
             aria-label="Notifications"
+            aria-expanded={notifOpen}
           >
             <BellIcon />
             <span
@@ -519,30 +585,21 @@ export default function Navbar() {
           </button>
 
           {user ? (
-            <>
-              <div
-                className="ww-avatar-chip"
-                onClick={() => navTo('/profile')}
-                role="button"
-                tabIndex={0}
-                onKeyDown={e => e.key === 'Enter' && navTo('/profile')}
-                title="Go to profile"
-              >
-                <div className="ww-avatar">
-                  {user.full_name?.[0]?.toUpperCase() || '?'}
-                </div>
-                <span className="ww-avatar__name">
-                  {user.full_name?.split(' ')[0]}
-                </span>
+            <div
+              className="ww-avatar-chip"
+              onClick={() => navTo('/profile')}
+              role="button"
+              tabIndex={0}
+              onKeyDown={e => e.key === 'Enter' && navTo('/profile')}
+              title="Go to profile"
+            >
+              <div className="ww-avatar">
+                {user.full_name?.[0]?.toUpperCase() || '?'}
               </div>
-              <button
-                className="ww-btn ww-btn--outline ww-btn--sm"
-                style={{ display: 'none' }} // shown via .ww-auth-row media query
-                onClick={handleLogout}
-              >
-                Logout
-              </button>
-            </>
+              <span className="ww-avatar__name">
+                {user.full_name?.split(' ')[0]}
+              </span>
+            </div>
           ) : (
             <div className="ww-auth-row">
               <button
@@ -574,22 +631,28 @@ export default function Navbar() {
                 </span>
               )}
             </span>
-            <button className="ww-notif-close" onClick={() => setNotifOpen(false)} aria-label="Close">×</button>
+            <button
+              className="ww-notif-close"
+              onClick={() => setNotifOpen(false)}
+              aria-label="Close notifications"
+            >
+              ×
+            </button>
           </div>
 
           <div className="ww-notif-item unread">
             <div className="ww-notif-dot" />
             <div>
-              <div className="ww-notif-item__title">Report #3 naayos na</div>
-              <div className="ww-notif-item__time">2 oras na ang nakalipas</div>
+              <div className="ww-notif-item__title">Report #3 resolved</div>
+              <div className="ww-notif-item__time">2 hours ago</div>
             </div>
           </div>
 
           <div className="ww-notif-item">
-            <div style={{ width: 8 }} />
+            <div style={{ width: 8, flexShrink: 0 }} />
             <div>
-              <div className="ww-notif-item__title">Maligayang pagdating sa WasteWatch!</div>
-              <div className="ww-notif-item__time">3 araw na ang nakalipas</div>
+              <div className="ww-notif-item__title">Welcome to WasteWatch!</div>
+              <div className="ww-notif-item__time">3 days ago</div>
             </div>
           </div>
 
@@ -603,32 +666,17 @@ export default function Navbar() {
       {menuOpen && (
         <aside className="ww-drawer" aria-label="Mobile navigation">
 
-          <div className="ww-drawer__user">
-            <div
-              className={`ww-drawer__avatar ${!user ? 'ww-drawer__avatar--guest' : ''}`}
-              onClick={() => user && navTo('/profile')}
-              style={{ cursor: user ? 'pointer' : 'default' }}
-            >
-              {user ? (user.full_name?.[0] || '?') : '👤'}
+          {/* Compact role/status strip below navbar */}
+          {user && (
+            <div className="ww-drawer__role-strip">
+              <span className="ww-drawer__role-label">
+                {role.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}
+              </span>
+              {!isOnline && <span className="ww-offline-badge">OFFLINE</span>}
             </div>
-            <div>
-              {user ? (
-                <>
-                  <div className="ww-drawer__name">{user.full_name}</div>
-                  <div className="ww-drawer__email">{user.email}</div>
-                </>
-              ) : (
-                <>
-                  <div className="ww-drawer__name">Guest</div>
-                  <div className="ww-drawer__signin" onClick={() => navTo('/login')}>
-                    Mag-sign in →
-                  </div>
-                </>
-              )}
-            </div>
-            {!isOnline && <span className="ww-offline-badge">OFFLINE</span>}
-          </div>
+          )}
 
+          {/* Nav links */}
           <nav className="ww-drawer__nav">
             {mobileNavItems.map(({ path, icon, label }) => (
               <button
@@ -636,14 +684,22 @@ export default function Navbar() {
                 className={`ww-drawer__item ${location.pathname === path ? 'active' : ''}`}
                 onClick={() => navTo(path)}
               >
+                {/*
+                  ── ICON FIX ──
+                  resolveIcon() tries ICONS (SVG map) first, then NAV_ICONS
+                  (emoji map), then falls back to the raw string.
+                  This prevents raw key names ("dashboard", "map") from
+                  appearing as text in the drawer.
+                */}
                 <span className="ww-drawer__item__icon" aria-hidden="true">
-                  {NAV_ICONS[icon] || icon}
+                  {resolveIcon(icon)}
                 </span>
                 <span>{label}</span>
               </button>
             ))}
           </nav>
 
+          {/* Footer */}
           <div className="ww-drawer__footer">
             {user ? (
               <>

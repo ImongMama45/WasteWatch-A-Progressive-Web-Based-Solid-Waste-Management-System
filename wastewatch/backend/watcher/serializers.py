@@ -10,6 +10,11 @@ class GarbageReportSerializer(serializers.ModelSerializer):
     class Meta:
         model = GarbageReport
         fields = '__all__'
+        read_only_fields = [
+            'status', 'user', 'approved_by', 'approved_at',
+            'rejected_by', 'rejected_at', 'rejection_reason',
+            'created_at', 'updated_at',
+        ]
 
     def get_user_name(self, obj):
         # 1. Anonymous submissions

@@ -91,12 +91,9 @@ export default function MiniMap() {
   const [panelOpen, setPanelOpen] = useState(false)
   const [reports, setReports] = useState([])
   const [activeTrucks, setActiveTrucks] = useState([])
-  const [liveReports, setLiveReports] = useState([])
 
   const activeTrucksRef = useRef(activeTrucks)
-  const liveReportsRef = useRef(liveReports)
   useEffect(() => { activeTrucksRef.current = activeTrucks }, [activeTrucks])
-  useEffect(() => { liveReportsRef.current = liveReports }, [liveReports])
 
   useEffect(() => {
     if (window.L) { setLeafletReady(true); return }
@@ -145,11 +142,8 @@ export default function MiniMap() {
         .catch(console.error)
     }
     const fetchReports = () => {
-      api.get('/api/watcher/reports/public_map/')
-        .then(res => setReports(res.data))
-        .catch(console.error)
       api.get('/api/watcher/reports/map_pins/')
-        .then(res => setLiveReports(res.data))
+        .then(res => setReports(res.data))
         .catch(console.error)
     }
     fetchActiveShifts()
@@ -166,7 +160,7 @@ export default function MiniMap() {
   useEffect(() => {
     if (mapInstance) drawLayers(mapInstance)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapInstance, reports, activeTrucks, liveReports])
+  }, [mapInstance, reports, activeTrucks])
 
   function clearLayers(map) {
     Object.values(layersRef.current).forEach(l => {
@@ -233,20 +227,8 @@ export default function MiniMap() {
       layersRef.current[`live-truck-${truck.id}`] = m
     })
 
-    // Garbage reports (Static from Public Map)
+    // Approved hotspot pins from map_pins endpoint
     reports.forEach(r => {
-      const lat = r.latitude || r.lat
-      const lng = r.longitude || r.lng
-      if (lat == null || lng == null) return
-
-      const icon = L.divIcon({ html: reportIconHtml(r.severity), className: '', iconSize: [24, 30], iconAnchor: [6, 30] })
-      const m = L.marker([lat, lng], { icon }).addTo(map)
-      m.bindPopup(`<b>⚠️ ${TYPE_LABELS[r.issue_type] || r.issue_type || 'Garbage'}</b><br/><small>${r.barangay_name || r.address || ''}</small><br/>${r.description || ''}`)
-      layersRef.current[`rep-${r.id}`] = m
-    })
-
-    // Garbage reports (Live Pins)
-    liveReportsRef.current.forEach(r => {
       const lat = r.lat || r.latitude
       const lng = r.lng || r.longitude
       if (lat == null || lng == null) return
@@ -254,7 +236,7 @@ export default function MiniMap() {
       const icon = L.divIcon({ html: reportIconHtml(r.severity), className: '', iconSize: [24, 30], iconAnchor: [6, 30] })
       const m = L.marker([lat, lng], { icon }).addTo(map)
       m.bindPopup(`<b>⚠️ ${TYPE_LABELS[r.issue_type] || r.issue_type || 'Garbage'}</b><br/><small>${r.barangay_name || r.address || ''}</small><br/>${r.description || ''}`)
-      layersRef.current[`live-rep-${r.id}`] = m
+      layersRef.current[`rep-${r.id}`] = m
     })
   }
 
@@ -306,7 +288,7 @@ export default function MiniMap() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#f59e0b', boxShadow: '0 0 6px #f59e0b' }} />
-          <span style={{ color: '#cbd5e1', fontSize: 11 }}>{liveReports.length + reports.length} Reports Nearby</span>
+          <span style={{ color: '#cbd5e1', fontSize: 11 }}>{reports.length} Reports Nearby</span>
         </div>
       </div>
       {panelOpen && selectedRoute && (

@@ -1,8 +1,6 @@
 // MapView.jsx — WasteWatch Admin/Watcher/Barangay Official Map
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from 'react-router-dom'
-import { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import { useAuth } from '../context/AuthContext'
@@ -36,7 +34,7 @@ export function getZoneType(brgy_name) {
   return ZONE_TYPE_MAP[brgy_name] ?? "residential"
 }
 
-const REPORT_MODERATOR_ROLES = ["watcher", "brgy_official", "admin"]
+const REPORT_MODERATOR_ROLES = ["brgy_official", "admin"]
 
 export const TRUCK_ROUTES = [];
 export const DUMP_SITES = [
@@ -221,7 +219,6 @@ export default function MapView() {
   const [barangayGeo, setBarangayGeo] = useState(null)
   const [reports, setReports] = useState([])
   const [activeTrucks, setActiveTrucks] = useState([])
-  const [liveReports, setLiveReports] = useState([])
 
   useEffect(() => subscribePickupStatusSync(() => {
     api.get('/api/driver/pickup-statuses/')
@@ -240,15 +237,12 @@ export default function MapView() {
 
   const activeFiltersRef = useRef(activeFilters)
   const activeTrucksRef = useRef(activeTrucks)
-  const liveReportsRef  = useRef(liveReports)
-  const barangayDataRef = useRef(barangayData)   // ← NEW: mirrors barangayData for drawAll
-  const selectedZoneRef = useRef(selectedZone)   // ← NEW: mirrors selectedZone for drawAll
-  const liveReportsRef = useRef(liveReports)
-  const mapInstanceRef = useRef(null) // Added for stability with drawAll
+  const barangayDataRef = useRef(barangayData)
+  const selectedZoneRef = useRef(selectedZone)
+  const mapInstanceRef = useRef(null)
 
   useEffect(() => { activeFiltersRef.current = activeFilters }, [activeFilters])
   useEffect(() => { activeTrucksRef.current  = activeTrucks  }, [activeTrucks])
-  useEffect(() => { liveReportsRef.current   = liveReports   }, [liveReports])
   useEffect(() => { barangayDataRef.current  = barangayData  }, [barangayData])
   useEffect(() => { selectedZoneRef.current  = selectedZone  }, [selectedZone])
   const schedulesRef = useRef(schedules)
@@ -415,15 +409,6 @@ export default function MapView() {
 
   // ── Live reports — poll every 30 s ───────────────────────────────────────
   useEffect(() => {
-    const fetchReports = () => {
-      console.log('[MapView] fetchReports')
-      api.get('/api/watcher/reports/map_pins/')
-        .then(res => {
-          console.log('map_pins count:', res.data?.length)
-          setLiveReports(res.data)
-        })
-        .catch(err => console.error('[MapView] map_pins error', err))
-    }
     fetchReports()
     const intv = setInterval(fetchReports, 30_000)
     return () => clearInterval(intv)
@@ -436,14 +421,14 @@ export default function MapView() {
       mapReady, barangayGeo: !!barangayGeo,
       activeFilters: Object.keys(activeFilters).filter(k => activeFilters[k]),
       activeTrucks: activeTrucks.length,
-      liveReports: liveReports.length,
+      reports: reports.length,
       barangayData: barangayData.trucks.length + barangayData.stops.length,
       schedules: schedules.length,
       stopStatusMap: stopStatusMap.size,
     })
     drawAll(mapInstanceRef.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, barangayGeo, activeFilters, activeTrucks, liveReports, barangayData, schedules, stopStatusMap])
+  }, [mapReady, barangayGeo, activeFilters, activeTrucks, reports, barangayData, schedules, stopStatusMap])
 
   // ── Fetch barangay stops when a zone is selected ──────────────────────────
   // Draws stop markers (colour-coded like ShiftRouteModule) WITHOUT the route.
@@ -1086,7 +1071,7 @@ function drawBarangayStops(stops) {
                 {panelMode === "route" && selectedRoute && <RoutePanel route={selectedRoute} />}
                 {panelMode === "zone" && selectedZone && <ZonePanel zone={selectedZone} barangayData={barangayData} />}
                 {panelMode === "report" && selectedReport && <ReportPanel report={selectedReport} onStatusChange={() => {
-                  api.get('/api/watcher/reports/map_pins/').then(res => setLiveReports(res.data)).catch(console.error)
+                  fetchReports()
                   setPanelOpen(false)
                 }} />}
               </div>
@@ -1392,7 +1377,8 @@ function ReportPanel({ report, onStatusChange }) {
   }[report.status] ?? report.status?.toUpperCase()
 
   function handleApprove() {
-    api.post(`/api/watcher/reports/${report.id}/approve/`)
+    const id = report.report_id || report.id
+    api.post(`/api/watcher/reports/${id}/approve/`)
       .then(() => onStatusChange?.())
       .catch(err => {
         console.error(err)
@@ -1401,11 +1387,11 @@ function ReportPanel({ report, onStatusChange }) {
   }
 
   function handleReject() {
+    const id = report.report_id || report.id
     const reason = prompt('Please enter a reason for rejection:')
-    if (reason === null) return // Cancelled
+    if (reason === null) return
     if (!reason.trim()) return alert('Reason is required for rejection.')
-    
-    api.post(`/api/watcher/reports/${report.id}/reject/`, { rejection_reason: reason })
+    api.post(`/api/watcher/reports/${id}/reject/`, { rejection_reason: reason })
       .then(() => onStatusChange?.())
       .catch(err => {
         console.error(err)
@@ -1414,8 +1400,8 @@ function ReportPanel({ report, onStatusChange }) {
   }
 
   function handleResolve() {
-    // This creates a confirmation which marks report as RESOLVED
-    api.post('/api/watcher/confirmations/', { report: report.id })
+    const id = report.report_id || report.id
+    api.post('/api/watcher/confirmations/', { report: id })
       .then(() => onStatusChange?.())
       .catch(err => {
         console.error(err)

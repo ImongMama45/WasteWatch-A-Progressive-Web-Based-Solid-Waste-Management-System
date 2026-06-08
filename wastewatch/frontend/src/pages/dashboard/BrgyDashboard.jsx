@@ -68,6 +68,28 @@ const MOCK_SCHEDULE = [
 const ISSUE_LABELS = { overflow: 'Overflow', illegal_dumping: 'Illegal Dumping', missed: 'Missed Collection' }
 const ISSUE_ICONS = { overflow: '🗑️', illegal_dumping: '🚯', missed: '📭' }
 
+const STATUS_BADGE = {
+  pending: { label: 'PENDING', color: 'var(--warning)', bg: 'rgba(243,156,18,0.1)' },
+  approved: { label: 'APPROVED', color: 'var(--accent)', bg: 'rgba(46,204,113,0.1)' },
+  rejected: { label: 'REJECTED', color: 'var(--danger)', bg: 'rgba(231,76,60,0.1)' },
+  resolved: { label: 'RESOLVED', color: '#3b82f6', bg: 'rgba(59,130,246,0.1)' },
+}
+
+function parseTags(tags) {
+  if (Array.isArray(tags)) return tags
+  if (!tags) return []
+  return String(tags).split(',').map(t => t.trim()).filter(Boolean)
+}
+
+function formatReportDate(createdAt) {
+  if (!createdAt) return '—'
+  return new Date(createdAt).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+function getIssueType(report) {
+  return report.issue_type || report.type
+}
+
 const STATUS_COLORS = { collecting: '#22c55e', en_route: '#f59e0b', idle: '#94a3b8', done: '#3b82f6' }
 const STATUS_LABELS = { collecting: 'Collecting', en_route: 'En Route', idle: 'Idle', done: 'Done' }
 
@@ -80,17 +102,17 @@ export default function BrgyDashboard() {
 
   const [stats, setStats] = useState({ pending: 0, approved: 0, rejected: 0, resolved: 0 })
   const [loading, setLoading] = useState(true)
-  const [pendingReports, setPendingReports] = useState([])
+  const [allReports, setAllReports] = useState([])
   const [trucks, setTrucks] = useState(MOCK_TRUCKS)
   const [activeMainTab, setActiveMainTab] = useState('validation')
-  const [reportFilter, setReportFilter] = useState('All')
+  const [reportFilter, setReportFilter] = useState('Pending')
   const [expandedReport, setExpandedReport] = useState(null)
   const [expandedTruck, setExpandedTruck] = useState(null)
   const [toast, setToast] = useState(null)
 
   useEffect(() => {
     fetchStats()
-    fetchPendingReports()
+    fetchReports()
   }, [])
 
   async function fetchStats() {
@@ -102,14 +124,13 @@ export default function BrgyDashboard() {
     }
   }
 
-  async function fetchPendingReports() {
+  async function fetchReports() {
     setLoading(true)
     try {
-      // get_queryset handles filtering by user's barangay for brgy_official
-      const res = await api.get('/api/watcher/reports/?status=pending')
-      setPendingReports(res.data)
+      const res = await api.get('/api/watcher/reports/')
+      setAllReports(res.data)
     } catch (err) {
-      console.error('Failed to fetch pending reports:', err)
+      console.error('Failed to fetch reports:', err)
     } finally {
       setLoading(false)
     }
@@ -123,10 +144,10 @@ export default function BrgyDashboard() {
   async function handleApprove(id) {
     try {
       await api.post(`/api/watcher/reports/${id}/approve/`)
-      setPendingReports(prev => prev.filter(r => r.id !== id))
+      setAllReports(prev => prev.map(r => r.id === id ? { ...r, status: 'approved' } : r))
       setExpandedReport(null)
       fetchStats()
-      showToast('✅ Report approved and added to driver schedule.')
+      showToast('✅ Report approved — now visible on the live map.')
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to approve report')
     }
@@ -139,7 +160,7 @@ export default function BrgyDashboard() {
 
     try {
       await api.post(`/api/watcher/reports/${id}/reject/`, { rejection_reason: reason })
-      setPendingReports(prev => prev.filter(r => r.id !== id))
+      setAllReports(prev => prev.map(r => r.id === id ? { ...r, status: 'rejected', rejection_reason: reason } : r))
       setExpandedReport(null)
       fetchStats()
       showToast('✕ Report rejected.')
@@ -161,8 +182,13 @@ export default function BrgyDashboard() {
     return () => clearTimeout(timer)
   }, [activeMainTab])
 
-  const pendingCount = pendingReports.length
+  const pendingCount = allReports.filter(r => r.status === 'pending').length
   const missedCount = trucks.filter(t => t.missedYesterday).length
+
+  const filteredReports = allReports.filter(report => {
+    if (reportFilter === 'All') return true
+    return report.status === reportFilter.toLowerCase()
+  })
 
   return (
     <>
@@ -363,15 +389,26 @@ export default function BrgyDashboard() {
                   </button>
                 </div>
 
-                {pendingReports.length === 0 ? (
+                {loading ? (
+                  <div className="card" style={{ textAlign: 'center', padding: '40px 20px' }}>
+                    <div className="text-muted text-sm">Loading reports…</div>
+                  </div>
+                ) : filteredReports.length === 0 ? (
                   <div className="card" style={{ textAlign: 'center', padding: '40px 20px' }}>
                     <div style={{ fontSize: 42, marginBottom: 12 }}>✅</div>
-                    <div style={{ fontWeight: 700, marginBottom: 4 }}>All caught up!</div>
-                    <div className="text-muted text-sm">No pending reports to validate.</div>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>No reports found</div>
+                    <div className="text-muted text-sm">
+                      {reportFilter === 'Pending' ? 'No pending reports to validate.' : `No ${reportFilter.toLowerCase()} reports.`}
+                    </div>
                   </div>
                 ) : (
                   <>
-                    {pendingReports.map(report => (
+                    {filteredReports.map(report => {
+                      const issueType = getIssueType(report)
+                      const statusBadge = STATUS_BADGE[report.status] || STATUS_BADGE.pending
+                      const tags = parseTags(report.tags)
+
+                      return (
                       <div key={report.id} className="bcard"
                         style={{
                           background: 'var(--surface)',
@@ -386,23 +423,23 @@ export default function BrgyDashboard() {
                         <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
                           <div style={{
                             width: 40, height: 40, borderRadius: 10, flexShrink: 0,
-                            background: report.type === 'overflow' ? 'rgba(239,68,68,0.1)'
-                              : report.type === 'illegal_dumping' ? 'rgba(243,156,18,0.1)'
+                            background: issueType === 'overflow' ? 'rgba(239,68,68,0.1)'
+                              : issueType === 'illegal_dumping' ? 'rgba(243,156,18,0.1)'
                                 : 'rgba(93,173,226,0.1)',
                             display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
-                          }}>{ISSUE_ICONS[report.type]}</div>
+                          }}>{ISSUE_ICONS[issueType]}</div>
 
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginBottom: 2 }}>
-                              <span style={{ fontWeight: 700, fontSize: 14 }}>{ISSUE_LABELS[report.type]}</span>
+                              <span style={{ fontWeight: 700, fontSize: 14 }}>{ISSUE_LABELS[issueType] || issueType}</span>
                               <span style={{
-                                background: 'rgba(243,156,18,0.1)', color: 'var(--warning)',
+                                background: statusBadge.bg, color: statusBadge.color,
                                 fontSize: 9, fontWeight: 800, padding: '2px 8px', borderRadius: 20, letterSpacing: '.05em',
-                              }}>PENDING</span>
+                              }}>{statusBadge.label}</span>
                             </div>
-                            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{report.address}</div>
+                            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{report.address || report.barangay_name || 'No address'}</div>
                             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
-                              {report.reporter} · {report.date}
+                              {report.user_name || 'Community Report'} · {formatReportDate(report.created_at || report.date)}
                             </div>
                           </div>
 
@@ -418,35 +455,39 @@ export default function BrgyDashboard() {
                           <div style={{ borderTop: '1px solid var(--border)', padding: '14px 16px', animation: 'slideDown .18s' }}
                             onClick={e => e.stopPropagation()}>
                             <p style={{ fontSize: 13, lineHeight: 1.65, marginBottom: 12, fontStyle: 'italic', color: 'var(--text-muted)' }}>
-                              "{report.description}"
+                              "{report.description || 'No description provided.'}"
                             </p>
-                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
-                              {report.tags.map(tag => (
-                                <span key={tag} style={{
-                                  background: 'var(--bg)', border: '1px solid var(--border)',
-                                  borderRadius: 20, fontSize: 11, padding: '3px 10px', color: 'var(--text-muted)',
-                                }}>{tag}</span>
-                              ))}
-                            </div>
-                            <div style={{
-                              background: 'rgba(20,184,166,0.05)', border: '1px solid rgba(20,184,166,0.18)',
-                              borderRadius: 8, padding: '9px 12px', marginBottom: 14,
-                              fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6,
-                            }}>
-                              <strong style={{ color: 'var(--text)' }}>💡 Validate:</strong> Is this a real issue in your barangay? Approving adds it to the driver's route.
-                            </div>
-                            <div style={{ display: 'flex', gap: 8 }}>
-                              <button className="abtn"
-                                onClick={() => handleApprove(report.id)}
-                                style={{
-                                  flex: 1, background: 'var(--accent)', color: '#ffffffff',
-                                  border: 'none', borderRadius: 10, padding: '10px',
-                                  fontWeight: 700, fontSize: 13,
+                            {tags.length > 0 && (
+                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+                                {tags.map(tag => (
+                                  <span key={tag} style={{
+                                    background: 'var(--bg)', border: '1px solid var(--border)',
+                                    borderRadius: 20, fontSize: 11, padding: '3px 10px', color: 'var(--text-muted)',
+                                  }}>{tag}</span>
+                                ))}
+                              </div>
+                            )}
+                            {report.status === 'pending' && (
+                              <>
+                                <div style={{
+                                  background: 'rgba(20,184,166,0.05)', border: '1px solid rgba(20,184,166,0.18)',
+                                  borderRadius: 8, padding: '9px 12px', marginBottom: 14,
+                                  fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6,
                                 }}>
-                                Approve
-                              </button>
-                              <button className="abtn"
-                                onClick={() => handleReject(report.id)}
+                                  <strong style={{ color: 'var(--text)' }}>💡 Validate:</strong> Is this a real issue in your barangay? Approving adds it to the live map.
+                                </div>
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                  <button className="abtn"
+                                    onClick={() => handleApprove(report.id)}
+                                    style={{
+                                      flex: 1, background: 'var(--accent)', color: '#ffffffff',
+                                      border: 'none', borderRadius: 10, padding: '10px',
+                                      fontWeight: 700, fontSize: 13,
+                                    }}>
+                                    Approve
+                                  </button>
+                                  <button className="abtn"
+                                    onClick={() => handleReject(report.id)}
                                 style={{
                                   flex: 1, background: 'transparent',
                                   border: '1.5px solid var(--danger)',
@@ -455,11 +496,13 @@ export default function BrgyDashboard() {
                                 }}>
                                 ✕ Reject
                               </button>
-                            </div>
+                                </div>
+                              </>
+                            )}
                           </div>
                         )}
                       </div>
-                    ))}
+                    )})}
 
 
                   </>

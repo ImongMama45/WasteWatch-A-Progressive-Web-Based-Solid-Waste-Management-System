@@ -101,7 +101,7 @@ export default function App() {
           } />
 
           <Route path="/brgy/validate-reports" element={
-            <PrivateRoute><ValidateReports /></PrivateRoute>
+            <PrivateRoute roles={['admin', 'brgy_official']}><ValidateReports /></PrivateRoute>
           } />
 
           {/* ADMIN PAGE */}

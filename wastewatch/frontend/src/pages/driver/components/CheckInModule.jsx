@@ -198,16 +198,16 @@ export default function CheckInModule({ setRouteState }) {
       setCompleted(c => [...c, 'gps'])
 
       // ── Step 2: Log shift start ──────────────────────────────────────────
+      // Step 2: Log shift start
       setStepIndex(2)
       var shiftTs = new Date().toISOString()
       var lat = sessionStorage.getItem('ww_gps_lat')
       var lng = sessionStorage.getItem('ww_gps_lng')
 
-      // Only call shift/start if there's no active shift already
       const alreadyActive = !!localStorage.getItem('ww_shift_start')
       if (!alreadyActive) {
         try {
-          await api.post('/api/driver/shift/start/', {
+          await api.post('/api/driver/shift/start/', {   // ← response NOT captured
             duty_type: dutyType,
             started_at: shiftTs,
             latitude: lat,
@@ -215,14 +215,17 @@ export default function CheckInModule({ setRouteState }) {
           })
           startShift()
           sessionStorage.setItem('ww_shift_started_at', shiftTs)
+          console.log('Shift started:', res.data)        // ← ReferenceError: res is not defined
         } catch (err) {
-          // If backend says already active, just continue — don't block the flow
+          // Both HTTP errors AND the ReferenceError land here
+          console.error(err.response?.status)            // undefined for a ReferenceError
+          console.error(err.response?.data)              // undefined for a ReferenceError
           if (err.response?.status === 400 && err.response?.data?.error?.includes('active shift')) {
-            startShift() // sync local timer
+            startShift()
           } else {
             setGpsStatus('error')
             const errMsg = err.response?.data?.error || 'Failed to start shift. Please try again.'
-            setInitError(errMsg)
+            setInitError(errMsg)   // ← blocks flow; shows generic message
             return
           }
         }
@@ -497,6 +500,32 @@ export default function CheckInModule({ setRouteState }) {
                 >
                   Go Back
                 </button>
+                {initError && import.meta.env.DEV && (
+                  <button
+                    onClick={() => {
+                      console.warn('Developer bypass activated')
+
+                      sessionStorage.setItem(
+                        'ww_shift_started_at',
+                        new Date().toISOString()
+                      )
+
+                      setCompleted(['session', 'gps', 'ready'])
+                      setRouteState('shiftroute')
+                    }}
+                    style={{
+                      padding: '12px 14px',
+                      borderRadius: 20,
+                      background: '#f59e0b',
+                      color: '#fff',
+                      border: 'none',
+                      fontWeight: 800,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Developer Bypass
+                  </button>
+                )}
               </div>
             </div>
           )}

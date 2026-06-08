@@ -21,21 +21,25 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = GarbageReport.objects.all()
-        
+
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+
         # 1. Anonymous users see only approved reports
         if not user.is_authenticated:
             return qs.filter(status=ReportStatus.APPROVED)
-        
+
         # 2. Admins see everything
         if user.role == 'admin':
             return qs
-            
+
         # 3. Barangay Officials see reports in their assigned barangay
         if user.role == 'brgy_official':
             if user.barangay:
                 return qs.filter(barangay=user.barangay)
-            return qs.none() # Or all if they have no barangay? User requirement says "Receive ONLY reports within their barangay"
-            
+            return qs.none()
+
         # 4. Citizens/Watchers see their own reports PLUS all approved reports
         from django.db.models import Q
         return qs.filter(
@@ -68,21 +72,35 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post', 'patch'], permission_classes=[permissions.IsAuthenticated])
     def approve(self, request, pk=None):
-        """PENDING -> APPROVED. Saves audit trail."""
         if request.user.role not in ['admin', 'brgy_official']:
             return Response({'error': 'Not authorized'}, status=403)
-        
+
         report = self.get_object()
-        
-        # Security: Barangay official can only approve reports in their barangay
+
         if request.user.role == 'brgy_official' and report.barangay != request.user.barangay:
             return Response({'error': 'Cannot approve reports outside your barangay'}, status=status.HTTP_403_FORBIDDEN)
 
         report.status = ReportStatus.APPROVED
         report.approved_by = request.user
         report.approved_at = timezone.now()
+        report.rejected_by = None
+        report.rejected_at = None
+        report.rejection_reason = ''
         report.save()
-        return Response(GarbageReportSerializer(report).data)
+
+        # Auto-promote to GarbageHotspot so it appears on the map (idempotent on double-click).
+        if report.latitude and report.longitude and report.barangay:
+            GarbageHotspot.objects.get_or_create(
+                name=f'Report #{report.id} — {report.get_issue_type_display()}',
+                defaults={
+                    'severity': report.severity,
+                    'barangay': report.barangay,
+                    'latitude': report.latitude,
+                    'longitude': report.longitude,
+                }
+            )
+
+        return Response(GarbageReportSerializer(report, context={'request': request}).data)
 
     @action(detail=True, methods=['post', 'patch'], permission_classes=[permissions.IsAuthenticated])
     def reject(self, request, pk=None):
@@ -104,8 +122,15 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
         report.rejected_by = request.user
         report.rejected_at = timezone.now()
         report.rejection_reason = reason
+        report.approved_by = None
+        report.approved_at = None
         report.save()
-        return Response(GarbageReportSerializer(report).data)
+
+        GarbageHotspot.objects.filter(
+            name=f'Report #{report.id} — {report.get_issue_type_display()}'
+        ).delete()
+
+        return Response(GarbageReportSerializer(report, context={'request': request}).data)
 
     @action(detail=False, methods=['get'])
     def public(self, request):
@@ -117,34 +142,38 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def map_pins(self, request):
         """
-        Public-facing map pins endpoint.
-        Returns ONLY APPROVED reports for everyone.
-        (Special roles like admin/watcher can use the main list endpoint to see PENDING)
+        Returns approved reports as map pins — sourced from GarbageHotspot
+        so only admin/brgy_official-approved issues appear on the public map.
+        Each pin links back to the originating GarbageReport for the detail panel.
         """
-        qs = GarbageReport.objects.filter(status=ReportStatus.APPROVED).exclude(
-            latitude__isnull=True
-        ).exclude(
-            longitude__isnull=True
-        )
+        hotspots = GarbageHotspot.objects.select_related('barangay').all()
 
         data = []
-        for r in qs.select_related('barangay')[:300]:
-            try:
-                data.append({
-                    'id':            r.id,
-                    'lat':           float(r.latitude),
-                    'lng':           float(r.longitude),
-                    'issue_type':    r.issue_type,
-                    'severity':      r.severity,
-                    'status':        r.status,
-                    'barangay_name': r.barangay.name if r.barangay else 'Unknown',
-                    'address':       r.address,
-                    'reported':      r.created_at.isoformat(),
-                    'description':   r.description,
-                    'image':         r.image.url if r.image else None,
-                })
-            except (TypeError, ValueError, AttributeError):
-                continue
+        for h in hotspots:
+            # Try to find the originating report by the sentinel name pattern
+            report = None
+            if h.name.startswith('Report #'):
+                try:
+                    report_id = int(h.name.split('Report #')[1].split(' —')[0])
+                    report = GarbageReport.objects.filter(id=report_id).select_related('barangay').first()
+                except (ValueError, IndexError):
+                    pass
+
+            data.append({
+                'id':            h.id,
+                'report_id':     report.id if report else None,
+                'lat':           float(h.latitude),
+                'lng':           float(h.longitude),
+                'issue_type':    report.issue_type if report else 'overflow',
+                'severity':      h.severity,
+                'status':        report.status if report else 'approved',
+                'barangay_name': h.barangay.name if h.barangay else 'Unknown',
+                'address':       report.address if report else h.name,
+                'reported':      report.created_at.isoformat() if report else None,
+                'description':   report.description if report else '',
+                'image':         report.image.url if report and report.image else None,
+                'rejection_reason': None,
+            })
 
         return Response(data)
 
@@ -169,6 +198,10 @@ class CollectionConfirmationViewSet(viewsets.ModelViewSet):
         if confirmation.report:
             confirmation.report.status = ReportStatus.RESOLVED
             confirmation.report.save()
+            # Retire the hotspot — collection confirmed, no longer an active issue
+            GarbageHotspot.objects.filter(
+                name=f'Report #{confirmation.report.id} — {confirmation.report.get_issue_type_display()}'
+            ).delete()
 
 class GarbageHotspotViewSet(viewsets.ModelViewSet):
     queryset = GarbageHotspot.objects.all()
@@ -238,9 +271,6 @@ class GarbageHotspotViewSet(viewsets.ModelViewSet):
     def add_to_route(self, request, pk=None):
         """Placeholder: driver requests to add this hotspot to their current route."""
         return Response({'status': 'added', 'id': pk})
-
-from rest_framework.decorators import action
-from rest_framework.response import Response
 
 class EscalationViewSet(viewsets.ModelViewSet):
     queryset = Escalation.objects.all()
