@@ -63,13 +63,8 @@ export default function CollectionSchedule() {
       .finally(() => setLoading(false))
   }, [])
 
-  // Filter: for non-admin/non-driver show only barangay-relevant schedules
-  const visibleSchedules = schedules.filter(s => {
-    if (['admin', 'driver'].includes(role)) return true
-    if (!userBarangay) return true
-    const names = (s.barangay_names || '').toLowerCase()
-    return names.includes(userBarangay.toLowerCase()) || names === ''
-  })
+  // Show all schedules to everyone as requested
+  const visibleSchedules = schedules
 
   // Today's schedules (match day-of-week to today)
   const todayDow = today.getDay() // 0-6

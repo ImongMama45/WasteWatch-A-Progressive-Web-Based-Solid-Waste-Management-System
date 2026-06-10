@@ -16,6 +16,7 @@ import { useAuth } from '../../context/AuthContext'
 import Navbar from '../../components/Navbar'
 import BottomNav from '../../components/BottomNav'
 import api from '../../api/client'
+import { ICONS } from '../../api/navConfig'
 
 // ─── STATUS COLOURS (mirrors pickupStatusSync palette) ───────────────────────
 const STATUS_META = {
@@ -155,9 +156,9 @@ function WorkflowCard({
 // ─── PROCESS FLOW ─────────────────────────────────────────────────────────────
 function ProcessFlow() {
     const steps = [
-        { icon: '🔍', label: 'Inspect Stop', sub: 'Watcher pre-checks', color: '#14b8a6' },
-        { icon: '🚛', label: 'Truck Collects', sub: 'Driver confirms', color: '#f59e0b' },
-        { icon: '✅', label: 'Verify Collected', sub: 'Watcher post-checks', color: '#16a34a' },
+        { icon: ICONS.search, label: 'Inspect Stop', sub: 'Watcher pre-checks', color: '#14b8a6' },
+        { icon: ICONS.truck, label: 'Truck Collects', sub: 'Driver confirms', color: '#f59e0b' },
+        { icon: ICONS.check, label: 'Verify Collected', sub: 'Watcher post-checks', color: '#16a34a' },
     ]
     return (
         <div style={{
@@ -297,12 +298,12 @@ export default function WatcherTasksHub() {
                     {/* Card 1 — Pre-Collection Inspection */}
                     <div className="hub-card">
                         <WorkflowCard
-                            icon="🔍"
+                            icon={ICONS.search}
                             title="Pre-Collection Inspection"
                             subtitle="Done before the truck arrives"
                             description="Walk to each assigned stop and report whether garbage is present. Marks stops as Ready for Collection or Empty."
                             timing="Before truck arrival"
-                            actionLabel="🔍 Start Inspection"
+                            actionLabel="Start Inspection"
                             accent="#14b8a6"
                             badgeCount={pendingInspection}
                             badgeLabel="pending"
@@ -314,12 +315,12 @@ export default function WatcherTasksHub() {
                     {/* Card 2 — Post-Collection Confirmation */}
                     <div className="hub-card">
                         <WorkflowCard
-                            icon="✅"
+                            icon={ICONS.check}
                             title="Post-Collection Verification"
                             subtitle="Done after the truck has collected"
                             description="Verify that the driver's collection report is accurate. Confirm the stop is clean and capture a final proof photo."
                             timing="After truck has collected"
-                            actionLabel="✅ Verify Collections"
+                            actionLabel="Verify Collections"
                             accent="#16a34a"
                             badgeCount={collectionReported}
                             badgeLabel="to verify"
@@ -335,7 +336,9 @@ export default function WatcherTasksHub() {
                         marginTop: 20, padding: '20px', borderRadius: 14, textAlign: 'center',
                         background: 'rgba(22,163,74,0.06)', border: '1px solid rgba(22,163,74,0.2)',
                     }}>
-                        <div style={{ fontSize: 36, marginBottom: 8 }}>🎉</div>
+                        <div style={{ display: 'flex', justifyContent: 'center', color: '#16a34a', marginBottom: 8 }}>
+                            <div style={{ width: 36, height: 36 }}>{ICONS.check}</div>
+                        </div>
                         <div style={{ fontWeight: 800, fontSize: 15, color: '#16a34a', marginBottom: 4 }}>
                             All tasks complete!
                         </div>
@@ -351,7 +354,9 @@ export default function WatcherTasksHub() {
                         marginTop: 20, padding: '32px 20px', borderRadius: 14, textAlign: 'center',
                         background: 'var(--surface)', border: '1px solid var(--border)',
                     }}>
-                        <div style={{ fontSize: 36, marginBottom: 10 }}>📋</div>
+                        <div style={{ display: 'flex', justifyContent: 'center', color: 'var(--text-muted)', marginBottom: 10 }}>
+                            <div style={{ width: 36, height: 36 }}>{ICONS.report}</div>
+                        </div>
                         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>No stops assigned today</div>
                         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                             Check back later or contact your supervisor.

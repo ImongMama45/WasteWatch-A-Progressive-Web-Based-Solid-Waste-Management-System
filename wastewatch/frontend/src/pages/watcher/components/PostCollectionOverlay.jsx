@@ -41,7 +41,7 @@ import { useState, useEffect } from 'react'
 import api from '../../../api/client'
 import { broadcastPickupStatusSync } from '../../../utils/pickupStatusSync'
 
-export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete, onBack, MultiPhotoPicker }) {
+export default function PostCollectionOverlay({ visible, task, gpsPos, onComplete, onBack, MultiPhotoPicker }) {
   const [outcome, setOutcome] = useState('')     // 'present' | 'empty'
   const [notes, setNotes] = useState('')
   const [photos, setPhotos] = useState([])
@@ -67,7 +67,7 @@ export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete
       form.append('outcome', outcome)
       form.append('notes', notes.trim())
       photos.forEach((file, i) => form.append(i === 0 ? 'photo' : `photo_${i + 1}`, file))
-      await api.post('/api/watcher/stop-validations/pre-inspect/', form)
+      await api.post('/api/watcher/stop-validations/post-verify/', form)
       broadcastPickupStatusSync()
       onComplete()
     } catch (err) {
@@ -90,7 +90,7 @@ export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete
 
         {/* Header */}
         <div style={{ background: 'linear-gradient(160deg, #0f172a 60%, #0c4a6e)', padding: '20px 20px 18px', color: '#fff', marginTop: 12 }}>
-          <div style={{ fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,.45)', letterSpacing: '.1em', marginBottom: 4 }}>PRE-COLLECTION INSPECTION</div>
+          <div style={{ fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,.45)', letterSpacing: '.1em', marginBottom: 4 }}>POST-COLLECTION VERIFICATION</div>
           <div style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 900 }}>{stopLabel}</div>
         </div>
 
@@ -105,11 +105,11 @@ export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete
           </div>
 
           {/* Outcome */}
-          <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.07em', marginBottom: 8 }}>INSPECTION OUTCOME *</div>
+          <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.07em', marginBottom: 8 }}>REMARKS / REASON *</div>
           <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
             {[
-              { key: 'present', label: '🗑️ Garbage Present', color: '#f59e0b' },
-              { key: 'empty', label: '✅ Empty / Clean', color: '#16a34a' },
+              { key: 'success', label: '✅ Collection Complete', color: '#16a34a' },
+              { key: 'failed', label: '❌ Missed Collection', color: '#ef4444' },
             ].map(opt => (
               <button key={opt.key} onClick={() => setOutcome(opt.key)} style={{
                 flex: 1, padding: '12px 8px', borderRadius: 10,
@@ -144,19 +144,8 @@ export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete
 
           <div style={{ display: 'flex', gap: 10 }}>
             <button className="btn btn-outline" style={{ flex: 1 }} onClick={onBack} disabled={submitting}>Cancel</button>
-            <button onClick={handleSubmit} disabled={!canSubmit} style={{
-              flex: 2, padding: '14px', borderRadius: 12, border: 'none',
-              background: canSubmit ? '#0f172a' : '#e2e8f0',
-              color: canSubmit ? '#fff' : '#94a3b8',
-              fontFamily: 'var(--font-head)', fontSize: 14, fontWeight: 900,
-              cursor: canSubmit ? 'pointer' : 'not-allowed',
-              boxShadow: canSubmit ? '0 4px 16px rgba(15,23,42,.25)' : 'none',
-              transition: 'all .2s',
-            }}>
-              {submitting ? 'Submitting…'
-                : !gpsPos ? '📡 Awaiting GPS…'
-                  : photos.length === 0 ? '📷 Add photo first'
-                    : '🔍 Submit Inspection'}
+            <button disabled={!canSubmit} onClick={handleSubmit} style={{ flex: 2, padding: '15px', borderRadius: 14, border: 'none', background: canSubmit ? '#16a34a' : '#e2e8f0', color: canSubmit ? '#fff' : '#94a3b8', fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900, cursor: canSubmit ? 'pointer' : 'not-allowed', transition: 'all .2s', boxShadow: canSubmit ? '0 4px 14px rgba(22,163,74,.3)' : 'none' }}>
+              {submitting ? 'Submitting…' : 'Verify Collection'}
             </button>
           </div>
           <div style={{ height: 20 }} />

@@ -18,6 +18,23 @@
 
 import { useState, useEffect, useRef } from 'react'
 
+const CameraIcon = (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx="12" cy="13" r="4" />
+    </svg>
+)
+
+const CameraOffIcon = (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" width="32" height="32">
+      <line x1="2" y1="2" x2="22" y2="22" />
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3l2-3h6l1.5 2.25" />
+      <circle cx="12" cy="13" r="4" />
+    </svg>
+)
+
 export default function WatcherCameraModal({ visible, stopLabel, gpsPos, onCapture, onClose }) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
@@ -216,7 +233,7 @@ export default function WatcherCameraModal({ visible, stopLabel, gpsPos, onCaptu
               alignItems: 'center', justifyContent: 'center', gap: 12,
               background: 'rgba(13,17,23,.9)', padding: '0 24px',
             }}>
-              <span style={{ fontSize: 32 }}>📵</span>
+              <span style={{ display: 'flex', color: '#fca5a5' }}>{CameraOffIcon}</span>
               <div style={{ fontSize: 13, color: '#fca5a5', textAlign: 'center', fontWeight: 600, lineHeight: 1.5 }}>{cameraError}</div>
               <button onClick={startCamera} style={{
                 marginTop: 8, padding: '10px 24px', borderRadius: 20,
@@ -293,7 +310,8 @@ export default function WatcherCameraModal({ visible, stopLabel, gpsPos, onCaptu
                 <button onClick={startCamera} style={{
                   width: '100%', padding: '16px', borderRadius: 14, border: 'none',
                   background: '#14b8a6', color: '#fff', fontSize: 14, fontWeight: 800, cursor: 'pointer',
-                }}>📷 Allow Camera Access</button>
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                }}><span style={{ display: 'flex' }}>{CameraIcon}</span> Allow Camera Access</button>
               ) : (
                 <button onClick={handleCapture} disabled={!isLive} style={{
                   width: 74, height: 74, borderRadius: '50%', border: 'none',
@@ -309,7 +327,7 @@ export default function WatcherCameraModal({ visible, stopLabel, gpsPos, onCaptu
                     background: isLive ? '#fff' : 'rgba(255,255,255,.1)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                   }}>
-                    <span style={{ fontSize: 22 }}>📷</span>
+                    <span style={{ display: 'flex', color: '#0d1117' }}>{CameraIcon}</span>
                   </div>
                 </button>
               )}

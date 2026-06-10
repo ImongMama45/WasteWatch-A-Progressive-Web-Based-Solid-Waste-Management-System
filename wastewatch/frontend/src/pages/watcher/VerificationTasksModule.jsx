@@ -1,7 +1,13 @@
 /**
- * VerificationTasksModule.jsx — Watcher map-based inspection workflow
- * Mirrors ShiftRouteModule architecture: fullscreen Leaflet map, GPS
- * proximity guard, ORS polyline to nearest stop, Dev teleport tools.
+ * VerificationTasksModule.jsx — Watcher map-based PRE-INSPECTION workflow
+ *
+ * Changes from previous version:
+ *  - OSM tile layer (default Leaflet, not CartoDB dark)
+ *  - Watcher marker: compass-style SVG with heading direction (like Google Maps)
+ *  - Multi-photo capture (up to 4 images), mandatory before submit
+ *  - Barangay-filtered stops — only shows stops in the watcher's assigned barangay
+ *  - Schedule-filtered stops — only today's scheduled stops appear
+ *  - "No Scheduled Verification Today" empty state when nothing matches
  */
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
@@ -17,10 +23,12 @@ import {
   subscribePickupStatusSync,
 } from '../../utils/pickupStatusSync'
 import PreInspectionOverlay from './components/PreInspectionOverlay'
+import { ICONS } from '../../api/navConfig'
 
 const ARRIVAL_RADIUS_M = 30
 const LUCENA_CENTER = [13.9373, 121.617]
 const ORS_KEY = import.meta.env.VITE_ORS_API_KEY || ''
+const MAX_PHOTOS = 4
 
 function injectStopMarkerStyles() {
   if (document.getElementById('ww-vtm-stop-styles')) return
@@ -36,8 +44,45 @@ function injectStopMarkerStyles() {
       border: 0 !important;
       box-shadow: none !important;
     }
+    @keyframes vtmPulse { 0%,100%{opacity:1} 50%{opacity:.3} }
   `
   document.head.appendChild(style)
+}
+
+// ─── WATCHER MARKER HTML (compass/heading style) ──────────────────────────────
+function watcherMarkerHtml(heading) {
+  const h = heading ?? 0
+  return `
+    <div style="position:relative;width:40px;height:40px;">
+      <!-- Heading cone -->
+      <svg viewBox="0 0 40 40" width="40" height="40"
+        style="position:absolute;inset:0;transform:rotate(${h}deg);transform-origin:center;transition:transform .3s ease;">
+        <defs>
+          <radialGradient id="coneGrad" cx="50%" cy="100%" r="100%">
+            <stop offset="0%" stop-color="#14b8a6" stop-opacity="0.7"/>
+            <stop offset="100%" stop-color="#14b8a6" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <!-- Cone pointing up (north = 0deg) -->
+        <path d="M20 20 L13 4 Q20 1 27 4 Z" fill="url(#coneGrad)"/>
+      </svg>
+      <!-- Accuracy ring -->
+      <div style="
+        position:absolute;inset:4px;border-radius:50%;
+        background:rgba(20,184,166,0.15);
+        border:1.5px solid rgba(20,184,166,0.4);
+      "></div>
+      <!-- Center dot -->
+      <div style="
+        position:absolute;top:50%;left:50%;
+        transform:translate(-50%,-50%);
+        width:14px;height:14px;border-radius:50%;
+        background:#14b8a6;
+        border:2.5px solid #fff;
+        box-shadow:0 0 10px rgba(20,184,166,.7), 0 2px 6px rgba(0,0,0,.3);
+      "></div>
+    </div>
+  `
 }
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
@@ -46,19 +91,6 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
   const dLat = r(lat2 - lat1), dLng = r(lng2 - lng1)
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(r(lat1)) * Math.cos(r(lat2)) * Math.sin(dLng / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
-
-function decodePolyline(enc) {
-  let pts = [], i = 0, lat = 0, lng = 0
-  while (i < enc.length) {
-    let b, s = 0, r = 0
-    do { b = enc.charCodeAt(i++) - 63; r |= (b & 0x1f) << s; s += 5 } while (b >= 0x20)
-    lat += (r & 1) ? ~(r >> 1) : r >> 1; s = 0; r = 0
-    do { b = enc.charCodeAt(i++) - 63; r |= (b & 0x1f) << s; s += 5 } while (b >= 0x20)
-    lng += (r & 1) ? ~(r >> 1) : r >> 1
-    pts.push([lat / 1e5, lng / 1e5])
-  }
-  return pts
 }
 
 // ─── SUB-COMPONENTS ──────────────────────────────────────────────────────────
@@ -92,20 +124,137 @@ function ConnPill() {
 
 function MapLegend() {
   const items = [
-    { color: 'transparent', border: '1.5px dashed rgba(148,163,184,.9)', label: 'Pending Inspection' },
+    { color: 'transparent', border: '1.5px dashed #94a3b8', label: 'Pending Inspection' },
     { color: '#f59e0b', label: 'Ready for Collection' },
     { color: '#94a3b8', label: 'Empty Stop' },
     { color: '#eab308', label: 'Collection Reported' },
     { color: '#16a34a', label: 'Verified Collected' },
   ]
   return (
-    <div style={{ position: 'absolute', bottom: 210, right: 14, zIndex: 500, background: 'rgba(15,23,42,.85)', backdropFilter: 'blur(6px)', borderRadius: 10, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+    <div style={{
+      position: 'absolute', bottom: 210, right: 14, zIndex: 500,
+      background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(6px)',
+      borderRadius: 10, padding: '8px 10px',
+      border: '1px solid rgba(0,0,0,0.1)',
+      boxShadow: '0 2px 12px rgba(0,0,0,0.12)',
+      display: 'flex', flexDirection: 'column', gap: 5,
+    }}>
+      <div style={{ fontSize: 8, fontWeight: 800, color: '#64748b', letterSpacing: '.08em', marginBottom: 3 }}>LEGEND</div>
       {items.map(({ color, border, label }) => (
         <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, border: border || 'none', flexShrink: 0 }} />
-          <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,.8)', letterSpacing: '.04em' }}>{label.toUpperCase()}</span>
+          <span style={{ fontSize: 9, fontWeight: 700, color: '#334155', letterSpacing: '.03em' }}>{label}</span>
         </div>
       ))}
+    </div>
+  )
+}
+
+// ─── MULTI-PHOTO PICKER ───────────────────────────────────────────────────────
+function MultiPhotoPicker({ photos, onChange }) {
+  function handleAdd(e) {
+    const files = Array.from(e.target.files || [])
+    if (!files.length) return
+    const next = [...photos, ...files].slice(0, MAX_PHOTOS)
+    onChange(next)
+    e.target.value = ''
+  }
+  function removePhoto(idx) {
+    onChange(photos.filter((_, i) => i !== idx))
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.07em', marginBottom: 8 }}>
+        INSPECTION PHOTOS * <span style={{ fontWeight: 500, textTransform: 'none', fontSize: 10, color: photos.length >= MAX_PHOTOS ? '#f59e0b' : '#94a3b8' }}>({photos.length}/{MAX_PHOTOS})</span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {photos.map((file, idx) => (
+          <div key={idx} style={{ position: 'relative', width: 72, height: 72 }}>
+            <img
+              src={URL.createObjectURL(file)}
+              alt={`Photo ${idx + 1}`}
+              style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 10, border: '2px solid #e2e8f0' }}
+            />
+            <button
+              onClick={() => removePhoto(idx)}
+              style={{
+                position: 'absolute', top: -6, right: -6,
+                width: 20, height: 20, borderRadius: '50%',
+                background: '#ef4444', color: '#fff', border: '2px solid #fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 10, fontWeight: 800, cursor: 'pointer',
+                boxShadow: '0 2px 6px rgba(0,0,0,.2)',
+              }}
+            >×</button>
+          </div>
+        ))}
+
+        {photos.length < MAX_PHOTOS && (
+          <label style={{
+            width: 72, height: 72, borderRadius: 10,
+            border: `2px dashed ${photos.length === 0 ? '#ef4444' : '#cbd5e1'}`,
+            background: photos.length === 0 ? 'rgba(239,68,68,0.04)' : '#fafafa',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', gap: 4,
+          }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke={photos.length === 0 ? '#ef4444' : '#94a3b8'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+              <circle cx="12" cy="13" r="4" />
+            </svg>
+            <span style={{ fontSize: 8, fontWeight: 700, color: photos.length === 0 ? '#ef4444' : '#94a3b8' }}>
+              {photos.length === 0 ? 'REQUIRED' : 'ADD'}
+            </span>
+            <input type="file" accept="image/*" capture="environment" multiple style={{ display: 'none' }} onChange={handleAdd} />
+          </label>
+        )}
+      </div>
+
+      {photos.length === 0 && (
+        <p style={{ fontSize: 11, color: '#ef4444', marginTop: 6, fontWeight: 600 }}>
+          At least one photo is required to submit.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ─── NO SCHEDULE BANNER ───────────────────────────────────────────────────────
+function NoScheduleBanner({ barangayName }) {
+  return (
+    <div style={{
+      position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10,
+      background: 'rgba(255,255,255,.97)', backdropFilter: 'blur(12px)',
+      borderTopLeftRadius: 24, borderTopRightRadius: 24,
+      boxShadow: '0 -4px 24px rgba(0,0,0,.12)', paddingBottom: 28,
+    }}>
+      <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2, margin: '12px auto' }} />
+      <div style={{ textAlign: 'center', padding: '18px 24px' }}>
+        <div style={{
+          width: 56, height: 56, borderRadius: '50%',
+          background: 'rgba(245,158,11,0.1)', border: '1.5px solid rgba(245,158,11,0.3)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 28, margin: '0 auto 14px',
+        }}>📅</div>
+        <div style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 900, color: '#0f172a', marginBottom: 6 }}>
+          No Scheduled Verification Today
+        </div>
+        <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.6, maxWidth: 280, margin: '0 auto 16px' }}>
+          {barangayName
+            ? `There are no collection routes scheduled for ${barangayName} today.`
+            : 'There are no collection routes scheduled for your barangay today.'}
+          {' '}Check back on your next scheduled collection day.
+        </div>
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)',
+          borderRadius: 20, padding: '6px 14px',
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b' }} />
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b' }}>No stops to inspect</span>
+        </div>
+      </div>
     </div>
   )
 }
@@ -116,6 +265,7 @@ export default function VerificationTasksModule() {
 
   // ── GPS state ──
   const [gpsPos, setGpsPos] = useState(null)
+  const [heading, setHeading] = useState(null)   // device compass heading
   const [isMock, setIsMock] = useState(false)
   const [gpsError, setGpsError] = useState(null)
   const [gpsAccuracy, setGpsAccuracy] = useState(null)
@@ -123,6 +273,7 @@ export default function VerificationTasksModule() {
   const gpsPosRef = useRef(null)
   const watchIdRef = useRef(null)
   const mockPosRef = useRef(null)
+  const headingRef = useRef(null)
 
   // ── Map state ──
   const [leafletReady, setLeafletReady] = useState(false)
@@ -133,16 +284,44 @@ export default function VerificationTasksModule() {
   const routeLayerRef = useRef(null)
 
   // ── Data state ──
-  const [stops, setStops] = useState([])
+  const [stops, setStops] = useState([])   // filtered stops
+  const [allStops, setAllStops] = useState([])   // raw from API
   const [loading, setLoading] = useState(true)
+  const [hasScheduleToday, setHasScheduleToday] = useState(true)
   const [selectedTask, setSelectedTask] = useState(null)
   const [orsRoute, setOrsRoute] = useState(null)
 
-  // ── Inject marker styles on mount ──
   useEffect(() => { injectStopMarkerStyles() }, [])
-
-  // ── Sync GPS ref (layout effect for same-render reads) ──
   useLayoutEffect(() => { gpsPosRef.current = gpsPos }, [gpsPos])
+
+  // ── Filter stops by watcher's barangay ──
+  useEffect(() => {
+    if (!allStops.length) { setStops([]); return }
+    const barangayId = user?.barangay
+    const barangayName = user?.barangay_name?.toLowerCase()
+
+    // If no barangay assigned, show nothing (admin-level watchers can override)
+    if (!barangayId && !barangayName) {
+      setStops([])
+      return
+    }
+
+    const filtered = allStops.filter(stop => {
+      // Match by barangay id or name (API may return either)
+      const stopBrgy = stop.barangay_id ?? stop.barangay
+      const stopName = stop.barangay_name?.toLowerCase() ?? ''
+      if (barangayId && stopBrgy != null) return String(stopBrgy) === String(barangayId)
+      if (barangayName) return stopName.includes(barangayName) || barangayName.includes(stopName)
+      return false
+    })
+
+    setHasScheduleToday(filtered.length > 0)
+    setStops(filtered.map(r => ({
+      ...r,
+      lat: r.lat ?? r.pre_validation_latitude ?? null,
+      lng: r.lng ?? r.pre_validation_longitude ?? null,
+    })))
+  }, [allStops, user?.barangay, user?.barangay_name])
 
   // ── Derived: nearest pending stop ──
   const nearestStop = (() => {
@@ -155,9 +334,7 @@ export default function VerificationTasksModule() {
     })
   })()
 
-  const distToStop = gpsPos && nearestStop?.lat
-    ? haversineDistance(gpsPos.lat, gpsPos.lng, nearestStop.lat, nearestStop.lng)
-    : null
+  const distToStop = gpsPos && nearestStop?.lat ? haversineDistance(gpsPos.lat, gpsPos.lng, nearestStop.lat, nearestStop.lng) : null
   const isNearStop = distToStop != null && distToStop <= ARRIVAL_RADIUS_M
   const pendingCount = stops.filter(s => normalizeStopStatus(s.current_status) === 'PENDING_INSPECTION').length
 
@@ -167,18 +344,17 @@ export default function VerificationTasksModule() {
     try {
       const res = await api.get('/api/watcher/stop-validations/')
       const rows = res.data?.results ?? res.data ?? []
-      setStops(rows.map(r => ({
-        ...r,
-        lat: r.lat ?? r.pre_validation_latitude ?? null,
-        lng: r.lng ?? r.pre_validation_longitude ?? null,
-      })))
-    } catch { setStops([]) }
-    finally { setLoading(false) }
+      setAllStops(rows)
+      if (rows.length === 0) setHasScheduleToday(false)
+    } catch {
+      setAllStops([])
+      setHasScheduleToday(false)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { loadStops() }, [])
-
-  // ── Subscribe to sync events ──
   useEffect(() => subscribePickupStatusSync(() => loadStops()), [])
 
   // ── Leaflet CDN ──
@@ -190,7 +366,7 @@ export default function VerificationTasksModule() {
     document.head.appendChild(s)
   }, [])
 
-  // ── GPS tracking (with mock override) ──
+  // ── GPS tracking + heading ──
   useEffect(() => {
     if (!navigator.geolocation) { setGpsError('GPS not available on this device.'); return }
     watchIdRef.current = navigator.geolocation.watchPosition(
@@ -199,20 +375,48 @@ export default function VerificationTasksModule() {
         const p = { lat: pos.coords.latitude, lng: pos.coords.longitude }
         setGpsPos(p); setIsTracking(true); setGpsError(null)
         setGpsAccuracy(pos.coords.accuracy != null ? Math.round(pos.coords.accuracy) : null)
+        // heading from GPS (only on moving, may be null)
+        if (pos.coords.heading != null && !isNaN(pos.coords.heading)) {
+          setHeading(pos.coords.heading)
+          headingRef.current = pos.coords.heading
+        }
       },
       err => { setGpsError(err.message); setIsTracking(false) },
       { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
     )
-    return () => { if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current) }
+
+    // Device orientation for heading when stationary
+    function onOrientation(e) {
+      const alpha = e.webkitCompassHeading ?? (e.alpha != null ? (360 - e.alpha) : null)
+      if (alpha != null) { setHeading(alpha); headingRef.current = alpha }
+    }
+    if (window.DeviceOrientationEvent) {
+      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission().then(perm => {
+          if (perm === 'granted') window.addEventListener('deviceorientation', onOrientation)
+        }).catch(() => { })
+      } else {
+        window.addEventListener('deviceorientation', onOrientation)
+      }
+    }
+
+    return () => {
+      if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current)
+      window.removeEventListener('deviceorientation', onOrientation)
+    }
   }, [])
 
-  // ── Map init ──
+  // ── Map init (OSM tiles) ──
   useEffect(() => {
     if (!leafletReady || !mapRef.current || mapInstance.current) return
     const L = window.L
-    const map = L.map(mapRef.current, { zoomControl: false, attributionControl: false })
+    const map = L.map(mapRef.current, { zoomControl: false, attributionControl: true })
       .setView(LUCENA_CENTER, 14)
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map)
+    // Standard OSM tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map)
     L.control.zoom({ position: 'topright' }).addTo(map)
     mapInstance.current = map
   }, [leafletReady])
@@ -221,9 +425,6 @@ export default function VerificationTasksModule() {
   useEffect(() => {
     const L = window.L
     if (!L || !mapInstance.current || stops.length === 0) return
-    const map = mapInstance.current
-
-    // Clear old markers
     stopMarkersRef.current.forEach(m => m.remove())
     stopMarkersRef.current.clear()
 
@@ -235,62 +436,50 @@ export default function VerificationTasksModule() {
       const marker = L.marker([stop.lat, stop.lng], {
         icon: L.divIcon({ html, className: 'ww-stop-div-icon', iconSize: isActive ? [28, 28] : [24, 24], iconAnchor: isActive ? [14, 14] : [12, 12] }),
         zIndexOffset: isActive ? 100 : 0,
-      })
-        .addTo(map)
+      }).addTo(mapInstance.current)
         .bindPopup(`<b>${stop.label}</b><br/><span style="font-size:11px;font-weight:700;color:${STOP_STATUS_COLORS[status]?.bg || '#94a3b8'}">${STOP_STATUS_LABELS[status] || status}</span>`)
-
-      marker.on('click', () => {
-        if (status === 'PENDING_INSPECTION') setSelectedTask(stop)
-      })
+      marker.on('click', () => { if (status === 'PENDING_INSPECTION') setSelectedTask(stop) })
       stopMarkersRef.current.set(stop.id, marker)
     })
   }, [stops, leafletReady, nearestStop])
 
-  // ── User dot on map ──
+  // ── Watcher marker (heading-aware) ──
   useEffect(() => {
     const L = window.L
     if (!L || !mapInstance.current || !gpsPos) return
-    const userHtml = `<div style="width:14px;height:14px;border-radius:50%;background:#14b8a6;border:2.5px solid #fff;box-shadow:0 0 12px rgba(20,184,166,.6);"></div>`
+    const html = watcherMarkerHtml(heading)
     if (!userMarkerRef.current) {
       userMarkerRef.current = L.marker([gpsPos.lat, gpsPos.lng], {
-        icon: L.divIcon({ html: userHtml, className: '', iconSize: [14, 14], iconAnchor: [7, 7] }),
+        icon: L.divIcon({ html, className: '', iconSize: [40, 40], iconAnchor: [20, 20] }),
         zIndexOffset: 1000,
       }).addTo(mapInstance.current)
+      mapInstance.current.setView([gpsPos.lat, gpsPos.lng], 16)
     } else {
       userMarkerRef.current.setLatLng([gpsPos.lat, gpsPos.lng])
+      userMarkerRef.current.setIcon(L.divIcon({ html, className: '', iconSize: [40, 40], iconAnchor: [20, 20] }))
     }
-  }, [gpsPos, leafletReady])
+  }, [gpsPos, heading, leafletReady])
 
   // ── ORS route to nearest stop ──
   useEffect(() => {
-    if (!gpsPos || !nearestStop?.lat || !nearestStop?.lng || !ORS_KEY) {
-      setOrsRoute(null); return
-    }
+    if (!gpsPos || !nearestStop?.lat || !nearestStop?.lng || !ORS_KEY) { setOrsRoute(null); return }
     const ctrl = new AbortController()
-    const fetchRoute = async () => {
-      try {
-        const res = await fetch(
-          `https://api.openrouteservice.org/v2/directions/foot-walking?api_key=${ORS_KEY}&start=${gpsPos.lng},${gpsPos.lat}&end=${nearestStop.lng},${nearestStop.lat}`,
-          { signal: ctrl.signal }
-        )
-        const data = await res.json()
-        const encoded = data?.features?.[0]?.properties?.segments?.[0]
-        const geometry = data?.features?.[0]?.geometry
-        if (geometry?.coordinates) {
-          setOrsRoute(geometry.coordinates.map(([lng, lat]) => [lat, lng]))
-        } else { setOrsRoute([[gpsPos.lat, gpsPos.lng], [nearestStop.lat, nearestStop.lng]]) }
-      } catch { setOrsRoute(null) }
-    }
-    fetchRoute()
+    fetch(
+      `https://api.openrouteservice.org/v2/directions/foot-walking?api_key=${ORS_KEY}&start=${gpsPos.lng},${gpsPos.lat}&end=${nearestStop.lng},${nearestStop.lat}`,
+      { signal: ctrl.signal }
+    ).then(r => r.json()).then(data => {
+      const geometry = data?.features?.[0]?.geometry
+      if (geometry?.coordinates) setOrsRoute(geometry.coordinates.map(([lng, lat]) => [lat, lng]))
+      else setOrsRoute([[gpsPos.lat, gpsPos.lng], [nearestStop.lat, nearestStop.lng]])
+    }).catch(() => setOrsRoute(null))
     return () => ctrl.abort()
   }, [gpsPos?.lat, gpsPos?.lng, nearestStop?.id])
 
-  // ── Draw ORS polyline ──
+  // ── Draw polyline ──
   useEffect(() => {
     const L = window.L
     if (!L || !mapInstance.current) return
-    routeLayerRef.current?.remove()
-    routeLayerRef.current = null
+    routeLayerRef.current?.remove(); routeLayerRef.current = null
     if (!orsRoute || orsRoute.length < 2) return
     routeLayerRef.current = L.polyline(orsRoute, {
       color: '#14b8a6', weight: 4, opacity: 0.85,
@@ -306,42 +495,33 @@ export default function VerificationTasksModule() {
     setGpsPos(p); setIsMock(true); setIsTracking(true)
     mapInstance.current?.flyTo([p.lat, p.lng], 18, { animate: true, duration: 1 })
   }
-
-  function clearMock() {
-    mockPosRef.current = null
-    setIsMock(false); setGpsPos(null); setIsTracking(false)
-  }
+  function clearMock() { mockPosRef.current = null; setIsMock(false); setGpsPos(null); setIsTracking(false) }
 
   const pendingStops = stops.filter(s => normalizeStopStatus(s.current_status) === 'PENDING_INSPECTION')
 
   return (
     <>
       <Navbar />
-      <style>{`
-        @keyframes vtmPulse { 0%,100%{opacity:1} 50%{opacity:.3} }
-        .ww-stop-div-icon { background:transparent!important;border:0!important;box-shadow:none!important; }
-      `}</style>
 
       <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
 
         {/* MAP */}
-        <div style={{ position: 'absolute', inset: 0, zIndex: 0, background: '#1e2a38' }}>
+        <div style={{ position: 'absolute', inset: 0, zIndex: 0, background: '#e8f0e8' }}>
           <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
           {leafletReady && <MapLegend />}
 
           {/* DEV TOOLS */}
           {import.meta.env.DEV && (
             <div style={{ position: 'absolute', top: '50%', right: 14, marginTop: 54, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button
-                onClick={() => teleportTo(nearestStop)}
-                disabled={!nearestStop}
-                title="Teleport to Nearest Pending Stop"
-                style={{ width: 44, height: 44, borderRadius: '50%', background: nearestStop ? '#14b8a6' : '#cbd5e1', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: nearestStop ? 'pointer' : 'not-allowed', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 20 }}
-              >📍</button>
+              <button onClick={() => teleportTo(nearestStop)} disabled={!nearestStop} title="Teleport to Nearest Pending Stop"
+                style={{ width: 44, height: 44, borderRadius: '50%', background: nearestStop ? '#14b8a6' : '#cbd5e1', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: nearestStop ? 'pointer' : 'not-allowed', boxShadow: '0 4px 12px rgba(0,0,0,.2)', color: '#fff' }}>
+                {ICONS.pin}
+              </button>
               {pendingStops.slice(0, 3).map((s, i) => (
                 <button key={s.id} onClick={() => teleportTo(s)} title={`Teleport to ${s.label}`}
-                  style={{ width: 44, height: 44, borderRadius: '50%', background: '#8b5cf6', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 13, fontWeight: 900, color: '#fff' }}
-                >{i + 1}</button>
+                  style={{ width: 44, height: 44, borderRadius: '50%', background: '#8b5cf6', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 13, fontWeight: 900, color: '#fff' }}>
+                  {i + 1}
+                </button>
               ))}
               {isMock && (
                 <button onClick={clearMock} title="Clear Mock GPS"
@@ -366,7 +546,8 @@ export default function VerificationTasksModule() {
             <div>
               <div style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 900, letterSpacing: '.02em' }}>Verification Tasks</div>
               <div style={{ fontSize: 12, color: 'rgba(255,255,255,.55)', marginTop: 2 }}>
-                {loading ? 'Loading stops…' : `${pendingCount} stop${pendingCount !== 1 ? 's' : ''} pending inspection`}
+                {user?.barangay_name ? `📍 ${user.barangay_name}` : 'No barangay assigned'} ·{' '}
+                {loading ? 'Loading…' : `${pendingCount} pending`}
               </div>
             </div>
             <div style={{ textAlign: 'right' }}>
@@ -376,74 +557,74 @@ export default function VerificationTasksModule() {
           </div>
         </div>
 
-        {/* BOTTOM PANEL */}
-        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(255,255,255,.97)', backdropFilter: 'blur(12px)', borderTopLeftRadius: 24, borderTopRightRadius: 24, boxShadow: '0 -4px 24px rgba(0,0,0,.12)', paddingBottom: 24 }}>
-          <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2, margin: '12px auto' }} />
+        {/* BOTTOM PANEL or NO-SCHEDULE BANNER */}
+        {!loading && !hasScheduleToday ? (
+          <NoScheduleBanner barangayName={user?.barangay_name} />
+        ) : (
+          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(255,255,255,.97)', backdropFilter: 'blur(12px)', borderTopLeftRadius: 24, borderTopRightRadius: 24, boxShadow: '0 -4px 24px rgba(0,0,0,.12)', paddingBottom: 24 }}>
+            <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2, margin: '12px auto' }} />
 
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: '20px 0', color: '#64748b', fontSize: 13 }}>Loading…</div>
-          ) : pendingCount === 0 ? (
-            <div style={{ textAlign: 'center', padding: '20px 20px', color: '#64748b' }}>
-              <div style={{ fontSize: 36, marginBottom: 8 }}>✅</div>
-              <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a', marginBottom: 4 }}>All stops inspected!</div>
-              <div style={{ fontSize: 12, color: '#94a3b8' }}>No pending inspection stops remaining today.</div>
-            </div>
-          ) : nearestStop ? (
-            <div style={{ padding: '4px 20px 0' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.06em', marginBottom: 3 }}>NEAREST PENDING STOP</div>
-                  <div style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 900, color: isNearStop ? '#0f172a' : '#64748b', transition: 'color .3s' }}>{nearestStop.label}</div>
-                </div>
-                {distToStop != null && (
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontFamily: 'var(--font-head)', fontSize: 20, fontWeight: 900, color: isNearStop ? '#14b8a6' : '#475569' }}>
-                      {distToStop > 1000 ? `${(distToStop / 1000).toFixed(1)}km` : `${Math.round(distToStop)}m`}
-                    </div>
-                    <div style={{ fontSize: 9, color: '#94a3b8', fontWeight: 700, letterSpacing: '.04em' }}>AWAY</div>
-                  </div>
-                )}
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '20px 0', color: '#64748b', fontSize: 13 }}>Loading…</div>
+            ) : pendingCount === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px 20px', color: '#64748b' }}>
+                <div style={{ fontSize: 36, marginBottom: 8 }}>✅</div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a', marginBottom: 4 }}>All stops inspected!</div>
+                <div style={{ fontSize: 12, color: '#94a3b8' }}>No pending inspection stops remaining today.</div>
               </div>
+            ) : nearestStop ? (
+              <div style={{ padding: '4px 20px 0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.06em', marginBottom: 3 }}>NEAREST PENDING STOP</div>
+                    <div style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 900, color: isNearStop ? '#0f172a' : '#64748b', transition: 'color .3s' }}>{nearestStop.label}</div>
+                  </div>
+                  {distToStop != null && (
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontFamily: 'var(--font-head)', fontSize: 20, fontWeight: 900, color: isNearStop ? '#14b8a6' : '#475569' }}>
+                        {distToStop > 1000 ? `${(distToStop / 1000).toFixed(1)}km` : `${Math.round(distToStop)}m`}
+                      </div>
+                      <div style={{ fontSize: 9, color: '#94a3b8', fontWeight: 700, letterSpacing: '.04em' }}>AWAY</div>
+                    </div>
+                  )}
+                </div>
 
-              {isNearStop ? (
-                <p style={{ fontSize: 12, color: '#14b8a6', fontWeight: 700, marginBottom: 12, textAlign: 'center' }}>📍 You have arrived — ready to inspect!</p>
-              ) : distToStop != null ? (
-                <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12, textAlign: 'center' }}>
-                  Walk {distToStop > 1000 ? `${(distToStop / 1000).toFixed(1)} km` : `${Math.round(distToStop)} m`} to reach this stop
-                </p>
-              ) : (
-                <p style={{ fontSize: 12, color: '#f59e0b', marginBottom: 12, textAlign: 'center' }}>📡 Waiting for GPS signal…</p>
-              )}
+                {isNearStop
+                  ? <p style={{ fontSize: 12, color: '#14b8a6', fontWeight: 700, marginBottom: 12, textAlign: 'center' }}>📍 You have arrived — ready to inspect!</p>
+                  : distToStop != null
+                    ? <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12, textAlign: 'center' }}>Walk {distToStop > 1000 ? `${(distToStop / 1000).toFixed(1)} km` : `${Math.round(distToStop)} m`} to reach this stop</p>
+                    : <p style={{ fontSize: 12, color: '#f59e0b', marginBottom: 12, textAlign: 'center' }}>📡 Waiting for GPS signal…</p>
+                }
 
-              <button
-                id="inspect-btn"
-                disabled={!isNearStop}
-                onClick={() => setSelectedTask(nearestStop)}
-                style={{
-                  width: '100%', maxWidth: 320, display: 'block', margin: '0 auto',
-                  padding: '18px', borderRadius: 30, border: 'none',
-                  fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, letterSpacing: '.06em',
-                  transition: 'all .35s ease',
-                  cursor: isNearStop ? 'pointer' : 'not-allowed',
-                  background: isNearStop ? '#0f172a' : '#e2e8f0',
-                  color: isNearStop ? '#fff' : '#94a3b8',
-                  boxShadow: isNearStop ? '0 6px 20px rgba(15,23,42,.3)' : 'none',
-                }}
-              >
-                {isNearStop ? '🔍 Inspect Stop' : 'Confirm on Arrival'}
-              </button>
-            </div>
-          ) : null}
-        </div>
+                <button
+                  disabled={!isNearStop}
+                  onClick={() => setSelectedTask(nearestStop)}
+                  style={{
+                    width: '100%', maxWidth: 320, display: 'block', margin: '0 auto',
+                    padding: '18px', borderRadius: 30, border: 'none',
+                    fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, letterSpacing: '.06em',
+                    transition: 'all .35s ease', cursor: isNearStop ? 'pointer' : 'not-allowed',
+                    background: isNearStop ? '#0f172a' : '#e2e8f0',
+                    color: isNearStop ? '#fff' : '#94a3b8',
+                    boxShadow: isNearStop ? '0 6px 20px rgba(15,23,42,.3)' : 'none',
+                  }}
+                >
+                  {isNearStop ? '🔍 Inspect Stop' : 'Confirm on Arrival'}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
 
-      {/* INSPECTION OVERLAY */}
+      {/* INSPECTION OVERLAY — passes MultiPhotoPicker requirement down */}
       <PreInspectionOverlay
         visible={!!selectedTask}
         task={selectedTask}
         gpsPos={gpsPos}
         onComplete={() => { setSelectedTask(null); loadStops() }}
         onBack={() => setSelectedTask(null)}
+        MultiPhotoPicker={MultiPhotoPicker}
       />
     </>
   )

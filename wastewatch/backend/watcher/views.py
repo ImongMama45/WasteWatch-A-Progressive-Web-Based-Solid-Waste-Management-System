@@ -342,11 +342,21 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
 
         schedule_id = request.data.get('schedule_id')
         stop_order = request.data.get('stop_order')
-        outcome = (request.data.get('outcome') or '').strip().lower()
+        outcome_raw = (request.data.get('outcome') or '').strip().lower()
+        if outcome_raw == 'present':
+            outcome = 'garbage_present'
+        elif outcome_raw == 'empty':
+            outcome = 'no_garbage'
+        else:
+            outcome = outcome_raw
+
         lat = request.data.get('lat')
         lng = request.data.get('lng')
-        remarks = (request.data.get('remarks') or '').strip()
+        remarks = (request.data.get('notes') or request.data.get('remarks') or '').strip()
         photo = request.FILES.get('photo')
+        photo_2 = request.FILES.get('photo_2')
+        photo_3 = request.FILES.get('photo_3')
+        photo_4 = request.FILES.get('photo_4')
 
         if not schedule_id or stop_order is None:
             return Response({'error': 'schedule_id and stop_order are required.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -376,8 +386,10 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         validation.pre_validation_latitude = lat
         validation.pre_validation_longitude = lng
         validation.pre_validation_remarks = remarks
-        if photo:
-            validation.pre_validation_photo = photo
+        if photo: validation.pre_validation_photo = photo
+        if photo_2: validation.pre_validation_photo_2 = photo_2
+        if photo_3: validation.pre_validation_photo_3 = photo_3
+        if photo_4: validation.pre_validation_photo_4 = photo_4
         validation.current_status = (
             StopValidationStatus.READY_FOR_COLLECTION
             if outcome == 'garbage_present'
@@ -404,8 +416,11 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         outcome = (request.data.get('outcome') or '').strip().lower()
         lat = request.data.get('lat')
         lng = request.data.get('lng')
-        dispute_reason = (request.data.get('dispute_reason') or request.data.get('description') or '').strip()
+        dispute_reason = (request.data.get('dispute_reason') or request.data.get('notes') or request.data.get('description') or '').strip()
         photo = request.FILES.get('photo')
+        photo_2 = request.FILES.get('photo_2')
+        photo_3 = request.FILES.get('photo_3')
+        photo_4 = request.FILES.get('photo_4')
 
         if not schedule_id or stop_order is None:
             return Response({'error': 'schedule_id and stop_order are required.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -437,8 +452,10 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         validation.post_validation_latitude = lat
         validation.post_validation_longitude = lng
         validation.dispute_reason = dispute_reason if outcome == 'failed' else ''
-        if photo:
-            validation.post_validation_photo = photo
+        if photo: validation.post_validation_photo = photo
+        if photo_2: validation.post_validation_photo_2 = photo_2
+        if photo_3: validation.post_validation_photo_3 = photo_3
+        if photo_4: validation.post_validation_photo_4 = photo_4
         validation.current_status = (
             StopValidationStatus.VERIFIED_COLLECTED
             if outcome == 'success'

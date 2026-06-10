@@ -279,7 +279,7 @@ export const ROLE_NAV_CONFIG = {
       type: 'group', label: 'Field Work', icon: 'check',
       items: [
         { path: '/map',                 label: 'Live Map',            icon: 'map' },
-        { path: '/verification-tasks',  label: 'Verifications',       icon: 'check' },
+        { path: '/watcher-tasks',       label: 'Watcher Tasks',       icon: 'check' },
         { path: '/schedule',            label: 'Collection Schedule', icon: 'schedule' },
       ],
     },

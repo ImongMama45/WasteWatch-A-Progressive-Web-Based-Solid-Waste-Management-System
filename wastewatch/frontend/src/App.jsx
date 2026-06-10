@@ -83,26 +83,22 @@ export default function App() {
             <PrivateRoute><DashboardRouter /></PrivateRoute>
           } />
 
-
-// New hub route — watcher landing page
+          {/* New hub route — watcher landing page */}
           <Route path="/watcher-tasks" element={
             <PrivateRoute><WatcherTasksHub /></PrivateRoute>
           } />
 
-// New map-based post-collection module
+          {/* New map-based post-collection module */}
           <Route path="/watcher/confirm" element={
             <PrivateRoute><ConfirmCollectionModule /></PrivateRoute>
           } />
 
-/**
-          * 3. OPTIONALLY redirect the old /collection/confirm to the new module:
-          *    Replace the existing /collection/confirm route with:
-          */
+          {/* Redirect the old /collection/confirm to the new module */}
           <Route path="/collection/confirm" element={
             <Navigate to="/watcher/confirm" replace />
           } />
 
-          {/* WATCHER PAGE */}
+          {/* WATCHER PAGE: Pre-collection map module */}
           <Route path="/verification-tasks" element={
             <PrivateRoute><VerificationTasks /></PrivateRoute>
           } />
