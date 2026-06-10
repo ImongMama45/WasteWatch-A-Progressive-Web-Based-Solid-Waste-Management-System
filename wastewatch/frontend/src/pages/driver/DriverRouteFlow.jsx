@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect } from 'react'
+import { DriverGpsProvider } from '../../context/DriverGpsContext'
 import AssignmentModule from './components/AssignmentModule'
 import CheckInModule from './components/CheckInModule'
 import ShiftRouteModule from './components/ShiftRouteModule'
@@ -25,17 +26,20 @@ export default function DriverRouteFlow() {
     }
   }, [routeState])
 
-  if (routeState === 'assignment') {
-    return <AssignmentModule setRouteState={setRouteState} />
-  }
-
-  if (routeState === 'checkin') {
-    return <CheckInModule setRouteState={setRouteState} />
-  }
-
-  if (ROUTE_MAP_STATES.includes(routeState)) {
-    return <ShiftRouteModule routeState={routeState} setRouteState={setRouteState} />
-  }
-
-  return <AssignmentModule setRouteState={setRouteState} />
+  return (
+    <DriverGpsProvider>
+      {routeState === 'assignment' && (
+        <AssignmentModule setRouteState={setRouteState} />
+      )}
+      {routeState === 'checkin' && (
+        <CheckInModule setRouteState={setRouteState} />
+      )}
+      {ROUTE_MAP_STATES.includes(routeState) && (
+        <ShiftRouteModule routeState={routeState} setRouteState={setRouteState} />
+      )}
+      {!['assignment', 'checkin', ...ROUTE_MAP_STATES].includes(routeState) && (
+        <AssignmentModule setRouteState={setRouteState} />
+      )}
+    </DriverGpsProvider>
+  )
 }

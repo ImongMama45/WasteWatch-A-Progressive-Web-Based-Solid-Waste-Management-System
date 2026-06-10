@@ -14,12 +14,12 @@ import BarangaySelect from '../../components/BarangaySelect'
 const ROLES = ['watcher', 'driver', 'brgy_official', 'citizen', 'dumpsite']
 
 const ROLE_META = {
-  watcher:      { label: 'Watcher',           color: '#5dade2', bg: 'rgba(93,173,226,0.1)',  border: 'rgba(93,173,226,0.3)' },
-  driver:       { label: 'Driver',             color: '#f39c12', bg: 'rgba(243,156,18,0.1)', border: 'rgba(243,156,18,0.3)' },
-  brgy_official:{ label: 'Brgy. Official',     color: '#9b59b6', bg: 'rgba(155,89,182,0.1)', border: 'rgba(155,89,182,0.3)' },
-  citizen:      { label: 'Citizen',            color: '#2ecc71', bg: 'rgba(46,204,113,0.1)', border: 'rgba(46,204,113,0.3)' },
-  admin:        { label: 'Admin',              color: '#e74c3c', bg: 'rgba(231,76,60,0.1)',  border: 'rgba(231,76,60,0.3)' },
-  dumpsite:     { label: 'Dumpsite Operator',  color: '#94a3b8', bg: 'rgba(148,163,184,0.1)',border: 'rgba(148,163,184,0.3)' },
+  watcher: { label: 'Watcher', color: '#5dade2', bg: 'rgba(93,173,226,0.1)', border: 'rgba(93,173,226,0.3)' },
+  driver: { label: 'Driver', color: '#f39c12', bg: 'rgba(243,156,18,0.1)', border: 'rgba(243,156,18,0.3)' },
+  brgy_official: { label: 'Brgy. Official', color: '#9b59b6', bg: 'rgba(155,89,182,0.1)', border: 'rgba(155,89,182,0.3)' },
+  citizen: { label: 'Citizen', color: '#2ecc71', bg: 'rgba(46,204,113,0.1)', border: 'rgba(46,204,113,0.3)' },
+  admin: { label: 'Admin', color: '#e74c3c', bg: 'rgba(231,76,60,0.1)', border: 'rgba(231,76,60,0.3)' },
+  dumpsite: { label: 'Dumpsite Operator', color: '#94a3b8', bg: 'rgba(148,163,184,0.1)', border: 'rgba(148,163,184,0.3)' },
 }
 
 const EMPTY_FORM = {
@@ -56,14 +56,14 @@ function Avatar({ name, active }) {
 function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
   const isEdit = !!user
   const [form, setForm] = useState(user ? {
-    full_name:     user.full_name,
-    email:         user.email,
-    password:      '',
-    role:          user.role,
+    full_name: user.full_name,
+    email: user.email,
+    password: '',
+    role: user.role,
     employee_type: user.employee_type || '',
-    barangay:      user.barangay  || '',
-    dumpsite:      user.dumpsite  || '',
-    is_active:     user.is_active,
+    barangay: user.barangay || '',
+    dumpsite: user.dumpsite || '',
+    is_active: user.is_active,
   } : { ...EMPTY_FORM })
   const [err, setErr] = useState('')
 
@@ -71,7 +71,7 @@ function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
 
   function validate() {
     if (!form.full_name.trim()) return 'Full name is required.'
-    if (!form.email.trim())     return 'Email is required.'
+    if (!form.email.trim()) return 'Email is required.'
     if (!isEdit && !form.password.trim()) return 'Password is required for new users.'
     if (form.role === 'dumpsite' && !form.dumpsite) return 'Please assign a dumpsite facility.'
     return ''
@@ -92,9 +92,10 @@ function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
       zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
     }} onClick={onClose}>
       <div style={{
-        background: 'var(--surface)', borderRadius: 16, padding: 24,
+        background: 'var(--surface)', borderRadius: 16, padding: '24px 16px',
         width: '100%', maxWidth: 460, maxHeight: '90vh', overflowY: 'auto',
         boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+        margin: '0 8px',   // ← prevents edge bleed on very small phones
       }} onClick={e => e.stopPropagation()}>
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
@@ -221,13 +222,16 @@ function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
   )
 }
 
+
+
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function UserManagement() {
   const { users, loading, refresh: refreshUsers } = useUsers()
   const [barangays, setBarangays] = useState([])
   const [dumpsites, setDumpsites] = useState([])
-  
+
   const [roleFilter, setRoleFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [search, setSearch] = useState('')
@@ -236,6 +240,12 @@ export default function UserManagement() {
 
   const [modal, setModal] = useState(null)  // null | 'add' | user object
   const [toast, setToast] = useState(null)
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768)
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768)
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [])
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
@@ -287,15 +297,15 @@ export default function UserManagement() {
   }
 
   const counts = useMemo(() => ({
-    all:          users.length,
-    watcher:      users.filter(u => u.role === 'watcher').length,
-    driver:       users.filter(u => u.role === 'driver').length,
-    brgy_official:users.filter(u => u.role === 'brgy_official').length,
-    citizen:      users.filter(u => u.role === 'citizen').length,
-    dumpsite:     users.filter(u => u.role === 'dumpsite').length,
-    crew_member:  users.filter(u => u.employee_type === 'crew_member').length,
-    active:       users.filter(u => u.is_active).length,
-    inactive:     users.filter(u => !u.is_active).length,
+    all: users.length,
+    watcher: users.filter(u => u.role === 'watcher').length,
+    driver: users.filter(u => u.role === 'driver').length,
+    brgy_official: users.filter(u => u.role === 'brgy_official').length,
+    citizen: users.filter(u => u.role === 'citizen').length,
+    dumpsite: users.filter(u => u.role === 'dumpsite').length,
+    crew_member: users.filter(u => u.employee_type === 'crew_member').length,
+    active: users.filter(u => u.is_active).length,
+    inactive: users.filter(u => !u.is_active).length,
   }), [users])
 
   const filtered = useMemo(() => users.filter(u => {
@@ -388,15 +398,20 @@ export default function UserManagement() {
         </div>
 
         {/* ── Role filter tabs ── */}
-        <div style={{ display: 'flex', gap: 4, marginBottom: 14, background: 'var(--surface-2)', borderRadius: 10, padding: 4, width: 'fit-content', flexWrap: 'wrap' }}>
+        <div style={{
+          display: 'flex', gap: 4, marginBottom: 14,
+          background: 'var(--surface-2)', borderRadius: 10, padding: 4,
+          overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+          maxWidth: '100%',
+        }}>
           {[
-            { key: 'all',          label: 'All' },
-            { key: 'watcher',      label: 'Watchers' },
-            { key: 'driver',       label: 'Drivers' },
-            { key: 'brgy_official',label: 'Brgy. Officials' },
-            { key: 'citizen',      label: 'Citizens' },
-            { key: 'crew_member',  label: '🚛 Crew' },
-            { key: 'dumpsite',     label: 'Dumpsite Ops' },
+            { key: 'all', label: 'All' },
+            { key: 'watcher', label: 'Watchers' },
+            { key: 'driver', label: 'Drivers' },
+            { key: 'brgy_official', label: 'Brgy. Officials' },
+            { key: 'citizen', label: 'Citizens' },
+            { key: 'crew_member', label: '🚛 Crew' },
+            { key: 'dumpsite', label: 'Dumpsite Ops' },
           ].map(f => (
             <button key={f.key} className="um-filter" onClick={() => setRoleFilter(f.key)} style={{
               padding: '6px 14px', borderRadius: 8, border: 'none',
@@ -430,31 +445,32 @@ export default function UserManagement() {
             placeholder="Search name, email, assignment…"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            style={{ maxWidth: 280, marginLeft: 'auto' }}
+            style={{ maxWidth: isMobile ? '100%' : 280, width: isMobile ? '100%' : undefined, marginLeft: isMobile ? 0 : 'auto' }}
           />
         </div>
 
         {/* ── Table ── */}
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          {/* Table header */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '2fr 2fr 1fr 1.2fr 80px 100px',
-            padding: '10px 16px',
-            background: 'var(--surface-2)',
-            borderBottom: '1px solid var(--border)',
-            fontSize: 10, fontWeight: 800, color: 'var(--text-muted)',
-            letterSpacing: '.07em', textTransform: 'uppercase',
-          }}>
-            <span>User</span>
-            <span>Email</span>
-            <span>Role</span>
-            <span>Jurisdiction</span>
-            <span style={{ textAlign: 'center' }}>Status</span>
-            <span style={{ textAlign: 'right' }}>Actions</span>
-          </div>
+          {/* Table header — desktop only */}
+          {!isMobile && (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '2fr 2fr 1fr 1.2fr 80px 100px',
+              padding: '10px 16px',
+              background: 'var(--surface-2)',
+              borderBottom: '1px solid var(--border)',
+              fontSize: 10, fontWeight: 800, color: 'var(--text-muted)',
+              letterSpacing: '.07em', textTransform: 'uppercase',
+            }}>
+              <span>User</span>
+              <span>Email</span>
+              <span>Role</span>
+              <span>Jurisdiction</span>
+              <span style={{ textAlign: 'center' }}>Status</span>
+              <span style={{ textAlign: 'right' }}>Actions</span>
+            </div>
+          )}
 
-          {/* Rows */}
           {loading ? (
             <div style={{ textAlign: 'center', padding: 40 }}>Loading users...</div>
           ) : filtered.length === 0 ? (
@@ -463,7 +479,90 @@ export default function UserManagement() {
               <div style={{ fontWeight: 700, marginBottom: 4 }}>No users found</div>
               <div className="text-muted text-sm">Try adjusting your filters.</div>
             </div>
+          ) : isMobile ? (
+            /* ── Mobile card list ── */
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {paginatedUsers.map((u, idx) => (
+                <div key={u.id} style={{
+                  padding: '14px 16px',
+                  borderBottom: idx < paginatedUsers.length - 1 ? '1px solid var(--border)' : 'none',
+                  background: u.is_active ? 'var(--surface)' : 'rgba(0,0,0,0.015)',
+                }}>
+                  {/* Top row: avatar + name + role badge */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <Avatar name={u.full_name} active={u.is_active} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 14, fontWeight: 700,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        color: u.is_active ? 'var(--text)' : 'var(--text-muted)',
+                      }}>{u.full_name}</div>
+                      <div style={{
+                        fontSize: 11, color: 'var(--text-muted)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>{u.email}</div>
+                    </div>
+                    <RoleBadge role={u.role} />
+                  </div>
+
+                  {/* Meta row: jurisdiction + crew badge */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                    {(u.barangay_name || u.dumpsite_name) && (
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        📍 {u.role === 'dumpsite' ? (u.dumpsite_name || '—') : (u.barangay_name || '—')}
+                      </span>
+                    )}
+                    {u.employee_type === 'crew_member' && (
+                      <span style={{
+                        fontSize: 8, fontWeight: 800, padding: '1px 6px', borderRadius: 10,
+                        background: 'rgba(251,191,36,0.12)', color: '#f59e0b',
+                        border: '1px solid rgba(251,191,36,0.3)', letterSpacing: '.06em',
+                      }}>CREW</span>
+                    )}
+                  </div>
+
+                  {/* Bottom row: toggle + actions */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div
+                      onClick={() => toggleActive(u)}
+                      title={u.is_active ? 'Deactivate' : 'Activate'}
+                      style={{
+                        width: 36, height: 20, borderRadius: 20, position: 'relative',
+                        background: u.is_active ? 'var(--accent)' : '#ccc',
+                        cursor: 'pointer', transition: 'background .2s', flexShrink: 0,
+                      }}
+                    >
+                      <div style={{
+                        position: 'absolute', top: 2, left: u.is_active ? 18 : 2,
+                        width: 16, height: 16, borderRadius: '50%', background: '#fff',
+                        transition: 'left .2s', boxShadow: '0 1px 3px rgba(0,0,0,.2)',
+                      }} />
+                    </div>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1 }}>
+                      {u.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                    <button
+                      onClick={() => setModal(u)}
+                      style={{
+                        background: 'var(--surface-2)', border: '1px solid var(--border)',
+                        borderRadius: 8, padding: '6px 12px', cursor: 'pointer',
+                        fontSize: 12, color: 'var(--text)',
+                      }}
+                    >✏️ Edit</button>
+                    <button
+                      onClick={() => deleteUser(u.id)}
+                      style={{
+                        background: 'rgba(231,76,60,0.07)', border: '1px solid rgba(231,76,60,0.25)',
+                        borderRadius: 8, padding: '6px 12px', cursor: 'pointer',
+                        fontSize: 12, color: '#e74c3c',
+                      }}
+                    >🗑</button>
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : (
+            /* ── Desktop table rows ── */
             paginatedUsers.map((u, idx) => (
               <div
                 key={u.id}
@@ -560,8 +659,8 @@ export default function UserManagement() {
           </div>
           {totalPages > 1 && (
             <div style={{ display: 'flex', gap: 6 }}>
-              <button 
-                className="btn btn-outline" 
+              <button
+                className="btn btn-outline"
                 disabled={currentPage === 1}
                 onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                 style={{ padding: '6px 12px', fontSize: 12, opacity: currentPage === 1 ? 0.5 : 1 }}
@@ -571,8 +670,8 @@ export default function UserManagement() {
               <div style={{ display: 'flex', alignItems: 'center', padding: '0 10px', fontSize: 13, fontWeight: 600 }}>
                 Page {currentPage} of {totalPages}
               </div>
-              <button 
-                className="btn btn-outline" 
+              <button
+                className="btn btn-outline"
                 disabled={currentPage === totalPages}
                 onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                 style={{ padding: '6px 12px', fontSize: 12, opacity: currentPage === totalPages ? 0.5 : 1 }}

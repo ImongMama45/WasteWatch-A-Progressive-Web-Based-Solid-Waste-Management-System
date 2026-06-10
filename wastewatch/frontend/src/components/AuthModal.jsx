@@ -12,20 +12,20 @@ import BarangaySelect from './BarangaySelect'
 
 export default function AuthModal({ defaultMode = 'login', onClose }) {
   const { login, register, barangays } = useAuth()
-  const navigate  = useNavigate()
-  const [params]  = useSearchParams()
-  const nextUrl   = params.get('next') || '/dashboard'
+  const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const nextUrl = params.get('next') || '/dashboard'
 
   const [isRegister, setIsRegister] = useState(defaultMode === 'register')
 
   const [form, setForm] = useState({
-    email:     '',
-    password:  '',
+    email: '',
+    password: '',
     password2: '',
     full_name: '',
-    barangay:  null,
+    barangay: null,
   })
-  const [error,   setError]   = useState('')
+  const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -69,11 +69,11 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
     try {
       const payload = {
         full_name: form.full_name,
-        email:     form.email,
-        password:  form.password,
+        email: form.email,
+        password: form.password,
         password2: form.password2,
-        barangay:  form.barangay,
-        role:      'citizen'
+        barangay: form.barangay,
+        role: 'citizen'
       };
       console.log('DEBUG: Sending Payload', payload);
       await register(payload)
@@ -94,7 +94,7 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
       if (data?.password) fieldErrors.push(`Password: ${data.password[0]}`)
       if (data?.barangay) fieldErrors.push(`Barangay: ${data.barangay[0]}`)
       if (data?.non_field_errors) fieldErrors.push(data.non_field_errors[0])
-      
+
       setError(fieldErrors.length > 0 ? fieldErrors.join(' | ') : (data?.error || 'Registration failed.'))
     } finally {
       setLoading(false)
@@ -193,14 +193,61 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
         }
 
         @media (max-width: 768px) {
-          .auth-modal-container { height: auto; min-height: 550px; }
-          .auth-form-container { position: relative; width: 100%; }
-          .sign-in-container, .sign-up-container { width: 100%; transform: none !important; opacity: 1 !important; z-index: 1 !important; }
+          .auth-modal-backdrop {
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+          }
+
+          .auth-modal-container {
+            width: 100%;
+            max-width: 400px;
+            height: auto;
+            min-height: 0;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+          }
+
+          .auth-form-container {
+            position: relative;
+            width: 100%;
+          }
+
+          .sign-in-container,
+          .sign-up-container {
+            width: 100%;
+            transform: none !important;
+            opacity: 1 !important;
+            z-index: 1 !important;
+          }
+
           .auth-overlay-container { display: none; }
+
           .sign-up-container { display: none; }
+
           .auth-modal-container.right-panel-active .sign-in-container { display: none; }
-          .auth-modal-container.right-panel-active .sign-up-container { display: flex; }
-          .auth-form-content { padding: 40px 24px; }
+          .auth-modal-container.right-panel-active .sign-up-container {
+            display: flex;
+            width: 100%;
+          }
+
+          .auth-form-content {
+            width: 100%;
+            justify-content: center;
+            padding: 40px 28px 36px;
+          }
+
+          .auth-form-content h1 {
+            font-size: 22px;
+            margin-bottom: 16px;
+          }
+
+          .auth-modal-close {
+            top: 14px;
+            right: 14px;
+          }
+
+          .mobile-only { display: block !important; }
         }
       `}</style>
 
@@ -211,12 +258,12 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
         <div className="auth-form-container sign-up-container">
           <form className="auth-form-content" onSubmit={handleRegister}>
             <h1 style={{ marginBottom: 12 }}>Create Account</h1>
-            
+
             {error && isRegister && <div className="alert alert-error" style={{ marginBottom: 10, width: '100%' }}>{error}</div>}
 
             <input className="form-input" style={{ marginBottom: 8, background: 'var(--surface-2)' }} type="text" name="full_name" value={form.full_name} onChange={handleChange} placeholder="Full Name" required />
             <input className="form-input" style={{ marginBottom: 8, background: 'var(--surface-2)' }} type="email" name="email" value={form.email} onChange={handleChange} placeholder="Email" required />
-            
+
             <div style={{ width: '100%', textAlign: 'left', marginBottom: 8 }}>
               <label style={{ fontSize: 11, fontWeight: 700, marginBottom: 4, display: 'block' }}>Barangay (Opsyonal)</label>
               <BarangaySelect barangays={barangays} value={form.barangay} onChange={id => setForm(f => ({ ...f, barangay: id }))} label="Piliin ang barangay (Opsyonal)" />

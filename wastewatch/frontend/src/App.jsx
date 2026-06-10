@@ -22,8 +22,8 @@ import AuthModal from './components/AuthModal'
 // (these are placeholders — wire up your actual page components)
 import DashboardRouter from './pages/dashboard/DashboardRouter'
 import ReportForm from './pages/ReportForm'
-import ConfirmCollection from './pages/ConfirmCollection'
-import VerificationTasks from './pages/VerificationTasks'
+import ConfirmCollection from './pages/watcher/ConfirmCollection'
+import VerificationTasks from './pages/watcher/VerificationTasksModule'
 import MapView from './pages/MapView'
 import EscalateToAdmin from './pages/EscalateToAdmin'
 import ValidateReports from './pages/ValidateReports'
@@ -31,6 +31,8 @@ import Profile from './pages/Profile'
 import CollectionSchedule from './pages/CollectionSchedule'
 import AnalyticsTabs from './pages/analytics/AnalyticsTabs'
 import NewsPage from './pages/news/NewsPage'
+import WatcherTasksHub from './pages/watcher/WatcherTasksHub'
+import ConfirmCollectionModule from './pages/watcher/ConfirmCollectionModule'
 
 // These may not exist yet — uncomment when ready:
 import TruckManagement from './pages/admin/TruckManagement'
@@ -79,6 +81,25 @@ export default function App() {
           {/* ── PROTECTED — all screen sizes ── */}
           <Route path="/dashboard" element={
             <PrivateRoute><DashboardRouter /></PrivateRoute>
+          } />
+
+
+// New hub route — watcher landing page
+          <Route path="/watcher-tasks" element={
+            <PrivateRoute><WatcherTasksHub /></PrivateRoute>
+          } />
+
+// New map-based post-collection module
+          <Route path="/watcher/confirm" element={
+            <PrivateRoute><ConfirmCollectionModule /></PrivateRoute>
+          } />
+
+/**
+          * 3. OPTIONALLY redirect the old /collection/confirm to the new module:
+          *    Replace the existing /collection/confirm route with:
+          */
+          <Route path="/collection/confirm" element={
+            <Navigate to="/watcher/confirm" replace />
           } />
 
           {/* WATCHER PAGE */}

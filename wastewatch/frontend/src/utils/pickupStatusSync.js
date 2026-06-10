@@ -1,72 +1,143 @@
 const SYNC_EVENT_NAME = 'ww:pickup-status-sync'
 const SYNC_STORAGE_KEY = 'ww_pickup_status_sync'
-const ALLOWED_STATUSES = new Set(['collected', 'current', 'upcoming', 'missed', 'pending', 'none'])
 
-export const normalizeStopStatus = (status) =>
-  ALLOWED_STATUSES.has(status) ? status : 'upcoming'
+export const STOP_VALIDATION_STATUSES = [
+  'PENDING_INSPECTION',
+  'READY_FOR_COLLECTION',
+  'EMPTY_STOP',
+  'COLLECTION_REPORTED',
+  'VERIFIED_COLLECTED',
+  'COLLECTION_DISPUTED',
+]
 
-export const resolveStopVisualStatus = (stop, fallback = 'upcoming') => {
+const ALLOWED_STATUSES = new Set(STOP_VALIDATION_STATUSES)
+
+export const STOP_STATUS_COLORS = {
+  PENDING_INSPECTION: { bg: 'transparent', border: 'rgba(148,163,184,0.9)', shadow: 'none', label: '#94a3b8' },
+  READY_FOR_COLLECTION: { bg: '#f59e0b', border: '#fff', shadow: 'rgba(245,158,11,0.4)', label: '#fff' },
+  EMPTY_STOP: { bg: '#94a3b8', border: '#fff', shadow: 'rgba(148,163,184,0.4)', label: '#fff' },
+  COLLECTION_REPORTED: { bg: '#eab308', border: '#fff', shadow: 'rgba(234,179,8,0.45)', label: '#fff' },
+  VERIFIED_COLLECTED: { bg: '#16a34a', border: '#fff', shadow: 'rgba(22,163,74,0.5)', label: '#fff' },
+  COLLECTION_DISPUTED: { bg: '#ef4444', border: '#fff', shadow: 'rgba(239,68,68,0.5)', label: '#fff' },
+}
+
+export const STOP_STATUS_LABELS = {
+  PENDING_INSPECTION: 'Pending Inspection',
+  READY_FOR_COLLECTION: 'Ready for Collection',
+  EMPTY_STOP: 'Empty Stop',
+  COLLECTION_REPORTED: 'Collection Reported',
+  VERIFIED_COLLECTED: 'Verified Collected',
+  COLLECTION_DISPUTED: 'Collection Disputed',
+}
+
+export const normalizeStopStatus = (status) => {
+  if (status == null || status === '') return 'PENDING_INSPECTION'
+  const upper = String(status).trim().toUpperCase()
+  if (ALLOWED_STATUSES.has(upper)) return upper
+
+  const legacy = String(status).trim().toLowerCase()
+  if (legacy === 'none') return 'PENDING_INSPECTION'
+  if (legacy === 'upcoming') return 'READY_FOR_COLLECTION'
+  if (legacy === 'collected') return 'VERIFIED_COLLECTED'
+  if (legacy === 'missed') return 'COLLECTION_DISPUTED'
+  if (legacy === 'pending') return 'COLLECTION_REPORTED'
+  if (legacy === 'current') return 'READY_FOR_COLLECTION'
+
+  return 'PENDING_INSPECTION'
+}
+
+export const resolveStopVisualStatus = (stop, fallback = 'PENDING_INSPECTION') => {
   const rawCandidates = [
+    stop?.current_status,
+    stop?.validation_status,
     stop?.status,
     stop?.watcher_status,
-    stop?.confirmation_status,
-    stop?.confirmationStatus,
   ]
-
-  const hasExplicitPendingFlag =
-    stop?.confirmed_by_watcher === false ||
-    stop?.watcher_confirmed === false ||
-    stop?.is_confirmed === false
-
-  if (hasExplicitPendingFlag) return 'pending'
 
   for (const raw of rawCandidates) {
     if (raw == null || raw === '') continue
-    const status = String(raw).trim().toLowerCase()
-    if (status === 'completed') return 'collected'
-    if (status === 'failed') return 'missed'
-    if (status === 'en_route') return 'upcoming'
-    if (status === 'arrived') return 'current'
-    if (ALLOWED_STATUSES.has(status)) return status
+    const normalized = normalizeStopStatus(raw)
+    if (ALLOWED_STATUSES.has(normalized)) return normalized
   }
 
-  return fallback
+  return normalizeStopStatus(fallback)
 }
 
-export const pickupScheduleId = (pickupStatus) => {
-  const schedule = pickupStatus?.schedule
+export const isRoutableStopStatus = (status) =>
+  normalizeStopStatus(status) === 'READY_FOR_COLLECTION'
+
+/** Shared stop marker HTML — used by MapView and ShiftRouteModule */
+export function buildStopMarkerHtml(stopNumber, status, details = null, isActive = false) {
+  const safeStatus = normalizeStopStatus(status)
+  const c = STOP_STATUS_COLORS[safeStatus] || STOP_STATUS_COLORS.PENDING_INSPECTION
+  const size = isActive ? 28 : 24
+  const markerLabel = safeStatus === 'VERIFIED_COLLECTED' ? '✓'
+    : safeStatus === 'COLLECTION_DISPUTED' ? '×'
+    : safeStatus === 'COLLECTION_REPORTED' ? '?'
+    : stopNumber
+
+  const pulse = isActive ? `
+    <span style="position:absolute;inset:-5px;border-radius:50%;
+      border:2.5px solid ${c.bg === 'transparent' ? '#f59e0b' : c.bg};
+      animation:wwPulse 1.8s ease infinite;pointer-events:none;"></span>
+  ` : ''
+
+  const glowShadow = ['VERIFIED_COLLECTED', 'COLLECTION_DISPUTED', 'COLLECTION_REPORTED'].includes(safeStatus)
+    ? `0 2px 10px ${c.shadow}, 0 0 0 3px ${c.bg === 'transparent' ? 'rgba(148,163,184,0.3)' : `${c.bg}44`}`
+    : `0 2px 10px ${c.shadow}`
+  const fillColor = safeStatus === 'PENDING_INSPECTION' ? 'transparent' : c.bg
+  const borderStyle = safeStatus === 'PENDING_INSPECTION' ? `2px dashed ${c.border}` : `2.5px solid ${c.border}`
+  const textColor = safeStatus === 'PENDING_INSPECTION' ? '#94a3b8' : c.label
+
+  return `
+    <div style="position:relative;width:${size}px;height:${size}px;">
+      ${pulse}
+      <div style="
+        position:absolute;inset:0;background:${fillColor};border:${borderStyle};
+        border-radius:50%;display:flex;align-items:center;justify-content:center;
+        color:${textColor};font-size:${isActive ? 12 : 10}px;font-weight:900;
+        font-family:monospace;box-shadow:${glowShadow};
+      ">${markerLabel}</div>
+      ${details?.collectedAt ? `<div style="position:absolute;top:-6px;right:-6px;background:rgba(0,0,0,0.75);color:#fff;font-size:10px;padding:2px 6px;border-radius:10px;">${details.collectedAt}</div>` : ''}
+    </div>`
+}
+
+export const validationScheduleId = (row) => {
+  const schedule = row?.schedule
   if (schedule && typeof schedule === 'object') return schedule.id ?? schedule.pk
-  return schedule ?? pickupStatus?.schedule_id
+  return schedule ?? row?.schedule_id ?? row?.route_id
 }
 
-export const pickupStatusKey = (pickupStatus) => {
-  const scheduleId = pickupScheduleId(pickupStatus)
-  const stopOrder = Number(pickupStatus?.stop_order ?? pickupStatus?.stopOrder)
+export const validationStatusKey = (row) => {
+  const scheduleId = validationScheduleId(row)
+  const stopOrder = Number(row?.stop_order ?? row?.stopOrder ?? row?.stop_id)
   if (scheduleId == null || Number.isNaN(stopOrder)) return null
   return `${scheduleId}:${stopOrder}`
 }
 
-export const buildPickupStatusSnapshot = (pickupStatuses = []) => {
-  const bySchedule = new Map()
+export const pickupScheduleId = validationScheduleId
+export const pickupStatusKey = validationStatusKey
+
+export const buildStopValidationSnapshot = (validations = []) => {
+  const statusMap = new Map()
   const detailsMap = new Map()
   let latestUpdatedAt = null
 
-  pickupStatuses.forEach(ps => {
-    const scheduleId = pickupScheduleId(ps)
-    const stopOrder = Number(ps.stop_order ?? ps.stopOrder)
+  validations.forEach((row) => {
+    const scheduleId = validationScheduleId(row)
+    const stopOrder = Number(row.stop_order ?? row.stopOrder ?? row.stop_id)
     if (scheduleId == null || Number.isNaN(stopOrder)) return
 
     const scheduleKey = String(scheduleId)
-    const row = { ...ps, scheduleId: scheduleKey, stopOrder }
-
-    if (!bySchedule.has(scheduleKey)) bySchedule.set(scheduleKey, [])
-    bySchedule.get(scheduleKey).push(row)
-
     const key = `${scheduleKey}:${stopOrder}`
+    const visualStatus = resolveStopVisualStatus(row)
+    statusMap.set(key, visualStatus)
+
     let collectedAt = ''
     try {
-      if (ps.collected_at) {
-        const d = new Date(ps.collected_at)
+      const raw = row.collection_timestamp || row.collected_at
+      if (raw) {
+        const d = new Date(raw)
         if (!Number.isNaN(d.getTime())) {
           collectedAt = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }
@@ -77,13 +148,15 @@ export const buildPickupStatusSnapshot = (pickupStatuses = []) => {
 
     detailsMap.set(key, {
       collectedAt,
-      truck: ps.truck_plate || ps.truck || '',
+      truck: row.truck_plate || row.truck || '',
       scheduleId: scheduleKey,
-      scheduledTime: ps.scheduledTime || '',
-      updatedAt: ps.updated_at || ps.updatedAt || null,
+      scheduledTime: row.scheduledTime || '',
+      updatedAt: row.updated_at || row.updatedAt || null,
+      label: row.label || '',
+      currentStatus: visualStatus,
     })
 
-    const updatedAt = ps.updated_at || ps.updatedAt || null
+    const updatedAt = row.updated_at || row.updatedAt || null
     if (updatedAt) {
       const updatedAtMs = new Date(updatedAt).getTime()
       if (!Number.isNaN(updatedAtMs)) {
@@ -94,34 +167,10 @@ export const buildPickupStatusSnapshot = (pickupStatuses = []) => {
     }
   })
 
-  const statusMap = new Map()
-  bySchedule.forEach(rows => {
-    rows.sort((a, b) => a.stopOrder - b.stopOrder)
-
-    let foundCurrent = false
-    rows.forEach(row => {
-      const key = `${row.scheduleId}:${row.stopOrder}`
-      const rowStatus = String(row.status || '').toUpperCase()
-
-      if (rowStatus === 'COMPLETED') {
-        statusMap.set(key, 'collected')
-      } else if (rowStatus === 'FAILED') {
-        statusMap.set(key, 'missed')
-      } else if (!foundCurrent) {
-        statusMap.set(key, 'current')
-        foundCurrent = true
-      } else {
-        statusMap.set(key, 'upcoming')
-      }
-    })
-  })
-
-  return {
-    statusMap,
-    detailsMap,
-    latestUpdatedAt,
-  }
+  return { statusMap, detailsMap, latestUpdatedAt }
 }
+
+export const buildPickupStatusSnapshot = buildStopValidationSnapshot
 
 export const broadcastPickupStatusSync = (detail = {}) => {
   if (typeof window === 'undefined') return

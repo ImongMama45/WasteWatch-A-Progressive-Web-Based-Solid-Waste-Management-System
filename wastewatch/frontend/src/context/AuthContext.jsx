@@ -43,8 +43,8 @@ function readBrgyCache() {
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }) {
-  const [user,      setUser]      = useState(readUserCache)
-  const [loading,   setLoading]   = useState(true)
+  const [user, setUser] = useState(readUserCache)
+  const [loading, setLoading] = useState(true)
   const [barangays, setBarangays] = useState(readBrgyCache)
 
   // ── Session check ─────────────────────────────────────────────────────────
@@ -115,7 +115,7 @@ export function AuthProvider({ children }) {
     </AuthContext.Provider>
   )
 
-  
+
 }
 
 export function useAuth() {

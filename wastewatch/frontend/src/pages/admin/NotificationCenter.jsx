@@ -8,10 +8,10 @@ const BARANGAYS = [
 ]
 
 const TYPES = {
-  alert:        { label: 'Alert',        color: '#e74c3c', bg: 'rgba(231,76,60,0.08)',  border: 'rgba(231,76,60,0.3)',  icon: '🚨' },
+  alert: { label: 'Alert', color: '#e74c3c', bg: 'rgba(231,76,60,0.08)', border: 'rgba(231,76,60,0.3)', icon: '🚨' },
   announcement: { label: 'Announcement', color: '#5dade2', bg: 'rgba(93,173,226,0.08)', border: 'rgba(93,173,226,0.3)', icon: '📢' },
-  reminder:     { label: 'Reminder',     color: '#f39c12', bg: 'rgba(243,156,18,0.08)', border: 'rgba(243,156,18,0.3)', icon: '⏰' },
-  info:         { label: 'Info',         color: '#2ecc71', bg: 'rgba(46,204,113,0.08)', border: 'rgba(46,204,113,0.3)', icon: 'ℹ️' },
+  reminder: { label: 'Reminder', color: '#f39c12', bg: 'rgba(243,156,18,0.08)', border: 'rgba(243,156,18,0.3)', icon: '⏰' },
+  info: { label: 'Info', color: '#2ecc71', bg: 'rgba(46,204,113,0.08)', border: 'rgba(46,204,113,0.3)', icon: 'ℹ️' },
 }
 
 const INITIAL = [
@@ -51,7 +51,7 @@ function TypeBadge({ t }) {
 
 export default function NotificationCenter() {
   const [notifications, setNotifications] = useState(INITIAL)
-  const [form, setForm]   = useState({ ...EMPTY })
+  const [form, setForm] = useState({ ...EMPTY })
   const [filterType, setFilterType] = useState('all')
   const [search, setSearch] = useState('')
   const [toast, setToast] = useState(null)
@@ -83,7 +83,7 @@ export default function NotificationCenter() {
 
   function validate() {
     if (!form.title.trim()) return 'Title is required.'
-    if (!form.body.trim())  return 'Message body is required.'
+    if (!form.body.trim()) return 'Message body is required.'
     if (form.target === 'barangay' && form.barangays.length === 0) return 'Please select at least one barangay.'
     return ''
   }
@@ -95,7 +95,7 @@ export default function NotificationCenter() {
     await new Promise(r => setTimeout(r, 900))  // simulate API call
     const now = new Date()
     const pad = n => String(n).padStart(2, '0')
-    const ts  = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`
+    const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`
     const reach = form.target === 'city-wide' ? 1240 : form.barangays.length * 195
     const newNotif = {
       id: Date.now(), type: form.type, title: form.title, body: form.body,
@@ -144,10 +144,10 @@ export default function NotificationCenter() {
               {preview.body}
             </div>
             {[
-              { label: 'Target',  value: preview.target },
+              { label: 'Target', value: preview.target },
               { label: 'Sent by', value: preview.sentBy },
               { label: 'Sent at', value: preview.sentAt },
-              { label: 'Reach',   value: `~${preview.reach.toLocaleString()} recipients` },
+              { label: 'Reach', value: `~${preview.reach.toLocaleString()} recipients` },
             ].map(r => (
               <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>{r.label.toUpperCase()}</span>
@@ -182,10 +182,10 @@ export default function NotificationCenter() {
         {/* KPI strip */}
         <div className="stat-grid" style={{ marginBottom: 20 }}>
           {[
-            { label: 'Total Sent',    value: notifications.length, color: 'var(--text)' },
-            { label: 'Alerts',        value: typeCounts.alert || 0, color: '#e74c3c'    },
+            { label: 'Total Sent', value: notifications.length, color: 'var(--text)' },
+            { label: 'Alerts', value: typeCounts.alert || 0, color: '#e74c3c' },
             { label: 'Announcements', value: typeCounts.announcement || 0, color: '#5dade2' },
-            { label: 'Reminders',     value: typeCounts.reminder || 0, color: '#f39c12'  },
+            { label: 'Reminders', value: typeCounts.reminder || 0, color: '#f39c12' },
           ].map(s => (
             <div key={s.label} className="stat-card">
               <div className="label">{s.label}</div>
@@ -299,7 +299,7 @@ export default function NotificationCenter() {
             <div style={{ marginBottom: 14 }}>
               <label className="form-label">Target Audience</label>
               <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-                {[['city-wide','🌆 City-wide'], ['barangay','📍 Per Barangay']].map(([v, l]) => (
+                {[['city-wide', '🌆 City-wide'], ['barangay', '📍 Per Barangay']].map(([v, l]) => (
                   <button key={v} className="nc-type-btn" onClick={() => set('target', v)} style={{
                     flex: 1, padding: '8px', borderRadius: 10, border: '1px solid',
                     fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-body)',

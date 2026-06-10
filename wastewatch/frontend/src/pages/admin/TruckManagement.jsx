@@ -47,6 +47,19 @@ function CapacityBar({ pct }) {
   )
 }
 
+function decodePolyline(encoded) {
+  let pts = [], i = 0, lat = 0, lng = 0
+  while (i < encoded.length) {
+    let b, s = 0, r = 0
+    do { b = encoded.charCodeAt(i++) - 63; r |= (b & 0x1f) << s; s += 5 } while (b >= 0x20)
+    lat += (r & 1) ? ~(r >> 1) : r >> 1; s = 0; r = 0
+    do { b = encoded.charCodeAt(i++) - 63; r |= (b & 0x1f) << s; s += 5 } while (b >= 0x20)
+    lng += (r & 1) ? ~(r >> 1) : r >> 1
+    pts.push([lat / 1e5, lng / 1e5])
+  }
+  return pts
+}
+
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
 const EMPTY_FORM = { plate_number: '', model: '', status: 'active', driver: '', crew: [], zone: '', last_service: '' }
@@ -235,61 +248,68 @@ function RouteModal({ driverId, driverName, onClose }) {
   }, [driverId])
 
   // Initialize and draw Map once Leaflet is ready and schedule is loaded
+  // Initialize and draw Map once Leaflet is ready and schedule is loaded
   useEffect(() => {
     if (!leafletReady || !mapRef.current || mapInstance.current || loading) return
 
     const L = window.L
-
-    // Default center to Lucena
-    const center = [13.9373, 121.617]
-    const map = L.map(mapRef.current, {
-      center: center,
-      zoom: 14,
-    })
-
+    const map = L.map(mapRef.current, { center: [13.9373, 121.617], zoom: 14 })
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap',
-      maxZoom: 19,
+      attribution: '© OpenStreetMap', maxZoom: 19,
     }).addTo(map)
-
     mapInstance.current = map
 
-    if (schedule && schedule.waypoints && schedule.waypoints.length > 0) {
-      const waypoints = schedule.waypoints
-      const latlngs = waypoints.map(w => [w.lat, w.lng])
+    if (!schedule?.waypoints?.length) return
 
-      // Draw route line
-      const polyline = L.polyline(latlngs, {
-        color: '#2ecc71',
-        weight: 5,
-        opacity: 0.8,
-        dashArray: '10, 8'
-      }).addTo(map)
+    const waypoints = schedule.waypoints
 
-      // Draw start point marker
-      const startWp = waypoints[0]
-      const startIcon = L.divIcon({
-        html: `<div style="background:#2ecc71;width:12px;height:12px;border-radius:50%;border:2px solid white;box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>`,
-        className: '',
-        iconSize: [12, 12],
-        iconAnchor: [6, 6]
+    // ── Stop markers (unchanged) ──────────────────────────────────────────
+    const startIcon = L.divIcon({
+      html: `<div style="background:#2ecc71;width:12px;height:12px;border-radius:50%;border:2px solid white;box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>`,
+      className: '', iconSize: [12, 12], iconAnchor: [6, 6],
+    })
+    L.marker([waypoints[0].lat, waypoints[0].lng], { icon: startIcon }).addTo(map).bindPopup('Start Point')
+
+    waypoints.slice(1).forEach((wp, index) => {
+      const stopIcon = L.divIcon({
+        html: `<div style="background:#3498db;width:16px;height:16px;border-radius:50%;color:white;font-size:9px;font-weight:bold;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 0 6px rgba(0,0,0,0.5);">${index + 1}</div>`,
+        className: '', iconSize: [16, 16], iconAnchor: [8, 8],
       })
-      L.marker([startWp.lat, startWp.lng], { icon: startIcon }).addTo(map).bindPopup('Start Point')
+      L.marker([wp.lat, wp.lng], { icon: stopIcon }).addTo(map).bindPopup(`Stop ${index + 1}: ${wp.label || ''}`)
+    })
 
-      // Draw stop markers
-      waypoints.slice(1).forEach((wp, index) => {
-        const stopIcon = L.divIcon({
-          html: `<div style="background:#3498db;width:16px;height:16px;border-radius:50%;color:white;font-size:9px;font-weight:bold;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 0 6px rgba(0,0,0,0.5);">${index + 1}</div>`,
-          className: '',
-          iconSize: [16, 16],
-          iconAnchor: [8, 8]
-        })
-        L.marker([wp.lat, wp.lng], { icon: stopIcon }).addTo(map).bindPopup(`Stop ${index + 1}: ${wp.label || ''}`)
+    // ── Fallback straight-line while ORS loads ────────────────────────────
+    const latlngs = waypoints.map(w => [w.lat, w.lng])
+    const fallbackLine = L.polyline(latlngs, {
+      color: '#2ecc71', weight: 3, opacity: 0.35, dashArray: '6, 6',
+    }).addTo(map)
+    map.fitBounds(fallbackLine.getBounds(), { padding: [30, 30] })
+
+    // ── ORS actual road route ─────────────────────────────────────────────
+    const orsApiKey = import.meta.env.VITE_ORS_API_KEY
+    if (!orsApiKey) return
+
+    // ORS accepts max 50 coordinates; slice if the route is long
+    const coordinates = waypoints.slice(0, 50).map(w => [w.lng, w.lat])
+
+    fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: orsApiKey,
+      },
+      body: JSON.stringify({ coordinates }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (!data.routes?.length || !mapInstance.current) return
+        map.removeLayer(fallbackLine)
+        const pts = decodePolyline(data.routes[0].geometry)
+        const orsLine = L.polyline(pts, { color: '#2ecc71', weight: 5, opacity: 0.85 }).addTo(map)
+        map.fitBounds(orsLine.getBounds(), { padding: [30, 30] })
       })
-
-      // Fit map bounds to show full route
-      map.fitBounds(polyline.getBounds(), { padding: [30, 30] })
-    }
+      .catch(() => { /* fallbackLine stays visible */ })
   }, [leafletReady, schedule, loading])
 
   // Cleanup map instance on unmount

@@ -38,6 +38,28 @@ export default function Dashboard() {
           <p className="text-muted text-sm">Stay updated on garbage collection in your area</p>
         </div>
 
+        {/* ── INSPECTION CTA ── */}
+        <div
+          onClick={() => navigate('/watcher-tasks')}
+          style={{
+            marginBottom: 20, padding: '20px 20px', borderRadius: 16, cursor: 'pointer',
+            background: 'linear-gradient(135deg, #0f172a 0%, #134e4a 100%)',
+            border: '1px solid rgba(20,184,166,.35)',
+            display: 'flex', alignItems: 'center', gap: 16,
+            boxShadow: '0 4px 24px rgba(20,184,166,.15)',
+            transition: 'transform .15s, box-shadow .15s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 8px 32px rgba(20,184,166,.25)' }}
+          onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 4px 24px rgba(20,184,166,.15)' }}
+        >
+          <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(20,184,166,.15)', border: '1.5px solid rgba(20,184,166,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, flexShrink: 0 }}>🔍</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, color: '#fff', marginBottom: 3 }}>Start Inspection Tasks</div>
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,.55)' }}>Inspection & post-collection verification</div>
+          </div>
+          <div style={{ fontSize: 22, color: 'rgba(20,184,166,.7)', flexShrink: 0 }}>›</div>
+        </div>
+
         <div className='mobile-schedule'>
           <HomeCarousel role="watcher" userBarangay={user?.barangay_name} onReport={() => navigate('/report/submit')} />
         </div>
@@ -187,6 +209,20 @@ export default function Dashboard() {
             <div className="card">
               <h3 className="section-title" style={{ marginBottom: 12 }}>Quick Actions</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button
+                  className="btn btn-full"
+                  onClick={() => navigate('/watcher-tasks')}
+                  style={{
+                    background: 'rgba(20,184,166,0.1)',
+                    border: '1px solid rgba(20,184,166,0.4)',
+                    color: 'var(--accent)',
+                    fontWeight: 700,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                    marginBottom: 8,
+                  }}
+                >
+                  Watcher Tasks
+                </button>
                 <button
                   className="btn btn-full"
                   onClick={() => navigate('/map')}

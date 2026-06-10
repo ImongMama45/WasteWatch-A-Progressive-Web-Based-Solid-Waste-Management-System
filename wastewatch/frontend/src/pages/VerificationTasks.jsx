@@ -1,270 +1,245 @@
 /**
- * VerificationTasks.jsx
- * ----------------------
- * Watcher-only page showing all verification tasks for their assigned route.
- * Matches Image 2 & 3 (Verification_Tasks.png).
- *
- * Features:
- *  - Hero banner with "VERIFICATION TASKS" title
- *  - Active pending card (if any) with CONFIRM / REPORT ISSUE
- *  - Progress indicator (today's completion)
- *  - Filter tabs: All | Pending | Completed | Issues Reported
- *  - Task list cards with status badges
+ * VerificationTasks.jsx — Watcher pre-collection inspection tasks.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import BottomNav from '../components/BottomNav'
+import api from '../api/client'
 
-const MOCK_TASKS = [
-  {
-    id: 1,
-    title: 'Katapat ng Gripo mabaho',
-    barangay: 'Baranggay 1, 5th Ave',
-    date: 'Mar 14',
-    status: 'awaiting',
-    driver: 'Hassad Gerald',
-    truck: '01-12-51',
-    distance: '0.3 KM',
-    time_reported: '2:00 AM',
-    avatar: null,
-  },
-  {
-    id: 2,
-    title: 'Grabe man uy',
-    barangay: 'Baranggay 1, 5th Ave',
-    date: 'Mar 14',
-    status: 'completed',
-    driver: 'Ramon Santos',
-    truck: '02-08-33',
-    distance: '0.8 KM',
-    time_reported: '4:10 AM',
-    avatar: null,
-  },
-  {
-    id: 3,
-    title: 'Grabe man uy',
-    barangay: 'Baranggay 1, 5th Ave',
-    date: 'Mar 14',
-    status: 'taken',
-    driver: 'Jun Dela Cruz',
-    truck: '03-11-20',
-    distance: '1.2 KM',
-    time_reported: '5:30 AM',
-    avatar: null,
-  },
-]
-
-const FILTERS = ['All', 'Pending', 'Completed', 'Issues Reported']
+const FILTERS = ['All', 'Pending', 'Inspected', 'Empty Stops']
 
 const STATUS_META = {
-  awaiting:  { label: 'Awaiting Verification', color: '#e74c3c',  bg: 'rgba(231,76,60,.12)' },
-  completed: { label: 'Completed',             color: '#2ecc71',  bg: 'rgba(46,204,113,.12)' },
-  taken:     { label: 'Got Taken',             color: '#f39c12',  bg: 'rgba(243,156,18,.12)' },
-  issue:     { label: 'Issue Reported',        color: '#5dade2',  bg: 'rgba(93,173,226,.12)' },
+  PENDING_INSPECTION: { label: 'Pending Inspection', color: '#94a3b8', bg: 'rgba(148,163,184,.12)' },
+  READY_FOR_COLLECTION: { label: 'Ready for Collection', color: '#f59e0b', bg: 'rgba(245,158,11,.12)' },
+  EMPTY_STOP: { label: 'Empty Stop', color: '#64748b', bg: 'rgba(100,116,139,.12)' },
 }
 
 function filterTasks(tasks, tab) {
-  if (tab === 'All')             return tasks
-  if (tab === 'Pending')         return tasks.filter(t => t.status === 'awaiting')
-  if (tab === 'Completed')       return tasks.filter(t => t.status === 'completed')
-  if (tab === 'Issues Reported') return tasks.filter(t => t.status === 'issue')
+  if (tab === 'All') return tasks
+  if (tab === 'Pending') return tasks.filter(t => t.current_status === 'PENDING_INSPECTION')
+  if (tab === 'Inspected') return tasks.filter(t => t.current_status === 'READY_FOR_COLLECTION')
+  if (tab === 'Empty Stops') return tasks.filter(t => t.current_status === 'EMPTY_STOP')
   return tasks
 }
 
-export default function VerificationTasks() {
-  const navigate = useNavigate()
-  const [activeTab,    setActiveTab]    = useState('All')
-  const [tasks,        setTasks]        = useState(MOCK_TASKS)
-  const [expandedId,   setExpandedId]   = useState(null)
+function PreInspectionForm({ task, onBack, onComplete }) {
+  const [gps, setGps] = useState({ lat: null, lng: null, status: 'detecting' })
+  const [remarks, setRemarks] = useState('')
+  const [photo, setPhoto] = useState(null)
+  const [preview, setPreview] = useState(null)
+  const [outcome, setOutcome] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
 
-  const topPending = tasks.find(t => t.status === 'awaiting')
-  const completed  = tasks.filter(t => t.status === 'completed').length
-  const total      = tasks.length
-  const progress   = Math.round((completed / total) * 100)
+  useEffect(() => {
+    if (!navigator.geolocation) { setGps({ lat: null, lng: null, status: 'error' }); return }
+    navigator.geolocation.getCurrentPosition(
+      pos => setGps({ lat: pos.coords.latitude, lng: pos.coords.longitude, status: 'ready' }),
+      () => setGps({ lat: null, lng: null, status: 'error' }),
+      { enableHighAccuracy: true, timeout: 10000 },
+    )
+  }, [])
 
-  const filtered = filterTasks(tasks, activeTab)
-
-  function handleConfirm(task) {
-    navigate('/collection/confirm')
+  function handlePhoto(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    setPhoto(file)
+    const reader = new FileReader()
+    reader.onload = ev => setPreview(ev.target.result)
+    reader.readAsDataURL(file)
   }
 
-  function handleTaskClick(id) {
-    setExpandedId(prev => prev === id ? null : id)
+  async function handleSubmit() {
+    if (!outcome) { setError('Select whether garbage is present or not.'); return }
+    if (gps.status !== 'ready') { setError('GPS validation required.'); return }
+    setSubmitting(true)
+    setError('')
+    try {
+      const form = new FormData()
+      form.append('schedule_id', task.schedule_id)
+      form.append('stop_order', task.stop_order)
+      form.append('lat', gps.lat)
+      form.append('lng', gps.lng)
+      form.append('outcome', outcome)
+      form.append('remarks', remarks)
+      if (photo) form.append('photo', photo)
+      await api.post('/api/watcher/stop-validations/pre-inspect/', form)
+      onComplete()
+    } catch (err) {
+      setError(err.response?.data?.error || 'Inspection submission failed.')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
     <>
       <Navbar />
+      <div className="page" style={{ maxWidth: 480, paddingBottom: 88 }}>
+        <button className="back-link" onClick={onBack}>‹ BACK</button>
+        <div style={{ marginBottom: 24 }}>
+          <h2 className="pv-title">PRE-COLLECTION INSPECTION</h2>
+          <div className="pv-subtitle">{task.label}</div>
+        </div>
+        <div className="card card-dark" style={{ padding: 24 }}>
+          <div className="form-group">
+            <label className="form-label">Location</label>
+            <div className="gps-field">
+              <span className={`gps-dot ${gps.status}`} />
+              <span style={{ fontSize: 13, color: gps.status === 'ready' ? 'var(--text)' : 'var(--text-muted)' }}>
+                {gps.status === 'ready'
+                  ? `GPS verified : ${gps.lat?.toFixed(4)}, ${gps.lng?.toFixed(4)}`
+                  : gps.status === 'detecting' ? 'Detecting your location…' : 'Location unavailable'}
+              </span>
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Inspection Outcome</label>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button type="button" className={`btn ${outcome === 'garbage_present' ? 'btn-primary' : 'btn-outline'}`} style={{ flex: 1 }} onClick={() => setOutcome('garbage_present')}>Garbage Present</button>
+              <button type="button" className={`btn ${outcome === 'no_garbage' ? 'btn-primary' : 'btn-outline'}`} style={{ flex: 1 }} onClick={() => setOutcome('no_garbage')}>No Garbage</button>
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Remarks (Optional)</label>
+            <textarea className="form-input" rows={3} value={remarks} onChange={e => setRemarks(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Photo Proof</label>
+            <div className="photo-upload-zone" onClick={() => document.getElementById('pre-inspect-photo').click()}>
+              {preview ? <img src={preview} alt="Preview" style={{ maxHeight: 160, borderRadius: 8 }} /> : (
+                <button type="button" className="btn btn-outline btn-sm">Take Photo</button>
+              )}
+            </div>
+            <input id="pre-inspect-photo" type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhoto} />
+          </div>
+          {error && <p style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</p>}
+        </div>
+        <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+          <button className="btn btn-outline" style={{ flex: 1 }} onClick={onBack}>Cancel</button>
+          <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleSubmit} disabled={submitting || gps.status !== 'ready'}>
+            {submitting ? 'Submitting…' : 'Submit Inspection'}
+          </button>
+        </div>
+      </div>
+      <BottomNav />
+    </>
+  )
+}
 
-      {/* Hero Banner */}
+export default function VerificationTasks() {
+  const navigate = useNavigate()
+  const [activeTab, setActiveTab] = useState('All')
+  const [tasks, setTasks] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [expandedId, setExpandedId] = useState(null)
+  const [selectedTask, setSelectedTask] = useState(null)
+
+  async function loadTasks() {
+    setLoading(true)
+    try {
+      const res = await api.get('/api/watcher/stop-validations/')
+      const rows = (res.data?.results ?? res.data ?? []).filter(t =>
+        ['PENDING_INSPECTION', 'READY_FOR_COLLECTION', 'EMPTY_STOP'].includes(t.current_status),
+      )
+      setTasks(rows.map(row => ({
+        ...row,
+        title: row.label,
+        barangay: row.barangay_names || row.label,
+        date: row.collection_date,
+        status: row.current_status,
+      })))
+    } catch {
+      setTasks([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { loadTasks() }, [])
+
+  const topPending = tasks.find(t => t.status === 'PENDING_INSPECTION')
+  const inspected = tasks.filter(t => t.status === 'READY_FOR_COLLECTION' || t.status === 'EMPTY_STOP').length
+  const total = tasks.length
+  const progress = total ? Math.round((inspected / total) * 100) : 0
+  const filtered = filterTasks(tasks, activeTab)
+
+  if (selectedTask) {
+    return (
+      <PreInspectionForm
+        task={selectedTask}
+        onBack={() => setSelectedTask(null)}
+        onComplete={() => { setSelectedTask(null); loadTasks() }}
+      />
+    )
+  }
+
+  return (
+    <>
+      <Navbar />
       <div className="vt-hero">
         <div className="vt-hero-overlay" />
         <h1 className="vt-hero-title">VERIFICATION TASKS</h1>
       </div>
-
       <div className="page" style={{ maxWidth: 480, paddingTop: 16 }}>
-
-        {/* ── Top pending card (active task) ── */}
         {topPending ? (
           <div className="card card-dark" style={{ padding: 20, marginBottom: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                <span style={{ color: 'var(--danger)', fontSize: 18, marginTop: 2 }}>📍</span>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 16 }}>{topPending.barangay}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.8 }}>
-                    <strong>Time Reported</strong> : {topPending.time_reported}<br />
-                    <strong>Driver</strong> : {topPending.driver}<br />
-                    <strong>Truck</strong> : {topPending.truck}
-                  </div>
-                </div>
-              </div>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{topPending.distance}</span>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>{topPending.label}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>
+              {topPending.barangay_names || topPending.barangay}
             </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14 }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', display: 'inline-block' }} />
-              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Status : Awaiting Verification</span>
-            </div>
-
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                className="btn btn-primary"
-                style={{ flex: 1, fontWeight: 700, letterSpacing: '.05em', fontSize: 13 }}
-                onClick={() => handleConfirm(topPending)}
-              >
-                CONFIRM
-              </button>
-              <button
-                className="btn btn-outline"
-                style={{ flex: 1, fontSize: 13 }}
-                onClick={() => navigate('/report/submit')}
-              >
-                REPORT ISSUE
-              </button>
-            </div>
+            <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => setSelectedTask(topPending)}>
+              INSPECT STOP
+            </button>
           </div>
-        ) : (
+        ) : !loading && (
           <div className="card" style={{ textAlign: 'center', padding: '32px 20px', marginBottom: 16 }}>
-            <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>No Available Tasks Today</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>No pending inspections today</p>
           </div>
         )}
 
-        {/* ── Progress Indicator ── */}
         <div className="card card-dark" style={{ padding: '16px 20px', marginBottom: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 18 }}>✅</span>
-              <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: 14 }}>
-                Progress Indicator ( Today )
-              </span>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>● Verified Location</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{completed}/{total} Locations</div>
-            </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+            <span style={{ fontWeight: 700, fontSize: 14 }}>Progress (Today)</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{inspected}/{total} Stops</span>
           </div>
-          {/* Progress bar */}
           <div style={{ background: 'var(--border)', borderRadius: 20, height: 8, overflow: 'hidden' }}>
-            <div style={{
-              width: `${progress}%`,
-              height: '100%',
-              background: 'var(--accent)',
-              borderRadius: 20,
-              transition: 'width .6s ease',
-            }} />
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, textAlign: 'right' }}>
-            {progress}%
+            <div style={{ width: `${progress}%`, height: '100%', background: 'var(--accent)', borderRadius: 20, transition: 'width .6s ease' }} />
           </div>
         </div>
 
-        {/* ── Filter Tabs ── */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
           {FILTERS.map(f => (
-            <button
-              key={f}
-              onClick={() => setActiveTab(f)}
-              style={{
-                padding: '7px 14px',
-                borderRadius: 20,
-                border: '1px solid var(--border)',
-                background: activeTab === f ? 'var(--surface-2)' : 'transparent',
-                color: activeTab === f ? 'var(--text)' : 'var(--text-muted)',
-                fontSize: 12,
-                fontWeight: activeTab === f ? 700 : 400,
-                cursor: 'pointer',
-                fontFamily: 'var(--font-body)',
-                outline: activeTab === f ? '2px solid var(--accent)' : 'none',
-                outlineOffset: -1,
-              }}
-            >
+            <button key={f} onClick={() => setActiveTab(f)} className={activeTab === f ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm'}>
               {f}
             </button>
           ))}
         </div>
 
-        {/* ── Task List ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {filtered.map(task => {
-            const meta = STATUS_META[task.status] || STATUS_META.awaiting
+          {loading ? <p className="text-muted text-sm">Loading tasks…</p> : filtered.map(task => {
+            const meta = STATUS_META[task.status] || STATUS_META.PENDING_INSPECTION
             return (
-              <div
-                key={task.id}
-                className="vt-task-card"
-                onClick={() => handleTaskClick(task.id)}
-              >
-                {/* Status badge + menu */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <span className="vt-status-badge" style={{ background: meta.bg, color: meta.color }}>
-                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: meta.color, display: 'inline-block', marginRight: 5 }} />
-                    {meta.label}
-                  </span>
-                  <button style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>
-                    ···
+              <div key={task.id} className="vt-task-card" onClick={() => setExpandedId(prev => prev === task.id ? null : task.id)}>
+                <span className="vt-status-badge" style={{ background: meta.bg, color: meta.color }}>{meta.label}</span>
+                <div style={{ fontWeight: 600, fontSize: 15, margin: '10px 0' }}>{task.title}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{task.barangay}</div>
+                {expandedId === task.id && task.status === 'PENDING_INSPECTION' && (
+                  <button className="btn btn-primary" style={{ marginTop: 14, width: '100%' }}
+                    onClick={e => { e.stopPropagation(); setSelectedTask(task) }}>
+                    INSPECT
                   </button>
-                </div>
-
-                {/* Title */}
-                <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 12 }}>
-                  {task.title}
-                </div>
-
-                {/* Meta row */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--text-muted)' }}>
-                    <span>📅</span> {task.date}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--text-muted)' }}>
-                    <span>💬</span> {task.barangay}
-                  </div>
-                  {/* Avatar placeholder */}
-                  <div style={{ marginLeft: 'auto', width: 28, height: 28, borderRadius: '50%', background: 'var(--surface-2)', border: '2px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}>
-                    👤
-                  </div>
-                </div>
-
-                {/* Expanded: action buttons */}
-                {expandedId === task.id && task.status === 'awaiting' && (
-                  <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)', display: 'flex', gap: 10 }}
-                       onClick={e => e.stopPropagation()}>
-                    <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, fontWeight: 700 }}
-                            onClick={() => handleConfirm(task)}>
-                      CONFIRM
-                    </button>
-                    <button className="btn btn-outline" style={{ flex: 1, fontSize: 12 }}
-                            onClick={() => navigate('/report/submit')}>
-                      REPORT ISSUE
-                    </button>
-                  </div>
                 )}
               </div>
             )
           })}
         </div>
 
+        <button className="btn btn-outline" style={{ width: '100%', marginTop: 16 }} onClick={() => navigate('/collection/confirm')}>
+          View Post-Collection Verifications
+        </button>
       </div>
       <BottomNav />
     </>

@@ -1,8 +1,25 @@
+// 1st step <== do not remove this indicator
+
+
+
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import api from '../../../api/client'
 import Navbar from '../../../components/Navbar'
+
+function decodePolyline(encoded) {
+  let pts = [], i = 0, lat = 0, lng = 0
+  while (i < encoded.length) {
+    let b, s = 0, r = 0
+    do { b = encoded.charCodeAt(i++) - 63; r |= (b & 0x1f) << s; s += 5 } while (b >= 0x20)
+    lat += (r & 1) ? ~(r >> 1) : r >> 1; s = 0; r = 0
+    do { b = encoded.charCodeAt(i++) - 63; r |= (b & 0x1f) << s; s += 5 } while (b >= 0x20)
+    lng += (r & 1) ? ~(r >> 1) : r >> 1
+    pts.push([lat / 1e5, lng / 1e5])
+  }
+  return pts
+}
 
 export default function AssignmentModule({ setRouteState }) {
   const navigate = useNavigate()
@@ -57,12 +74,12 @@ export default function AssignmentModule({ setRouteState }) {
   }, [])
 
   // 4. Draw map once Leaflet + schedule are ready ───────────────────────────────
+  // 4. Draw map once Leaflet + schedule are ready ───────────────────────────────
   useEffect(() => {
     if (!leafletReady || !mapRef.current || mapInstance.current || mapLoading) return
 
     const L = window.L
-    const center = [13.9373, 121.617]
-    const map = L.map(mapRef.current, { center, zoom: 14, zoomControl: false })
+    const map = L.map(mapRef.current, { center: [13.9373, 121.617], zoom: 14, zoomControl: false })
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap', maxZoom: 19,
@@ -71,32 +88,58 @@ export default function AssignmentModule({ setRouteState }) {
     L.control.zoom({ position: 'bottomright' }).addTo(map)
     mapInstance.current = map
 
-    if (schedule?.waypoints?.length > 0) {
-      const wps = schedule.waypoints
-      const latlngs = wps.map(w => [w.lat, w.lng])
+    if (!schedule?.waypoints?.length) return
 
-      const line = L.polyline(latlngs, {
-        color: '#2ecc71', weight: 5, opacity: 0.85, dashArray: '10,7',
-      }).addTo(map)
+    const wps = schedule.waypoints
 
-      // Start marker
-      const startIcon = L.divIcon({
-        html: `<div style="background:#1e2633;border:2px solid #2ecc71;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;box-shadow:0 2px 6px rgba(0,0,0,.5);">🏛️</div>`,
-        className: '', iconSize: [22, 22], iconAnchor: [11, 11],
+    // ── Start marker ──────────────────────────────────────────────────────
+    const startIcon = L.divIcon({
+      html: `<div style="background:#1e2633;border:2px solid #2ecc71;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;box-shadow:0 2px 6px rgba(0,0,0,.5);">🏛️</div>`,
+      className: '', iconSize: [22, 22], iconAnchor: [11, 11],
+    })
+    L.marker([wps[0].lat, wps[0].lng], { icon: startIcon }).addTo(map).bindPopup('<b>Start Point</b>')
+
+    // ── Stop markers ──────────────────────────────────────────────────────
+    wps.slice(1).forEach((wp, i) => {
+      const stopIcon = L.divIcon({
+        html: `<div style="background:#5dade2;border:2px solid white;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:white;font-size:9px;font-weight:800;box-shadow:0 2px 6px rgba(0,0,0,.4);">${i + 1}</div>`,
+        className: '', iconSize: [20, 20], iconAnchor: [10, 10],
       })
-      L.marker([wps[0].lat, wps[0].lng], { icon: startIcon }).addTo(map).bindPopup('<b>Start Point</b>')
+      L.marker([wp.lat, wp.lng], { icon: stopIcon }).addTo(map).bindPopup(`<b>${wp.label || `Stop ${i + 1}`}</b>`)
+    })
 
-      // Stop markers
-      wps.slice(1).forEach((wp, i) => {
-        const stopIcon = L.divIcon({
-          html: `<div style="background:#5dade2;border:2px solid white;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:white;font-size:9px;font-weight:800;box-shadow:0 2px 6px rgba(0,0,0,.4);">${i + 1}</div>`,
-          className: '', iconSize: [20, 20], iconAnchor: [10, 10],
-        })
-        L.marker([wp.lat, wp.lng], { icon: stopIcon }).addTo(map).bindPopup(`<b>${wp.label || `Stop ${i + 1}`}</b>`)
+    // ── Fallback dashed straight-line while ORS loads ─────────────────────
+    const latlngs = wps.map(w => [w.lat, w.lng])
+    const fallbackLine = L.polyline(latlngs, {
+      color: '#2ecc71', weight: 3, opacity: 0.35, dashArray: '6, 6',
+    }).addTo(map)
+    map.fitBounds(fallbackLine.getBounds(), { padding: [30, 30] })
+
+    // ── ORS actual road route ─────────────────────────────────────────────
+    const orsApiKey = import.meta.env.VITE_ORS_API_KEY
+    if (!orsApiKey) return
+
+    // ORS accepts max 50 coordinates
+    const coordinates = wps.slice(0, 50).map(w => [w.lng, w.lat])
+
+    fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: orsApiKey,
+      },
+      body: JSON.stringify({ coordinates }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (!data.routes?.length || !mapInstance.current) return
+        map.removeLayer(fallbackLine)
+        const pts = decodePolyline(data.routes[0].geometry)
+        const orsLine = L.polyline(pts, { color: '#2ecc71', weight: 5, opacity: 0.85 }).addTo(map)
+        map.fitBounds(orsLine.getBounds(), { padding: [30, 30] })
       })
-
-      map.fitBounds(line.getBounds(), { padding: [30, 30] })
-    }
+      .catch(() => { /* fallbackLine stays visible */ })
   }, [leafletReady, schedule, mapLoading])
 
   // 5. Cleanup on unmount ───────────────────────────────────────────────────────

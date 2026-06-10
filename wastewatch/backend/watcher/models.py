@@ -228,6 +228,92 @@ class GarbageHotspot(models.Model):
     def __str__(self):
         return f'{self.name} ({self.severity})'
 
+class StopValidationStatus(models.TextChoices):
+    PENDING_INSPECTION = 'PENDING_INSPECTION', 'Pending Inspection'
+    READY_FOR_COLLECTION = 'READY_FOR_COLLECTION', 'Ready for Collection'
+    EMPTY_STOP = 'EMPTY_STOP', 'Empty Stop'
+    COLLECTION_REPORTED = 'COLLECTION_REPORTED', 'Collection Reported'
+    VERIFIED_COLLECTED = 'VERIFIED_COLLECTED', 'Verified Collected'
+    COLLECTION_DISPUTED = 'COLLECTION_DISPUTED', 'Collection Disputed'
+
+
+class StopValidation(models.Model):
+    """
+    Centralized two-stage stop validation workflow.
+    One row per schedule stop per collection day.
+    """
+    schedule = models.ForeignKey(
+        'driver.CollectionSchedule',
+        on_delete=models.CASCADE,
+        related_name='stop_validations',
+    )
+    stop_order = models.PositiveIntegerField(help_text='Waypoint index (1 = first collection stop)')
+    collection_date = models.DateField(help_text='The scheduled collection day for this validation cycle')
+
+    current_status = models.CharField(
+        max_length=30,
+        choices=StopValidationStatus.choices,
+        default=StopValidationStatus.PENDING_INSPECTION,
+    )
+
+    # Pre-collection inspection
+    pre_validation_watcher = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='pre_validations',
+    )
+    pre_validation_timestamp = models.DateTimeField(null=True, blank=True)
+    pre_validation_photo = CloudinaryField('pre validation proof', folder='stop-pre-validation/', null=True, blank=True)
+    pre_validation_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    pre_validation_longitude = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+    pre_validation_remarks = models.TextField(blank=True)
+
+    # Driver collection
+    driver = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='driver_stop_collections',
+    )
+    collection_timestamp = models.DateTimeField(null=True, blank=True)
+    collection_photo = CloudinaryField('collection proof', folder='stop-collection/', null=True, blank=True)
+    collection_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    collection_longitude = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+    collection_notes = models.TextField(blank=True)
+
+    # Post-collection verification
+    post_validation_watcher = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='post_validations',
+    )
+    post_validation_timestamp = models.DateTimeField(null=True, blank=True)
+    post_validation_photo = CloudinaryField('post validation proof', folder='stop-post-validation/', null=True, blank=True)
+    post_validation_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    post_validation_longitude = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+    dispute_reason = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['collection_date', 'schedule_id', 'stop_order']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['schedule', 'stop_order', 'collection_date'],
+                name='unique_stop_validation_per_day',
+            )
+        ]
+
+    def __str__(self):
+        return f'Stop {self.stop_order} on schedule {self.schedule_id} ({self.collection_date}) — {self.current_status}'
+
+
 class Escalation(models.Model):
     PRIORITY_CHOICES = [
         ('low', 'Low'),

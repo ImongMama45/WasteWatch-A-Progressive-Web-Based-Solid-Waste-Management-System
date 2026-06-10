@@ -16,115 +16,38 @@ import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
 import useGpsTracking from '../../hooks/useGpsTracking'
 import Navbar from '../../components/Navbar'
+import { buildStopValidationSnapshot, normalizeStopStatus } from '../../utils/pickupStatusSync'
 
-// ─── MOCK DATA ────────────────────────────────────────────────────────────────
 
-const DRIVER_LOCATION = [13.9452, 121.6128]   // current driver lat/lng
+// ─── ROUTE HELPERS ────────────────────────────────────────────────────────────
 
-const MOCK_ROUTE = {
-  id: 1,
-  name: 'Isabang–Brgy.12 Route',
-  barangay: 'Barangay Isabang',
-  truck: 'TRUCK WT-042',
-  color: '#2ecc71',
+function decodePolyline(encoded) {
+  let pts = [], i = 0, lat = 0, lng = 0
+  while (i < encoded.length) {
+    let b, s = 0, r = 0
+    do { b = encoded.charCodeAt(i++) - 63; r |= (b & 0x1f) << s; s += 5 } while (b >= 0x20)
+    lat += (r & 1) ? ~(r >> 1) : r >> 1; s = 0; r = 0
+    do { b = encoded.charCodeAt(i++) - 63; r |= (b & 0x1f) << s; s += 5 } while (b >= 0x20)
+    lng += (r & 1) ? ~(r >> 1) : r >> 1
+    pts.push([lat / 1e5, lng / 1e5])
+  }
+  return pts
 }
 
-const MOCK_STOPS = [
-  {
-    id: 1,
-    order: 1,
-    address: 'Barangay Hall, Brgy. 8',
-    zone: 'Zone A',
-    type: 'Mixed Waste',
-    lat: 13.946,
-    lng: 121.6085,
-    status: 'completed',        // 'completed' | 'current' | 'pending'
-    distance: null,
-    completedAt: '6:42 AM',
-    // photoProof: null          // TODO: attach photo proof URL here when feature is ready
-  },
-  {
-    id: 2,
-    order: 2,
-    address: 'Public Market, Brgy. 9',
-    zone: 'Zone A',
-    type: 'Recyclable',
-    lat: 13.9472,
-    lng: 121.6102,
-    status: 'completed',
-    distance: null,
-    completedAt: '7:05 AM',
-    // photoProof: null
-  },
-  {
-    id: 3,
-    order: 3,
-    address: 'Covered Court, Brgy. 10',
-    zone: 'Zone B',
-    type: 'Mixed Waste',
-    lat: 13.9480,
-    lng: 121.6120,
-    status: 'completed',
-    distance: null,
-    completedAt: '7:28 AM',
-    // photoProof: null
-  },
-  {
-    id: 4,
-    order: 4,
-    address: 'Barangay Hall, Brgy. 11',
-    zone: 'Zone B',
-    type: 'Biodegradable',
-    lat: 13.9488,
-    lng: 121.6138,
-    status: 'current',
-    distance: '0.3 km',
-    completedAt: null,
-    // photoProof: null
-  },
-  {
-    id: 5,
-    order: 5,
-    address: 'School Zone, Brgy. 12',
-    zone: 'Zone C',
-    type: 'Mixed Waste',
-    lat: 13.9475,
-    lng: 121.6155,
-    status: 'pending',
-    distance: '1.1 km',
-    completedAt: null,
-    // photoProof: null
-  },
-  {
-    id: 6,
-    order: 6,
-    address: 'Chapel, Brgy. 13',
-    zone: 'Zone C',
-    type: 'Recyclable',
-    lat: 13.9460,
-    lng: 121.6160,
-    status: 'pending',
-    distance: '1.8 km',
-    completedAt: null,
-    // photoProof: null
-  },
-  {
-    id: 7,
-    order: 7,
-    address: 'Sitio Bagong Silang',
-    zone: 'Zone D',
-    type: 'Biodegradable',
-    lat: 13.9448,
-    lng: 121.6145,
-    status: 'pending',
-    distance: '2.4 km',
-    completedAt: null,
-    // photoProof: null
-  },
-]
+function haversineDistance(lat1, lng1, lat2, lng2) {
+  const R = 6371000, toRad = d => d * Math.PI / 180
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1)
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
 
-// Route polyline (driver path through all stops)
-const ROUTE_PATH = MOCK_STOPS.map(s => [s.lat, s.lng])
+// Backend normalised status → the three UI buckets used by StopCard / STATUS
+function mapBackendStatus(normalizedStatus, isCurrentStop) {
+  if (['VERIFIED_COLLECTED', 'COLLECTION_REPORTED', 'EMPTY_STOP'].includes(normalizedStatus))
+    return 'completed'
+  if (isCurrentStop) return 'current'
+  return 'pending'
+}
 
 // ─── STATUS CONFIG ─────────────────────────────────────────────────────────────
 
@@ -174,8 +97,17 @@ function makeDriverIcon(L) {
 
 // ─── STOP CARD (read-only) ───────────────────────────────────────────────────
 
-function StopCard({ stop, isNext, onFocus, focused }) {
+function StopCard({ stop, isNext, onFocus, focused, gpsPosition }) {
   const cfg = STATUS[stop.status]
+
+  const distance = (() => {
+    if (stop.status === 'completed') return null
+    if (gpsPosition) {
+      const d = haversineDistance(gpsPosition.lat, gpsPosition.lng, stop.lat, stop.lng)
+      return d > 1000 ? `${(d / 1000).toFixed(1)} km` : `${Math.round(d)} m`
+    }
+    return stop.distance || null
+  })()
 
   return (
     <>
@@ -230,8 +162,8 @@ function StopCard({ stop, isNext, onFocus, focused }) {
               </span>
               <span style={{ color: "#000000", marginLeft: "10px" }} className="text-muted text-xs">{stop.type}</span>
               <span style={{ color: "#5b5b5bff", marginLeft: "10px" }} className="text-muted text-xs">{stop.zone}</span>
-              {stop.distance && (
-                <span style={{ color: "#ffffffff", marginLeft: "10px", fontWeight: 600, padding: 5, paddingLeft: 10, paddingRight: 10, borderRadius: 10, backgroundColor: "#4c6dffff" }} className="text-muted text-xs">{stop.distance}</span>
+              {distance && (
+                <span style={{ color: "#ffffffff", marginLeft: "10px", fontWeight: 600, padding: 5, paddingLeft: 10, paddingRight: 10, borderRadius: 10, backgroundColor: "#4c6dffff" }} className="text-muted text-xs">{distance}</span>
               )}
               {stop.completedAt && (
                 <span style={{ color: "#000000ff", marginLeft: "10px", fontWeight: 600, padding: 5, paddingLeft: 10, paddingRight: 10, borderRadius: 10, backgroundColor: "#00ff15ff" }} className="text-muted text-xs">{stop.completedAt}</span>
@@ -256,7 +188,10 @@ export default function RouteOverview() {
   const driverRef = useRef(null)
 
   const [leafletReady, setLeafletReady] = useState(false)
-  const [stops, setStops] = useState(MOCK_STOPS)
+  const [schedule, setSchedule] = useState(null)
+  const [profile, setProfile] = useState(null)
+  const [stops, setStops] = useState([])
+  const [mapLoading, setMapLoading] = useState(true)
   const [focusedId, setFocusedId] = useState(null)
 
   // ── Live GPS tracking ────────────────────────────────────────────────────────
@@ -265,11 +200,62 @@ export default function RouteOverview() {
 
   const completedCount = stops.filter(s => s.status === 'completed').length
   const totalCount = stops.length
-  const progress = Math.round((completedCount / totalCount) * 100)
+  const progress = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0
   const currentStop = stops.find(s => s.status === 'current')
   const nextStop = stops.find(s => s.status === 'pending')
 
-  // ── Load Leaflet CDN ────────────────────────────────────────────────────────
+  // ── 1. Fetch driver profile ──────────────────────────────────────────────────
+  useEffect(() => {
+    api.get('/api/driver/shift/profile/')
+      .then(res => setProfile(res.data))
+      .catch(() => { })
+  }, [])
+
+  // ── 2. Fetch schedule + stop validations → build real stops list ─────────────
+  useEffect(() => {
+    if (!user?.id) return
+    setMapLoading(true)
+    api.get('/api/driver/collection-schedules/')
+      .then(async res => {
+        const match = res.data.find(s => String(s.driver) === String(user.id))
+        setSchedule(match || null)
+        if (!match) return
+
+        const [currentRes, valRes] = await Promise.all([
+          api.get('/api/driver/stops/current/').catch(() => ({ data: null })),
+          api.get(`/api/watcher/stop-validations/?schedule_id=${encodeURIComponent(match.id)}`).catch(() => ({ data: null })),
+        ])
+        const currentStopOrder = Number(currentRes.data?.order) || null
+        const rows = valRes.data?.results ?? valRes.data ?? []
+        const snapshot = buildStopValidationSnapshot(rows)
+
+        const builtStops = (match.waypoints || []).slice(1).map((wp, i) => {
+          const wpIndex = i + 1
+          const key = `${match.id}:${wpIndex}`
+          const rawStatus = snapshot.statusMap.get(key) || 'PENDING_INSPECTION'
+          const normalized = normalizeStopStatus(rawStatus)
+          const isCurrentStop = wpIndex === currentStopOrder
+          const details = snapshot.detailsMap.get(key)
+          return {
+            id: wpIndex,
+            order: wpIndex,
+            address: wp.label || wp.name || `Stop ${wpIndex}`,
+            zone: wp.barangay || match.barangay_names || '',
+            type: 'Waste Collection',
+            lat: Number(wp.lat),
+            lng: Number(wp.lng),
+            status: mapBackendStatus(normalized, isCurrentStop),
+            distance: null,          // computed live in StopCard via gpsPosition prop
+            completedAt: details?.collectedAt || null,
+          }
+        })
+        setStops(builtStops)
+      })
+      .catch(() => setSchedule(null))
+      .finally(() => setMapLoading(false))
+  }, [user?.id])
+
+  // ── 3. Load Leaflet CDN ──────────────────────────────────────────────────────
   useEffect(() => {
     if (window.L) { setLeafletReady(true); return }
     const link = document.createElement('link')
@@ -282,68 +268,113 @@ export default function RouteOverview() {
     document.head.appendChild(script)
   }, [])
 
-  // ── Init map ────────────────────────────────────────────────────────────────
+  // ── 4. Init map once (no drawMap call here) ──────────────────────────────────
   useEffect(() => {
     if (!leafletReady || !mapRef.current || mapInstance.current) return
     const L = window.L
-    const map = L.map(mapRef.current, {
-      center: DRIVER_LOCATION,
-      zoom: 15,
-      zoomControl: false,
-    })
+    const map = L.map(mapRef.current, { center: [13.9373, 121.617], zoom: 15, zoomControl: false })
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap', maxZoom: 19,
     }).addTo(map)
     L.control.zoom({ position: 'bottomright' }).addTo(map)
     mapInstance.current = map
-    drawMap(map)
   }, [leafletReady])
 
-  // ── Draw markers + route ────────────────────────────────────────────────────
-  function drawMap(map) {
+  // ── 5. Redraw whenever stops change (after fetch or optimistic update) ────────
+  useEffect(() => {
+    if (!mapInstance.current || !window.L || !stops.length) return
+    drawMap(mapInstance.current, stops)
+  }, [stops]) // eslint-disable-line
+
+  // ── Draw markers + ORS road-snapped route ────────────────────────────────────
+  function drawMap(map, stopsData) {
     const L = window.L
 
-    // Completed path (solid)
-    const doneCoords = stops.filter(s => s.status === 'completed').map(s => [s.lat, s.lng])
-    if (doneCoords.length > 1)
-      L.polyline(doneCoords, { color: '#2ecc71', weight: 5, opacity: 0.9 }).addTo(map)
+    // Clear previous markers before redraw
+    Object.values(markersRef.current).forEach(m => { try { map.removeLayer(m) } catch { } })
+    markersRef.current = {}
+    if (driverRef.current) { try { map.removeLayer(driverRef.current) } catch { }; driverRef.current = null }
 
-    // Remaining path (dashed)
-    const remStart = currentStop ? [[currentStop.lat, currentStop.lng]] : []
-    const remCoords = [...remStart, ...stops.filter(s => s.status === 'pending').map(s => [s.lat, s.lng])]
-    if (remCoords.length > 1)
-      L.polyline(remCoords, { color: '#2ecc71', weight: 4, opacity: 0.45, dashArray: '10,8' }).addTo(map)
+    if (!stopsData.length) return
 
     // Stop markers
-    stops.forEach(stop => {
+    stopsData.forEach(stop => {
       const m = L.marker([stop.lat, stop.lng], { icon: makeStopIcon(L, stop) })
         .addTo(map)
         .on('click', () => focusStop(stop))
       markersRef.current[stop.id] = m
     })
 
-    // Driver marker — starts at mock location, updated by GPS hook
-    driverRef.current = L.marker(DRIVER_LOCATION, { icon: makeDriverIcon(L), zIndexOffset: 1000 })
+    // Driver marker — real GPS if available, else first stop coords
+    const driverStart = gpsPosition
+      ? [gpsPosition.lat, gpsPosition.lng]
+      : [stopsData[0].lat, stopsData[0].lng]
+    driverRef.current = L.marker(driverStart, { icon: makeDriverIcon(L), zIndexOffset: 1000 })
       .addTo(map)
       .bindPopup('<b>📍 Your Location</b>')
+
+    // Completed path — solid, straight line (already driven, accuracy fine)
+    const doneCoords = stopsData.filter(s => s.status === 'completed').map(s => [s.lat, s.lng])
+    if (doneCoords.length > 1)
+      L.polyline(doneCoords, { color: '#2ecc71', weight: 5, opacity: 0.9 }).addTo(map)
+
+    // Remaining path — faint fallback first, then swap with ORS road-snapped route
+    const curStop = stopsData.find(s => s.status === 'current')
+    const remCoords = [
+      ...(curStop ? [[curStop.lat, curStop.lng]] : []),
+      ...stopsData.filter(s => s.status === 'pending').map(s => [s.lat, s.lng]),
+    ]
+
+    let fallbackLine = null
+    if (remCoords.length > 1) {
+      fallbackLine = L.polyline(remCoords, {
+        color: '#2ecc71', weight: 3, opacity: 0.35, dashArray: '6, 6',
+      }).addTo(map)
+    }
+
+    // Fit to all stops
+    map.fitBounds(L.latLngBounds(stopsData.map(s => [s.lat, s.lng])), { padding: [40, 40] })
+
+    // ORS road-snapped route for remaining stops
+    const orsApiKey = import.meta.env.VITE_ORS_API_KEY
+    if (!orsApiKey || remCoords.length < 2) return
+
+    fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: orsApiKey,
+      },
+      body: JSON.stringify({ coordinates: remCoords.slice(0, 50).map(([lat, lng]) => [lng, lat]) }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (!data.routes?.length || !mapInstance.current) return
+        if (fallbackLine) map.removeLayer(fallbackLine)
+        const pts = decodePolyline(data.routes[0].geometry)
+        L.polyline(pts, { color: '#2ecc71', weight: 5, opacity: 0.85 }).addTo(map)
+      })
+      .catch(() => { /* fallbackLine stays visible */ })
   }
 
-  // ── Move driver marker whenever GPS position updates ─────────────────────────
+  // ── 6. Move driver marker on GPS update ──────────────────────────────────────
   useEffect(() => {
-    if (!gpsPosition || !driverRef.current || !mapInstance.current) return
-    const { lat, lng } = gpsPosition
-    driverRef.current.setLatLng([lat, lng])
-    // Optionally keep map centred on driver while tracking
-    // mapInstance.current.panTo([lat, lng])
+    if (!gpsPosition || !driverRef.current) return
+    driverRef.current.setLatLng([gpsPosition.lat, gpsPosition.lng])
   }, [gpsPosition])
 
-  // ── Focus a stop on the map ─────────────────────────────────────────────────
+  // ── 7. Cleanup on unmount ─────────────────────────────────────────────────────
+  useEffect(() => {
+    return () => {
+      if (mapInstance.current) { mapInstance.current.remove(); mapInstance.current = null }
+    }
+  }, [])
+
+  // ── Focus a stop on the map ──────────────────────────────────────────────────
   const focusStop = useCallback((stop) => {
     setFocusedId(stop.id)
-    if (mapInstance.current) {
-      mapInstance.current.flyTo([stop.lat, stop.lng], 16, { duration: 0.6 })
-    }
-    // Scroll the card into view
+    if (mapInstance.current) mapInstance.current.flyTo([stop.lat, stop.lng], 16, { duration: 0.6 })
     const el = document.getElementById(`stop-card-${stop.id}`)
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [])
@@ -405,7 +436,8 @@ export default function RouteOverview() {
               My Route
             </h1>
             <p className="text-muted text-xs" style={{ marginTop: 2 }}>
-              {MOCK_ROUTE.name} · {MOCK_ROUTE.truck}
+              {schedule?.barangay_names || (mapLoading ? 'Loading route…' : 'No route assigned')}
+              {profile?.truck ? ` · ${profile.truck}` : profile?.plateNumber ? ` · ${profile.plateNumber}` : ''}
             </p>
           </div>
           <div style={{
@@ -500,7 +532,9 @@ export default function RouteOverview() {
                   {currentStop.address}
                 </div>
                 <div style={{ color: '#94a3b8', fontSize: 10 }}>
-                  {currentStop.type} · {currentStop.distance}
+                  {currentStop.type}{gpsPosition
+                    ? ` · ${(() => { const d = haversineDistance(gpsPosition.lat, gpsPosition.lng, currentStop.lat, currentStop.lng); return d > 1000 ? `${(d / 1000).toFixed(1)} km` : `${Math.round(d)} m` })()}`
+                    : currentStop.distance ? ` · ${currentStop.distance}` : ''}
                 </div>
               </div>
               <button
@@ -564,6 +598,7 @@ export default function RouteOverview() {
                 focused={focusedId === stop.id}
                 onFocus={focusStop}
                 onMarkDone={handleMarkDone}
+                gpsPosition={gpsPosition}
               />
             )
           })}

@@ -219,18 +219,52 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
                 except Exception:
                     pass  # non-fatal — fall through to last-resort query
 
-        # ── 3. Query next uncompleted stop ────────────────────────────────────
+        # ── 3. Query next READY_FOR_COLLECTION stop (watcher-validated) ───────
+        from watcher.models import StopValidation, StopValidationStatus
+        from watcher.stop_validation_service import ensure_stop_validations_for_schedule
+
+        stop = None
         if schedule:
-            stop = (
-                PickupStatus.objects
-                .filter(driver=request.user, schedule=schedule)
-                .exclude(status='COMPLETED')
-                .select_related('schedule')
-                .order_by('stop_order')
-                .first()
+            ensure_stop_validations_for_schedule(schedule)
+            ready_orders = set(
+                StopValidation.objects.filter(
+                    schedule=schedule,
+                    collection_date=today,
+                    current_status=StopValidationStatus.READY_FOR_COLLECTION,
+                ).values_list('stop_order', flat=True)
             )
-        else:
-            stop = None
+            reported_orders = set(
+                StopValidation.objects.filter(
+                    schedule=schedule,
+                    collection_date=today,
+                    current_status__in=[
+                        StopValidationStatus.COLLECTION_REPORTED,
+                        StopValidationStatus.VERIFIED_COLLECTED,
+                        StopValidationStatus.COLLECTION_DISPUTED,
+                    ],
+                ).values_list('stop_order', flat=True)
+            )
+            eligible_orders = sorted(ready_orders - reported_orders)
+            if eligible_orders:
+                next_order = eligible_orders[0]
+                stop = (
+                    PickupStatus.objects
+                    .filter(driver=request.user, schedule=schedule, stop_order=next_order)
+                    .select_related('schedule')
+                    .first()
+                )
+                if not stop:
+                    waypoints = schedule.waypoints or []
+                    address = ''
+                    if next_order < len(waypoints) and isinstance(waypoints[next_order], dict):
+                        address = waypoints[next_order].get('label') or waypoints[next_order].get('address') or ''
+                    stop = PickupStatus.objects.create(
+                        driver=request.user,
+                        schedule=schedule,
+                        stop_order=next_order,
+                        status='EN_ROUTE',
+                        address=address,
+                    )
 
         # ── 4. Last resort: any uncompleted stop for this driver ──────────────
         if not stop:
@@ -321,6 +355,35 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
         except CollectionSchedule.DoesNotExist:
             return Response({'error': 'Schedule not found or not assigned to you.'}, status=status.HTTP_404_NOT_FOUND)
 
+        from watcher.models import StopValidation, StopValidationStatus
+        from watcher.stop_validation_utils import COLLECTION_RADIUS_M, get_stop_coordinates, validate_gps_proximity
+        from watcher.stop_validation_service import ensure_stop_validations_for_schedule
+
+        ensure_stop_validations_for_schedule(schedule)
+        today = timezone.localdate()
+        try:
+            validation = StopValidation.objects.get(
+                schedule=schedule,
+                stop_order=stop_order,
+                collection_date=today,
+            )
+        except StopValidation.DoesNotExist:
+            return Response({'error': 'Stop validation not found for today.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if validation.current_status != StopValidationStatus.READY_FOR_COLLECTION:
+            return Response(
+                {'error': 'Stop is not ready for collection. Watcher pre-inspection required.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        driver_lat = request.data.get('lat')
+        driver_lng = request.data.get('lng')
+        coords = get_stop_coordinates(schedule, stop_order)
+        if coords:
+            ok, err = validate_gps_proximity(driver_lat, driver_lng, coords[0], coords[1], COLLECTION_RADIUS_M)
+            if not ok:
+                return Response({'error': err}, status=status.HTTP_403_FORBIDDEN)
+
         collected_at = timezone.now()
         if collected_at_raw:
             try:
@@ -353,6 +416,18 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
 
         ps.save()
 
+        validation.driver = request.user
+        validation.collection_timestamp = collected_at
+        validation.collection_notes = note
+        if driver_lat is not None:
+            validation.collection_latitude = driver_lat
+        if driver_lng is not None:
+            validation.collection_longitude = driver_lng
+        if photo:
+            validation.collection_photo = photo
+        validation.current_status = StopValidationStatus.COLLECTION_REPORTED
+        validation.save()
+
         photo_url = None
         if ps.photo_url:
             try:
@@ -364,6 +439,7 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
             'id':          ps.id,
             'stop_order':  ps.stop_order,
             'status':      ps.status,
+            'validation_status': validation.current_status,
             'photo_url':   photo_url,
             'collected_at': ps.collected_at,
         }, status=status.HTTP_201_CREATED)
@@ -813,11 +889,12 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
         GET /api/driver/shift/barangay_stops/?barangay_name=<name>
         """
         barangay_name = request.query_params.get('barangay_name', '').strip()
+        scope = request.query_params.get('scope', 'all').strip().lower()
         if not barangay_name:
             return Response({'error': 'barangay_name is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         now = timezone.now()
-        result_trucks, result_stops = [], []
+        result_trucks, result_stops = []
 
         for shift in DriverShift.objects.filter(is_active=True).select_related('driver', 'truck'):
             schedule = CollectionSchedule.objects.filter(
@@ -832,39 +909,76 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
 
             if shift.current_latitude and shift.current_longitude:
                 result_trucks.append({
-                    'id': shift.id, 'driver': shift.driver.full_name,
+                    'id': shift.id,
+                    'driver_id': shift.driver.id,
+                    'driver': shift.driver.full_name,
+                    'driver_name': shift.driver.full_name,
                     'truckId': shift.truck.plate_number if shift.truck else 'Unknown',
-                    'lat': float(shift.current_latitude), 'lng': float(shift.current_longitude),
+                    'truck_plate': shift.truck.plate_number if shift.truck else 'Unknown',
+                    'truckModel': shift.truck.model if shift.truck else 'Unknown',
+                    'lat': float(shift.current_latitude),
+                    'lng': float(shift.current_longitude),
                     'status': conn,
+                    'op_status': shift.op_status,
+                    'last_update': shift.last_location_update.isoformat() if shift.last_location_update else None,
+                    'barangay_name': barangay_name,
                 })
 
-            completed_orders = set(PickupStatus.objects.filter(
-                driver=shift.driver, schedule=schedule, status='COMPLETED',
-            ).values_list('stop_order', flat=True))
+            from watcher.models import StopValidation, StopValidationStatus
+            from watcher.stop_validation_service import ensure_stop_validations_for_schedule
+            from watcher.stop_validation_utils import is_schedule_today, is_validation_visible
 
-            failed_orders = set(PickupStatus.objects.filter(
-                driver=shift.driver, schedule=schedule, status='FAILED',
-            ).values_list('stop_order', flat=True))
+            if not is_schedule_today(schedule):
+                continue
 
-            nxt = PickupStatus.objects.filter(
-                driver=shift.driver, schedule=schedule,
-            ).exclude(status__in=['COMPLETED', 'FAILED']).order_by('stop_order').first()
-            current_order = nxt.stop_order if nxt else None
+            ensure_stop_validations_for_schedule(schedule)
+            today = timezone.localdate()
+            validations = {
+                sv.stop_order: sv
+                for sv in StopValidation.objects.filter(schedule=schedule, collection_date=today)
+                if is_validation_visible(sv)
+            }
+
+            current_order = None
+            for order in sorted(validations.keys()):
+                if validations[order].current_status == StopValidationStatus.READY_FOR_COLLECTION:
+                    current_order = order
+                    break
+            if current_order is None:
+                for order in sorted(validations.keys()):
+                    if validations[order].current_status == StopValidationStatus.COLLECTION_REPORTED:
+                        current_order = order
+                        break
 
             for i, wp in enumerate(schedule.waypoints or []):
                 if i == 0:
                     continue  # skip home base
-                st = (
-                    'collected' if i in completed_orders
-                    else 'missed' if i in failed_orders
-                    else 'current' if i == current_order
-                    else 'upcoming'
-                )
+                sv = validations.get(i)
+                if not sv:
+                    continue
+                is_current = i == current_order
+                if scope == 'focus' and not is_current:
+                    continue
+                st = sv.current_status
                 result_stops.append({
                     'lat': float(wp.get('lat', 0)), 'lng': float(wp.get('lng', 0)),
                     'label': wp.get('label', f'Stop {i}'),
-                    'status': st, 'stop_order': i,
-                    'driver_id': shift.driver.id, 'driver_name': shift.driver.full_name,
+                    'status': st,
+                    'current_status': st,
+                    'is_current': is_current,
+                    'stop_order': i,
+                    'schedule_id': schedule.id,
+                    'driver_id': shift.driver.id,
+                    'driver_name': shift.driver.full_name,
+                    'truck_plate': shift.truck.plate_number if shift.truck else '',
+                    'collected_at': sv.collection_timestamp.isoformat() if sv.collection_timestamp else None,
                 })
+
+        if scope == 'focus':
+            active_driver_ids = {s['driver_id'] for s in result_stops}
+            result_trucks = [
+                t for t in result_trucks
+                if t.get('driver_id') in active_driver_ids
+            ]
 
         return Response({'trucks': result_trucks, 'stops': result_stops})

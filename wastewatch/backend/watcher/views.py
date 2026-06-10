@@ -2,12 +2,30 @@ from django.utils import timezone
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import GarbageReport, CollectionConfirmation, GarbageHotspot, Escalation, ReportStatus
+from .models import (
+    GarbageReport,
+    CollectionConfirmation,
+    GarbageHotspot,
+    Escalation,
+    ReportStatus,
+    StopValidation,
+    StopValidationStatus,
+)
 from .serializers import (
     GarbageReportSerializer,
     CollectionConfirmationSerializer,
     GarbageHotspotSerializer,
     EscalationSerializer,
+    StopValidationSerializer,
+)
+from .stop_validation_service import ensure_today_stop_validations
+from .stop_validation_utils import (
+    COLLECTION_RADIUS_M,
+    INSPECTION_RADIUS_M,
+    VERIFICATION_RADIUS_M,
+    get_stop_coordinates,
+    is_validation_visible,
+    validate_gps_proximity,
 )
 
 # Roles that may see all reports across the city on the map
@@ -271,6 +289,168 @@ class GarbageHotspotViewSet(viewsets.ModelViewSet):
     def add_to_route(self, request, pk=None):
         """Placeholder: driver requests to add this hotspot to their current route."""
         return Response({'status': 'added', 'id': pk})
+
+class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Centralized stop validation workflow API.
+    GET  /api/watcher/stop-validations/
+    POST /api/watcher/stop-validations/pre-inspect/
+    POST /api/watcher/stop-validations/post-verify/
+    """
+    queryset = StopValidation.objects.select_related(
+        'schedule', 'schedule__truck', 'driver',
+        'pre_validation_watcher', 'post_validation_watcher',
+    ).prefetch_related('schedule__barangays')
+    serializer_class = StopValidationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        ensure_today_stop_validations()
+        today = timezone.localdate()
+        qs = super().get_queryset().filter(collection_date=today)
+
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(current_status=status_param)
+
+        schedule_id = self.request.query_params.get('schedule_id')
+        if schedule_id:
+            qs = qs.filter(schedule_id=schedule_id)
+
+        visible = [sv.id for sv in qs if is_validation_visible(sv)]
+        return qs.filter(id__in=visible)
+
+    def _get_validation(self, schedule_id, stop_order):
+        today = timezone.localdate()
+        try:
+            return StopValidation.objects.select_related('schedule').get(
+                schedule_id=schedule_id,
+                stop_order=stop_order,
+                collection_date=today,
+            )
+        except StopValidation.DoesNotExist:
+            return None
+
+    @action(detail=False, methods=['post'], url_path='pre-inspect')
+    def pre_inspect(self, request):
+        """
+        Watcher pre-collection inspection.
+        outcome: garbage_present | no_garbage
+        """
+        if request.user.role not in ('watcher', 'admin', 'brgy_official'):
+            return Response({'error': 'Not authorized.'}, status=status.HTTP_403_FORBIDDEN)
+
+        schedule_id = request.data.get('schedule_id')
+        stop_order = request.data.get('stop_order')
+        outcome = (request.data.get('outcome') or '').strip().lower()
+        lat = request.data.get('lat')
+        lng = request.data.get('lng')
+        remarks = (request.data.get('remarks') or '').strip()
+        photo = request.FILES.get('photo')
+
+        if not schedule_id or stop_order is None:
+            return Response({'error': 'schedule_id and stop_order are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            stop_order = int(stop_order)
+        except (TypeError, ValueError):
+            return Response({'error': 'stop_order must be an integer.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if outcome not in ('garbage_present', 'no_garbage'):
+            return Response({'error': 'outcome must be garbage_present or no_garbage.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        validation = self._get_validation(schedule_id, stop_order)
+        if not validation:
+            return Response({'error': 'Stop validation not found for today.'}, status=status.HTTP_404_NOT_FOUND)
+        if validation.current_status != StopValidationStatus.PENDING_INSPECTION:
+            return Response({'error': 'Stop is not pending inspection.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        coords = get_stop_coordinates(validation.schedule, stop_order)
+        if not coords:
+            return Response({'error': 'Stop coordinates not found.'}, status=status.HTTP_400_BAD_REQUEST)
+        ok, err = validate_gps_proximity(lat, lng, coords[0], coords[1], INSPECTION_RADIUS_M)
+        if not ok:
+            return Response({'error': err}, status=status.HTTP_403_FORBIDDEN)
+
+        validation.pre_validation_watcher = request.user
+        validation.pre_validation_timestamp = timezone.now()
+        validation.pre_validation_latitude = lat
+        validation.pre_validation_longitude = lng
+        validation.pre_validation_remarks = remarks
+        if photo:
+            validation.pre_validation_photo = photo
+        validation.current_status = (
+            StopValidationStatus.READY_FOR_COLLECTION
+            if outcome == 'garbage_present'
+            else StopValidationStatus.EMPTY_STOP
+        )
+        validation.save()
+
+        return Response(
+            StopValidationSerializer(validation, context={'request': request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=['post'], url_path='post-verify')
+    def post_verify(self, request):
+        """
+        Watcher post-collection verification.
+        outcome: success | failed
+        """
+        if request.user.role not in ('watcher', 'admin', 'brgy_official'):
+            return Response({'error': 'Not authorized.'}, status=status.HTTP_403_FORBIDDEN)
+
+        schedule_id = request.data.get('schedule_id')
+        stop_order = request.data.get('stop_order')
+        outcome = (request.data.get('outcome') or '').strip().lower()
+        lat = request.data.get('lat')
+        lng = request.data.get('lng')
+        dispute_reason = (request.data.get('dispute_reason') or request.data.get('description') or '').strip()
+        photo = request.FILES.get('photo')
+
+        if not schedule_id or stop_order is None:
+            return Response({'error': 'schedule_id and stop_order are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            stop_order = int(stop_order)
+        except (TypeError, ValueError):
+            return Response({'error': 'stop_order must be an integer.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if outcome not in ('success', 'failed'):
+            return Response({'error': 'outcome must be success or failed.'}, status=status.HTTP_400_BAD_REQUEST)
+        if outcome == 'failed' and not dispute_reason:
+            return Response({'error': 'dispute_reason is required when collection failed.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        validation = self._get_validation(schedule_id, stop_order)
+        if not validation:
+            return Response({'error': 'Stop validation not found for today.'}, status=status.HTTP_404_NOT_FOUND)
+        if validation.current_status != StopValidationStatus.COLLECTION_REPORTED:
+            return Response({'error': 'Stop does not have a reported collection.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        coords = get_stop_coordinates(validation.schedule, stop_order)
+        if not coords:
+            return Response({'error': 'Stop coordinates not found.'}, status=status.HTTP_400_BAD_REQUEST)
+        ok, err = validate_gps_proximity(lat, lng, coords[0], coords[1], VERIFICATION_RADIUS_M)
+        if not ok:
+            return Response({'error': err}, status=status.HTTP_403_FORBIDDEN)
+
+        validation.post_validation_watcher = request.user
+        validation.post_validation_timestamp = timezone.now()
+        validation.post_validation_latitude = lat
+        validation.post_validation_longitude = lng
+        validation.dispute_reason = dispute_reason if outcome == 'failed' else ''
+        if photo:
+            validation.post_validation_photo = photo
+        validation.current_status = (
+            StopValidationStatus.VERIFIED_COLLECTED
+            if outcome == 'success'
+            else StopValidationStatus.COLLECTION_DISPUTED
+        )
+        validation.save()
+
+        return Response(
+            StopValidationSerializer(validation, context={'request': request}).data,
+            status=status.HTTP_200_OK,
+        )
+
 
 class EscalationViewSet(viewsets.ModelViewSet):
     queryset = Escalation.objects.all()

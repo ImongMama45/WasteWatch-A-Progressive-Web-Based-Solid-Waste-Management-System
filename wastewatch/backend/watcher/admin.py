@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import GarbageReport, CollectionConfirmation, GarbageHotspot, Escalation
+from .models import GarbageReport, CollectionConfirmation, GarbageHotspot, Escalation, StopValidation
 
 
 @admin.register(GarbageReport)
@@ -23,6 +23,14 @@ class CollectionConfirmationAdmin(admin.ModelAdmin):
 class GarbageHotspotAdmin(admin.ModelAdmin):
     list_display = ('name', 'severity', 'barangay', 'created_at')
     list_filter = ('severity', 'barangay')
+
+@admin.register(StopValidation)
+class StopValidationAdmin(admin.ModelAdmin):
+    list_display = ('id', 'schedule', 'stop_order', 'collection_date', 'current_status', 'driver')
+    list_filter = ('current_status', 'collection_date')
+    search_fields = ('schedule__id',)
+    ordering = ('-collection_date', 'schedule_id', 'stop_order')
+
 
 @admin.register(Escalation)
 class EscalationAdmin(admin.ModelAdmin):

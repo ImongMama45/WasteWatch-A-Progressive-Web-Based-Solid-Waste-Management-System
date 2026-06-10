@@ -27,11 +27,15 @@ const DEFAULT_INTERVAL_MS = 10_000   // send to backend every 10 s
 const SYNC_FAIL_THRESHOLD = 3       // warn after this many consecutive failures
 const GEO_OPTIONS = {
   enableHighAccuracy: true,
-  maximumAge: 5_000,   // accept cached position up to 5 s old
-  timeout: 15_000,
+  maximumAge: 0,
+  timeout: 20_000,
 }
 
-export default function useGpsTracking({ intervalMs = DEFAULT_INTERVAL_MS, enabled = true } = {}) {
+export default function useGpsTracking({
+  intervalMs = DEFAULT_INTERVAL_MS,
+  enabled = true,
+  syncEnabled = enabled,
+} = {}) {
   const [position, setPosition] = useState(null)   // { lat, lng }
   const [accuracy, setAccuracy] = useState(null)   // metres
   const [error, setError] = useState(null)   // string | null
@@ -94,7 +98,7 @@ export default function useGpsTracking({ intervalMs = DEFAULT_INTERVAL_MS, enabl
         setAccuracy(Math.round(acc))
         setError(null)
         setIsTracking(true)
-        syncToBackend(lat, lng, acc)
+        if (syncEnabled) syncToBackend(lat, lng, acc)
       },
       (err) => {
         const messages = {
@@ -113,7 +117,7 @@ export default function useGpsTracking({ intervalMs = DEFAULT_INTERVAL_MS, enabl
         watchId.current = null
       }
     }
-  }, [enabled, syncToBackend])
+  }, [enabled, syncEnabled, syncToBackend])
 
   return { position, accuracy, error, isTracking, lastSyncedAt, syncFailed }
 }

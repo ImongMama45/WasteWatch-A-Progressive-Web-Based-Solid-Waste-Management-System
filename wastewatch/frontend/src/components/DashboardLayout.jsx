@@ -16,6 +16,7 @@ import Navbar from './Navbar'
 import { useOnline } from '../hooks/useOnline'
 import BottomNav from './BottomNav'
 import { ICONS, getRoleNavItems } from '../api/navConfig'
+import { DriverGpsProvider } from '../context/DriverGpsContext'
 
 // ─── NavGroup: collapsible sidebar section ────────────────────────────────────
 function NavGroup({ group, currentPath, onNavigate }) {
@@ -336,6 +337,7 @@ const SIDEBAR_CSS = `
    ════════════════════════════════════════ */
 .dashboard-main {
   min-height: 100vh;
+  padding-top: 60px;
 }
 
 @media (min-width: 1024px) {
@@ -406,7 +408,7 @@ function injectSidebarCSS() {
 
 const LeafIcon = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M17 8C8 10 5.9 16.17 3.82 21.34L5.71 22l1-2.3A4.49 4.49 0 0 0 8 20C19 20 22 3 22 3c-1 2-8 5.25-8 5.25S17.7 9.08 17 8z"/>
+    <path d="M17 8C8 10 5.9 16.17 3.82 21.34L5.71 22l1-2.3A4.49 4.49 0 0 0 8 20C19 20 22 3 22 3c-1 2-8 5.25-8 5.25S17.7 9.08 17 8z" />
   </svg>
 )
 
@@ -458,16 +460,16 @@ function renderNavItems(navItems, currentPath, navigate) {
 // ─── DashboardLayout ──────────────────────────────────────────────────────────
 export default function DashboardLayout({ children }) {
   const { user, logout } = useAuth()
-  const navigate  = useNavigate()
-  const location  = useLocation()
-  const isOnline  = useOnline()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const isOnline = useOnline()
 
-  const [searchVal,  setSearchVal]  = useState('')
-  const [notifOpen,  setNotifOpen]  = useState(false)
+  const [searchVal, setSearchVal] = useState('')
+  const [notifOpen, setNotifOpen] = useState(false)
 
   useEffect(() => { injectSidebarCSS() }, [])
 
-  const role     = user?.role?.toLowerCase() || 'citizen'
+  const role = user?.role?.toLowerCase() || 'citizen'
   const navItems = getRoleNavItems(role)
 
   async function handleLogout() {
@@ -623,7 +625,9 @@ export default function DashboardLayout({ children }) {
 
       {/* ── Main Content ── */}
       <main className="dashboard-main">
-        {children}
+        {role === 'driver' ? (
+          <DriverGpsProvider>{children}</DriverGpsProvider>
+        ) : children}
       </main>
 
       {/* ── MOBILE: bottom nav ── */}

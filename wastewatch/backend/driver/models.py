@@ -75,6 +75,12 @@ class CollectionSchedule(models.Model):
         if not self.pk:
             return
 
+        try:
+            from watcher.stop_validation_service import ensure_stop_validations_for_schedule
+            ensure_stop_validations_for_schedule(self)
+        except Exception:
+            pass
+
         stops = [wp for idx, wp in enumerate(self.waypoints or []) if idx > 0]
         desired_order_set = set(range(1, len(stops) + 1))
         existing_statuses = {ps.stop_order: ps for ps in self.pickups.all()}

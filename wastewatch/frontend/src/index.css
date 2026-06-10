@@ -43,14 +43,14 @@
 }
 
 .leaflet-barangay-tooltip {
-  background: rgba(15,23,42,0.92);
-  border: 1px solid rgba(20,184,166,0.4);
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(20, 184, 166, 0.4);
   color: #e2e8f0;
   font-size: 11px;
   font-weight: 600;
   padding: 3px 8px;
   border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
 .logo img {
@@ -517,6 +517,7 @@ select.form-input {
   overflow: hidden;
 }
 
+
 .map-placeholder::before {
   content: '';
   position: absolute;
@@ -538,6 +539,27 @@ select.form-input {
   font-size: 12px;
   line-height: 1.7;
   z-index: 1;
+}
+
+.leaflet-control-container .leaflet-top {
+  margin-top: 70px;
+}
+
+.map-container {
+  height: calc(100vh - 60px);
+  margin-top: 60px;
+}
+
+.navbar {
+  height: 60px;
+}
+
+.page {
+  padding-top: 60px;
+}
+
+.leaflet-top {
+  top: 60px !important;
 }
 
 @media (min-width: 1024px) {

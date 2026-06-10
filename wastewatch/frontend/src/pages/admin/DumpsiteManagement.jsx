@@ -64,7 +64,7 @@ function SiteModal({ site, coords, onSave, onClose, barangays }) {
   const [detectedName, setDetectedName] = useState('')
   const [err, setErr] = useState('')
 
-  const set  = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const setAc = (k, v) => setAccount(a => ({ ...a, [k]: v }))
 
   // ── Auto-detect barangay from coords via Nominatim ──
@@ -92,17 +92,17 @@ function SiteModal({ site, coords, onSave, onClose, barangays }) {
           if (match) set('barangay', match.id)
         }
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setDetecting(false))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coords])
 
   function submit() {
-    if (!form.name.trim())   { setErr('Site name is required.'); return }
-    if (!form.barangay)      { setErr('Please select a barangay.'); return }
+    if (!form.name.trim()) { setErr('Site name is required.'); return }
+    if (!form.barangay) { setErr('Please select a barangay.'); return }
     if (!isEdit) {
       if (!account.full_name.trim()) { setErr('Account full name is required.'); return }
-      if (!account.email.trim())     { setErr('Account email is required.'); return }
+      if (!account.email.trim()) { setErr('Account email is required.'); return }
       if (account.password.length < 6) { setErr('Password must be at least 6 characters.'); return }
     }
     setErr('')
@@ -171,7 +171,12 @@ function SiteModal({ site, coords, onSave, onClose, barangays }) {
               placeholder="e.g. Main Landfill — Gulang-Gulang" />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: isMobile ? '1fr' : '1fr 340px',
+            gap: 16,
+            height: isMobile ? 'auto' : 580,
+          }}>
             <div>
               <label className="form-label">Type</label>
               <select className="form-input" value={form.type} onChange={e => set('type', e.target.value)}>
@@ -251,7 +256,7 @@ function SiteDetailModal({ site, barangays, onClose }) {
   if (!site) return null
   const t = typeMap[site.type] || TYPES[1]
   const bName = barangays.find(b => b.id === site.barangay || b.id === site.barangay?.id)?.name
-              || site.barangay_name || 'Unknown'
+    || site.barangay_name || 'Unknown'
   const capacity = site.capacity_used ?? site.capacity ?? 0
   const capColor = capacity > 80 ? '#e74c3c' : capacity > 60 ? '#f39c12' : '#2ecc71'
   const staff = site.staff_accounts || []
@@ -352,7 +357,7 @@ function SiteDetailModal({ site, barangays, onClose }) {
                     }}>{u.is_active ? 'Active' : 'Inactive'}</span>
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {[{label: 'Role', val: u.role}, {label: 'Barangay', val: u.barangay || '—'}, {label: 'Joined', val: u.created_at}].map(p => (
+                    {[{ label: 'Role', val: u.role }, { label: 'Barangay', val: u.barangay || '—' }, { label: 'Joined', val: u.created_at }].map(p => (
                       <div key={p.label} style={{
                         display: 'flex', gap: 4, alignItems: 'center',
                         background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 20, padding: '2px 8px',
@@ -503,13 +508,13 @@ export default function DumpsiteManagement() {
     if (modal === 'add') {
       const [lat, lng] = pendingCoords
       const payload = {
-        name:     form.name,
-        type:     form.type,
+        name: form.name,
+        type: form.type,
         barangay: form.barangay,
         lat,
         lng,
         capacity: 0,
-        notes:    form.notes || '',
+        notes: form.notes || '',
       }
       res = await saveSite(null, payload)
       if (res.ok) {
@@ -528,10 +533,10 @@ export default function DumpsiteManagement() {
       }
     } else {
       const payload = {
-        name:     form.name,
-        type:     form.type,
+        name: form.name,
+        type: form.type,
         barangay: form.barangay,
-        notes:    form.notes || '',
+        notes: form.notes || '',
       }
       res = await saveSite(modal.id, payload)
       if (res.ok) showToast('✅ Site updated.')
@@ -558,6 +563,13 @@ export default function DumpsiteManagement() {
   const filtered = useMemo(() =>
     typeFilter === 'all' ? sites : sites.filter(s => s.type === typeFilter)
     , [sites, typeFilter])
+
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768)
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768)
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [])
 
   return (
     <DashboardLayout>
@@ -625,6 +637,7 @@ export default function DumpsiteManagement() {
             style={{
               background: addMode ? '#f39c12' : 'var(--accent)', color: '#0d1117',
               border: 'none', borderRadius: 10, padding: '9px 18px', fontWeight: 700,
+              alignSelf: 'flex-start',   // ← add this
             }}
           >
             {addMode ? '✕ Cancel — Click Map' : '+ Add Site (Click Map)'}
@@ -642,11 +655,24 @@ export default function DumpsiteManagement() {
           </div>
         )}
 
+
+
         {/* ── Two-column layout: map + side list ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 16, height: 580 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'var(--dm-cols, 1fr 340px)', gap: 16, height: 'var(--dm-height, 580px)' }}
+          ref={el => {
+            if (!el) return
+            const update = () => {
+              const narrow = window.innerWidth < 500
+              el.style.setProperty('--dm-cols', narrow ? '1fr' : '1fr 340px')
+              el.style.setProperty('--dm-height', narrow ? 'auto' : '580px')
+            }
+            update()
+            window.addEventListener('resize', update)
+            return () => window.removeEventListener('resize', update)
+          }}>
 
           {/* MAP */}
-          <div className="card" style={{ padding: 0, overflow: 'hidden', position: 'relative', borderRadius: 14 }}>
+          <div className="card" style={{ padding: 0, overflow: 'hidden', position: 'relative', borderRadius: 14, height: isMobile ? 320 : '100%' }}>
             <div ref={mapRef} style={{ position: 'absolute', inset: 0, zIndex: 1 }} />
             {!mapReady && (
               <div style={{
@@ -674,7 +700,7 @@ export default function DumpsiteManagement() {
           </div>
 
           {/* SIDE LIST */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflowY: isMobile ? 'visible' : 'auto', maxHeight: isMobile ? 'none' : 580 }}>
 
             {/* Type filter pills */}
             <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>

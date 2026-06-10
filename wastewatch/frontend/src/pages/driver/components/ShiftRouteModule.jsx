@@ -49,7 +49,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useShiftTimer from '../../../hooks/useShiftTimer'
-import useGpsTracking from '../../../hooks/useGpsTracking'
+import { useDriverGps } from '../../../context/DriverGpsContext'
 import Navbar from '../../../components/Navbar'
 import api from '../../../api/client'
 import { useAuth } from '../../../context/AuthContext'
@@ -57,23 +57,15 @@ import EndShiftModule from './EndShiftModule'
 import CameraProofModal from './CameraProofModal'
 import {
   broadcastPickupStatusSync,
-  buildPickupStatusSnapshot,
+  buildStopValidationSnapshot,
+  isRoutableStopStatus,
+  normalizeStopStatus,
+  STOP_STATUS_COLORS,
+  STOP_STATUS_LABELS,
   subscribePickupStatusSync,
 } from '../../../utils/pickupStatusSync'
 
-// ─── STOP STATUS COLOURS ──────────────────────────────────────────────────────
-
-const STOP_COLORS = {
-  collected: { bg: '#16a34a', border: '#fff', shadow: 'rgba(22,163,74,0.5)',  label: '#fff' },
-  current:   { bg: '#2563eb', border: '#fff', shadow: 'rgba(37,99,235,0.6)',  label: '#fff' },
-  upcoming:  { bg: '#f59e0b', border: '#fff', shadow: 'rgba(245,158,11,0.4)', label: '#fff' },
-  missed:    { bg: '#ef4444', border: '#fff', shadow: 'rgba(239,68,68,0.5)',  label: '#fff' },
-  pending:   { bg: '#94a3b8', border: '#fff', shadow: 'rgba(148,163,184,0.4)', label: '#fff' },
-  none:      { bg: 'transparent', border: 'rgba(148,163,184,0.9)', shadow: 'none', label: '#94a3b8' },
-}
-
-const normalizeStopStatus = (status) =>
-  ['collected', 'current', 'upcoming', 'missed', 'pending', 'none'].includes(status) ? status : 'upcoming'
+const STOP_COLORS = STOP_STATUS_COLORS
 
 const restoreStopStatuses = () => {
   try {
@@ -110,33 +102,33 @@ function injectStopMarkerStyles() {
   document.head.appendChild(style)
 }
 
-function stopMarkerHTML(stopNumber, status, details) {
+function stopMarkerHTML(stopNumber, status, details, isActive = false) {
   const safeStatus = normalizeStopStatus(status)
-  const c = STOP_COLORS[safeStatus]
-  const size = safeStatus === 'current' ? 28 : 24
-  const markerLabel = safeStatus === 'collected' ? '✓'
-                    : safeStatus === 'missed'    ? '×'
-                    : safeStatus === 'pending'   ? '?'
-                    : stopNumber
+  const c = STOP_COLORS[safeStatus] || STOP_COLORS.PENDING_INSPECTION
+  const size = isActive ? 28 : 24
+  const markerLabel = safeStatus === 'VERIFIED_COLLECTED' ? '✓'
+    : safeStatus === 'COLLECTION_DISPUTED' ? '×'
+      : safeStatus === 'COLLECTION_REPORTED' ? '?'
+        : stopNumber
 
-  const keyframe = safeStatus === 'current' ? `
+  const keyframe = isActive ? `
     <style>@keyframes wwMarkerPulse{0%,100%{transform:scale(1);opacity:.5}50%{transform:scale(1.75);opacity:0}}</style>
   ` : ''
 
-  const pulse = safeStatus === 'current' ? `
+  const pulse = isActive ? `
     <span style="
       position:absolute;inset:-5px;border-radius:50%;
-      border:2.5px solid ${c.bg};
+      border:2.5px solid ${c.bg === 'transparent' ? '#f59e0b' : c.bg};
       animation:wwMarkerPulse 1.8s ease infinite;
       pointer-events:none;
     "></span>
   ` : ''
 
-  const glowShadow = (safeStatus === 'collected' || safeStatus === 'missed' || safeStatus === 'pending')
-    ? `0 2px 10px ${c.shadow}, 0 0 0 3px ${c.bg}44`
+  const glowShadow = ['VERIFIED_COLLECTED', 'COLLECTION_DISPUTED', 'COLLECTION_REPORTED'].includes(safeStatus)
+    ? `0 2px 10px ${c.shadow}, 0 0 0 3px ${c.bg === 'transparent' ? 'rgba(148,163,184,0.3)' : `${c.bg}44`}`
     : `0 2px 10px ${c.shadow}`
-  const fillColor = safeStatus === 'none' ? 'transparent' : c.bg
-  const borderStyle = safeStatus === 'none' ? `2px dashed ${c.border}` : `2.5px solid ${c.border}`
+  const fillColor = safeStatus === 'PENDING_INSPECTION' ? 'transparent' : c.bg
+  const borderStyle = safeStatus === 'PENDING_INSPECTION' ? `2px dashed ${c.border}` : `2.5px solid ${c.border}`
 
   return `
     ${keyframe}
@@ -149,7 +141,7 @@ function stopMarkerHTML(stopNumber, status, details) {
         border-radius:50%;
         display:flex;align-items:center;justify-content:center;
         color:${c.label};
-        font-size:${safeStatus === 'current' ? 12 : 10}px;
+        font-size:${isActive ? 12 : 10}px;
         font-weight:900;
         font-family:monospace;
         box-shadow:${glowShadow};
@@ -246,20 +238,20 @@ function TurnArrow({ type, bearing, size = 48, color = '#0f172a' }) {
     </svg>
   )
   const arrows = {
-    0: wrap('Turn left',         <g {...s}><path d="M22,36 L22,20 Q22,12 13,12" /><polyline points="20,20 13,12 21,5" /></g>),
-    1: wrap('Turn right',        <g {...s}><path d="M22,36 L22,20 Q22,12 31,12" /><polyline points="24,20 31,12 23,5" /></g>),
-    2: wrap('Sharp left',        <g {...s}><path d="M22,36 L22,24 Q22,18 16,14 Q10,10 10,4" /><polyline points="4,10 10,4 16,10" /></g>),
-    3: wrap('Sharp right',       <g {...s}><path d="M22,36 L22,24 Q22,18 28,14 Q34,10 34,4" /><polyline points="28,10 34,4 40,10" /></g>),
-    4: wrap('Slight left',       <g {...s}><path d="M22,36 L22,20 Q21,12 14,8" /><polyline points="7,12 14,8 16,16" /></g>),
-    5: wrap('Slight right',      <g {...s}><path d="M22,36 L22,20 Q23,12 30,8" /><polyline points="28,16 30,8 37,12" /></g>),
-    6: wrap('Straight',          <g {...s}><line x1="22" y1="36" x2="22" y2="8" /><polyline points="14,16 22,8 30,16" /></g>),
-    7: wrap('Enter roundabout',  <g {...s}><circle cx="22" cy="19" r="8" /><line x1="22" y1="36" x2="22" y2="27" /><line x1="28" y1="12" x2="33" y2="7" /><polyline points="26,3 33,7 29,14" /></g>),
-    8: wrap('Exit roundabout',   <g {...s}><circle cx="22" cy="19" r="8" /><line x1="22" y1="36" x2="22" y2="27" /><line x1="28" y1="12" x2="33" y2="7" /><polyline points="26,3 33,7 29,14" /></g>),
-    9: wrap('U-turn',            <g {...s}><path d="M14,36 L14,18 Q14,6 22,6 Q30,6 30,14 L30,20" /><polyline points="22,14 30,20 38,14" /><polyline points="8,30 14,36 20,30" /></g>),
-    10: wrap('Arrived',          <g><path d="M22,38 Q22,38 13,25 A11,11 0 1,1 31,25 Z" {...s} /><circle cx="22" cy="17" r="3.5" fill={color} opacity="0.7" stroke="none" /></g>),
-    11: wrap('Depart',           <g {...s}><line x1="13" y1="7" x2="13" y2="37" /><path d="M13,7 L33,14 L13,21" fill={color} fillOpacity="0.12" stroke={color} strokeWidth="2.6" strokeLinejoin="round" /></g>),
-    12: wrap('Keep left',        <g {...s}><line x1="22" y1="36" x2="22" y2="8" strokeOpacity="0.2" /><path d="M22,36 L22,22 L15,8" /><polyline points="9,13 15,8 18,15" /></g>),
-    13: wrap('Keep right',       <g {...s}><line x1="22" y1="36" x2="22" y2="8" strokeOpacity="0.2" /><path d="M22,36 L22,22 L29,8" /><polyline points="26,15 29,8 35,13" /></g>),
+    0: wrap('Turn left', <g {...s}><path d="M22,36 L22,20 Q22,12 13,12" /><polyline points="20,20 13,12 21,5" /></g>),
+    1: wrap('Turn right', <g {...s}><path d="M22,36 L22,20 Q22,12 31,12" /><polyline points="24,20 31,12 23,5" /></g>),
+    2: wrap('Sharp left', <g {...s}><path d="M22,36 L22,24 Q22,18 16,14 Q10,10 10,4" /><polyline points="4,10 10,4 16,10" /></g>),
+    3: wrap('Sharp right', <g {...s}><path d="M22,36 L22,24 Q22,18 28,14 Q34,10 34,4" /><polyline points="28,10 34,4 40,10" /></g>),
+    4: wrap('Slight left', <g {...s}><path d="M22,36 L22,20 Q21,12 14,8" /><polyline points="7,12 14,8 16,16" /></g>),
+    5: wrap('Slight right', <g {...s}><path d="M22,36 L22,20 Q23,12 30,8" /><polyline points="28,16 30,8 37,12" /></g>),
+    6: wrap('Straight', <g {...s}><line x1="22" y1="36" x2="22" y2="8" /><polyline points="14,16 22,8 30,16" /></g>),
+    7: wrap('Enter roundabout', <g {...s}><circle cx="22" cy="19" r="8" /><line x1="22" y1="36" x2="22" y2="27" /><line x1="28" y1="12" x2="33" y2="7" /><polyline points="26,3 33,7 29,14" /></g>),
+    8: wrap('Exit roundabout', <g {...s}><circle cx="22" cy="19" r="8" /><line x1="22" y1="36" x2="22" y2="27" /><line x1="28" y1="12" x2="33" y2="7" /><polyline points="26,3 33,7 29,14" /></g>),
+    9: wrap('U-turn', <g {...s}><path d="M14,36 L14,18 Q14,6 22,6 Q30,6 30,14 L30,20" /><polyline points="22,14 30,20 38,14" /><polyline points="8,30 14,36 20,30" /></g>),
+    10: wrap('Arrived', <g><path d="M22,38 Q22,38 13,25 A11,11 0 1,1 31,25 Z" {...s} /><circle cx="22" cy="17" r="3.5" fill={color} opacity="0.7" stroke="none" /></g>),
+    11: wrap('Depart', <g {...s}><line x1="13" y1="7" x2="13" y2="37" /><path d="M13,7 L33,14 L13,21" fill={color} fillOpacity="0.12" stroke={color} strokeWidth="2.6" strokeLinejoin="round" /></g>),
+    12: wrap('Keep left', <g {...s}><line x1="22" y1="36" x2="22" y2="8" strokeOpacity="0.2" /><path d="M22,36 L22,22 L15,8" /><polyline points="9,13 15,8 18,15" /></g>),
+    13: wrap('Keep right', <g {...s}><line x1="22" y1="36" x2="22" y2="8" strokeOpacity="0.2" /><path d="M22,36 L22,22 L29,8" /><polyline points="26,15 29,8 35,13" /></g>),
   }
   return arrows[type] ?? arrows[6]
 }
@@ -272,10 +264,12 @@ const TURN_COLOR = {
 
 function MapLegend() {
   const items = [
-    { color: '#2563eb', label: 'Current' },
-    { color: '#16a34a', label: 'Collected' },
-    { color: '#f59e0b', label: 'Upcoming' },
-    { color: '#ef4444', label: 'Missed' },
+    { color: 'transparent', border: '1px dashed rgba(148,163,184,0.9)', label: STOP_STATUS_LABELS.PENDING_INSPECTION },
+    { color: '#f59e0b', label: STOP_STATUS_LABELS.READY_FOR_COLLECTION },
+    { color: '#94a3b8', label: STOP_STATUS_LABELS.EMPTY_STOP },
+    { color: '#eab308', label: STOP_STATUS_LABELS.COLLECTION_REPORTED },
+    { color: '#16a34a', label: STOP_STATUS_LABELS.VERIFIED_COLLECTED },
+    { color: '#ef4444', label: STOP_STATUS_LABELS.COLLECTION_DISPUTED },
   ]
   return (
     <div style={{
@@ -284,15 +278,17 @@ function MapLegend() {
       borderRadius: 10, padding: '8px 10px',
       display: 'flex', flexDirection: 'column', gap: 5,
     }}>
-      {items.map(({ color, label }) => (
+      {items.map(({ color, border, label }) => (
         <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{
             width: 10, height: 10, borderRadius: '50%', background: color,
-            boxShadow: `0 0 4px ${color}88`, flexShrink: 0
+            border: border || 'none',
+            boxShadow: color === 'transparent' ? 'none' : `0 0 4px ${color}88`,
+            flexShrink: 0,
           }} />
           <span style={{
             fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.8)',
-            letterSpacing: '.04em'
+            letterSpacing: '.04em',
           }}>{label.toUpperCase()}</span>
         </div>
       ))}
@@ -793,7 +789,7 @@ function EndShiftOverlay({ visible, gpsPos, schedule, onClose }) {
 
   const distLabel = distanceToBase == null ? 'Calculating…'
     : distanceToBase > 1000 ? `${(distanceToBase / 1000).toFixed(1)} km to base`
-    : `${Math.round(distanceToBase)} m to base`
+      : `${Math.round(distanceToBase)} m to base`
 
   return (
     <RouteOverlay visible={visible}>
@@ -933,14 +929,7 @@ function EndShiftOverlay({ visible, gpsPos, schedule, onClose }) {
 export default function ShiftRouteModule({ routeState: externalRouteState, setRouteState: externalSetRouteState }) {
   const { user } = useAuth()
   const { formattedTime, shiftActive } = useShiftTimer()
-
-  // ── FIX 1: GPS is ALWAYS enabled on mount. ────────────────────────────────
-  // Previously `enabled: shiftActive` caused GPS to never start when
-  // shiftActive was false on first render (common with async shift hydration).
-  // GPS tracking is harmless to run before the shift state resolves — the
-  // backend sync in useGpsTracking only posts while shiftActive is true anyway.
-  const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } =
-    useGpsTracking({ enabled: true, intervalMs: 5000 })
+  const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } = useDriverGps()
 
   const [routeState, setRouteStateLocal] = useState(() => {
     const saved = sessionStorage.getItem('ww_route_state')
@@ -1013,25 +1002,32 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
 
   const getStopStatus = useCallback((wpIndex) => {
     if (stopStatuses.has(wpIndex)) return normalizeStopStatus(stopStatuses.get(wpIndex))
-    if (wpIndex === currentStopIndex) return 'current'
-    if (wpIndex < currentStopIndex) return 'collected'
-    return 'upcoming'
-  }, [stopStatuses, currentStopIndex])
+    return 'PENDING_INSPECTION'
+  }, [stopStatuses])
+
+  const getRoutableIndices = useCallback(() => {
+    const wps = schedule?.waypoints || []
+    const indices = []
+    for (let i = 1; i < wps.length; i += 1) {
+      if (isRoutableStopStatus(getStopStatus(i))) indices.push(i)
+    }
+    return indices
+  }, [schedule?.waypoints, getStopStatus])
 
   const syncPickupStatuses = useCallback(async () => {
     if (!schedule?.id) return
     const scheduleId = String(schedule.id)
-    const [currentRes, statusRes] = await Promise.all([
+    const [currentRes, validationRes] = await Promise.all([
       api.get('/api/driver/stops/current/').catch(() => ({ data: null })),
-      api.get(`/api/driver/pickup-statuses/?schedule_id=${encodeURIComponent(scheduleId)}`).catch(() => ({ data: null })),
+      api.get(`/api/watcher/stop-validations/?schedule_id=${encodeURIComponent(scheduleId)}`).catch(() => ({ data: null })),
     ])
     const nextStopIndex = Number(currentRes.data?.order)
     if (Number.isInteger(nextStopIndex) && nextStopIndex > 0) {
       setCurrentStopIndex(nextStopIndex)
       sessionStorage.setItem('ww_current_stop_index', String(nextStopIndex))
     }
-    const rows = statusRes.data?.results ?? statusRes.data ?? []
-    const snapshot = buildPickupStatusSnapshot(rows)
+    const rows = validationRes.data?.results ?? validationRes.data ?? []
+    const snapshot = buildStopValidationSnapshot(rows)
     setStopDetailsMap(snapshot.detailsMap)
     stopDetailsMapRef.current = snapshot.detailsMap
     setStopStatuses(prev => {
@@ -1039,8 +1035,6 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
       snapshot.statusMap.forEach((status, key) => {
         const stopOrder = Number(String(key).split(':')[1])
         if (Number.isNaN(stopOrder)) return
-        const current = next.get(stopOrder)
-        if (current === 'missed' && status !== 'missed') return
         next.set(stopOrder, status)
       })
       return next
@@ -1052,20 +1046,23 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
     const safeStatus = normalizeStopStatus(status)
     if (!marker || !window.L) return
     const details = detailsOverride ?? stopDetailsMapRef.current.get(`${schedule?.id}:${wpIndex}`)
+    const isActive = wpIndex === currentStopIndex && isRoutableStopStatus(safeStatus)
+    const colorEntry = STOP_COLORS[safeStatus] || STOP_COLORS.PENDING_INSPECTION
     marker.setIcon(window.L.divIcon({
-      html: stopMarkerHTML(wpIndex, safeStatus, details),
+      html: stopMarkerHTML(wpIndex, safeStatus, details, isActive),
       className: 'ww-stop-div-icon',
-      iconSize: safeStatus === 'current' ? [28, 28] : [24, 24],
-      iconAnchor: safeStatus === 'current' ? [14, 14] : [12, 12],
+      iconSize: isActive ? [28, 28] : [24, 24],
+      iconAnchor: isActive ? [14, 14] : [12, 12],
     }))
+    const displayColor = safeStatus === 'PENDING_INSPECTION' ? '#94a3b8' : colorEntry.bg
     const popupHtml = `
       <b>${waypoints[wpIndex]?.label || ('Stop ' + wpIndex)}</b>
-      <br/><span style="font-size:11px;color:${safeStatus === 'none' ? '#94a3b8' : STOP_COLORS[safeStatus].bg};font-weight:700;text-transform:uppercase">${safeStatus}</span>
-      ${details?.collectedAt ? `<div style="margin-top:6px;font-size:11px;color:#10b981">Collected: ${details.collectedAt}</div>` : ''}
+      <br/><span style="font-size:11px;color:${displayColor};font-weight:700;text-transform:uppercase">${STOP_STATUS_LABELS[safeStatus] || safeStatus}</span>
+      ${details?.collectedAt ? `<div style="margin-top:6px;font-size:11px;color:#10b981">Reported: ${details.collectedAt}</div>` : ''}
       ${details?.truck ? `<div style="font-size:11px;color:#64748b">Truck: ${details.truck}</div>` : ''}
     `
     marker.getPopup()?.setContent(popupHtml)
-  }, [waypoints, schedule])
+  }, [waypoints, schedule, currentStopIndex])
 
   useEffect(() => {
     if (!window.L || stopMarkersRef.current.size === 0) return
@@ -1105,38 +1102,26 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
         setCurrentStopIndex(idx)
         sessionStorage.setItem('ww_current_stop_index', String(idx))
         if (currentStopRes.data?.id) sessionStorage.setItem('ww_pending_collection_stop_id', String(currentStopRes.data.id))
-        if (idx > 1) {
-          const syncedStatuses = restoreStopStatuses()
-          for (let wpIndex = 1; wpIndex < idx; wpIndex += 1) {
-            if (syncedStatuses.get(wpIndex) !== 'missed') syncedStatuses.set(wpIndex, 'collected')
-          }
-          persistStopStatuses(syncedStatuses)
-          setStopStatuses(syncedStatuses)
-        }
         try {
-          const psRes = await api.get('/api/driver/pickup-statuses/')
-          const rows = psRes.data?.results ?? psRes.data ?? []
-          const details = new Map()
-          rows.forEach(ps => {
-            const scheduleId = String(ps?.schedule ?? ps?.schedule_id ?? '')
-            const stopOrder = Number(ps.stop_order ?? ps.stopOrder)
-            if (!scheduleId || Number.isNaN(stopOrder)) return
-            if (String(match?.id) !== scheduleId) return
-            let collectedAt = ''
-            try { if (ps.collected_at) { const d = new Date(ps.collected_at); if (!isNaN(d)) collectedAt = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) } } catch {}
-            details.set(`${scheduleId}:${stopOrder}`, { collectedAt, truck: ps.truck_plate || ps.truck || '', scheduledTime: match?.start_time || ps.scheduledTime || '' })
+          const valRes = await api.get(`/api/watcher/stop-validations/?schedule_id=${encodeURIComponent(match?.id || '')}`)
+          const rows = valRes.data?.results ?? valRes.data ?? []
+          const snapshot = buildStopValidationSnapshot(rows)
+          setStopDetailsMap(snapshot.detailsMap)
+          stopDetailsMapRef.current = snapshot.detailsMap
+          const statusMap = new Map()
+          snapshot.statusMap.forEach((status, key) => {
+            const stopOrder = Number(String(key).split(':')[1])
+            if (!Number.isNaN(stopOrder)) statusMap.set(stopOrder, status)
           })
-          setStopDetailsMap(details)
-          stopDetailsMapRef.current = details
-          details.forEach((val, k) => { const parts = String(k).split(':'); const idx = Number(parts[1]); if (!Number.isNaN(idx)) repaintMarker(idx, getStopStatus(idx), val) })
-        } catch {}
+          setStopStatuses(statusMap)
+        } catch { }
       })
       .catch(() => setSchedule(null))
       .finally(() => setMapLoading(false))
   }, [user?.id])
 
   useEffect(() => {
-    if (!schedule?.id) return () => {}
+    if (!schedule?.id) return () => { }
     let alive = true
     const refresh = async () => { try { await syncPickupStatuses() } catch (err) { if (alive) console.error('[ShiftRouteModule] pickup sync error', err) } }
     refresh()
@@ -1161,7 +1146,7 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
       attribution: '© OpenStreetMap', maxZoom: 19,
     }).addTo(map)
     mapInstance.current = map
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leafletReady])
 
   // ── FIX 4: Driver marker creation is now DECOUPLED from map init. ─────────
@@ -1210,44 +1195,43 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
     if (pos && routeState === 'navigating') {
       mapInstance.current.panTo([pos.lat, pos.lng])
     }
-  // Re-run when map becomes ready OR when the first GPS fix arrives.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Re-run when map becomes ready OR when the first GPS fix arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leafletReady, gpsPos])
 
   // 3b. Draw stop markers
   useEffect(() => {
     if (!mapInstance.current || !window.L || !schedule) return
-    stopMarkersRef.current.forEach(marker => { try { mapInstance.current.removeLayer(marker) } catch {} })
+    stopMarkersRef.current.forEach(marker => { try { mapInstance.current.removeLayer(marker) } catch { } })
     stopMarkersRef.current.clear()
     const L = window.L
     const wps = schedule.waypoints || []
     wps.slice(1).forEach((wp, i) => {
       const wpIndex = i + 1
-      const status = (() => {
-        if (stopStatuses.has(wpIndex)) return stopStatuses.get(wpIndex)
-        if (wpIndex === currentStopIndex) return 'current'
-        if (wpIndex < currentStopIndex) return 'collected'
-        return 'upcoming'
-      })()
+      const status = getStopStatus(wpIndex)
+      const isActive = wpIndex === currentStopIndex && isRoutableStopStatus(status)
       const details = stopDetailsMapRef.current.get(`${schedule?.id}:${wpIndex}`)
+      const safeStatus = normalizeStopStatus(status)
+      const colorEntry = STOP_COLORS[safeStatus] || STOP_COLORS.PENDING_INSPECTION
+      const displayColor = safeStatus === 'PENDING_INSPECTION' ? '#94a3b8' : colorEntry.bg
       const icon = L.divIcon({
-        html: stopMarkerHTML(wpIndex, status, details),
+        html: stopMarkerHTML(wpIndex, status, details, isActive),
         className: 'ww-stop-div-icon',
-        iconSize: status === 'current' ? [28, 28] : [24, 24],
-        iconAnchor: status === 'current' ? [14, 14] : [12, 12],
+        iconSize: isActive ? [28, 28] : [24, 24],
+        iconAnchor: isActive ? [14, 14] : [12, 12],
       })
       const marker = L.marker([wp.lat, wp.lng], { icon })
         .addTo(mapInstance.current)
         .bindPopup(`
           <div style="font-family:sans-serif;min-width:160px;">
             <b style="font-size:13px;">${wp.label || ('Stop ' + wpIndex)}</b><br/>
-            <span style="font-size:11px;color:${normalizeStopStatus(status) === 'none' ? '#94a3b8' : STOP_COLORS[normalizeStopStatus(status)].bg};font-weight:700;text-transform:uppercase">
-              ${normalizeStopStatus(status)}
+            <span style="font-size:11px;color:${displayColor};font-weight:700;text-transform:uppercase">
+              ${STOP_STATUS_LABELS[safeStatus] || safeStatus}
             </span>
           </div>`)
       stopMarkersRef.current.set(wpIndex, marker)
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schedule])
 
   // 4. ORS directions
@@ -1257,7 +1241,11 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
     if (!orsApiKey) return
     const startLng = gpsPos?.lng ?? waypoints[0]?.lng ?? 121.617
     const startLat = gpsPos?.lat ?? waypoints[0]?.lat ?? 13.9373
-    const remaining = waypoints.slice(currentStopIndex, currentStopIndex + 40).map(wp => [wp.lng, wp.lat])
+    const routableFromCurrent = getRoutableIndices().filter(idx => idx >= currentStopIndex)
+    const remaining = routableFromCurrent.slice(0, 40).map(idx => {
+      const wp = waypoints[idx]
+      return [wp.lng, wp.lat]
+    })
     const coordinates = [[startLng, startLat], ...remaining]
     fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
       method: 'POST',
@@ -1275,7 +1263,7 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
         }
       })
       .catch(console.error)
-  }, [orsFetchKey, currentTarget?.lat, currentTarget?.lng, currentStopIndex])
+  }, [orsFetchKey, currentTarget?.lat, currentTarget?.lng, currentStopIndex, getRoutableIndices, waypoints])
 
   // 5. Move driver marker — runs every time gpsPos updates.
   useEffect(() => {
@@ -1318,9 +1306,9 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
       const next = new Map(prev)
       waypoints.slice(fromIndex).forEach((_, i) => {
         const idx = fromIndex + i
-        if (!next.has(idx) || next.get(idx) === 'upcoming' || next.get(idx) === 'current') {
-          next.set(idx, 'missed')
-          repaintMarker(idx, 'missed')
+        if (isRoutableStopStatus(next.get(idx))) {
+          next.set(idx, 'COLLECTION_DISPUTED')
+          repaintMarker(idx, 'COLLECTION_DISPUTED')
         }
       })
       return next
@@ -1340,10 +1328,20 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
     setRouteState('arrived')
   }
 
-  function handleCollectionConfirmed() { setRouteState('completed') }
+  function handleCollectionConfirmed() {
+    setStopStatuses(prev => {
+      const next = new Map(prev)
+      next.set(currentStopIndex, 'COLLECTION_REPORTED')
+      return next
+    })
+    repaintMarker(currentStopIndex, 'COLLECTION_REPORTED')
+    setRouteState('completed')
+  }
 
   function handleNextStop() {
-    const nextIndex = currentStopIndex + 1
+    const routable = getRoutableIndices()
+    const pos = routable.indexOf(currentStopIndex)
+    const nextIndex = pos >= 0 && pos < routable.length - 1 ? routable[pos + 1] : currentStopIndex + 1
     setCurrentStopIndex(nextIndex)
     sessionStorage.setItem('ww_current_stop_index', String(nextIndex))
     sessionStorage.removeItem('ww_pending_collection_note')
@@ -1456,18 +1454,21 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
             </div>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
               {[
-                { status: 'collected', count: [...stopStatuses.values()].filter(s => s === 'collected').length || Math.max(0, currentStopIndex - 1), color: '#16a34a' },
-                { status: 'current',   count: [...stopStatuses.values()].filter(s => s === 'current').length,   color: '#2563eb' },
-                { status: 'upcoming',  count: [...stopStatuses.values()].filter(s => s === 'upcoming').length,  color: '#f59e0b' },
-                { status: 'missed',    count: [...stopStatuses.values()].filter(s => s === 'missed').length,    color: '#ef4444' },
-                { status: 'pending',   count: [...stopStatuses.values()].filter(s => s === 'pending').length,   color: '#94a3b8' },
-                { status: 'none',      count: [...stopStatuses.values()].filter(s => s === 'none').length,      color: '#94a3b8' },
-              ].map(({ status, count, color }) => count > 0 && (
-                <div key={status} style={{ display: 'flex', alignItems: 'center', gap: 3, background: `${color}22`, border: `1px solid ${color}44`, borderRadius: 20, padding: '2px 8px' }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
-                  <span style={{ fontSize: 9, fontWeight: 800, color, letterSpacing: '.04em' }}>{count}</span>
-                </div>
-              ))}
+                { status: 'PENDING_INSPECTION', color: '#94a3b8' },
+                { status: 'READY_FOR_COLLECTION', color: '#f59e0b' },
+                { status: 'EMPTY_STOP', color: '#94a3b8' },
+                { status: 'COLLECTION_REPORTED', color: '#eab308' },
+                { status: 'VERIFIED_COLLECTED', color: '#16a34a' },
+                { status: 'COLLECTION_DISPUTED', color: '#ef4444' },
+              ].map(({ status, color }) => {
+                const count = [...stopStatuses.values()].filter(s => normalizeStopStatus(s) === status).length
+                return count > 0 && (
+                  <div key={status} style={{ display: 'flex', alignItems: 'center', gap: 3, background: `${color}22`, border: `1px solid ${color}44`, borderRadius: 20, padding: '2px 8px' }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
+                    <span style={{ fontSize: 9, fontWeight: 800, color, letterSpacing: '.04em' }}>{count}</span>
+                  </div>
+                )
+              })}
             </div>
           </div>
         </div>
@@ -1518,21 +1519,35 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
             {!isNearDestination && distanceToStop == null && (
               <p style={{ fontSize: 12, color: '#f59e0b', marginBottom: 12 }}>📡 Waiting for GPS signal…</p>
             )}
-            <button
-              id="arrived-btn"
-              disabled={!isNearDestination}
-              onClick={handleArrived}
-              style={{
-                width: '100%', maxWidth: 320, padding: '18px', borderRadius: 30, border: 'none',
-                fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, letterSpacing: '.06em',
-                transition: 'all .35s ease',
-                cursor: isNearDestination ? 'pointer' : 'not-allowed',
-                background: isNearDestination ? '#0f172a' : '#e2e8f0',
-                color: isNearDestination ? '#fff' : '#94a3b8',
-                boxShadow: isNearDestination ? '0 6px 20px rgba(15,23,42,0.3)' : 'none',
-              }}>
-              {isNearDestination ? 'Confirm Arrival' : 'Confirm on Arrival'}
-            </button>
+            {(() => {
+              const currentStatus = stopStatuses.has(currentStopIndex) ? normalizeStopStatus(stopStatuses.get(currentStopIndex)) : 'PENDING_INSPECTION';
+              const isRoutable = isRoutableStopStatus(currentStatus);
+              const canArrive = isNearDestination && isRoutable;
+
+              let buttonText = 'Confirm on Arrival';
+              if (isNearDestination) {
+                if (isRoutable) buttonText = 'Confirm Arrival';
+                else buttonText = 'Waiting for Inspection...';
+              }
+
+              return (
+                <button
+                  id="arrived-btn"
+                  disabled={!canArrive}
+                  onClick={handleArrived}
+                  style={{
+                    width: '100%', maxWidth: 320, padding: '18px', borderRadius: 30, border: 'none',
+                    fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, letterSpacing: '.06em',
+                    transition: 'all .35s ease',
+                    cursor: canArrive ? 'pointer' : 'not-allowed',
+                    background: canArrive ? '#0f172a' : '#e2e8f0',
+                    color: canArrive ? '#fff' : '#94a3b8',
+                    boxShadow: canArrive ? '0 6px 20px rgba(15,23,42,0.3)' : 'none',
+                  }}>
+                  {buttonText}
+                </button>
+              );
+            })()}
           </div>
         </div>
       </div>

@@ -501,26 +501,24 @@ export default function Navbar() {
 
   const mobileNavItems = user
     ? [
-        ...baseItems.map(item => ({
-          path: item.path,
-          icon: item.icon,   // keep as-is; resolveIcon() handles it in render
-          label: item.label,
-        })),
-        ...(role === 'driver'
-          ? [{ path: '/collection/confirm', icon: 'check', label: 'Confirm Collection' }]
-          : []),
-      ]
+      ...baseItems.map(item => ({
+        path: item.path,
+        icon: item.icon,   // keep as-is; resolveIcon() handles it in render
+        label: item.label,
+      }))
+
+    ]
     : [
-        { path: '/',         icon: 'home',     label: 'Home'     },
-        { path: '/login',    icon: 'login',    label: 'Login'    },
-        { path: '/register', icon: 'register', label: 'Register' },
-      ]
+      { path: '/', icon: '🏠', label: 'Home' },
+      { path: '/login', icon: '🔑', label: 'Login' },
+      { path: '/register', icon: '📝', label: 'Register' },
+    ]
 
   const desktopLinks = [
-    { path: '/',            label: 'Home'      },
-    { path: '/map',         label: 'Map'       },
-    { path: '/schedule',    label: 'Schedule'  },
-    { path: '/about',       label: 'About'     },
+    { path: '/', label: 'Home' },
+    { path: '/map', label: 'Map' },
+    { path: '/schedule', label: 'Schedule' },
+    { path: '/about', label: 'About' },
     ...(user ? [{ path: '/dashboard', label: 'Dashboard' }] : []),
   ]
 

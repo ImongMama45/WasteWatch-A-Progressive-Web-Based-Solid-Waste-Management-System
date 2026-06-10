@@ -11,7 +11,7 @@ import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
 import useShiftTimer from '../../hooks/useShiftTimer'
-import useGpsTracking from '../../hooks/useGpsTracking'
+import { useOptionalDriverGps } from '../../context/DriverGpsContext'
 import IssueReporter from './components/IssueReporter'
 import HomeCarousel from '../../components/carousel/HomeCarousel'
 
@@ -107,7 +107,10 @@ export default function DriverDashboard() {
   const [issueOpen, setIssueOpen] = useState(false)
 
   const { shiftActive, startTime, formattedTime, startShift } = useShiftTimer()
-  const { position: gpsPosition, syncFailed, lastSyncedAt } = useGpsTracking({ enabled: shiftActive })
+  const driverGps = useOptionalDriverGps()
+  const gpsPosition = driverGps?.position ?? null
+  const syncFailed = driverGps?.syncFailed ?? false
+  const lastSyncedAt = driverGps?.lastSyncedAt ?? null
 
   const activeStatus = STATUSES.find(s => s.key === status) || STATUSES[0]
   const firstName = user?.full_name?.split(' ')[0] || 'Driver'
