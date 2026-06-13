@@ -11,7 +11,6 @@ from .models import (
     PickupStatus,
     TruckLocation,
     CompletionReport,
-    DriverNotification,
     TruckCrewAssignment,
     WasteDelivery,
     CalendarEvent,
@@ -25,7 +24,6 @@ from .serializers import (
     PickupStatusSerializer,
     TruckLocationSerializer,
     CompletionReportSerializer,
-    DriverNotificationSerializer,
     TruckCrewAssignmentSerializer,
     WasteDeliverySerializer,
     CalendarEventSerializer,
@@ -428,6 +426,13 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
         validation.current_status = StopValidationStatus.COLLECTION_REPORTED
         validation.save()
 
+        # ── Notify barangay: collection done ─────────────────────────────────
+        try:
+            from notifications.services import notify_collection_done
+            notify_collection_done(schedule, stop_order, driver=request.user)
+        except Exception:
+            pass  # non-fatal — collection is already recorded
+
         photo_url = None
         if ps.photo_url:
             try:
@@ -501,6 +506,55 @@ class TruckLocationViewSet(viewsets.ModelViewSet):
                 'current_latitude', 'current_longitude', 'last_location_update'
             ])
 
+        # ── TRUCK_NEAR check ──────────────────────────────────────────────────
+        # Runs on every qualifying ping. The service handles distance + dedup
+        # internally — this call is always safe and non-blocking.
+        try:
+            from notifications.services import notify_truck_near
+
+            # Resolve today's schedule for this driver
+            _schedule = (
+                CollectionSchedule.objects
+                .filter(driver=driver, date=timezone.localdate())
+                .prefetch_related('barangays')
+                .first()
+            ) or (
+                CollectionSchedule.objects
+                .filter(driver=driver)
+                .prefetch_related('barangays')
+                .order_by('-id')
+                .first()
+            )
+
+            if _schedule and _schedule.waypoints:
+                # Find the next uncompleted stop to check proximity against
+                from watcher.models import StopValidation, StopValidationStatus
+                today_date = timezone.localdate()
+                next_stop  = (
+                    StopValidation.objects
+                    .filter(
+                        schedule=_schedule,
+                        collection_date=today_date,
+                        current_status=StopValidationStatus.READY_FOR_COLLECTION,
+                    )
+                    .order_by('stop_order')
+                    .first()
+                )
+                if next_stop:
+                    wp = _schedule.waypoints[next_stop.stop_order] if next_stop.stop_order < len(_schedule.waypoints) else None
+                    if wp and 'lat' in wp and 'lng' in wp:
+                        notify_truck_near(
+                            shift=active_shift,
+                            schedule=_schedule,
+                            stop_order=next_stop.stop_order,
+                            stop_lat=float(wp['lat']),
+                            stop_lng=float(wp['lng']),
+                            driver_lat=float(lat),
+                            driver_lng=float(lng),
+                        )
+        except Exception:
+            pass  # TRUCK_NEAR is best-effort — never block GPS recording
+
         location = TruckLocation.objects.create(
             driver=driver,
             truck=active_shift.truck,
@@ -516,11 +570,7 @@ class CompletionReportViewSet(viewsets.ModelViewSet):
     queryset = CompletionReport.objects.all()
     serializer_class = CompletionReportSerializer
     permission_classes = [permissions.IsAuthenticated]
-
-class DriverNotificationViewSet(viewsets.ModelViewSet):
-    queryset = DriverNotification.objects.all()
-    serializer_class = DriverNotificationSerializer
-    permission_classes = [permissions.IsAuthenticated]
+ 
 
 
 class TruckCrewAssignmentViewSet(viewsets.ModelViewSet):
@@ -663,8 +713,9 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
                 schedule = CollectionSchedule.objects.filter(driver=driver).first()
         truck = assignment.truck if assignment else (schedule.truck if schedule else None)
 
-        # Vicinity check
-        if schedule and schedule.waypoints:
+        # Vicinity check — skipped in DEBUG mode for developer bypass
+        from django.conf import settings as django_settings
+        if schedule and schedule.waypoints and not django_settings.DEBUG:
             waypoints = schedule.waypoints
             if waypoints and len(waypoints) > 0:
                 home_base = waypoints[0]
@@ -674,12 +725,12 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
                             float(driver_lat), float(driver_lng),
                             float(home_base['lat']), float(home_base['lng'])
                         )
-                        if dist > 1000:   # ← hard 1 km radius
+                        if dist > 1000:   # hard 1 km radius (production only)
                             return Response({
                                 'error': f'You are too far from the home base ({int(dist)}m away)...'
-                            }, status=status.HTTP_403_FORBIDDEN)   # ← this is the 403
+                            }, status=status.HTTP_403_FORBIDDEN)
                     except ValueError:
-                        pass# Invalid coordinates format
+                        pass  # Invalid coordinates format
 
 
         
@@ -894,7 +945,7 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
             return Response({'error': 'barangay_name is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         now = timezone.now()
-        result_trucks, result_stops = []
+        result_trucks, result_stops = [], []
 
         for shift in DriverShift.objects.filter(is_active=True).select_related('driver', 'truck'):
             schedule = CollectionSchedule.objects.filter(

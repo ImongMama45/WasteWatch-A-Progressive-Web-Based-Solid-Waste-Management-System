@@ -40,6 +40,7 @@
 import { useState, useEffect } from 'react'
 import api from '../../../api/client'
 import { broadcastPickupStatusSync } from '../../../utils/pickupStatusSync'
+import { ICONS } from '../../../api/navConfig'
 
 export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete, onBack, MultiPhotoPicker }) {
   const [outcome, setOutcome] = useState('')     // 'present' | 'empty'
@@ -97,27 +98,28 @@ export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete
         <div style={{ padding: '18px 20px' }}>
 
           {/* GPS indicator */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: 10, marginBottom: 16, background: gpsPos ? 'rgba(22,163,74,0.06)' : 'rgba(245,158,11,0.06)', border: `1px solid ${gpsPos ? 'rgba(22,163,74,0.25)' : 'rgba(245,158,11,0.3)'}` }}>
-            <span style={{ fontSize: 14 }}>{gpsPos ? '📍' : '📡'}</span>
-            <span style={{ fontSize: 12, fontWeight: 700, color: gpsPos ? '#16a34a' : '#f59e0b' }}>
-              {gpsPos ? `GPS verified · ${gpsPos.lat.toFixed(4)}, ${gpsPos.lng.toFixed(4)}` : 'Waiting for GPS fix…'}
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: gpsPos ? 'rgba(20,184,166,0.1)' : 'rgba(245,158,11,0.1)', color: gpsPos ? '#14b8a6' : '#f59e0b', padding: '6px 12px', borderRadius: 20 }}>
+            <div style={{ width: 14, height: 14 }}>{gpsPos ? ICONS.pin : ICONS.warning}</div>
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.04em' }}>{gpsPos ? 'GPS ACQUIRED' : 'LOCATING...'}</span>
           </div>
 
           {/* Outcome */}
           <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.07em', marginBottom: 8 }}>INSPECTION OUTCOME *</div>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
             {[
-              { key: 'present', label: '🗑️ Garbage Present', color: '#f59e0b' },
-              { key: 'empty', label: '✅ Empty / Clean', color: '#16a34a' },
+              { key: 'present', label: 'Garbage Present', icon: ICONS.trash, color: '#f59e0b' },
+              { key: 'empty', label: 'Empty / Clean', icon: ICONS.check, color: '#16a34a' },
             ].map(opt => (
               <button key={opt.key} onClick={() => setOutcome(opt.key)} style={{
-                flex: 1, padding: '12px 8px', borderRadius: 10,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '12px 8px', borderRadius: 10,
                 border: `1.5px solid ${outcome === opt.key ? opt.color : '#e2e8f0'}`,
                 background: outcome === opt.key ? `${opt.color}10` : '#fff',
                 color: outcome === opt.key ? opt.color : '#475569',
                 fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all .15s',
-              }}>{opt.label}</button>
+              }}>
+                <div style={{ width: 18, height: 18 }}>{opt.icon}</div>
+                <div>{opt.label}</div>
+              </button>
             ))}
           </div>
 
@@ -153,10 +155,9 @@ export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete
               boxShadow: canSubmit ? '0 4px 16px rgba(15,23,42,.25)' : 'none',
               transition: 'all .2s',
             }}>
-              {submitting ? 'Submitting…'
-                : !gpsPos ? '📡 Awaiting GPS…'
-                  : photos.length === 0 ? '📷 Add photo first'
-                    : '🔍 Submit Inspection'}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                {submitting ? 'Submitting...' : <><div style={{ width: 18, height: 18 }}>{ICONS.search}</div> Submit Inspection</>}
+              </div>
             </button>
           </div>
           <div style={{ height: 20 }} />

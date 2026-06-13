@@ -117,6 +117,46 @@ function FillBar({ pct }) {
 }
 
 function TrendLine({ values, labels, color = 'var(--accent)' }) {
+  if (!Array.isArray(values) || values.length === 0) {
+    return (
+      <div style={{
+        height: 96,
+        borderRadius: 12,
+        border: '1px dashed var(--border)',
+        background: 'var(--bg)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'var(--text-muted)',
+        fontSize: 12,
+        fontWeight: 600,
+      }}>
+        No data yet
+      </div>
+    )
+  }
+
+  if (values.length === 1) {
+    return (
+      <div style={{
+        height: 96,
+        borderRadius: 12,
+        border: '1px solid var(--border)',
+        background: 'linear-gradient(180deg, var(--surface), var(--bg))',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 4,
+      }}>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Single data point</div>
+        <div style={{ fontFamily: 'var(--font-head)', fontSize: 28, fontWeight: 800, color }}>
+          {values[0]}
+        </div>
+      </div>
+    )
+  }
+
   const max = Math.max(...values, 1)
   const H = 80, W = 280
   const pts = values.map((v, i) => [

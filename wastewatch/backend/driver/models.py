@@ -67,9 +67,16 @@ class CollectionSchedule(models.Model):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
 
     def save(self, *args, **kwargs):
-        creating = self.pk is None
+        is_new = self._state.adding
         super().save(*args, **kwargs)
         self.sync_pickup_statuses()
+
+        # ── Notify affected barangays ─────────────────────────────────────────
+        try:
+            from notifications.services import notify_schedule_change
+            notify_schedule_change(self, is_new=is_new)
+        except ImportError:
+            pass  
 
     def sync_pickup_statuses(self):
         if not self.pk:
@@ -88,20 +95,29 @@ class CollectionSchedule(models.Model):
         with transaction.atomic():
             for order, waypoint in enumerate(stops, start=1):
                 address = ''
+                barangay_id = None
+                stop_id = None
                 if isinstance(waypoint, dict):
                     address = waypoint.get('label') or waypoint.get('address') or ''
+                    barangay_id = waypoint.get('barangay_id')
+                    stop_id = waypoint.get('stop_id')
+                
                 if order in existing_statuses:
                     ps = existing_statuses[order]
                     ps.driver = self.driver
                     ps.schedule = self
                     ps.address = address
-                    ps.save(update_fields=['driver', 'schedule', 'address'])
+                    ps.barangay_id = barangay_id
+                    ps.stop_id = stop_id
+                    ps.save(update_fields=['driver', 'schedule', 'address', 'barangay_id', 'stop_id'])
                 else:
                     self.pickups.create(
                         driver=self.driver,
                         status='EN_ROUTE',
                         stop_order=order,
                         address=address,
+                        barangay_id=barangay_id,
+                        stop_id=stop_id,
                     )
 
             stale_ids = [ps.id for order, ps in existing_statuses.items() if order not in desired_order_set]
@@ -132,6 +148,13 @@ class PickupStatus(models.Model):
         ('FAILED', 'Failed'),
     ]
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='EN_ROUTE')
+    barangay = models.ForeignKey(
+        'accounts.Barangay',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='pickups'
+    )
+    stop_id = models.CharField(max_length=100, blank=True, null=True, help_text='Stable stop ID from route builder')
     # Stop detail fields — used by the driver collection log UI
     stop_order  = models.PositiveIntegerField(default=0, help_text='Order of this stop in the route')
     address     = models.CharField(max_length=255, blank=True)
@@ -175,16 +198,6 @@ class CompletionReport(models.Model):
 
     def __str__(self):
         return f"Report {self.id} for {self.driver} ({self.generated_at.date()})"
-
-class DriverNotification(models.Model):
-    driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
-    title = models.CharField(max_length=150)
-    message = models.TextField()
-    created_at = models.DateTimeField(auto_now_add=True)
-    read = models.BooleanField(default=False)
-
-    def __str__(self):
-        return f"Notification for {self.driver} – {'Read' if self.read else 'Unread'}"
 
 
 # ---------------------------------------------------------------------------

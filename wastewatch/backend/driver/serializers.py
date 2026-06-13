@@ -7,7 +7,6 @@ from .models import (
     PickupStatus,
     TruckLocation,
     CompletionReport,
-    DriverNotification,
     TruckCrewAssignment,
     WasteDelivery,
     CalendarEvent,
@@ -102,10 +101,6 @@ class CompletionReportSerializer(serializers.ModelSerializer):
         model = CompletionReport
         fields = '__all__'
 
-class DriverNotificationSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = DriverNotification
-        fields = '__all__'
 
 
 class TruckCrewAssignmentSerializer(serializers.ModelSerializer):

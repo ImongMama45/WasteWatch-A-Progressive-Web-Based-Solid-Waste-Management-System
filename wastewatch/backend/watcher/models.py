@@ -249,6 +249,13 @@ class StopValidation(models.Model):
     )
     stop_order = models.PositiveIntegerField(help_text='Waypoint index (1 = first collection stop)')
     collection_date = models.DateField(help_text='The scheduled collection day for this validation cycle')
+    barangay = models.ForeignKey(
+        'accounts.Barangay',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='stop_validations'
+    )
+    stop_id = models.CharField(max_length=100, blank=True, null=True, help_text='Stable stop ID from route builder')
 
     current_status = models.CharField(
         max_length=30,

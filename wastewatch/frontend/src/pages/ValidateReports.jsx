@@ -9,11 +9,12 @@ import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import { useAuth } from '../context/AuthContext'
 import api from '../api/client'
+import { ICONS } from '../api/navConfig'
 
 const TYPE_META = {
-  overflow: { label: 'Overflow', icon: '🗑️', color: '#ef4444', bg: 'rgba(239,68,68,0.1)' },
-  illegal_dumping: { label: 'Illegal Dumping', icon: '🚯', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' },
-  missed: { label: 'Missed Pickup', icon: '📭', color: '#5dade2', bg: 'rgba(93,173,226,0.1)' },
+  overflow: { label: 'Overflow', icon: ICONS.trash, color: '#ef4444', bg: 'rgba(239,68,68,0.1)' },
+  illegal_dumping: { label: 'Illegal Dumping', icon: ICONS.warning, color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' },
+  missed: { label: 'Missed Pickup', icon: ICONS.box, color: '#5dade2', bg: 'rgba(93,173,226,0.1)' },
 }
 const STATUS_META = {
   pending: { label: 'Pending', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' },
@@ -251,7 +252,7 @@ export default function ValidateReports() {
                   border: `1px solid ${TYPE_META[drawerReport.issue_type]?.color}44`,
                   borderRadius: 10, padding: '8px 12px', flex: 1,
                 }}>
-                  <span style={{ fontSize: 20 }}>{TYPE_META[drawerReport.issue_type]?.icon}</span>
+                  <div style={{ width: 20, height: 20, color: TYPE_META[drawerReport.issue_type]?.color }}>{TYPE_META[drawerReport.issue_type]?.icon}</div>
                   <div>
                     <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.06em' }}>TYPE</div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: TYPE_META[drawerReport.issue_type]?.color }}>
@@ -265,9 +266,7 @@ export default function ValidateReports() {
                   border: `1px solid ${SEVERITY_COLORS[drawerReport.severity]}44`,
                   borderRadius: 10, padding: '8px 12px', flex: 1,
                 }}>
-                  <span style={{ fontSize: 20 }}>
-                    {drawerReport.severity === 'high' ? '🔴' : drawerReport.severity === 'medium' ? '🟡' : '🟢'}
-                  </span>
+                  <div style={{ width: 14, height: 14, borderRadius: '50%', background: SEVERITY_COLORS[drawerReport.severity] }} />
                   <div>
                     <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.06em' }}>SEVERITY</div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: SEVERITY_COLORS[drawerReport.severity] }}>
@@ -326,9 +325,9 @@ export default function ValidateReports() {
                 <div style={{
                   background: 'rgba(239,68,68,0.04)', border: '1px solid rgba(239,68,68,0.2)',
                   borderRadius: 10, padding: '12px 16px', marginBottom: 16,
-                  fontSize: 12, color: 'var(--danger)',
+                  fontSize: 12, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 6
                 }}>
-                  ⚠️ No photo evidence provided
+                  <div style={{ width: 14, height: 14 }}>{ICONS.warning}</div> No photo evidence provided
                 </div>
               )}
 
@@ -337,9 +336,10 @@ export default function ValidateReports() {
                 <div style={{
                   background: 'rgba(20,184,166,0.05)', border: '1px solid rgba(20,184,166,0.18)',
                   borderRadius: 8, padding: '10px 12px', marginBottom: 20,
-                  fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.65,
+                  fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.65, display: 'flex', gap: 8, alignItems: 'flex-start'
                 }}>
-                  <strong style={{ color: 'var(--text)' }}>💡 Your call:</strong> Approving makes this report visible to everyone on the live map and adds it to the collection queue. Rejecting records it in History.
+                  <div style={{ width: 16, height: 16, flexShrink: 0, marginTop: 2, color: 'var(--accent)' }}>{ICONS.warning}</div>
+                  <div><strong style={{ color: 'var(--text)' }}>Your call:</strong> Approving makes this report visible to everyone on the live map and adds it to the collection queue. Rejecting records it in History.</div>
                 </div>
               )}
             </div>
@@ -365,9 +365,9 @@ export default function ValidateReports() {
                   style={{
                     flex: 2, background: 'var(--accent)', color: '#0d1117',
                     border: 'none', borderRadius: 10, padding: '11px',
-                    fontWeight: 700, fontSize: 13,
+                    fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
                   }}>
-                  ✅ Approve & Publish
+                  <div style={{ width: 14, height: 14 }}>{ICONS.check}</div> Approve & Publish
                 </button>
               </div>
             )}
@@ -485,11 +485,11 @@ export default function ValidateReports() {
                 >
                   <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
                     <div style={{
-                      width: 44, height: 44, borderRadius: 12, flexShrink: 0,
+                      width: 40, height: 40, borderRadius: 12, flexShrink: 0,
                       background: tm.bg, display: 'flex', alignItems: 'center',
-                      justifyContent: 'center', fontSize: 20,
+                      justifyContent: 'center', color: tm.color
                     }}>
-                      {tm.icon}
+                      <div style={{ width: 20, height: 20 }}>{tm.icon}</div>
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
@@ -508,16 +508,16 @@ export default function ValidateReports() {
                           display: 'inline-block',
                           boxShadow: `0 0 5px ${SEVERITY_COLORS[report.severity]}`,
                         }} />
-                        {report.status === 'approved' && (
+                        {report.has_marker && (
                           <span style={{
                             fontSize: 9, fontWeight: 700, color: 'var(--accent)',
                             background: 'rgba(34,197,94,0.08)',
                             border: '1px solid rgba(34,197,94,0.25)',
-                            padding: '2px 7px', borderRadius: 20,
-                          }}>🗺 On Map</span>
+                            padding: '2px 7px', borderRadius: 20, display: 'inline-flex', alignItems: 'center', gap: 4
+                          }}><div style={{ width: 10, height: 10 }}>{ICONS.map}</div> On Map</span>
                         )}
                         {!report.image && report.status === 'pending' && (
-                          <span style={{ fontSize: 10, color: 'var(--danger)' }}>⚠️ No photo</span>
+                          <span style={{ fontSize: 10, color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><div style={{ width: 10, height: 10 }}>{ICONS.warning}</div> No photo</span>
                         )}
                       </div>
                       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>

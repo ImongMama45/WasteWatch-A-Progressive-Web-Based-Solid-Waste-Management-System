@@ -115,6 +115,16 @@ export default function DriverDashboard() {
   const activeStatus = STATUSES.find(s => s.key === status) || STATUSES[0]
   const firstName = user?.full_name?.split(' ')[0] || 'Driver'
 
+  // Check if today is in the driver's collection schedule
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long' })
+  const hasScheduleToday = (() => {
+    if (!schedule) return false
+    let activeDays = []
+    if (Array.isArray(schedule.days)) activeDays = schedule.days
+    else if (typeof schedule.days === 'string') activeDays = schedule.days.split(',').map(d => d.trim())
+    return activeDays.includes(today)
+  })()
+
   // When no active shift, always show zero progress regardless of stale state
   const displayStats = shiftActive ? routeStats : {
     totalStops: 0, completedStops: 0, distanceKm: 0,
@@ -218,6 +228,7 @@ export default function DriverDashboard() {
   // ── Shift toggle ─────────────────────────────────────────────────────────────
   function handleShiftToggle() {
     if (!shiftActive) {
+      if (!hasScheduleToday) return // blocked — no schedule today
       clearRouteSession()
       navigate('/driver/flow')
       return
@@ -327,6 +338,49 @@ export default function DriverDashboard() {
               MAIN COLUMN
           ════════════════════════════════════════ */}
           <div>
+
+          {/* ── NO SCHEDULE TODAY BANNER ── */}
+            {!loading && !shiftActive && !hasScheduleToday && (
+              <div style={{
+                marginBottom: 20,
+                borderRadius: 14, overflow: 'hidden',
+                border: '1.5px solid rgba(245,158,11,0.4)',
+                background: 'rgba(245,158,11,0.06)',
+                animation: 'fadeSlideIn .35s ease',
+              }}>
+                <div style={{
+                  background: 'linear-gradient(135deg,rgba(245,158,11,0.15),rgba(234,179,8,0.1))',
+                  padding: '18px 20px',
+                  display: 'flex', alignItems: 'flex-start', gap: 14,
+                }}>
+                  <div style={{
+                    width: 44, height: 44, borderRadius: 12, flexShrink: 0,
+                    background: 'rgba(245,158,11,0.15)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 22,
+                  }}>🚫</div>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 15, color: '#92400e', marginBottom: 4 }}>
+                      No Scheduled Collection Today
+                    </div>
+                    <div style={{ fontSize: 12, color: '#78350f', lineHeight: 1.5 }}>
+                      Today is <strong>{today}</strong>. Your collection schedule does not include today.
+                      You will not be able to start a shift until your next scheduled day.
+                    </div>
+                    {schedule && (
+                      <div style={{
+                        marginTop: 10, fontSize: 11, fontWeight: 700,
+                        color: '#92400e', letterSpacing: '.03em',
+                      }}>
+                        📅 Scheduled days: {Array.isArray(schedule.days)
+                          ? schedule.days.join(', ')
+                          : schedule.days || '—'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* ── STAT CARDS ── */}
             <div className="stat-grid" style={{ marginBottom: 20 }}>
@@ -443,18 +497,27 @@ export default function DriverDashboard() {
               <div style={{ display: 'flex', gap: 10, marginBottom: 24 }}>
                 <button id="driver-main-cta" className="abtn btn"
                   onClick={() => shiftActive ? navigate('/driver/flow') : handleShiftToggle()}
+                  disabled={!shiftActive && !hasScheduleToday}
                   style={{
                     flex: 2, padding: '16px 20px', borderRadius: 14,
                     fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 800,
-                    background: shiftActive
-                      ? 'linear-gradient(135deg,#2ecc71,#27ae60)'
-                      : 'linear-gradient(135deg,#3b82f6,#2563eb)',
-                    color: '#fff', border: 'none',
-                    boxShadow: shiftActive
-                      ? '0 4px 18px rgba(46,204,113,0.35)'
-                      : '0 4px 18px rgba(59,130,246,0.35)',
+                    background: !shiftActive && !hasScheduleToday
+                      ? 'rgba(148,163,184,0.15)'
+                      : shiftActive
+                        ? 'linear-gradient(135deg,#2ecc71,#27ae60)'
+                        : 'linear-gradient(135deg,#3b82f6,#2563eb)',
+                    color: !shiftActive && !hasScheduleToday ? '#94a3b8' : '#fff',
+                    border: !shiftActive && !hasScheduleToday ? '1.5px solid var(--border)' : 'none',
+                    cursor: !shiftActive && !hasScheduleToday ? 'not-allowed' : 'pointer',
+                    boxShadow: !shiftActive && !hasScheduleToday
+                      ? 'none'
+                      : shiftActive
+                        ? '0 4px 18px rgba(46,204,113,0.35)'
+                        : '0 4px 18px rgba(59,130,246,0.35)',
                   }}>
-                  {shiftActive ? '🚛 Resume Route' : '▶ Start Duty'}
+                  {!shiftActive && !hasScheduleToday
+                    ? '🚫 No Collection Today'
+                    : shiftActive ? '🚛 Resume Route' : '▶ Start Duty'}
                 </button>
                 {shiftActive && (
                   <button id="driver-end-shift" className="abtn btn"

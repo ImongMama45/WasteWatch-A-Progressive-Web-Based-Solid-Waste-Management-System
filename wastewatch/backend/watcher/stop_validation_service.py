@@ -25,14 +25,27 @@ def ensure_stop_validations_for_schedule(schedule, collection_date=None):
     created = []
     with transaction.atomic():
         for order in range(1, len(waypoints)):
+            wp = waypoints[order]
+            barangay_id = wp.get('barangay_id') if isinstance(wp, dict) else None
+            stop_id = wp.get('stop_id') if isinstance(wp, dict) else None
+
             sv, was_created = StopValidation.objects.get_or_create(
                 schedule=schedule,
                 stop_order=order,
                 collection_date=collection_date,
-                defaults={'current_status': StopValidationStatus.PENDING_INSPECTION},
+                defaults={
+                    'current_status': StopValidationStatus.PENDING_INSPECTION,
+                    'barangay_id': barangay_id,
+                    'stop_id': stop_id,
+                },
             )
             if was_created:
                 created.append(sv)
+            else:
+                if sv.barangay_id != barangay_id or sv.stop_id != stop_id:
+                    sv.barangay_id = barangay_id
+                    sv.stop_id = stop_id
+                    sv.save(update_fields=['barangay_id', 'stop_id'])
     return created
 
 

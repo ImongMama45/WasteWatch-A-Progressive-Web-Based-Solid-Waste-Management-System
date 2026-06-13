@@ -7,7 +7,6 @@ from .models import (
     PickupStatus,
     TruckLocation,
     CompletionReport,
-    DriverNotification,
 )
 
 admin.site.register(Truck)
@@ -17,4 +16,3 @@ admin.site.register(RouteAssignment)
 admin.site.register(PickupStatus)
 admin.site.register(TruckLocation)
 admin.site.register(CompletionReport)
-admin.site.register(DriverNotification)

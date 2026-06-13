@@ -24,7 +24,7 @@ from .serializers import UserSerializer, BarangaySerializer, RegisterSerializer,
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.select_related('barangay', 'dumpsite').all()
+    queryset = User.objects.select_related('barangay', 'dumpsite').order_by('-id')
     permission_classes = [permissions.IsAuthenticated]
 
     def get_serializer_class(self):

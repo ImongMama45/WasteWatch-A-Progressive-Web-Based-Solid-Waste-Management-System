@@ -15,6 +15,7 @@ import { useNavigate } from 'react-router-dom'
 
 import Navbar from '../../components/Navbar'
 import BottomNav from '../../components/BottomNav'
+import { ICONS } from '../../api/navConfig'
 import OfflineBanner from '../../components/OfflineBanner'
 import OfflineReportBuilder from '../../components/OfflineReportBuilder'
 import OfflineReportQueue from '../../components/OfflineReportQueue'
@@ -60,13 +61,13 @@ const HERO_SLIDES = [
 ]
 
 const LUCENA_BARANGAYS = [
-  'Bocohan','Cotta','Dalahican','Domoit','Gulang-Gulang',
-  'Ibabang Dupay','Ibabang Iyam','Ibabang Talim','Ilayang Dupay','Ilayang Iyam',
-  'Isabang','Labor','Maranggal','Market View','Mayao Castillo',
-  'Mayao Kanluran','Mayao Parada','Mayao Silangan','Novaliches','Palale',
-  'Ransohan','Salinas','San Antonio','San Fernando','San Isidro',
-  'San Jose','San Lucas','San Pablo','San Pedro','Santa Lucia',
-  'Santo Niño','Talao-Talao','Tayabas Drive',
+  'Bocohan', 'Cotta', 'Dalahican', 'Domoit', 'Gulang-Gulang',
+  'Ibabang Dupay', 'Ibabang Iyam', 'Ibabang Talim', 'Ilayang Dupay', 'Ilayang Iyam',
+  'Isabang', 'Labor', 'Maranggal', 'Market View', 'Mayao Castillo',
+  'Mayao Kanluran', 'Mayao Parada', 'Mayao Silangan', 'Novaliches', 'Palale',
+  'Ransohan', 'Salinas', 'San Antonio', 'San Fernando', 'San Isidro',
+  'San Jose', 'San Lucas', 'San Pablo', 'San Pedro', 'Santa Lucia',
+  'Santo Niño', 'Talao-Talao', 'Tayabas Drive',
 ]
 
 // ─── Map coordinate utilities (shared with OfflineGISLite) ───────────────────
@@ -85,19 +86,19 @@ function mapPts(coords) {
 
 // Simplified Lucena City barangay polygons for background map
 const HERO_BARANGAYS = [
-  { id: 'ibabang_dupay', poly: [[13.944,121.604],[13.950,121.606],[13.952,121.618],[13.948,121.624],[13.942,121.621],[13.940,121.610]] },
-  { id: 'gulang_gulang', poly: [[13.950,121.600],[13.958,121.602],[13.962,121.614],[13.956,121.618],[13.950,121.614],[13.948,121.606]] },
-  { id: 'cotta',         poly: [[13.930,121.604],[13.938,121.606],[13.940,121.614],[13.935,121.618],[13.928,121.615],[13.926,121.607]] },
-  { id: 'isabang',       poly: [[13.924,121.596],[13.932,121.598],[13.934,121.608],[13.928,121.612],[13.921,121.608],[13.920,121.600]] },
-  { id: 'dalahican',     poly: [[13.912,121.610],[13.920,121.612],[13.922,121.622],[13.916,121.628],[13.908,121.622],[13.907,121.614]] },
-  { id: 'ilayang_dupay', poly: [[13.935,121.618],[13.942,121.620],[13.945,121.632],[13.938,121.636],[13.932,121.630],[13.930,121.622]] },
-  { id: 'bocohan',       poly: [[13.920,121.622],[13.928,121.625],[13.930,121.635],[13.923,121.638],[13.916,121.632],[13.915,121.624]] },
-  { id: 'domoit',        poly: [[13.926,121.586],[13.934,121.590],[13.935,121.598],[13.928,121.600],[13.922,121.596],[13.921,121.588]] },
-  { id: 'ibabang_iyam',  poly: [[13.938,121.586],[13.946,121.590],[13.948,121.600],[13.942,121.604],[13.934,121.598],[13.932,121.590]] },
-  { id: 'ransohan',      poly: [[13.956,121.590],[13.964,121.593],[13.967,121.604],[13.960,121.607],[13.953,121.602],[13.951,121.594]] },
-  { id: 'ilayang_iyam',  poly: [[13.948,121.594],[13.956,121.596],[13.958,121.606],[13.952,121.610],[13.944,121.606],[13.942,121.597]] },
-  { id: 'labor',         poly: [[13.960,121.610],[13.966,121.613],[13.968,121.624],[13.962,121.627],[13.956,121.622],[13.954,121.614]] },
-  { id: 'san_jose',      poly: [[13.968,121.596],[13.975,121.600],[13.975,121.610],[13.969,121.614],[13.963,121.608],[13.962,121.599]] },
+  { id: 'ibabang_dupay', poly: [[13.944, 121.604], [13.950, 121.606], [13.952, 121.618], [13.948, 121.624], [13.942, 121.621], [13.940, 121.610]] },
+  { id: 'gulang_gulang', poly: [[13.950, 121.600], [13.958, 121.602], [13.962, 121.614], [13.956, 121.618], [13.950, 121.614], [13.948, 121.606]] },
+  { id: 'cotta', poly: [[13.930, 121.604], [13.938, 121.606], [13.940, 121.614], [13.935, 121.618], [13.928, 121.615], [13.926, 121.607]] },
+  { id: 'isabang', poly: [[13.924, 121.596], [13.932, 121.598], [13.934, 121.608], [13.928, 121.612], [13.921, 121.608], [13.920, 121.600]] },
+  { id: 'dalahican', poly: [[13.912, 121.610], [13.920, 121.612], [13.922, 121.622], [13.916, 121.628], [13.908, 121.622], [13.907, 121.614]] },
+  { id: 'ilayang_dupay', poly: [[13.935, 121.618], [13.942, 121.620], [13.945, 121.632], [13.938, 121.636], [13.932, 121.630], [13.930, 121.622]] },
+  { id: 'bocohan', poly: [[13.920, 121.622], [13.928, 121.625], [13.930, 121.635], [13.923, 121.638], [13.916, 121.632], [13.915, 121.624]] },
+  { id: 'domoit', poly: [[13.926, 121.586], [13.934, 121.590], [13.935, 121.598], [13.928, 121.600], [13.922, 121.596], [13.921, 121.588]] },
+  { id: 'ibabang_iyam', poly: [[13.938, 121.586], [13.946, 121.590], [13.948, 121.600], [13.942, 121.604], [13.934, 121.598], [13.932, 121.590]] },
+  { id: 'ransohan', poly: [[13.956, 121.590], [13.964, 121.593], [13.967, 121.604], [13.960, 121.607], [13.953, 121.602], [13.951, 121.594]] },
+  { id: 'ilayang_iyam', poly: [[13.948, 121.594], [13.956, 121.596], [13.958, 121.606], [13.952, 121.610], [13.944, 121.606], [13.942, 121.597]] },
+  { id: 'labor', poly: [[13.960, 121.610], [13.966, 121.613], [13.968, 121.624], [13.962, 121.627], [13.956, 121.622], [13.954, 121.614]] },
+  { id: 'san_jose', poly: [[13.968, 121.596], [13.975, 121.600], [13.975, 121.610], [13.969, 121.614], [13.963, 121.608], [13.962, 121.599]] },
 ]
 
 const SEV_CLR = { high: '#ff3b30', medium: '#ff9f0a', low: '#34c759', critical: '#bf5af2' }
@@ -219,7 +220,7 @@ function HeroMapLayer({ isOnline }) {
       const rep = JSON.parse(localStorage.getItem('ww_offline_reports') || '[]')
       setHotspots(
         rep.filter(r => r.location?.lat && r.location?.lng)
-           .map(r => ({ lat: r.location.lat, lng: r.location.lng, severity: r.severity || 'medium', id: r.id }))
+          .map(r => ({ lat: r.location.lat, lng: r.location.lng, severity: r.severity || 'medium', id: r.id }))
       )
     } catch { /* silent */ }
   }, [])
@@ -398,18 +399,18 @@ function HeroMapLayer({ isOnline }) {
       }).addTo(layerGroup)
     })
 
-    ;[...MAPVIEW_GARBAGE_REPORTS, ...hotspots].forEach(report => {
-      const color = SEV_CLR[report.severity] || SEV_CLR.medium
-      L.circleMarker([report.lat, report.lng], {
-        interactive: false,
-        radius: isOnline ? 8 : 6,
-        fillColor: color,
-        color: '#ffffff',
-        weight: 2,
-        opacity: 0.85,
-        fillOpacity: isOnline ? 0.78 : 0.48,
-      }).addTo(layerGroup)
-    })
+      ;[...MAPVIEW_GARBAGE_REPORTS, ...hotspots].forEach(report => {
+        const color = SEV_CLR[report.severity] || SEV_CLR.medium
+        L.circleMarker([report.lat, report.lng], {
+          interactive: false,
+          radius: isOnline ? 8 : 6,
+          fillColor: color,
+          color: '#ffffff',
+          weight: 2,
+          opacity: 0.85,
+          fillOpacity: isOnline ? 0.78 : 0.48,
+        }).addTo(layerGroup)
+      })
 
     L.circleMarker([13.9370, 121.6155], {
       interactive: false,
@@ -572,9 +573,9 @@ export default function PublicDashboard() {
     selectedBarangay === 'all'
       ? schedule
       : (barangayScheduleCache[selectedBarangay] ??
-         schedule.filter(s =>
-           s.zone?.toLowerCase().includes(selectedBarangay.toLowerCase().split(' ')[0])
-         ))
+        schedule.filter(s =>
+          s.zone?.toLowerCase().includes(selectedBarangay.toLowerCase().split(' ')[0])
+        ))
 
   // Whether the selected barangay's schedule is from live sync or cache
   const brgyIsLive = isOnline && selectedBarangay !== 'all'
@@ -673,8 +674,8 @@ export default function PublicDashboard() {
 
         {/* Pending sync pill */}
         {pendingCount > 0 && (
-          <div className="ld-hero__sync-pill">
-            ⏳ {pendingCount} report{pendingCount > 1 ? 's' : ''} pending sync
+          <div className="ld-hero__sync-pill" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 14, height: 14, display: 'inline-flex' }}>{ICONS.clock}</span> {pendingCount} report{pendingCount > 1 ? 's' : ''} pending sync
           </div>
         )}
       </section>
@@ -988,8 +989,9 @@ export default function PublicDashboard() {
               <button
                 className={`ld-brgy-chip${selectedBarangay === 'all' ? ' ld-brgy-chip--active' : ''}`}
                 onClick={() => setSelectedBarangay('all')}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
               >
-                🏙️ All Zones
+                <span style={{ width: 14, height: 14, display: 'inline-flex' }}>{ICONS.map}</span> All Zones
               </button>
               {LUCENA_BARANGAYS.map(b => (
                 <button
@@ -1023,7 +1025,9 @@ export default function PublicDashboard() {
             <div className="ld-sched-modal__list">
               {scheduleForSelected.length === 0 ? (
                 <div className="ld-sched-modal__empty">
-                  <span style={{ fontSize: 32 }}>📅</span>
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12, color: 'var(--text-muted)' }}>
+                    <div style={{ width: 32, height: 32 }}>{ICONS.schedule}</div>
+                  </div>
                   <p>Walang schedule para sa <strong>{selectedBarangay}</strong>.</p>
                   {!isOnline && <p className="ld-sched-modal__empty-hint">Kumonekta sa internet para ma-load ang schedule.</p>}
                 </div>

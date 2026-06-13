@@ -928,8 +928,18 @@ function EndShiftOverlay({ visible, gpsPos, schedule, onClose }) {
 
 export default function ShiftRouteModule({ routeState: externalRouteState, setRouteState: externalSetRouteState }) {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const { formattedTime, shiftActive } = useShiftTimer()
   const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } = useDriverGps()
+
+  // ── Guard: redirect if no active shift ──────────────────────────────────────
+  const hasRedirected = useRef(false)
+  useEffect(() => {
+    if (!shiftActive && !hasRedirected.current) {
+      hasRedirected.current = true
+      navigate('/dashboard', { replace: true })
+    }
+  }, [shiftActive, navigate])
 
   const [routeState, setRouteStateLocal] = useState(() => {
     const saved = sessionStorage.getItem('ww_route_state')
@@ -962,6 +972,7 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
   const mapInstance = useRef(null)
   const driverMarker = useRef(null)
   const routeLayer = useRef(null)
+  const [mapReady, setMapReady] = useState(false)
 
   // ── FIX 3: Use useLayoutEffect for gpsPosRef so synchronous reads within
   // the same render cycle (e.g. in map init) always see the latest value. ────
@@ -987,6 +998,7 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
 
   const [orsData, setOrsData] = useState(null)
   const [orsFetchKey, setOrsFetchKey] = useState(0)
+  const lastOrsGpsPosRef = useRef(null)
 
   const waypoints = schedule?.waypoints || []
   const currentTarget = waypoints[currentStopIndex] || null
@@ -1135,7 +1147,6 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
   useEffect(() => {
     if (!leafletReady || !mapRef.current || mapInstance.current) return
     const L = window.L
-    // Use current GPS pos if available, otherwise fall back to Lucena coords.
     const pos = gpsPosRef.current
     const map = L.map(mapRef.current, {
       center: pos ? [pos.lat, pos.lng] : [13.9373, 121.617],
@@ -1146,44 +1157,75 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
       attribution: '© OpenStreetMap', maxZoom: 19,
     }).addTo(map)
     mapInstance.current = map
+    setMapReady(true)
+    setTimeout(() => map.invalidateSize(), 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leafletReady])
+  }, [leafletReady, schedule])
 
+
+  // GPS-movement-triggered ORS re-fetch
+  // Fires whenever gpsPos changes; if the driver has moved >10m from the
+  // last position used for an ORS fetch, bump orsFetchKey to re-fetch.
+  // This guarantees the first real GPS fix always triggers a route draw.
+  useEffect(() => {
+    if (!gpsPos) return
+    const last = lastOrsGpsPosRef.current
+    if (!last) {
+      // First fix — always trigger
+      lastOrsGpsPosRef.current = gpsPos
+      setOrsFetchKey(k => k + 1)
+      return
+    }
+    const moved = haversineDistance(last.lat, last.lng, gpsPos.lat, gpsPos.lng)
+    if (moved > 10) {
+      lastOrsGpsPosRef.current = gpsPos
+      setOrsFetchKey(k => k + 1)
+    }
+  }, [gpsPos])
   // ── FIX 4: Driver marker creation is now DECOUPLED from map init. ─────────
   // This effect waits until BOTH mapInstance.current and gpsPos are non-null
   // before creating the marker. If gpsPos arrives after the map, the marker
   // is created at the correct real position. If the map isn't ready yet when
   // gpsPos first arrives, this effect re-runs once the map is ready.
   useEffect(() => {
-    if (!mapInstance.current || !window.L) return
+    if (!mapReady || !mapInstance.current || !window.L) return
     if (driverMarker.current) return // already created — movement handled below
 
     const L = window.L
-    // Place at real GPS position if available, otherwise use map center.
     const pos = gpsPos || gpsPosRef.current
     const startPos = pos
       ? [pos.lat, pos.lng]
       : mapInstance.current.getCenter()
 
+    const heading = pos?.heading ?? 0
+
+    const truckIconHtml = (deg) => `
+      <div style="
+        width:32px;height:32px;
+        transform:rotate(${deg}deg);
+        transition:transform 0.6s ease;
+        filter:drop-shadow(0 3px 8px rgba(37,99,235,0.7));
+      ">
+        <svg viewBox="0 0 32 32" width="32" height="32" xmlns="http://www.w3.org/2000/svg">
+          <!-- Truck body -->
+          <rect x="6" y="10" width="20" height="14" rx="3" fill="#1d4ed8" stroke="white" stroke-width="1.5"/>
+          <!-- Cab -->
+          <rect x="14" y="6" width="12" height="10" rx="2" fill="#2563eb" stroke="white" stroke-width="1.2"/>
+          <!-- Windshield -->
+          <rect x="15" y="7.5" width="9" height="5" rx="1" fill="rgba(186,230,253,0.85)"/>
+          <!-- Wheels -->
+          <circle cx="10" cy="24" r="3" fill="#1e293b" stroke="white" stroke-width="1"/>
+          <circle cx="22" cy="24" r="3" fill="#1e293b" stroke="white" stroke-width="1"/>
+          <!-- Direction arrow on top -->
+          <polygon points="16,2 13.5,6.5 18.5,6.5" fill="#60a5fa"/>
+        </svg>
+      </div>`
+
     const driverIcon = L.divIcon({
-      html: `
-        <div style="position:relative;width:18px;height:18px;">
-          <span style="
-            position:absolute;inset:-6px;border-radius:50%;
-            border:2px solid #2563eb;opacity:0.4;
-            animation:markerPulse 2s ease infinite;
-          "></span>
-          <div style="
-            position:absolute;inset:0;
-            background:#2563eb;
-            border:3px solid white;
-            border-radius:50%;
-            box-shadow:0 0 12px rgba(37,99,235,0.7);
-          "></div>
-        </div>`,
+      html: truckIconHtml(heading),
       className: '',
-      iconSize: [18, 18],
-      iconAnchor: [9, 9],
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
     })
 
     driverMarker.current = L.marker(startPos, {
@@ -1191,17 +1233,19 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
       zIndexOffset: 1000,
     }).addTo(mapInstance.current)
 
+    // Store truck icon factory on ref so move effect can update rotation
+    driverMarker.current._truckIconHtml = truckIconHtml
+
     // Pan to the real GPS position immediately on first fix.
     if (pos && routeState === 'navigating') {
       mapInstance.current.panTo([pos.lat, pos.lng])
     }
-    // Re-run when map becomes ready OR when the first GPS fix arrives.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leafletReady, gpsPos])
+  }, [leafletReady, gpsPos, mapReady])
 
   // 3b. Draw stop markers
   useEffect(() => {
-    if (!mapInstance.current || !window.L || !schedule) return
+    if (!mapReady || !mapInstance.current || !window.L || !schedule) return
     stopMarkersRef.current.forEach(marker => { try { mapInstance.current.removeLayer(marker) } catch { } })
     stopMarkersRef.current.clear()
     const L = window.L
@@ -1232,21 +1276,22 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
       stopMarkersRef.current.set(wpIndex, marker)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schedule])
+  }, [schedule, mapReady])
 
   // 4. ORS directions
   useEffect(() => {
-    if (!currentTarget) return
+    if (!currentTarget || !mapReady) return
     const orsApiKey = import.meta.env.VITE_ORS_API_KEY
     if (!orsApiKey) return
-    const startLng = gpsPos?.lng ?? waypoints[0]?.lng ?? 121.617
-    const startLat = gpsPos?.lat ?? waypoints[0]?.lat ?? 13.9373
+    const startLng = Number(gpsPos?.lng ?? waypoints[0]?.lng ?? 121.617)
+    const startLat = Number(gpsPos?.lat ?? waypoints[0]?.lat ?? 13.9373)
     const routableFromCurrent = getRoutableIndices().filter(idx => idx >= currentStopIndex)
     const remaining = routableFromCurrent.slice(0, 40).map(idx => {
       const wp = waypoints[idx]
-      return [wp.lng, wp.lat]
+      return [Number(wp.lng), Number(wp.lat)]
     })
     const coordinates = [[startLng, startLat], ...remaining]
+    if (coordinates.length < 2) return
     fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: orsApiKey },
@@ -1263,7 +1308,7 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
         }
       })
       .catch(console.error)
-  }, [orsFetchKey, currentTarget?.lat, currentTarget?.lng, currentStopIndex, getRoutableIndices, waypoints])
+  }, [orsFetchKey, gpsPos?.lat, gpsPos?.lng, currentTarget?.lat, currentTarget?.lng, currentStopIndex, getRoutableIndices, waypoints, mapReady])
 
   // 5. Move driver marker — runs every time gpsPos updates.
   useEffect(() => {
@@ -1271,8 +1316,17 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
     if (!mapInstance.current || !window.L) return
 
     if (driverMarker.current) {
-      // Marker already exists — just move it.
       driverMarker.current.setLatLng([gpsPos.lat, gpsPos.lng])
+      // Update truck rotation if heading is available
+      if (driverMarker.current._truckIconHtml && window.L) {
+        const heading = gpsPos.heading ?? 0
+        driverMarker.current.setIcon(window.L.divIcon({
+          html: driverMarker.current._truckIconHtml(heading),
+          className: '',
+          iconSize: [32, 32],
+          iconAnchor: [16, 16],
+        }))
+      }
     }
     // Pan map only while navigating (not when an overlay is open).
     if (routeState === 'navigating') {
@@ -1407,8 +1461,7 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
         @keyframes arrowPop    { 0%{transform:scale(.8);opacity:0} 60%{transform:scale(1.1)} 100%{transform:scale(1);opacity:1} }
       `}</style>
 
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-body)', overflow: 'hidden', position: 'relative' }}>
-
+      <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-body)', overflow: 'hidden', position: 'relative' }}>
         {/* MAP */}
         <div style={{ position: 'absolute', inset: 0, zIndex: 0, background: '#2a3441' }}>
           <div ref={mapRef} style={{ width: '100%', height: '100%' }} />

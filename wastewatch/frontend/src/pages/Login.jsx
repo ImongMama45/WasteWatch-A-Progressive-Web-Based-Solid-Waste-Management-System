@@ -8,6 +8,7 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { ICONS } from '../api/navConfig'
 
 export default function Login() {
   const { login } = useAuth()
@@ -54,7 +55,9 @@ export default function Login() {
         </button>
 
         <div className="auth-logo">
-          <div className="logo-icon">🗑️</div>
+          <div className="logo-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 28, height: 28 }}>{ICONS.trash}</div>
+          </div>
           <h1>WasteWatch</h1>
           <p>Sign in to your account</p>
         </div>

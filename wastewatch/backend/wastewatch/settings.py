@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     'analytics',            # Performance metrics and trends
     'cloudinary_storage',   # Cloudinary storage backend
     'cloudinary',           # Cloudinary integration
+    'notifications',
 ]
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',   # Must be first
@@ -73,7 +74,13 @@ cloudinary.config(
     secure     = True
 )
 
-DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+# Use Cloudinary only when real credentials are provided.
+# Falls back to local FileSystemStorage in development to avoid 500s.
+_cloudinary_configured = CLOUDINARY_STORAGE['API_KEY'] not in ('your_api_key', '', None)
+if _cloudinary_configured:
+    DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+else:
+    DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
 
 ROOT_URLCONF = 'wastewatch.urls'
 

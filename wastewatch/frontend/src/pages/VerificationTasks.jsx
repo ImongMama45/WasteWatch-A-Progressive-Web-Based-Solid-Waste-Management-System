@@ -144,9 +144,10 @@ export default function VerificationTasks() {
       const rows = (res.data?.results ?? res.data ?? []).filter(t =>
         ['PENDING_INSPECTION', 'READY_FOR_COLLECTION', 'EMPTY_STOP'].includes(t.current_status),
       )
-      setTasks(rows.map(row => ({
+      setTasks(rows.map((row, index) => ({
         ...row,
-        title: row.label,
+        watcherIndex: index + 1,
+        title: `Stop ${index + 1} of ${rows.length} (${row.label})`,
         barangay: row.barangay_names || row.label,
         date: row.collection_date,
         status: row.current_status,

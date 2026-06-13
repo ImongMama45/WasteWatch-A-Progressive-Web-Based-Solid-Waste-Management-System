@@ -40,6 +40,7 @@
 import { useState, useEffect } from 'react'
 import api from '../../../api/client'
 import { broadcastPickupStatusSync } from '../../../utils/pickupStatusSync'
+import { ICONS } from '../../../api/navConfig'
 
 export default function PostCollectionOverlay({ visible, task, gpsPos, onComplete, onBack, MultiPhotoPicker }) {
   const [outcome, setOutcome] = useState('')     // 'present' | 'empty'
@@ -97,8 +98,8 @@ export default function PostCollectionOverlay({ visible, task, gpsPos, onComplet
         <div style={{ padding: '18px 20px' }}>
 
           {/* GPS indicator */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: 10, marginBottom: 16, background: gpsPos ? 'rgba(22,163,74,0.06)' : 'rgba(245,158,11,0.06)', border: `1px solid ${gpsPos ? 'rgba(22,163,74,0.25)' : 'rgba(245,158,11,0.3)'}` }}>
-            <span style={{ fontSize: 14 }}>{gpsPos ? '📍' : '📡'}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 12px', borderRadius: 10, marginBottom: 16, background: gpsPos ? 'rgba(22,163,74,0.06)' : 'rgba(245,158,11,0.06)', border: `1px solid ${gpsPos ? 'rgba(22,163,74,0.25)' : 'rgba(245,158,11,0.3)'}` }}>
+            <div style={{ width: 14, height: 14, color: gpsPos ? '#16a34a' : '#f59e0b' }}>{gpsPos ? ICONS.pin : ICONS.warning}</div>
             <span style={{ fontSize: 12, fontWeight: 700, color: gpsPos ? '#16a34a' : '#f59e0b' }}>
               {gpsPos ? `GPS verified · ${gpsPos.lat.toFixed(4)}, ${gpsPos.lng.toFixed(4)}` : 'Waiting for GPS fix…'}
             </span>
@@ -108,16 +109,19 @@ export default function PostCollectionOverlay({ visible, task, gpsPos, onComplet
           <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.07em', marginBottom: 8 }}>REMARKS / REASON *</div>
           <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
             {[
-              { key: 'success', label: '✅ Collection Complete', color: '#16a34a' },
-              { key: 'failed', label: '❌ Missed Collection', color: '#ef4444' },
+              { key: 'success', label: 'Collection Complete', icon: ICONS.check, color: '#16a34a' },
+              { key: 'failed', label: 'Missed Collection', icon: ICONS.warning, color: '#ef4444' },
             ].map(opt => (
               <button key={opt.key} onClick={() => setOutcome(opt.key)} style={{
                 flex: 1, padding: '12px 8px', borderRadius: 10,
                 border: `1.5px solid ${outcome === opt.key ? opt.color : '#e2e8f0'}`,
                 background: outcome === opt.key ? `${opt.color}10` : '#fff',
                 color: outcome === opt.key ? opt.color : '#475569',
-                fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all .15s',
-              }}>{opt.label}</button>
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  <div style={{ width: 16, height: 16 }}>{opt.icon}</div> {opt.label}
+                </div>
+              </button>
             ))}
           </div>
 

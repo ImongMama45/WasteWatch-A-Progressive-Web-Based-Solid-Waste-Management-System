@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import DashboardLayout from '../components/DashboardLayout'
 import BarangaySelect from '../components/BarangaySelect'
+import { ICONS } from '../api/navConfig'
 
 // Mock extra data for demo purposes since the backend might not have all fields yet
 const MOCK_EXTRA_DATA = {
@@ -28,10 +29,13 @@ export default function Profile() {
 
   // Form state
   const [form, setForm] = useState({
-    fullName: user?.full_name || '',
+    first_name: user?.first_name || '',
+    last_name: user?.last_name || '',
+    username: user?.username || '',
     email: user?.email || '',
     phone: user?.phone_number || '0912 345 6789', // Mock fallback
     barangay: user?.barangay || '',               // Store the ID here
+    profile_pic: null,
   })
 
   // Password state
@@ -53,29 +57,34 @@ export default function Profile() {
   async function handleSaveProfile(e) {
     e.preventDefault()
     try {
-      await updateUser({
-        full_name: form.fullName,
-        barangay: form.barangay
-      })
+      const payload = new FormData()
+      payload.append('first_name', form.first_name)
+      payload.append('last_name', form.last_name)
+      payload.append('username', form.username)
+      payload.append('full_name', `${form.first_name} ${form.last_name}`.trim())
+      if (form.barangay) payload.append('barangay', form.barangay)
+      if (form.profile_pic) payload.append('profile_pic', form.profile_pic)
+
+      await updateUser(payload)
       setIsEditing(false)
       showToast('Profile updated successfully.')
     } catch (err) {
-      showToast('❌ Failed to update profile.')
+      showToast('Failed to update profile.')
     }
   }
 
   function handleSavePassword(e) {
     e.preventDefault()
     if (pwd.new !== pwd.confirm) {
-      showToast('⚠️ New passwords do not match.')
+      showToast('New passwords do not match.')
       return
     }
     if (!pwd.current) {
-      showToast('⚠️ Current password is required.')
+      showToast('Current password is required.')
       return
     }
     setPwd({ current: '', new: '', confirm: '' })
-    showToast('🔒Password changed successfully.')
+    showToast('Password changed successfully.')
   }
 
   return (
@@ -105,15 +114,24 @@ export default function Profile() {
 
         {/* 1. Header Card */}
         <div className="profile-card" style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-          <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'var(--accent)', color: '#0d1117', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontWeight: 800 }}>
-            {user.full_name?.[0]?.toUpperCase() || '?'}
-          </div>
+          {user.profile_pic ? (
+            <img 
+              src={user.profile_pic} 
+              alt="Profile" 
+              style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }} 
+            />
+          ) : (
+            <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'var(--accent)', color: '#0d1117', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontWeight: 800 }}>
+              {user.first_name?.[0]?.toUpperCase() || user.full_name?.[0]?.toUpperCase() || '?'}
+            </div>
+          )}
           <div>
-            <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>{user.full_name}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>{user.full_name || `${user.first_name} ${user.last_name}`}</div>
+            <div style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 8 }}>@{user.username || 'username'}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <span className="role-badge">{role.replace('_', ' ')}</span>
               {(role === 'brgy_official' || role === 'watcher' || role === 'citizen') && (
-                <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>📍 Brgy. {user.barangay_name || 'Unassigned'}</span>
+                <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}><div style={{ width: 14, height: 14, color: '#14b8a6' }}>{ICONS.pin}</div> Brgy. {user.barangay_name || 'Unassigned'}</span>
               )}
             </div>
           </div>
@@ -134,12 +152,24 @@ export default function Profile() {
               <form onSubmit={handleSaveProfile}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
                   <div>
-                    <label className="form-label">Full Name</label>
-                    <input className="form-input" value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} required />
+                    <label className="form-label">First Name</label>
+                    <input className="form-input" value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} required />
+                  </div>
+                  <div>
+                    <label className="form-label">Last Name</label>
+                    <input className="form-input" value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} required />
+                  </div>
+                  <div>
+                    <label className="form-label">Username</label>
+                    <input className="form-input" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} required />
                   </div>
                   <div>
                     <label className="form-label">Email</label>
                     <input className="form-input" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} disabled style={{ opacity: 0.6, cursor: 'not-allowed' }} />
+                  </div>
+                  <div>
+                    <label className="form-label">Profile Picture</label>
+                    <input className="form-input" type="file" accept="image/*" onChange={e => setForm({ ...form, profile_pic: e.target.files[0] })} style={{ padding: 8 }} />
                   </div>
                   <div>
                     <label className="form-label">Contact Number</label>
@@ -165,8 +195,16 @@ export default function Profile() {
             ) : (
               <div>
                 <div className="info-row">
-                  <div className="info-label">Full Name</div>
-                  <div className="info-value">{user.full_name}</div>
+                  <div className="info-label">First Name</div>
+                  <div className="info-value">{user.first_name || '—'}</div>
+                </div>
+                <div className="info-row">
+                  <div className="info-label">Last Name</div>
+                  <div className="info-value">{user.last_name || '—'}</div>
+                </div>
+                <div className="info-row">
+                  <div className="info-label">Username</div>
+                  <div className="info-value">@{user.username || '—'}</div>
                 </div>
                 <div className="info-row">
                   <div className="info-label">Email Address</div>

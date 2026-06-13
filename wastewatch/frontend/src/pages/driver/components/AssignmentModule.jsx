@@ -259,7 +259,7 @@ export default function AssignmentModule({ setRouteState }) {
           {/* Start button */}
           <button id="start-duty-btn" onClick={() => {
             sessionStorage.setItem('ww_duty_type', 'normal')
-            setRouteState('checkin')
+            setRouteState('navigate_to_base')
           }}
             style={{ width: '100%', padding: '16px', borderRadius: 30, background: '#10b981', color: '#fff', border: 'none', fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 800, letterSpacing: '.08em', cursor: 'pointer', boxShadow: '0 4px 14px rgba(16,185,129,0.3)', marginBottom: 32 }}>
             START NORMAL DUTY

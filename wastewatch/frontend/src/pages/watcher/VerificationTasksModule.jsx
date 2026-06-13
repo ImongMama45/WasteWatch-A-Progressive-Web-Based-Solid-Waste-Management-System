@@ -232,11 +232,12 @@ function NoScheduleBanner({ barangayName }) {
       <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2, margin: '12px auto' }} />
       <div style={{ textAlign: 'center', padding: '18px 24px' }}>
         <div style={{
-          width: 56, height: 56, borderRadius: '50%',
-          background: 'rgba(245,158,11,0.1)', border: '1.5px solid rgba(245,158,11,0.3)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 28, margin: '0 auto 14px',
-        }}>📅</div>
+          width: 50, height: 50, borderRadius: 14, background: 'rgba(59,130,246,.15)', border: '1px solid rgba(59,130,246,.3)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3b82f6', marginBottom: 12,
+          boxShadow: '0 4px 12px rgba(59,130,246,.1)'
+        }}>
+          <div style={{ width: 24, height: 24 }}>{ICONS.schedule}</div>
+        </div>
         <div style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 900, color: '#0f172a', marginBottom: 6 }}>
           No Scheduled Verification Today
         </div>
@@ -309,7 +310,7 @@ export default function VerificationTasksModule() {
     const filtered = allStops.filter(stop => {
       // Match by barangay id or name (API may return either)
       const stopBrgy = stop.barangay_id ?? stop.barangay
-      const stopName = stop.barangay_name?.toLowerCase() ?? ''
+      const stopName = stop.barangay_names?.toLowerCase() ?? ''
       if (barangayId && stopBrgy != null) return String(stopBrgy) === String(barangayId)
       if (barangayName) return stopName.includes(barangayName) || barangayName.includes(stopName)
       return false
@@ -538,15 +539,17 @@ export default function VerificationTasksModule() {
             <ConnPill />
             {isMock && (
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(245,158,11,.15)', border: '1px solid rgba(245,158,11,.5)', borderRadius: 20, padding: '3px 10px' }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: '.04em' }}>📍 MOCK GPS</span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: '.04em', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <div style={{ width: 12, height: 12 }}>{ICONS.pin}</div> MOCK GPS
+                </span>
               </div>
             )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
               <div style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 900, letterSpacing: '.02em' }}>Verification Tasks</div>
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,.55)', marginTop: 2 }}>
-                {user?.barangay_name ? `📍 ${user.barangay_name}` : 'No barangay assigned'} ·{' '}
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,.55)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{ width: 14, height: 14 }}>{ICONS.pin}</div> {user?.barangay_name || 'No barangay assigned'} ·{' '}
                 {loading ? 'Loading…' : `${pendingCount} pending`}
               </div>
             </div>
@@ -568,7 +571,9 @@ export default function VerificationTasksModule() {
               <div style={{ textAlign: 'center', padding: '20px 0', color: '#64748b', fontSize: 13 }}>Loading…</div>
             ) : pendingCount === 0 ? (
               <div style={{ textAlign: 'center', padding: '20px 20px', color: '#64748b' }}>
-                <div style={{ fontSize: 36, marginBottom: 8 }}>✅</div>
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8, color: '#10b981' }}>
+                  <div style={{ width: 36, height: 36 }}>{ICONS.check}</div>
+                </div>
                 <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a', marginBottom: 4 }}>All stops inspected!</div>
                 <div style={{ fontSize: 12, color: '#94a3b8' }}>No pending inspection stops remaining today.</div>
               </div>
@@ -590,7 +595,7 @@ export default function VerificationTasksModule() {
                 </div>
 
                 {isNearStop
-                  ? <p style={{ fontSize: 12, color: '#14b8a6', fontWeight: 700, marginBottom: 12, textAlign: 'center' }}>📍 You have arrived — ready to inspect!</p>
+                  ? <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, color: '#14b8a6', marginBottom: 12 }}><div style={{ width: 16, height: 16 }}>{ICONS.pin}</div><p style={{ fontSize: 12, fontWeight: 700, margin: 0 }}>You have arrived — ready to inspect!</p></div>
                   : distToStop != null
                     ? <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12, textAlign: 'center' }}>Walk {distToStop > 1000 ? `${(distToStop / 1000).toFixed(1)} km` : `${Math.round(distToStop)} m`} to reach this stop</p>
                     : <p style={{ fontSize: 12, color: '#f59e0b', marginBottom: 12, textAlign: 'center' }}>📡 Waiting for GPS signal…</p>
@@ -607,19 +612,21 @@ export default function VerificationTasksModule() {
                     background: isNearStop ? '#0f172a' : '#e2e8f0',
                     color: isNearStop ? '#fff' : '#94a3b8',
                     boxShadow: isNearStop ? '0 6px 20px rgba(15,23,42,.3)' : 'none',
-                  }}
-                >
-                  {isNearStop ? '🔍 Inspect Stop' : 'Confirm on Arrival'}
+                  }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                    {isNearStop ? <><div style={{ width: 18, height: 18 }}>{ICONS.search}</div> Inspect Stop</> : 'Confirm on Arrival'}
+                  </div>
                 </button>
               </div>
             ) : null}
           </div>
         )}
-      </div>
+      </div >
 
       {/* INSPECTION OVERLAY — passes MultiPhotoPicker requirement down */}
-      <PreInspectionOverlay
-        visible={!!selectedTask}
+      < PreInspectionOverlay
+        visible={!!selectedTask
+        }
         task={selectedTask}
         gpsPos={gpsPos}
         onComplete={() => { setSelectedTask(null); loadStops() }}

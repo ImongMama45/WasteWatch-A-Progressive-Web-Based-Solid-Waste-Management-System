@@ -309,6 +309,10 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         today = timezone.localdate()
         qs = super().get_queryset().filter(collection_date=today)
 
+        user = self.request.user
+        if user.role == 'watcher' and user.barangay:
+            qs = qs.filter(barangay=user.barangay)
+
         status_param = self.request.query_params.get('status')
         if status_param:
             qs = qs.filter(current_status=status_param)

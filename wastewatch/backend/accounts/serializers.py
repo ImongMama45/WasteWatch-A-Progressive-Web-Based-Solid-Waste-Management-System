@@ -30,7 +30,8 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model  = User
         fields = [
-            'id', 'email', 'full_name', 'role', 'employee_type',
+            'id', 'username', 'email', 'full_name', 'first_name', 'last_name', 'role', 'employee_type',
+            'profile_pic',
             'barangay', 'barangay_name',
             'dumpsite', 'dumpsite_name',
             'is_active', 'created_at',
@@ -54,7 +55,8 @@ class AdminUserSerializer(serializers.ModelSerializer):
     class Meta:
         model  = User
         fields = [
-            'id', 'email', 'full_name', 'role', 'employee_type',
+            'id', 'username', 'email', 'full_name', 'first_name', 'last_name', 'role', 'employee_type',
+            'profile_pic',
             'barangay', 'barangay_name',
             'dumpsite', 'dumpsite_name',
             'is_active', 'password', 'created_at',
@@ -100,10 +102,22 @@ class RegisterSerializer(serializers.Serializer):
     barangay is required for valid citizens.
     """
 
-    full_name = serializers.CharField(
-        max_length=255, 
+    username = serializers.CharField(
+        max_length=150, 
         required=True,
-        error_messages={'required': 'Mangyaring ilagay ang iyong buong pangalan.'}
+        error_messages={'required': 'Mangyaring ilagay ang iyong username.'}
+    )
+    profile_pic = serializers.ImageField(required=False, allow_null=True)
+
+    first_name = serializers.CharField(
+        max_length=150, 
+        required=True,
+        error_messages={'required': 'Mangyaring ilagay ang iyong unang pangalan (First Name).'}
+    )
+    last_name = serializers.CharField(
+        max_length=150, 
+        required=True,
+        error_messages={'required': 'Mangyaring ilagay ang iyong huling pangalan (Last Name).'}
     )
     email     = serializers.EmailField(
         required=True,
@@ -132,6 +146,11 @@ class RegisterSerializer(serializers.Serializer):
 
     # ── Validation ──────────────────────────────────────────────────────────
 
+    def validate_username(self, value):
+        if User.objects.filter(username__iexact=value).exists():
+            raise serializers.ValidationError('Ang username na ito ay ginagamit na.')
+        return value.lower()
+
     def validate_email(self, value):
         if User.objects.filter(email__iexact=value).exists():
             raise serializers.ValidationError('Ang email na ito ay may account na.')
@@ -155,6 +174,11 @@ class RegisterSerializer(serializers.Serializer):
         
         # Public registration is ALWAYS citizen.
         role     = UserRole.CITIZEN
+
+        # Auto-generate full_name for backend models
+        first_name = validated_data.get('first_name', '')
+        last_name = validated_data.get('last_name', '')
+        validated_data['full_name'] = f"{first_name} {last_name}".strip()
 
         user = User(
             role=role,

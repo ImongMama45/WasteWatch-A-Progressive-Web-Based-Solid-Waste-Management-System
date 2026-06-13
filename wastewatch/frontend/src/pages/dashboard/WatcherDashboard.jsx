@@ -4,6 +4,7 @@ import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
 import HomeCarousel from '../../components/carousel/HomeCarousel'
+import { ICONS } from '../../api/navConfig'
 
 export default function Dashboard() {
   const { user } = useAuth()
@@ -52,7 +53,9 @@ export default function Dashboard() {
           onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 8px 32px rgba(20,184,166,.25)' }}
           onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 4px 24px rgba(20,184,166,.15)' }}
         >
-          <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(20,184,166,.15)', border: '1.5px solid rgba(20,184,166,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, flexShrink: 0 }}>🔍</div>
+          <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(20,184,166,.15)', border: '1.5px solid rgba(20,184,166,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent)', flexShrink: 0 }}>
+            <div style={{ width: 26, height: 26 }}>{ICONS.search}</div>
+          </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, color: '#fff', marginBottom: 3 }}>Start Inspection Tasks</div>
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,.55)' }}>Inspection & post-collection verification</div>
@@ -137,7 +140,9 @@ export default function Dashboard() {
                   reports.slice(0, 10).map(report => (
                     <div key={report.id} className="report-item"
                       onClick={() => navigate(`/report/${report.id}`)}>
-                      <div className="report-pin">📍</div>
+                      <div className="report-pin" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div style={{ width: 20, height: 20 }}>{ICONS.pin}</div>
+                      </div>
                       <div className="report-info">
                         <div className="report-type">
                           {report.issue_type_display}
@@ -182,7 +187,9 @@ export default function Dashboard() {
                     { day: 'Friday', time: '6:00 AM – 10:00 AM' },
                   ].map((s, i) => (
                     <div key={i} className="report-item">
-                      <div className="report-pin">📅</div>
+                      <div className="report-pin" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div style={{ width: 20, height: 20 }}>{ICONS.schedule}</div>
+                      </div>
                       <div className="report-info">
                         <div className="report-type">{s.day}</div>
                         <div className="report-location">{user.barangay_name}</div>
@@ -234,7 +241,7 @@ export default function Dashboard() {
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
                   }}
                 >
-                  🗺 View Live Map
+                  <div style={{ width: 18, height: 18 }}>{ICONS.map}</div> View Live Map
                 </button>
               </div>
             </div>
@@ -251,7 +258,9 @@ export default function Dashboard() {
                   { day: 'Friday', time: '6:00 AM – 10:00 AM' },
                 ].map((s, i) => (
                   <div key={i} className="report-item">
-                    <div className="report-pin">📅</div>
+                    <div className="report-pin" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <div style={{ width: 20, height: 20 }}>{ICONS.schedule}</div>
+                    </div>
                     <div className="report-info">
                       <div className="report-type">{s.day}</div>
                       <div className="report-location">{user.barangay_name}</div>

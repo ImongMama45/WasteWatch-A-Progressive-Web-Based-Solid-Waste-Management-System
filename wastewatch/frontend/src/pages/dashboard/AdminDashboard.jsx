@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import MiniMap from "../../components/MiniMap";
 import api from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
+import { ICONS } from "../../api/navConfig";
 
 // ─── Priority config ──────────────────────────────────────────────────────────
 
@@ -120,7 +121,7 @@ export default function AdminDashboard() {
       setEscalations(prev => prev.filter(e => e.id !== id));
       setExpandedEsc(null);
       showToast("Escalation resolved. Barangay has been notified.");
-    } catch { showToast("❌ Failed to resolve.") }
+    } catch { showToast("Failed to resolve.") }
   }
 
   const filteredHotspots = hotspotFilter === "all" ? hotspots : hotspots.filter(h => h.status === hotspotFilter);
@@ -190,10 +191,10 @@ export default function AdminDashboard() {
 
         <div className="stat-grid" style={{ marginBottom: 20 }}>
           {[
-            { label: "Open Reports", value: stats.pending_reports || 0, color: "var(--danger)", icon: "📋" },
-            { label: "Active Trucks", value: stats.active_trucks || 0, color: "var(--warning)", icon: "🚛" },
-            { label: "Escalations", value: escalations.length, color: "var(--danger)", icon: "⚠️" },
-            { label: "Routes Done", value: stats.completed_routes || 0, color: "var(--accent)", icon: "✅" },
+            { label: "Open Reports", value: stats.pending_reports || 0, color: "var(--danger)" },
+            { label: "Active Trucks", value: stats.active_trucks || 0, color: "var(--warning)" },
+            { label: "Escalations", value: escalations.length, color: "var(--danger)" },
+            { label: "Routes Done", value: stats.completed_routes || 0, color: "var(--accent)" },
           ].map(s => (
             <div key={s.label} className="stat-card">
               <div className="label">{s.label}</div>
@@ -279,11 +280,13 @@ export default function AdminDashboard() {
               <h3 className="section-title">Quick Actions</h3>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {[
-                  { label: "🗺 Live Map", route: "/map" },
-                  { label: "🚛 Trucks", route: "/admin/trucks" },
-                  { label: "📅 Schedule", route: "/schedule" },
+                  { label: "Live Map", icon: ICONS.map, route: "/map" },
+                  { label: "Trucks", icon: ICONS.truck, route: "/admin/trucks" },
+                  { label: "Schedule", icon: ICONS.schedule, route: "/schedule" },
                 ].map(a => (
-                  <button key={a.label} className="abtn" onClick={() => navigate(a.route)} style={{ background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13 }}>{a.label}</button>
+                  <button key={a.label} className="abtn" onClick={() => navigate(a.route)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13 }}>
+                    <span style={{ width: 14, height: 14, display: 'inline-flex' }}>{a.icon}</span> {a.label}
+                  </button>
                 ))}
               </div>
             </div>

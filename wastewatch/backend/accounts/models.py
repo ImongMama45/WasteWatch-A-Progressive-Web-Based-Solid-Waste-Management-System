@@ -104,6 +104,13 @@ class User(AbstractUser):
         help_text="Set to 'crew_member' for citizens who serve on collection trucks.",
     )
 
+    profile_pic = models.ImageField(
+        upload_to='profiles/',
+        null=True,
+        blank=True,
+        help_text="User's profile picture."
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     # Tell Django to use email as the login field

@@ -24,7 +24,8 @@ urlpatterns = [
     path('api/', include('wastewatch.api_urls')),
     path('api/driver/', include('driver.urls')),
     path('api/analytics/', include('analytics.urls')),
-    
+    path('api/notifications/', include('notifications.urls')),
+
 
 ]
 

@@ -5,6 +5,8 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import { useAuth } from '../context/AuthContext'
 import api from '../api/client'
+import { ICONS } from '../api/navConfig'
+import ReactDOMServer from 'react-dom/server'
 import {
   buildStopMarkerHtml,
   buildStopValidationSnapshot,
@@ -49,10 +51,10 @@ export const GARBAGE_REPORTS = [];
 const TYPE_LABELS = { overflow: "Overflow", illegal_dumping: "Illegal Dumping", missed: "Missed Pickup" };
 
 export const ZONE_META = {
-  residential: { label: "Residential", icon: "🏠", color: "#4ade80" },
-  commercial: { label: "Commercial", icon: "🏪", color: "#fb923c" },
-  industrial: { label: "Industrial", icon: "🏭", color: "#94a3b8" },
-  agricultural: { label: "Agricultural", icon: "🌾", color: "#a3e635" },
+  residential: { label: "Residential", icon: ICONS.barangay, color: "#4ade80" },
+  commercial: { label: "Commercial", icon: ICONS.dashboard, color: "#fb923c" },
+  industrial: { label: "Industrial", icon: ICONS.waste, color: "#94a3b8" },
+  agricultural: { label: "Agricultural", icon: ICONS.hotspot, color: "#a3e635" },
 };
 
 const STATUS_COLORS = {
@@ -96,15 +98,15 @@ const makeTruckIcon = (color, label, status) => `
 const dumpSiteIconHtml = `
   <div style="background:#ef4444;border:2.5px solid white;border-radius:50%;
     width:36px;height:36px;display:flex;align-items:center;justify-content:center;
-    font-size:18px;box-shadow:0 4px 14px rgba(0,0,0,0.35);">🏭</div>`;
+    color:white;box-shadow:0 4px 14px rgba(0,0,0,0.35);">${ReactDOMServer.renderToString(ICONS.dumpsite)}</div>`;
 
 const garbageReportIconHtml = (severity) => {
   const colors = { high: "#ef4444", medium: "#f59e0b", low: "#22c55e" };
   return `<div style="background:${colors[severity] || "#f59e0b"};border:2px solid white;
     border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:30px;height:30px;
-    display:flex;align-items:center;justify-content:center;
+    display:flex;align-items:center;justify-content:center;color:white;
     box-shadow:0 3px 10px rgba(0,0,0,0.35);">
-    <div style="transform:rotate(45deg);font-size:14px;">⚠️</div></div>`;
+    <div style="transform:rotate(45deg);width:16px;height:16px;display:flex;align-items:center;justify-content:center;">${ReactDOMServer.renderToString(ICONS.warning)}</div></div>`;
 };
 
 // ─── STOP MARKER HTML (shared with ShiftRouteModule) ─────────────────────────
@@ -159,7 +161,7 @@ export default function MapView() {
   // ── Barangay stop markers (drawn separately from main layers) ─────────────
   // Keyed separately so drawAll() doesn't wipe them, and clearBarangayMarkers()
   // removes them without touching the main layer set.
-  const barangayMarkersRef = useRef([])
+  const barangayMarkersRef = useRef(new Map())
   const globalStopMarkersRef = useRef(new Map())  // Map<statusKey, {marker, status}>  // ← NEW: stop markers for all active trucks, no-zone mode
   const [barangayData, setBarangayData] = useState({ trucks: [], stops: [], loading: false })
   const [schedules, setSchedules] = useState([])   // ← NEW: collection schedules keyed by driver id
@@ -177,6 +179,9 @@ export default function MapView() {
     routes: true, trucks: true, dumpSites: true, reports: true,
   })
   const [barangayGeo, setBarangayGeo] = useState(null)
+  const [barangays, setBarangays] = useState([])  // Django Barangay list (for pk lookups)
+  const barangaysRef = useRef([])
+  useEffect(() => { barangaysRef.current = barangays }, [barangays])
   const [reports, setReports] = useState([])
   const [activeTrucks, setActiveTrucks] = useState([])
   const userMarkerRef = useRef(null)
@@ -226,6 +231,10 @@ export default function MapView() {
       .then(r => r.json())
       .then(setBarangayGeo)
       .catch(err => console.error("Failed to load barangay GeoJSON:", err))
+
+    api.get('/api/barangays/')
+      .then(r => setBarangays(r.data))
+      .catch(err => console.error('[MapView] Failed to fetch barangays:', err))
 
     fetchReports()
   }, [])
@@ -401,6 +410,8 @@ export default function MapView() {
   useEffect(() => {
     if (!selectedZone || !mapReady) {
       clearBarangayMarkers()
+      // When zone is cleared, also wipe global stop markers so stale pins don't linger
+      clearGlobalStopMarkers()
       return
     }
     clearBarangayMarkers()
@@ -417,6 +428,7 @@ export default function MapView() {
 
   function clearBarangayFocus() {
     clearBarangayMarkers()
+    clearGlobalStopMarkers()
     setBarangayData({ trucks: [], stops: [], loading: false })
     setSelectedZone(null)
     setPanelOpen(false)
@@ -471,30 +483,48 @@ export default function MapView() {
   // ─── BARANGAY STOP MARKER HELPERS ────────────────────────────────────────
 
   function clearBarangayMarkers() {
-    barangayMarkersRef.current.forEach(m => {
-      try { mapInstanceRef.current?.removeLayer(m) } catch { }
+    barangayMarkersRef.current.forEach(({ marker }) => {
+      try { mapInstanceRef.current?.removeLayer(marker) } catch { }
     })
-    barangayMarkersRef.current = []
+    barangayMarkersRef.current = new Map()
   }
 
   function clearGlobalStopMarkers() {
     globalStopMarkersRef.current.forEach(({ marker }) => {
       try { mapInstanceRef.current?.removeLayer(marker) } catch { }
     })
-    globalStopMarkersRef.current = new Map()  // was an array — now a Map keyed by statusKey
+    globalStopMarkersRef.current = new Map()
   }
 
-  function drawBarangayStops(stops) {
+  function resolveLiveBarangayStopStatus(stop) {
+    const scheduleId = stop.schedule_id ?? stop.schedule?.id ?? stop.schedule?.pk
+    const stopOrder = Number(stop.stop_order ?? stop.stopOrder ?? stop.stop_id)
+    if (scheduleId != null && !Number.isNaN(stopOrder)) {
+      const statusKey = `${scheduleId}:${stopOrder}`
+      if (stopStatusMapRef.current.has(statusKey)) {
+        return normalizeStopStatus(stopStatusMapRef.current.get(statusKey))
+      }
+    }
+    return resolveStopVisualStatus(stop, 'PENDING_INSPECTION')
+  }
+
+  function drawBarangayStops(stops, { fitBounds = true } = {}) {
     if (!mapInstanceRef.current || !window.L) return
 
     const L = window.L
+    const desired = new Map()
+
     stops.forEach(stop => {
       if (!stop.lat || !stop.lng) return
-      const stopStatus = resolveStopVisualStatus(stop, 'PENDING_INSPECTION')
+      const stopStatus = resolveLiveBarangayStopStatus(stop)
       const color = STOP_COLORS_MAP[stopStatus]
       const displayColor = color === 'transparent' ? '#94a3b8' : color
       const isActive = Boolean(stop.is_current) || stopStatus === 'READY_FOR_COLLECTION' || stopStatus === 'COLLECTION_REPORTED'
       const size = isActive ? 28 : 24
+      const scheduleId = stop.schedule_id ?? stop.schedule?.id ?? stop.schedule?.pk
+      const stopOrder = Number(stop.stop_order ?? stop.stopOrder ?? stop.stop_id)
+      if (scheduleId == null || Number.isNaN(stopOrder)) return
+      const statusKey = `${scheduleId}:${stopOrder}`
 
       // Build details for barangay stop if available
       const bCollectedRaw = stop.collected_at || stop.collectedAt || stop.collectedAtRaw
@@ -505,49 +535,106 @@ export default function MapView() {
         truck: stop.truck_plate || stop.driver_name || '',
         scheduleId: stop.schedule_id || stop.schedule || ''
       }
-
-      const marker = L.marker([Number(stop.lat), Number(stop.lng)], {
-        icon: L.divIcon({
-          html: makeStopMarkerHtml(stop.stop_order, stopStatus, bDetails, isActive),
-          className: '',
-          iconSize: [size, size],
-          iconAnchor: [size / 2, size / 2],
-        }),
-        zIndexOffset: isActive ? 900 : 800,
-      })
-        .addTo(mapInstanceRef.current)
-        .bindPopup(`<div style="font-family:sans-serif;min-width:180px;">
+      const popupHtml = `<div style="font-family:sans-serif;min-width:180px;">
           <b style="font-size:13px;">${stop.label}</b><br/>
           <span style="font-size:11px;color:${displayColor};font-weight:700;text-transform:uppercase">${STOP_STATUS_LABELS[stopStatus] || stopStatus}</span><br/>
           <span style="font-size:11px;color:#64748b">Driver: ${stop.driver_name || ''}</span><br/>
           ${bDetails.collectedAt ? `<div style="margin-top:6px;font-size:11px;color:#10b981">Collected: ${bDetails.collectedAt}</div>` : ''}
           ${bDetails.truck ? `<div style="font-size:11px;color:#64748b">Truck: ${bDetails.truck}</div>` : ''}
-        </div>`)
+        </div>`
 
-      barangayMarkersRef.current.push(marker)
+      desired.set(statusKey, {
+        lat: Number(stop.lat),
+        lng: Number(stop.lng),
+        status: stopStatus,
+        details: bDetails,
+        label: stop.label,
+        isActive,
+        size,
+        popupHtml,
+        zIndexOffset: isActive ? 900 : 800,
+      })
+    })
+
+    const toRemove = []
+    barangayMarkersRef.current.forEach((entry, key) => {
+      if (!desired.has(key)) toRemove.push(key)
+    })
+    toRemove.forEach(key => {
+      try { mapInstanceRef.current?.removeLayer(barangayMarkersRef.current.get(key).marker) } catch { }
+      barangayMarkersRef.current.delete(key)
+    })
+
+    desired.forEach((entry, key) => {
+      const existing = barangayMarkersRef.current.get(key)
+      const signature = `${entry.status}|${entry.details.collectedAt}|${entry.details.truck}|${entry.isActive ? 1 : 0}`
+      if (existing) {
+        if (existing.signature === signature) return
+        existing.marker.setIcon(L.divIcon({
+          html: makeStopMarkerHtml(key.split(':')[1], entry.status, entry.details, entry.isActive),
+          className: '',
+          iconSize: [entry.size, entry.size],
+          iconAnchor: [entry.size / 2, entry.size / 2],
+        }))
+        existing.marker.getPopup()?.setContent(entry.popupHtml)
+        existing.signature = signature
+        existing.status = entry.status
+        return
+      }
+
+      const marker = L.marker([entry.lat, entry.lng], {
+        icon: L.divIcon({
+          html: makeStopMarkerHtml(key.split(':')[1], entry.status, entry.details, entry.isActive),
+          className: '',
+          iconSize: [entry.size, entry.size],
+          iconAnchor: [entry.size / 2, entry.size / 2],
+        }),
+        zIndexOffset: entry.zIndexOffset,
+      })
+        .addTo(mapInstanceRef.current)
+        .bindPopup(entry.popupHtml)
+
+      barangayMarkersRef.current.set(key, { marker, status: entry.status, signature })
     })
 
     // Fit map to show all stop markers if there are any
-    if (barangayMarkersRef.current.length > 0) {
+    if (fitBounds && barangayMarkersRef.current.size > 0) {
       try {
-        const group = L.featureGroup(barangayMarkersRef.current)
+        const group = L.featureGroup([...barangayMarkersRef.current.values()].map(entry => entry.marker))
         mapInstanceRef.current.fitBounds(group.getBounds().pad(0.3))
       } catch { }
     }
   }
 
-  // ── Draw stop markers for ALL active drivers (no-zone mode) ──────────────
-  // Mirrors ShiftRouteModule's stop marker colours. Does NOT draw polylines,
-  // ORS routes, or navigation paths — those remain exclusive to NavigationModule.
-  // Only called when no barangay zone is selected; the zone path (drawBarangayStops)
-  // already handles status-aware markers for the selected barangay.
-  function drawGlobalStops(map) {
+  useEffect(() => {
+    if (!mapReady || !selectedZone?.name || !mapInstanceRef.current) return
+    drawBarangayStops(barangayDataRef.current.stops || [], { fitBounds: false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, selectedZone?.name, stopStatusMap, stopDetailsMap])
+
+  // ── Draw stop markers for the selected barangay's active drivers ──────────
+  // Only called when a zone IS selected; mirrors ShiftRouteModule stop colours.
+  // Does NOT draw polylines, ORS routes, or navigation paths — driver-only.
+  function drawGlobalStops(map, allowedShiftIds = null) {
     if (!map || !window.L) return
     const L = window.L
 
+    // Build a set of allowed driver IDs from the barangay trucks as a fallback
+    // (schedules may link to a shift via shift_id, or to a driver via driver / driver_id)
+    const barangayDriverIds = allowedShiftIds !== null
+      ? new Set(barangayDataRef.current.trucks.map(t => t.driver_id ?? t.driverId).filter(Boolean))
+      : null
+
     const pendingSchedules = schedulesRef.current.filter(s => {
       const st = String(s.status || '').toUpperCase()
-      return !['COMPLETED', 'CANCELLED'].includes(st)
+      if (['COMPLETED', 'CANCELLED'].includes(st)) return false
+      if (allowedShiftIds === null) return true
+      // Match by shift id first, then fall back to driver id
+      const schedShiftId = s.shift_id ?? s.shift ?? s.id
+      if (allowedShiftIds.has(schedShiftId)) return true
+      const schedDriverId = s.driver_id ?? s.driver
+      if (barangayDriverIds && schedDriverId != null && barangayDriverIds.has(schedDriverId)) return true
+      return false
     })
 
     const desired = new Map()
@@ -567,6 +654,10 @@ export default function MapView() {
       waypoints.slice(1).forEach((wp, i) => {
         const stopOrder = i + 1
         if (!wp.lat || !wp.lng) return
+
+        const currentZone = selectedZoneRef.current
+        if (currentZone && wp.barangay_id !== currentZone.id) return
+
         const statusKey = `${schedule.id}:${stopOrder}`
         if (!stopStatusMapRef.current.has(statusKey)) return
         const stopStatus = normalizeStopStatus(stopStatusMapRef.current.get(statusKey))
@@ -701,8 +792,12 @@ export default function MapView() {
           const color = ZONE_META[type].color
 
           layer.on("click", () => {
+            // Look up the Django Barangay integer PK by name so that
+            // selectedZone.id matches the barangay_id stored in waypoints.
+            const djangoBrgy = barangaysRef.current.find(b => b.name === feature.properties.brgy_name)
             setSelectedZone({
-              id: feature.properties.brgy_code,
+              id: djangoBrgy ? djangoBrgy.id : null,  // integer PK — matches wp.barangay_id
+              brgy_code: feature.properties.brgy_code, // GeoJSON code kept for reference
               name: feature.properties.brgy_name,
               type,
               color,
@@ -756,24 +851,17 @@ export default function MapView() {
       })
     }
 
-    // ── Live truck markers ──
-    // ── Live truck markers ──
-    if (activeFilters.trucks) {
-      // When a barangay zone is selected, restrict markers to only the trucks
-      // the backend confirmed are serving that barangay (from barangay_stops).
-      // barangayData.trucks is populated by the selectedZone useEffect via
-      // GET /api/driver/shift/barangay_stops/?barangay_name=<name>.
-      // When no zone is active, allowedShiftIds is null and all trucks show.
-      const zone = selectedZoneRef.current
-      const barangayTrucks = barangayDataRef.current.trucks   // [] while loading
-      const isZoneActive = Boolean(zone)
-      const allowedShiftIds = isZoneActive
-        ? new Set(barangayTrucks.map(t => t.id))
-        : null   // null = no filter
+    // ── Live truck markers — only visible when a barangay zone is selected ──
+    // Trucks and stop markers are hidden on the default overview. When a zone is
+    // selected the driver markers and stop pins for that barangay appear, giving
+    // a focused per-barangay view instead of a cluttered city-wide one.
+    if (activeFilters.trucks && zoneFocusActive) {
+      const barangayTrucks = barangayDataRef.current.trucks
+      const allowedShiftIds = new Set(barangayTrucks.map(t => t.id))
 
       activeTrucksRef.current.forEach(truck => {
-        // Skip trucks not assigned to the selected barangay
-        if (allowedShiftIds !== null && !allowedShiftIds.has(truck.id)) return
+        if (!allowedShiftIds.has(truck.id)) return
+
         const truckColor = STATUS_COLORS[truck.status] || '#14b8a6'
         const icon = L.divIcon({
           html: makeTruckIcon(truckColor, truck.truckId, truck.status),
@@ -781,7 +869,6 @@ export default function MapView() {
         })
         const m = L.marker([truck.lat, truck.lng], { icon }).addTo(map)
 
-        // AFTER
         const statusLabel = truck.status === 'active' ? '🟢 Active'
           : truck.status === 'weak_signal' ? '🟡 Weak Signal' : '⚫ Offline'
         const lastUpdate = truck.last_update
@@ -801,7 +888,7 @@ export default function MapView() {
           <div style="font-size:12px;margin-bottom:3px;">
             <b>Status:</b> ${statusLabel}
           </div>
-          <div style="font-size:11px;color:#94a3b8;margin-top:4px;">
+          <div style="font-size:11px;color:#94a8b8;margin-top:4px;">
             Last update: ${lastUpdate}
           </div>
         </div>`)
@@ -809,16 +896,15 @@ export default function MapView() {
         m.on('click', () => {
           setSelectedRoute({
             id: truck.id,
-            truckId: truck.truckId,           // plate number (e.g. "ABC 123")
-            truckModel: truck.truckModel || '—', // e.g. "Isuzu ELF"
+            truckId: truck.truckId,
+            truckModel: truck.truckModel || '—',
             driver: truck.driver,
-            plateNumber: truck.truckId,           // truckId IS the plate_number per active_shifts shape
+            plateNumber: truck.truckId,
             opStatus: truck.op_status,
             barangay: 'Live Tracking',
-            status: truck.status,            // active | weak_signal | offline (connection status)
+            status: truck.status,
             lastUpdate,
             color: truckColor,
-            // Progress fields not available at map level — zeroed out
             capacity: 0,
             collectedCount: 0,
             totalPoints: 0,
@@ -830,21 +916,11 @@ export default function MapView() {
         })
         layersRef.current[`live-truck-${truck.id}`] = m
       })
-    }
 
-    // ── Global stop markers (no-zone mode only) ───────────────────────────
-    // When a barangay zone IS selected, drawBarangayStops() handles status-aware
-    // markers via barangayMarkersRef. When no zone is active, draw all scheduled
-    // stops across all pending routes as upcoming markers.
-    if (activeFilters.trucks) {
-      if (selectedZoneRef.current) {
-        // Zone is active — clear global stops so only zone-scoped markers show
-        clearGlobalStopMarkers()
-      } else {
-        drawGlobalStops(map)
-      }
-    } else {
-      // Trucks layer toggled off — hide stop markers too
+      // Draw stop markers scoped to this barangay's active schedules only
+      drawGlobalStops(map, allowedShiftIds)
+    } else if (!zoneFocusActive) {
+      // No zone selected — ensure no stale stop markers remain from a previous focus
       clearGlobalStopMarkers()
     }
 
@@ -858,11 +934,8 @@ export default function MapView() {
           <span style="color:#64748b;font-size:12px;">Capacity: ${site.capacity}% full</span>
         </div>`)
         layersRef.current[`dump-${site.id}`] = m
-      }
-      )
+      })
     }
-
-
 
     // ── Garbage reports (hidden when barangay focus is active) ──
     if (activeFilters.reports && !zoneFocusActive) {
@@ -948,6 +1021,14 @@ export default function MapView() {
                 }}>✕ Clear</button>
               </div>
             )}
+            {!selectedZone && (
+              <div style={{
+                background: "rgba(15,23,42,0.75)", border: "1px solid rgba(20,184,166,0.25)",
+                color: "#64748b", borderRadius: 20, padding: "5px 12px", fontSize: 11,
+              }}>
+                Tap a barangay to see its routes &amp; drivers
+              </div>
+            )}
             {userLocationError && (
               <div style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.4)", color: "#fca5a5", borderRadius: 8, padding: "4px 10px", fontSize: 11 }}>
                 {userLocationError}
@@ -965,7 +1046,7 @@ export default function MapView() {
           </button>
           <button className="ww-btn" onClick={() => { setLegendOpen(o => !o); setFilterOpen(false) }}
             style={{ pointerEvents: "auto", background: "rgba(10,16,30,0.92)", border: "1px solid rgba(20,184,166,0.4)", color: "#14b8a6", borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 600 }}>
-            🗺️ Legend
+            <div style={{ width: 16, height: 16, color: '#14b8a6' }}>{ICONS.map}</div> Legend
           </button>
         </div>
 
@@ -979,17 +1060,17 @@ export default function MapView() {
           }}>
             <div style={{ color: "white", fontWeight: 700, fontSize: 13, marginBottom: 12 }}>MAP LAYERS</div>
             {[
-              { key: "routes", label: "Truck Routes", icon: "〰️" },
-              { key: "trucks", label: "Truck Markers", icon: "🚛" },
-              { key: "dumpSites", label: "Dump Sites", icon: "🏭" },
-              { key: "reports", label: "Garbage Reports", icon: "⚠️" },
+              { key: "routes", label: "Truck Routes", icon: <div style={{ width: 14, height: 14 }}>{ICONS.dashboard}</div> },
+              { key: "trucks", label: "Truck Markers", icon: <div style={{ width: 14, height: 14 }}>{ICONS.truck}</div> },
+              { key: "dumpSites", label: "Dump Sites", icon: <div style={{ width: 14, height: 14 }}>{ICONS.dumpsite}</div> },
+              { key: "reports", label: "Garbage Reports", icon: <div style={{ width: 14, height: 14 }}>{ICONS.warning}</div> },
             ].map(f => (
               <div key={f.key} className="filter-chip" onClick={() => toggleFilter(f.key)}
                 style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
                 <div style={{ width: 20, height: 20, borderRadius: 5, background: activeFilters[f.key] ? "#14b8a6" : "#1e293b", border: "1.5px solid", borderColor: activeFilters[f.key] ? "#14b8a6" : "#334155", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>
                   {activeFilters[f.key] ? "✓" : ""}
                 </div>
-                <span style={{ fontSize: 11 }}>{f.icon}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center' }}>{f.icon}</span>
                 <span style={{ color: "#cbd5e1", fontSize: 13 }}>{f.label}</span>
               </div>
             ))}
@@ -1000,7 +1081,7 @@ export default function MapView() {
                 <div style={{ width: 20, height: 20, borderRadius: 5, background: activeFilters[key] ? meta.color : "#1e293b", border: "1.5px solid", borderColor: activeFilters[key] ? meta.color : "#334155", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>
                   {activeFilters[key] ? "✓" : ""}
                 </div>
-                <span style={{ fontSize: 11 }}>{meta.icon}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', width: 14, height: 14 }}>{meta.icon}</span>
                 <span style={{ color: "#cbd5e1", fontSize: 13 }}>{meta.label}</span>
               </div>
             ))}
@@ -1028,13 +1109,13 @@ export default function MapView() {
             ))}
             <div style={{ width: "100%", height: 1, background: "rgba(255,255,255,0.07)", margin: "10px 0" }} />
             {[
-              { icon: "🚛", label: "Truck (live position)" },
-              { icon: "🏭", label: "Dump site" },
-              { icon: "⚠️", label: "Reported garbage" },
-              { icon: "📍", label: "Your location" },
+              { icon: <div style={{ width: 14, height: 14 }}>{ICONS.truck}</div>, label: "Truck (barangay focus only)" },
+              { icon: <div style={{ width: 14, height: 14 }}>{ICONS.dumpsite}</div>, label: "Dump site" },
+              { icon: <div style={{ width: 14, height: 14 }}>{ICONS.warning}</div>, label: "Reported garbage" },
+              { icon: <div style={{ width: 14, height: 14 }}>{ICONS.pin}</div>, label: "Your location" },
             ].map(r => (
               <div key={r.label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
-                <span style={{ fontSize: 14 }}>{r.icon}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center' }}>{r.icon}</span>
                 <span style={{ color: "#cbd5e1", fontSize: 12 }}>{r.label}</span>
               </div>
             ))}
@@ -1071,9 +1152,9 @@ export default function MapView() {
             transition: "all 0.25s ease",
           }}>
             <button className="ww-btn" onClick={() => navigate("/report/submit")} title="Report Issue"
-              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 50, height: 50, borderRadius: "50%", background: "#ef4444", border: "none", fontSize: 22, boxShadow: "0 4px 16px rgba(239,68,68,0.4)", cursor: "pointer" }}>⚠️</button>
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 50, height: 50, borderRadius: "50%", background: "#ef4444", border: "none", color: "white", boxShadow: "0 4px 16px rgba(239,68,68,0.4)", cursor: "pointer" }}><div style={{ width: 22, height: 22 }}>{ICONS.warning}</div></button>
             <button className="ww-btn" onClick={() => navigate("/collection/confirm")} title="Confirm Collection"
-              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 50, height: 50, borderRadius: "50%", background: "#22c55e", border: "none", fontSize: 22, boxShadow: "0 4px 16px rgba(34,197,94,0.4)", cursor: "pointer" }}>✅</button>
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 50, height: 50, borderRadius: "50%", background: "#22c55e", border: "none", color: "white", boxShadow: "0 4px 16px rgba(34,197,94,0.4)", cursor: "pointer" }}><div style={{ width: 22, height: 22 }}>{ICONS.check}</div></button>
           </div>
           <button className="ww-btn" onClick={() => setFabOpen(o => !o)}
             style={{
@@ -1123,7 +1204,6 @@ export default function MapView() {
 
 // ─── PANEL COMPONENTS ─────────────────────────────────────────────────────────
 
-// AFTER
 // Connection-status → colour and label for the bottom panel badge
 const CONN_STATUS_META = {
   active: { color: '#22c55e', label: 'LIVE' },
@@ -1157,8 +1237,8 @@ function RoutePanel({ route }) {
             background: `${route.color}22`,
             border: `2px solid ${route.color}`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 24, flexShrink: 0,
-          }}>🚛</div>
+            flexShrink: 0, color: route.color
+          }}><div style={{ width: 24, height: 24 }}>{ICONS.truck}</div></div>
 
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ color: 'white', fontWeight: 800, fontSize: 18, lineHeight: 1.1 }}>
@@ -1193,11 +1273,11 @@ function RoutePanel({ route }) {
           border: '1px solid rgba(255,255,255,0.07)',
           borderRadius: 12, overflow: 'hidden', marginBottom: 14,
         }}>
-          <DetailRow icon="👤" label="Driver" value={route.driver} />
-          <DetailRow icon="🔢" label="Truck No." value={route.truckId} />
-          <DetailRow icon="🪪" label="Plate" value={route.plateNumber} accent />
-          <DetailRow icon="📡" label="Op. Status" value={opLabel} />
-          <DetailRow icon="🕐" label="Last Update" value={route.lastUpdate || 'N/A'} last />
+          <DetailRow icon={<div style={{ width: 14, height: 14 }}>{ICONS.users}</div>} label="Driver" value={route.driver} />
+          <DetailRow icon={<div style={{ width: 14, height: 14 }}>{ICONS.dashboard}</div>} label="Truck No." value={route.truckId} />
+          <DetailRow icon={<div style={{ width: 14, height: 14 }}>{ICONS.waste}</div>} label="Plate" value={route.plateNumber} accent />
+          <DetailRow icon={<div style={{ width: 14, height: 14 }}>{ICONS.pin}</div>} label="Op. Status" value={opLabel} />
+          <DetailRow icon={<div style={{ width: 14, height: 14 }}>{ICONS.clock}</div>} label="Last Update" value={route.lastUpdate || 'N/A'} last />
         </div>
 
         <p style={{
@@ -1220,7 +1300,7 @@ function RoutePanel({ route }) {
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-        <div style={{ fontSize: 28 }}>🚛</div>
+        <div style={{ width: 28, height: 28, color: '#14b8a6' }}>{ICONS.truck}</div>
         <div style={{ flex: 1 }}>
           <div style={{ color: 'white', fontWeight: 800, fontSize: 17 }}>{route.truckId}</div>
           <div style={{ color: '#94a3b8', fontSize: 12 }}>{route.driver}</div>
@@ -1263,7 +1343,7 @@ function DetailRow({ icon, label, value, accent, last }) {
       padding: '10px 14px',
       borderBottom: last ? 'none' : '1px solid rgba(255,255,255,0.05)',
     }}>
-      <span style={{ fontSize: 14, width: 20, textAlign: 'center', flexShrink: 0 }}>{icon}</span>
+      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, flexShrink: 0, color: '#94a3b8' }}>{icon}</span>
       <span style={{ color: '#64748b', fontSize: 11, fontWeight: 600, width: 80, flexShrink: 0, letterSpacing: '.03em' }}>
         {label}
       </span>
@@ -1285,10 +1365,10 @@ function DetailRow({ icon, label, value, accent, last }) {
 // already drawn on the map by drawBarangayStops() are visible.
 function ZonePanel({ zone, barangayData, onClearFocus }) {
   const meta = {
-    residential: { label: "Residential", icon: "🏠" },
-    commercial: { label: "Commercial", icon: "🏪" },
-    industrial: { label: "Industrial", icon: "🏭" },
-    agricultural: { label: "Agricultural", icon: "🌾" },
+    residential: { label: "Residential", icon: <div style={{ width: 24, height: 24 }}>{ICONS.barangay}</div> },
+    commercial: { label: "Commercial", icon: <div style={{ width: 24, height: 24 }}>{ICONS.dashboard}</div> },
+    industrial: { label: "Industrial", icon: <div style={{ width: 24, height: 24 }}>{ICONS.waste}</div> },
+    agricultural: { label: "Agricultural", icon: <div style={{ width: 24, height: 24 }}>{ICONS.hotspot}</div> },
   }
   const m = meta[zone.type] || {}
   const { trucks = [], stops = [], loading = false } = barangayData || {}
@@ -1301,7 +1381,7 @@ function ZonePanel({ zone, barangayData, onClearFocus }) {
     <>
       {/* Zone header */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-        <div style={{ fontSize: 30 }}>{m.icon}</div>
+        <div style={{ color: zone.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{m.icon}</div>
         <div>
           <div style={{ color: "white", fontWeight: 800, fontSize: 17 }}>{zone.name}</div>
           <div style={{ color: zone.color, fontSize: 12, fontWeight: 600 }}>{m.label} Zone</div>
@@ -1320,7 +1400,7 @@ function ZonePanel({ zone, barangayData, onClearFocus }) {
           borderRadius: 10, color: '#64748b', fontSize: 13, marginBottom: 14,
           display: 'flex', alignItems: 'center', gap: 10,
         }}>
-          <span style={{ fontSize: 20 }}>🚛</span>
+          <div style={{ width: 20, height: 20 }}>{ICONS.truck}</div>
           No active trucks assigned to this barangay right now.
         </div>
       ) : (

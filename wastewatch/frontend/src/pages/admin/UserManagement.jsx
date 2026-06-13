@@ -23,8 +23,15 @@ const ROLE_META = {
 }
 
 const EMPTY_FORM = {
-  full_name: '', email: '', password: '', role: 'citizen',
-  barangay: '', dumpsite: '', employee_type: '', is_active: true,
+  first_name: '', last_name: '', username: '', email: '', password: '', password2: '', role: 'citizen',
+  barangay: '', dumpsite: '', employee_type: '', is_active: true, profile_pic: null,
+}
+
+export function getDisplayName(u) {
+  if (u.full_name && u.full_name.trim()) return u.full_name;
+  const parts = [u.first_name, u.last_name].filter(Boolean);
+  if (parts.length > 0) return parts.join(' ');
+  return u.email ? u.email.split('@')[0] : 'Unknown';
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -56,23 +63,31 @@ function Avatar({ name, active }) {
 function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
   const isEdit = !!user
   const [form, setForm] = useState(user ? {
-    full_name: user.full_name,
+    first_name: user.first_name || '',
+    last_name: user.last_name || '',
+    username: user.username || '',
     email: user.email,
     password: '',
+    password2: '',
     role: user.role,
     employee_type: user.employee_type || '',
     barangay: user.barangay || '',
     dumpsite: user.dumpsite || '',
     is_active: user.is_active,
+    profile_pic: null,
   } : { ...EMPTY_FORM })
   const [err, setErr] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   function validate() {
-    if (!form.full_name.trim()) return 'Full name is required.'
+    if (!form.first_name.trim()) return 'First name is required.'
+    if (!form.last_name.trim()) return 'Last name is required.'
+    if (!form.username.trim()) return 'Username is required.'
     if (!form.email.trim()) return 'Email is required.'
     if (!isEdit && !form.password.trim()) return 'Password is required for new users.'
+    if (form.password && form.password !== form.password2) return 'Passwords do not match.'
     if (form.role === 'dumpsite' && !form.dumpsite) return 'Please assign a dumpsite facility.'
     return ''
   }
@@ -83,6 +98,10 @@ function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
     // Strip employee_type unless citizen
     const payload = { ...form }
     if (payload.role !== 'citizen') payload.employee_type = ''
+    
+    // Auto-generate full_name for backend models
+    payload.full_name = `${form.first_name} ${form.last_name}`.trim()
+    
     onSave(payload)
   }
 
@@ -112,19 +131,45 @@ function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
           }}>{err}</div>
         )}
 
-        <div style={{ marginBottom: 13 }}>
-          <label className="form-label">Full Name</label>
-          <input className="form-input" value={form.full_name} onChange={e => set('full_name', e.target.value)} placeholder="e.g. Juan Dela Cruz" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 13 }}>
+          <div>
+            <label className="form-label">First Name</label>
+            <input className="form-input" value={form.first_name} onChange={e => set('first_name', e.target.value)} placeholder="Juan" />
+          </div>
+          <div>
+            <label className="form-label">Last Name</label>
+            <input className="form-input" value={form.last_name} onChange={e => set('last_name', e.target.value)} placeholder="Dela Cruz" />
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 13 }}>
+          <div>
+            <label className="form-label">Username</label>
+            <input className="form-input" value={form.username} onChange={e => set('username', e.target.value)} placeholder="juan123" />
+          </div>
+          <div>
+            <label className="form-label">Email Address</label>
+            <input className="form-input" type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="user@lucena.gov.ph" />
+          </div>
         </div>
 
         <div style={{ marginBottom: 13 }}>
-          <label className="form-label">Email Address</label>
-          <input className="form-input" type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="user@lucena.gov.ph" />
+          <label className="form-label">Profile Picture (Optional)</label>
+          <input className="form-input" type="file" accept="image/*" onChange={e => set('profile_pic', e.target.files[0])} style={{ padding: 8 }} />
         </div>
 
-        <div style={{ marginBottom: 13 }}>
-          <label className="form-label">{isEdit ? 'New Password (leave blank to keep)' : 'Password'}</label>
-          <input className="form-input" type="password" value={form.password} onChange={e => set('password', e.target.value)} placeholder="••••••••" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 13 }}>
+          <div style={{ position: 'relative' }}>
+            <label className="form-label">{isEdit ? 'New Password' : 'Password'}</label>
+            <input className="form-input" type={showPassword ? "text" : "password"} value={form.password} onChange={e => set('password', e.target.value)} placeholder="••••••••" style={{ paddingRight: 40 }} />
+            <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 10, top: 28, background: 'none', border: 'none', cursor: 'pointer', opacity: 0.6, padding: 0 }}>
+              {showPassword ? '🙈' : '👁️'}
+            </button>
+          </div>
+          <div style={{ position: 'relative' }}>
+            <label className="form-label">Confirm Password</label>
+            <input className="form-input" type={showPassword ? "text" : "password"} value={form.password2} onChange={e => set('password2', e.target.value)} placeholder="••••••••" style={{ paddingRight: 40 }} />
+          </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 13 }}>
@@ -259,15 +304,23 @@ export default function UserManagement() {
     api.get('/api/driver/dumpsites/').then(res => setDumpsites(res.data))
   }, [])
 
-  async function handleSave(form) {
+  async function handleSave(formObj) {
     try {
+      const formData = new FormData()
+      Object.keys(formObj).forEach(key => {
+        if (formObj[key] !== null && formObj[key] !== undefined && formObj[key] !== '') {
+          formData.append(key, formObj[key])
+        }
+      })
+
       if (modal === 'add') {
-        await api.post('/api/accounts/users/', form)
+        await api.post('/api/accounts/users/', formData)
         showToast('✅ User created successfully.')
       } else {
-        await api.patch(`/api/accounts/users/${modal.id}/`, form)
+        await api.patch(`/api/accounts/users/${modal.id}/`, formData)
         showToast('✅ User updated.')
       }
+      setCurrentPage(1)
       await refreshUsers()
       setModal(null)
     } catch (err) {
@@ -314,8 +367,8 @@ export default function UserManagement() {
       || (roleFilter === 'crew_member' && u.employee_type === 'crew_member')
     const matchStatus = statusFilter === 'all' || (statusFilter === 'active' ? u.is_active : !u.is_active)
     const matchSearch = !search ||
-      u.full_name.toLowerCase().includes(search.toLowerCase()) ||
-      u.email.toLowerCase().includes(search.toLowerCase()) ||
+      getDisplayName(u).toLowerCase().includes(search.toLowerCase()) ||
+      (u.email || '').toLowerCase().includes(search.toLowerCase()) ||
       (u.barangay_name || '').toLowerCase().includes(search.toLowerCase()) ||
       (u.dumpsite_name || '').toLowerCase().includes(search.toLowerCase())
     return matchRole && matchStatus && matchSearch
@@ -490,13 +543,13 @@ export default function UserManagement() {
                 }}>
                   {/* Top row: avatar + name + role badge */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                    <Avatar name={u.full_name} active={u.is_active} />
+                    <Avatar name={getDisplayName(u)} active={u.is_active} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
                         fontSize: 14, fontWeight: 700,
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         color: u.is_active ? 'var(--text)' : 'var(--text-muted)',
-                      }}>{u.full_name}</div>
+                      }}>{getDisplayName(u)}</div>
                       <div style={{
                         fontSize: 11, color: 'var(--text-muted)',
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -578,13 +631,13 @@ export default function UserManagement() {
               >
                 {/* Name + avatar */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                  <Avatar name={u.full_name} active={u.is_active} />
+                  <Avatar name={getDisplayName(u)} active={u.is_active} />
                   <div style={{ minWidth: 0 }}>
                     <div style={{
                       fontSize: 13, fontWeight: 600, overflow: 'hidden',
                       textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       color: u.is_active ? 'var(--text)' : 'var(--text-muted)',
-                    }}>{u.full_name}</div>
+                    }}>{getDisplayName(u)}</div>
                     {u.employee_type === 'crew_member' && (
                       <span style={{
                         fontSize: 8, fontWeight: 800, padding: '1px 6px', borderRadius: 10,

@@ -14,6 +14,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useOnline } from '../hooks/useOnline'
 import { ICONS, NAV_ICONS, getRoleNavItems, flattenNavItems } from '../api/navConfig'
+import { useNotifications } from '../hooks/useNotifications'
 
 // ─── tiny CSS injected once ───────────────────────────────────────────────────
 const NAVBAR_CSS = `
@@ -470,6 +471,7 @@ export default function Navbar() {
   const navigate = useNavigate()
   const location = useLocation()
   const isOnline = useOnline()
+  const { notifications, unreadCount, markRead } = useNotifications()
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
@@ -576,10 +578,12 @@ export default function Navbar() {
             aria-expanded={notifOpen}
           >
             <BellIcon />
-            <span
-              className="ww-bell__dot"
-              style={{ background: isOnline ? '#e74c3c' : '#f57c00' }}
-            />
+            {unreadCount > 0 && (
+              <span
+                className="ww-bell__dot"
+                style={{ background: '#e74c3c' }}
+              />
+            )}
           </button>
 
           {user ? (
@@ -623,39 +627,53 @@ export default function Navbar() {
           <div className="ww-notif-head">
             <span className="ww-notif-head__title">
               Notifications
-              {!isOnline && (
-                <span style={{ fontSize: 10, color: '#e65100', marginLeft: 8, fontWeight: 400 }}>
-                  (cached)
-                </span>
+              {unreadCount > 0 && (
+                <span style={{
+                  marginLeft: 8, background: '#e74c3c', color: '#fff',
+                  fontSize: 10, fontWeight: 800, padding: '1px 7px',
+                  borderRadius: 20,
+                }}>{unreadCount}</span>
               )}
             </span>
             <button
               className="ww-notif-close"
               onClick={() => setNotifOpen(false)}
               aria-label="Close notifications"
-            >
-              ×
-            </button>
+            >×</button>
           </div>
 
-          <div className="ww-notif-item unread">
-            <div className="ww-notif-dot" />
-            <div>
-              <div className="ww-notif-item__title">Report #3 resolved</div>
-              <div className="ww-notif-item__time">2 hours ago</div>
+          {notifications.length === 0 ? (
+            <div style={{ padding: '24px 16px', textAlign: 'center', color: 'rgba(0,0,0,0.4)', fontSize: 13 }}>
+              No new notifications
             </div>
-          </div>
-
-          <div className="ww-notif-item">
-            <div style={{ width: 8, flexShrink: 0 }} />
-            <div>
-              <div className="ww-notif-item__title">Welcome to WasteWatch!</div>
-              <div className="ww-notif-item__time">3 days ago</div>
-            </div>
-          </div>
+          ) : (
+            notifications.slice(0, 5).map(n => (
+              <div key={n.id} className={`ww-notif-item ${!n.is_read ? 'unread' : ''}`}>
+                {!n.is_read
+                  ? <div className="ww-notif-dot" />
+                  : <div style={{ width: 8, flexShrink: 0 }} />
+                }
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="ww-notif-item__title">{n.title}</div>
+                  <div className="ww-notif-item__time" style={{
+                    fontSize: 11, color: 'rgba(0,0,0,0.4)', marginTop: 2,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {n.message}
+                  </div>
+                  <div className="ww-notif-item__time">
+                    {new Date(n.created_at).toLocaleString('en-PH', {
+                      month: 'short', day: 'numeric',
+                      hour: '2-digit', minute: '2-digit',
+                    })}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
 
           <div className="ww-notif-footer">
-            <button>Mark all as read</button>
+            <button onClick={() => markRead()}>Mark all as read</button>
           </div>
         </div>
       )}

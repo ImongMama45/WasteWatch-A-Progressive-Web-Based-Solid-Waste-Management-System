@@ -10,7 +10,6 @@ router.register(r'pickup-statuses',     views.PickupStatusViewSet, basename='pic
 router.register(r'stops',               views.PickupStatusViewSet, basename='stops')
 router.register(r'truck-locations',     views.TruckLocationViewSet)
 router.register(r'completion-reports',  views.CompletionReportViewSet)
-router.register(r'notifications',       views.DriverNotificationViewSet)
 router.register(r'crew-assignments',    views.TruckCrewAssignmentViewSet)
 router.register(r'waste-deliveries',    views.WasteDeliveryViewSet)
 router.register(r'calendar-events',     views.CalendarEventViewSet)

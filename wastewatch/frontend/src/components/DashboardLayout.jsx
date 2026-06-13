@@ -17,6 +17,8 @@ import { useOnline } from '../hooks/useOnline'
 import BottomNav from './BottomNav'
 import { ICONS, getRoleNavItems } from '../api/navConfig'
 import { DriverGpsProvider } from '../context/DriverGpsContext'
+import { useNotifications } from '../hooks/useNotifications'
+
 
 // ─── NavGroup: collapsible sidebar section ────────────────────────────────────
 function NavGroup({ group, currentPath, onNavigate }) {
@@ -463,6 +465,7 @@ export default function DashboardLayout({ children }) {
   const navigate = useNavigate()
   const location = useLocation()
   const isOnline = useOnline()
+  const { notifications, unreadCount, markRead } = useNotifications()
 
   const [searchVal, setSearchVal] = useState('')
   const [notifOpen, setNotifOpen] = useState(false)
@@ -564,7 +567,9 @@ export default function DashboardLayout({ children }) {
               aria-expanded={notifOpen}
             >
               {ICONS.bell}
-              <span className="notif-dot" style={{ background: isOnline ? '#ef4444' : '#f97316' }} />
+              {unreadCount > 0 && (
+                <span className="notif-dot" style={{ background: '#ef4444' }} />
+              )}
             </button>
 
             <div
@@ -594,29 +599,58 @@ export default function DashboardLayout({ children }) {
       {notifOpen && (
         <div className="notif-dropdown" role="dialog" aria-label="Notifications">
           <div className="notif-header">
-            <span>Notifications</span>
+            <span>
+              Notifications
+              {unreadCount > 0 && (
+                <span style={{
+                  marginLeft: 8, background: '#ef4444', color: '#fff',
+                  fontSize: 10, fontWeight: 800, padding: '1px 7px',
+                  borderRadius: 20,
+                }}>{unreadCount}</span>
+              )}
+            </span>
             <button
               onClick={() => setNotifOpen(false)}
               style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, lineHeight: 1, color: 'rgba(0,0,0,0.4)' }}
               aria-label="Close notifications"
             >×</button>
           </div>
-          <div className="notif-item unread">
-            <div className="notif-dot-inline" />
-            <div>
-              <div style={{ fontWeight: 600 }}>Report #3 resolved</div>
-              <div style={{ fontSize: 11, color: 'rgba(0,0,0,0.4)', marginTop: 2 }}>2 hours ago</div>
+
+          {notifications.length === 0 ? (
+            <div style={{ padding: '24px 16px', textAlign: 'center', color: 'rgba(0,0,0,0.4)', fontSize: 13 }}>
+              No new notifications
             </div>
-          </div>
-          <div className="notif-item">
-            <div style={{ width: 8 }} />
-            <div>
-              <div style={{ fontWeight: 600 }}>Welcome to WasteWatch!</div>
-              <div style={{ fontSize: 11, color: 'rgba(0,0,0,0.4)', marginTop: 2 }}>3 days ago</div>
-            </div>
-          </div>
+          ) : (
+            notifications.slice(0, 5).map(n => (
+              <div key={n.id} className={`notif-item ${!n.is_read ? 'unread' : ''}`}>
+                {!n.is_read
+                  ? <div className="notif-dot-inline" />
+                  : <div style={{ width: 8, flexShrink: 0 }} />
+                }
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{n.title}</div>
+                  <div style={{
+                    fontSize: 11, color: 'rgba(0,0,0,0.4)', marginTop: 2,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {n.message}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'rgba(0,0,0,0.4)', marginTop: 2 }}>
+                    {new Date(n.created_at).toLocaleString('en-PH', {
+                      month: 'short', day: 'numeric',
+                      hour: '2-digit', minute: '2-digit',
+                    })}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+
           <div style={{ padding: '10px 16px', borderTop: '1px solid rgba(0,0,0,0.07)' }}>
-            <button style={{ width: '100%', background: 'none', border: 'none', color: '#16a34a', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+            <button
+              onClick={() => markRead()}
+              style={{ width: '100%', background: 'none', border: 'none', color: '#16a34a', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+            >
               Mark all as read
             </button>
           </div>

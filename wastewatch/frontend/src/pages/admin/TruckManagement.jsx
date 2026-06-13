@@ -13,6 +13,7 @@ import DashboardLayout from '../../components/DashboardLayout'
 import { useTrucks } from '../../hooks/useTrucks'
 import { useUsers } from '../../hooks/useUsers'
 import api from '../../api/client'
+import { ICONS } from '../../api/navConfig'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -215,8 +216,11 @@ function RouteModal({ driverId, driverName, onClose }) {
   const mapRef = useRef(null)
   const mapInstance = useRef(null)
   const [leafletReady, setLeafletReady] = useState(false)
-  const [schedule, setSchedule] = useState(null)
+  const [schedules, setSchedules] = useState([])
+  const [activeIdx, setActiveIdx] = useState(0)
   const [loading, setLoading] = useState(true)
+
+  const schedule = schedules[activeIdx] || null
 
   // Load Leaflet CDN dynamically if not present
   useEffect(() => {
@@ -240,73 +244,80 @@ function RouteModal({ driverId, driverName, onClose }) {
     setLoading(true)
     api.get('/api/driver/collection-schedules/')
       .then(res => {
-        const matchingSchedule = res.data.find(s => String(s.driver) === String(driverId))
-        setSchedule(matchingSchedule || null)
+        const matching = res.data.filter(s => String(s.driver) === String(driverId))
+        setSchedules(matching)
+        setActiveIdx(0)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [driverId])
 
-  // Initialize and draw Map once Leaflet is ready and schedule is loaded
-  // Initialize and draw Map once Leaflet is ready and schedule is loaded
+  // Initialize Map
   useEffect(() => {
-    if (!leafletReady || !mapRef.current || mapInstance.current || loading) return
-
+    if (!leafletReady || !mapRef.current || mapInstance.current) return
     const L = window.L
     const map = L.map(mapRef.current, { center: [13.9373, 121.617], zoom: 14 })
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap', maxZoom: 19,
     }).addTo(map)
     mapInstance.current = map
+  }, [leafletReady])
+
+  const layerGroupRef = useRef(null)
+
+  // Draw Schedule
+  useEffect(() => {
+    if (!leafletReady || !mapInstance.current || loading || !schedule) return
+    const L = window.L
+    const map = mapInstance.current
+
+    if (layerGroupRef.current) {
+      layerGroupRef.current.clearLayers()
+    } else {
+      layerGroupRef.current = L.featureGroup().addTo(map)
+    }
+    const layerGroup = layerGroupRef.current
 
     if (!schedule?.waypoints?.length) return
 
     const waypoints = schedule.waypoints
 
-    // ── Stop markers (unchanged) ──────────────────────────────────────────
     const startIcon = L.divIcon({
       html: `<div style="background:#2ecc71;width:12px;height:12px;border-radius:50%;border:2px solid white;box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>`,
       className: '', iconSize: [12, 12], iconAnchor: [6, 6],
     })
-    L.marker([waypoints[0].lat, waypoints[0].lng], { icon: startIcon }).addTo(map).bindPopup('Start Point')
+    L.marker([waypoints[0].lat, waypoints[0].lng], { icon: startIcon }).addTo(layerGroup).bindPopup('Start Point')
 
     waypoints.slice(1).forEach((wp, index) => {
       const stopIcon = L.divIcon({
         html: `<div style="background:#3498db;width:16px;height:16px;border-radius:50%;color:white;font-size:9px;font-weight:bold;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 0 6px rgba(0,0,0,0.5);">${index + 1}</div>`,
         className: '', iconSize: [16, 16], iconAnchor: [8, 8],
       })
-      L.marker([wp.lat, wp.lng], { icon: stopIcon }).addTo(map).bindPopup(`Stop ${index + 1}: ${wp.label || ''}`)
+      L.marker([wp.lat, wp.lng], { icon: stopIcon }).addTo(layerGroup).bindPopup(`Stop ${index + 1}: ${wp.label || ''}`)
     })
 
-    // ── Fallback straight-line while ORS loads ────────────────────────────
     const latlngs = waypoints.map(w => [w.lat, w.lng])
     const fallbackLine = L.polyline(latlngs, {
       color: '#2ecc71', weight: 3, opacity: 0.35, dashArray: '6, 6',
-    }).addTo(map)
+    }).addTo(layerGroup)
     map.fitBounds(fallbackLine.getBounds(), { padding: [30, 30] })
 
-    // ── ORS actual road route ─────────────────────────────────────────────
     const orsApiKey = import.meta.env.VITE_ORS_API_KEY
     if (!orsApiKey) return
 
-    // ORS accepts max 50 coordinates; slice if the route is long
     const coordinates = waypoints.slice(0, 50).map(w => [w.lng, w.lat])
 
     fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
       method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        Authorization: orsApiKey,
-      },
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: orsApiKey },
       body: JSON.stringify({ coordinates }),
     })
       .then(r => r.json())
       .then(data => {
         if (!data.routes?.length || !mapInstance.current) return
-        map.removeLayer(fallbackLine)
+        layerGroup.removeLayer(fallbackLine)
         const pts = decodePolyline(data.routes[0].geometry)
-        const orsLine = L.polyline(pts, { color: '#2ecc71', weight: 5, opacity: 0.85 }).addTo(map)
+        const orsLine = L.polyline(pts, { color: '#2ecc71', weight: 5, opacity: 0.85 }).addTo(layerGroup)
         map.fitBounds(orsLine.getBounds(), { padding: [30, 30] })
       })
       .catch(() => { /* fallbackLine stays visible */ })
@@ -345,6 +356,25 @@ function RouteModal({ driverId, driverName, onClose }) {
         </div>
 
         <div style={{ position: 'relative', width: '100%', height: 350, background: '#1e293b', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+          {schedules.length > 1 && (
+            <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 1000, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {schedules.map((s, idx) => (
+                <button
+                  key={s.id}
+                  onClick={() => setActiveIdx(idx)}
+                  style={{
+                    background: activeIdx === idx ? '#14b8a6' : 'rgba(15,23,42,0.8)',
+                    color: '#fff', borderRadius: 20, padding: '6px 12px',
+                    fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                    border: `1px solid ${activeIdx === idx ? '#14b8a6' : 'rgba(255,255,255,0.2)'}`
+                  }}
+                >
+                  {s.days || `Route ${idx + 1}`}
+                </button>
+              ))}
+            </div>
+          )}
           <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
 
           {(loading || !leafletReady) && (
@@ -361,7 +391,7 @@ function RouteModal({ driverId, driverName, onClose }) {
               position: 'absolute', inset: 0, background: 'rgba(30, 41, 59, 0.9)',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#fff', padding: 20, textAlign: 'center'
             }}>
-              <span style={{ fontSize: 36, marginBottom: 10 }}>📍</span>
+              <span style={{ width: 36, height: 36, marginBottom: 10, color: '#e74c3c' }}>{ICONS.map}</span>
               <span style={{ fontSize: 14, fontWeight: 600, color: '#e74c3c' }}>No Route Configured</span>
               <span style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>This driver does not have a route schedule assigned.</span>
             </div>
@@ -432,7 +462,7 @@ export default function TruckManagement() {
     const res = await apiDeleteTruck(id)
     if (res.ok) {
       setExpanded(null)
-      showToast('🗑 Truck removed.')
+      showToast('Truck removed.')
     }
   }
 
@@ -572,7 +602,7 @@ export default function TruckManagement() {
             <div style={{ textAlign: 'center', padding: 40 }}>Loading trucks...</div>
           ) : filtered.length === 0 ? (
             <div className="card" style={{ textAlign: 'center', padding: '36px 20px' }}>
-              <div style={{ fontSize: 36, marginBottom: 10 }}>🚛</div>
+              <div style={{ width: 48, height: 48, margin: '0 auto 12px', color: '#94a3b8' }}>{ICONS.truck}</div>
               <div style={{ fontWeight: 700, marginBottom: 4 }}>No trucks found</div>
               <div className="text-muted text-sm">Try adjusting your filter or search.</div>
             </div>
@@ -599,9 +629,11 @@ export default function TruckManagement() {
                     <div style={{
                       width: 44, height: 44, borderRadius: 12, flexShrink: 0,
                       background: `${sm.bg}`,
-                      border: `1px solid ${sm.border}`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22,
-                    }}>🚛</div>
+                      border: `1px solid ${sm.border}`, color: sm.color,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <div style={{ width: 24, height: 24 }}>{ICONS.truck}</div>
+                    </div>
 
                     {/* Main info */}
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -610,8 +642,9 @@ export default function TruckManagement() {
                         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{truck.model}</span>
                         <StatusBadge status={truck.status} />
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
-                        {truck.driver_name ? `👤 ${truck.driver_name}` : '👤 No driver assigned'} &nbsp;·&nbsp; {truck.zone}
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ width: 14, height: 14, flexShrink: 0 }}>{ICONS.profile}</div>
+                        {truck.driver_name ? truck.driver_name : 'No driver assigned'} &nbsp;·&nbsp; {truck.zone}
                       </div>
                       {truck.status === 'active' && <CapacityBar pct={truck.current_capacity} />}
                     </div>
@@ -660,7 +693,9 @@ export default function TruckManagement() {
                                 style={{ fontSize: 11, padding: '4px 10px', height: 'fit-content' }}
                                 onClick={() => setViewRouteDriver({ id: truck.driver, name: truck.driver_name })}
                               >
-                                🗺️ Show Route
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <div style={{ width: 14, height: 14 }}>{ICONS.map}</div> Show Route
+                                </div>
                               </button>
                             </div>
                           ) : (
@@ -711,14 +746,18 @@ export default function TruckManagement() {
                           style={{ flex: 1 }}
                           onClick={() => setModal(truck)}
                         >
-                          ✏️ Edit / Reassign
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                            <div style={{ width: 14, height: 14 }}>{ICONS.edit}</div> Edit / Reassign
+                          </div>
                         </button>
                         <button
                           className="btn btn-sm"
                           style={{ background: 'rgba(231,76,60,0.08)', color: '#e74c3c', border: '1px solid rgba(231,76,60,0.3)' }}
                           onClick={() => handleDeleteTruck(truck.id)}
                         >
-                          🗑 Delete
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                            <div style={{ width: 14, height: 14 }}>{ICONS.trash}</div> Delete
+                          </div>
                         </button>
                       </div>
                     </div>

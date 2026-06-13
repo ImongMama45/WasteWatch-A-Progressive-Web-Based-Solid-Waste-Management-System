@@ -14,9 +14,8 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
-import api from '../../api/client'
 import HomeCarousel from '../../components/carousel/HomeCarousel'
-
+import { ICONS } from '../../api/navConfig'
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 
@@ -66,7 +65,7 @@ const MOCK_SCHEDULE = [
 ]
 
 const ISSUE_LABELS = { overflow: 'Overflow', illegal_dumping: 'Illegal Dumping', missed: 'Missed Collection' }
-const ISSUE_ICONS = { overflow: '🗑️', illegal_dumping: '🚯', missed: '📭' }
+const ISSUE_ICONS = { overflow: ICONS.trash, illegal_dumping: ICONS.hotspot, missed: ICONS.box }
 
 const STATUS_BADGE = {
   pending: { label: 'PENDING', color: 'var(--warning)', bg: 'rgba(243,156,18,0.1)' },
@@ -123,6 +122,21 @@ export default function BrgyDashboard() {
       console.error('Failed to fetch stats:', err)
     }
   }
+
+  // In useEffect, alongside fetchStats() and fetchReports():
+  async function fetchAnnouncements() {
+    try {
+      const barangayId = user?.barangay_id
+      const url = barangayId
+        ? `/api/news/items/?barangay_id=${barangayId}`
+        : '/api/news/items/for-dashboard/'
+      const res = await api.get(url)
+      setAnnouncements(res.data.slice(0, 4))
+    } catch { /* silent */ }
+  }
+
+  // State:
+  const [announcements, setAnnouncements] = useState([])
 
   async function fetchReports() {
     setLoading(true)
@@ -395,7 +409,9 @@ export default function BrgyDashboard() {
                   </div>
                 ) : filteredReports.length === 0 ? (
                   <div className="card" style={{ textAlign: 'center', padding: '40px 20px' }}>
-                    <div style={{ fontSize: 42, marginBottom: 12 }}>✅</div>
+                    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12, color: 'var(--accent)' }}>
+                      <div style={{ width: 42, height: 42 }}>{ICONS.check}</div>
+                    </div>
                     <div style={{ fontWeight: 700, marginBottom: 4 }}>No reports found</div>
                     <div className="text-muted text-sm">
                       {reportFilter === 'Pending' ? 'No pending reports to validate.' : `No ${reportFilter.toLowerCase()} reports.`}
@@ -409,100 +425,105 @@ export default function BrgyDashboard() {
                       const tags = parseTags(report.tags)
 
                       return (
-                      <div key={report.id} className="bcard"
-                        style={{
-                          background: 'var(--surface)',
-                          border: expandedReport === report.id
-                            ? '1.5px solid var(--accent)' : '1px solid var(--border)',
-                          borderRadius: 14, marginBottom: 10,
-                          overflow: 'hidden', cursor: 'pointer',
-                        }}
-                        onClick={() => setExpandedReport(p => p === report.id ? null : report.id)}
-                      >
-                        {/* Row */}
-                        <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <div style={{
-                            width: 40, height: 40, borderRadius: 10, flexShrink: 0,
-                            background: issueType === 'overflow' ? 'rgba(239,68,68,0.1)'
-                              : issueType === 'illegal_dumping' ? 'rgba(243,156,18,0.1)'
-                                : 'rgba(93,173,226,0.1)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
-                          }}>{ISSUE_ICONS[issueType]}</div>
-
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginBottom: 2 }}>
-                              <span style={{ fontWeight: 700, fontSize: 14 }}>{ISSUE_LABELS[issueType] || issueType}</span>
-                              <span style={{
-                                background: statusBadge.bg, color: statusBadge.color,
-                                fontSize: 9, fontWeight: 800, padding: '2px 8px', borderRadius: 20, letterSpacing: '.05em',
-                              }}>{statusBadge.label}</span>
-                            </div>
-                            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{report.address || report.barangay_name || 'No address'}</div>
-                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
-                              {report.user_name || 'Community Report'} · {formatReportDate(report.created_at || report.date)}
-                            </div>
-                          </div>
-
-                          <div style={{
-                            fontSize: 16, color: 'var(--text-muted)',
-                            transform: expandedReport === report.id ? 'rotate(90deg)' : 'rotate(0)',
-                            transition: 'transform .2s',
-                          }}>›</div>
-                        </div>
-
-                        {/* Expanded */}
-                        {expandedReport === report.id && (
-                          <div style={{ borderTop: '1px solid var(--border)', padding: '14px 16px', animation: 'slideDown .18s' }}
-                            onClick={e => e.stopPropagation()}>
-                            <p style={{ fontSize: 13, lineHeight: 1.65, marginBottom: 12, fontStyle: 'italic', color: 'var(--text-muted)' }}>
-                              "{report.description || 'No description provided.'}"
-                            </p>
-                            {tags.length > 0 && (
-                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
-                                {tags.map(tag => (
-                                  <span key={tag} style={{
-                                    background: 'var(--bg)', border: '1px solid var(--border)',
-                                    borderRadius: 20, fontSize: 11, padding: '3px 10px', color: 'var(--text-muted)',
-                                  }}>{tag}</span>
-                                ))}
+                        <div key={report.id} className="bcard"
+                          style={{
+                            background: 'var(--surface)',
+                            border: expandedReport === report.id
+                              ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                            borderRadius: 14, marginBottom: 10,
+                            overflow: 'hidden', cursor: 'pointer',
+                          }}
+                          onClick={() => setExpandedReport(p => p === report.id ? null : report.id)}
+                        >
+                          {/* Row */}
+                          <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <div style={{
+                              width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+                              background: issueType === 'overflow' ? 'rgba(239,68,68,0.1)'
+                                : issueType === 'illegal_dumping' ? 'rgba(243,156,18,0.1)'
+                                  : 'rgba(93,173,226,0.1)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}>
+                              <div style={{ width: 20, height: 20, color: 'var(--accent)' }}>
+                                {ISSUE_ICONS[issueType]}
                               </div>
-                            )}
-                            {report.status === 'pending' && (
-                              <>
-                                <div style={{
-                                  background: 'rgba(20,184,166,0.05)', border: '1px solid rgba(20,184,166,0.18)',
-                                  borderRadius: 8, padding: '9px 12px', marginBottom: 14,
-                                  fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6,
-                                }}>
-                                  <strong style={{ color: 'var(--text)' }}>💡 Validate:</strong> Is this a real issue in your barangay? Approving adds it to the live map.
-                                </div>
-                                <div style={{ display: 'flex', gap: 8 }}>
-                                  <button className="abtn"
-                                    onClick={() => handleApprove(report.id)}
-                                    style={{
-                                      flex: 1, background: 'var(--accent)', color: '#ffffffff',
-                                      border: 'none', borderRadius: 10, padding: '10px',
-                                      fontWeight: 700, fontSize: 13,
-                                    }}>
-                                    Approve
-                                  </button>
-                                  <button className="abtn"
-                                    onClick={() => handleReject(report.id)}
-                                style={{
-                                  flex: 1, background: 'transparent',
-                                  border: '1.5px solid var(--danger)',
-                                  color: 'var(--danger)', borderRadius: 10, padding: '10px',
-                                  fontWeight: 700, fontSize: 13,
-                                }}>
-                                ✕ Reject
-                              </button>
-                                </div>
-                              </>
-                            )}
+                            </div>
+
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginBottom: 2 }}>
+                                <span style={{ fontWeight: 700, fontSize: 14 }}>{ISSUE_LABELS[issueType] || issueType}</span>
+                                <span style={{
+                                  background: statusBadge.bg, color: statusBadge.color,
+                                  fontSize: 9, fontWeight: 800, padding: '2px 8px', borderRadius: 20, letterSpacing: '.05em',
+                                }}>{statusBadge.label}</span>
+                              </div>
+                              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{report.address || report.barangay_name || 'No address'}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
+                                {report.user_name || 'Community Report'} · {formatReportDate(report.created_at || report.date)}
+                              </div>
+                            </div>
+
+                            <div style={{
+                              fontSize: 16, color: 'var(--text-muted)',
+                              transform: expandedReport === report.id ? 'rotate(90deg)' : 'rotate(0)',
+                              transition: 'transform .2s',
+                            }}>›</div>
                           </div>
-                        )}
-                      </div>
-                    )})}
+
+                          {/* Expanded */}
+                          {expandedReport === report.id && (
+                            <div style={{ borderTop: '1px solid var(--border)', padding: '14px 16px', animation: 'slideDown .18s' }}
+                              onClick={e => e.stopPropagation()}>
+                              <p style={{ fontSize: 13, lineHeight: 1.65, marginBottom: 12, fontStyle: 'italic', color: 'var(--text-muted)' }}>
+                                "{report.description || 'No description provided.'}"
+                              </p>
+                              {tags.length > 0 && (
+                                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+                                  {tags.map(tag => (
+                                    <span key={tag} style={{
+                                      background: 'var(--bg)', border: '1px solid var(--border)',
+                                      borderRadius: 20, fontSize: 11, padding: '3px 10px', color: 'var(--text-muted)',
+                                    }}>{tag}</span>
+                                  ))}
+                                </div>
+                              )}
+                              {report.status === 'pending' && (
+                                <>
+                                  <div style={{
+                                    background: 'rgba(20,184,166,0.05)', border: '1px solid rgba(20,184,166,0.18)',
+                                    borderRadius: 8, padding: '9px 12px', marginBottom: 14,
+                                    fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6,
+                                  }}>
+                                    <strong style={{ color: 'var(--text)' }}>💡 Validate:</strong> Is this a real issue in your barangay? Approving adds it to the live map.
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 8 }}>
+                                    <button className="abtn"
+                                      onClick={() => handleApprove(report.id)}
+                                      style={{
+                                        flex: 1, background: 'var(--accent)', color: '#ffffffff',
+                                        border: 'none', borderRadius: 10, padding: '10px',
+                                        fontWeight: 700, fontSize: 13,
+                                      }}>
+                                      Approve
+                                    </button>
+                                    <button className="abtn"
+                                      onClick={() => handleReject(report.id)}
+                                      style={{
+                                        flex: 1, background: 'transparent',
+                                        border: '1.5px solid var(--danger)',
+                                        color: 'var(--danger)', borderRadius: 10, padding: '10px',
+                                        fontWeight: 700, fontSize: 13,
+                                      }}>
+                                      ✕ Reject
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
 
 
                   </>
@@ -543,9 +564,11 @@ export default function BrgyDashboard() {
                     <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
                       <div style={{
                         width: 40, height: 40, borderRadius: 10, flexShrink: 0,
-                        background: 'var(--surface-2)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20,
-                      }}>🚛</div>
+                        background: 'var(--surface-2)', color: 'var(--accent)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        <div style={{ width: 20, height: 20 }}>{ICONS.truck}</div>
+                      </div>
 
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginBottom: 2 }}>
@@ -666,8 +689,9 @@ export default function BrgyDashboard() {
                               border: '1px solid rgba(20,184,166,0.35)',
                               color: 'var(--accent)', borderRadius: 10,
                               padding: '9px 8px', fontWeight: 700, fontSize: 12,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
                             }}>
-                            🗺 Track on Map
+                            <div style={{ width: 14, height: 14 }}>{ICONS.map}</div> Track on Map
                           </button>
 
                           {/* 2. Flag to Admin */}
@@ -680,8 +704,9 @@ export default function BrgyDashboard() {
                                 border: '1px solid rgba(231,76,60,0.35)',
                                 color: 'var(--danger)', borderRadius: 10,
                                 padding: '9px 8px', fontWeight: 700, fontSize: 12,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
                               }}>
-                              🚩 Flag to Admin
+                              <div style={{ width: 14, height: 14 }}>{ICONS.warning}</div> Flag to Admin
                             </button>
                           ) : (
                             <button disabled style={{
@@ -690,8 +715,9 @@ export default function BrgyDashboard() {
                               border: '1px solid rgba(243,156,18,0.3)',
                               color: 'var(--warning)', borderRadius: 10,
                               padding: '9px 8px', fontWeight: 700, fontSize: 12, opacity: .55,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
                             }}>
-                              🚩 Flagged
+                              <div style={{ width: 14, height: 14 }}>{ICONS.warning}</div> Flagged
                             </button>
                           )}
 
@@ -743,9 +769,10 @@ export default function BrgyDashboard() {
                       <div style={{
                         width: 36, height: 36, borderRadius: 10, flexShrink: 0,
                         background: s.done ? 'rgba(46,204,113,0.12)' : 'var(--surface-2)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
+                        color: s.done ? 'var(--accent)' : 'var(--text-muted)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}>
-                        {s.done ? '✅' : '📅'}
+                        <div style={{ width: 16, height: 16 }}>{s.done ? ICONS.check : ICONS.schedule}</div>
                       </div>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 600, fontSize: 14 }}>{s.day}</div>
@@ -793,7 +820,7 @@ export default function BrgyDashboard() {
                     color: 'var(--accent)', fontWeight: 700,
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
                   }}>
-                  🗺 View Live Map
+                  <div style={{ width: 16, height: 16 }}>{ICONS.map}</div> View Live Map
                 </button>
                 <button className="abtn btn btn-full"
                   onClick={() => navigate('/brgy/escalate')}
@@ -802,7 +829,7 @@ export default function BrgyDashboard() {
                     color: 'var(--danger)', fontWeight: 700,
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
                   }}>
-                  📨 Escalate to Admin
+                  <div style={{ width: 16, height: 16 }}>{ICONS.escalation}</div> Escalate to Admin
                 </button>
               </div>
             </div>
@@ -833,7 +860,7 @@ export default function BrgyDashboard() {
                   display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0',
                   borderBottom: i < MOCK_SCHEDULE.length - 1 ? '1px solid var(--border)' : 'none',
                 }}>
-                  <span style={{ fontSize: 14 }}>{s.done ? '✅' : '📅'}</span>
+                  <div style={{ width: 14, height: 14, color: s.done ? 'var(--accent)' : 'var(--text-muted)' }}>{s.done ? ICONS.check : ICONS.schedule}</div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{s.day}</div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.zone}</div>

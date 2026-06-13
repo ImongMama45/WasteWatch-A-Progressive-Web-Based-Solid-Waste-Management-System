@@ -104,6 +104,48 @@ function BarChart({ data, color = '#2ecc71' }) {
 // ─── SVG LINE CHART ───────────────────────────────────────────────────────────
 
 function LineChart({ data, color = '#3b82f6', label = 'm' }) {
+    if (!Array.isArray(data) || data.length === 0) {
+        return (
+            <div style={{
+                height: 120,
+                borderRadius: 12,
+                border: '1px dashed var(--border)',
+                background: 'var(--bg)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--text-muted)',
+                fontSize: 12,
+                fontWeight: 600,
+            }}>
+                No data yet
+            </div>
+        )
+    }
+
+    if (data.length === 1) {
+        const value = data[0]
+        return (
+            <div style={{
+                height: 120,
+                borderRadius: 12,
+                border: '1px solid var(--border)',
+                background: 'linear-gradient(180deg, var(--surface), var(--bg))',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                color: 'var(--text-muted)',
+            }}>
+                <div style={{ fontSize: 11, fontWeight: 700 }}>Single data point</div>
+                <div style={{ fontFamily: 'var(--font-head)', fontSize: 28, fontWeight: 800, color }}>
+                    {value}{label}
+                </div>
+            </div>
+        )
+    }
+
     const W = 320, H = 100, PAD = 16
     const max = Math.max(...data, 1)
     const min = Math.min(...data)
