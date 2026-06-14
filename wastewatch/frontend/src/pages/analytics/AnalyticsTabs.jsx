@@ -128,29 +128,47 @@ function AdminControls() {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function AnalyticsTabs() {
-  const { user } = useAuth()
+  const { user, barangays } = useAuth()
   const role = user?.role?.toLowerCase() || 'citizen'
-  const userBarangay = user?.barangay_name || ''
   const navigate = useNavigate()
 
   const tabs = buildTabs(role)
   const [active, setActive] = useState(tabs[0]?.key || 'global')
 
   // ── Filter state ───────────────────────────────────────────────────────────
-  const [selectedBarangay, setSelectedBarangay] = useState('All Barangays')
-  const [selectedPeriod, setSelectedPeriod] = useState('This Week')
+  // Default: Admin = All Barangays, Others = User's Barangay ID
+  const [selectedBarangay, setSelectedBarangay] = useState(
+    role === 'admin' ? 'all' : (user?.barangay || 'all')
+  )
+
+  // Default date range: Last 30 days
+  const todayStr = new Date().toISOString().split('T')[0]
+  const thirtyDaysAgo = new Date()
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+  const defaultFrom = thirtyDaysAgo.toISOString().split('T')[0]
+
+  const [dateFrom, setDateFrom] = useState(defaultFrom)
+  const [dateTo, setDateTo] = useState(todayStr)
   const [selectedRoute, setSelectedRoute] = useState('All Routes')
+
+  function handleToday() {
+    setDateFrom(todayStr)
+    setDateTo(todayStr)
+  }
 
   function handleExport() {
     const params = new URLSearchParams({
-      barangay: selectedBarangay,
-      period: selectedPeriod,
+      barangay_id: selectedBarangay,
+      date_from: dateFrom,
+      date_to: dateTo,
       route: selectedRoute,
     })
     window.open(`/api/analytics/export/?${params}`, '_blank')
   }
 
-  const scopeBarangay = selectedBarangay === 'All Barangays' ? 'City-wide View' : selectedBarangay
+  const selectedBrgyName = selectedBarangay === 'all' 
+    ? 'City-wide View' 
+    : (barangays.find(b => b.id === Number(selectedBarangay))?.name || 'Selected Barangay')
 
   return (
     <DashboardLayout>
@@ -166,9 +184,9 @@ export default function AnalyticsTabs() {
               <span className="ac-breadcrumb__sep">›</span>
               <span className="ac-breadcrumb__city">CENRO</span>
               <span className="ac-breadcrumb__sep">›</span>
-              <span className="ac-breadcrumb__scope">{scopeBarangay}</span>
+              <span className="ac-breadcrumb__scope">{selectedBrgyName}</span>
               <span className="ac-breadcrumb__sep">›</span>
-              <span className="ac-breadcrumb__scope">{selectedPeriod}</span>
+              <span className="ac-breadcrumb__scope">{dateFrom} to {dateTo}</span>
             </div>
 
             {/* Title row — stacks on mobile, side-by-side on desktop */}
@@ -200,43 +218,41 @@ export default function AnalyticsTabs() {
                     onChange={e => setSelectedBarangay(e.target.value)}
                     aria-label="Select barangay"
                   >
-                    {BARANGAY_OPTIONS.map(b => (
-                      <option key={b} value={b}>{b}</option>
+                    <option value="all">All Barangays</option>
+                    {barangays.map(b => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
                     ))}
                   </select>
                 </div>
 
-                {/* Period */}
+                {/* Date Range */}
                 <div className="ac-filter-group">
-                  <div className="ac-filter-label">Date Range</div>
-                  <select
+                  <div className="ac-filter-label">Date From</div>
+                  <input
+                    type="date"
                     className="ac-filter-select"
-                    value={selectedPeriod}
-                    onChange={e => setSelectedPeriod(e.target.value)}
-                    aria-label="Select date range"
-                  >
-                    {['Today', 'This Week', 'This Month', 'This Quarter', 'This Year'].map(p => (
-                      <option key={p} value={p}>{p}</option>
-                    ))}
-                  </select>
+                    value={dateFrom}
+                    onChange={e => setDateFrom(e.target.value)}
+                  />
+                </div>
+                <div className="ac-filter-group">
+                  <div className="ac-filter-label">Date To</div>
+                  <input
+                    type="date"
+                    className="ac-filter-select"
+                    value={dateTo}
+                    onChange={e => setDateTo(e.target.value)}
+                  />
                 </div>
 
-                {/* Route — admin / driver only */}
-                {(role === 'admin' || role === 'driver') && (
-                  <div className="ac-filter-group">
-                    <div className="ac-filter-label">Route</div>
-                    <select
-                      className="ac-filter-select"
-                      value={selectedRoute}
-                      onChange={e => setSelectedRoute(e.target.value)}
-                      aria-label="Select collection route"
-                    >
-                      {['All Routes', 'Zone A', 'Zone B', 'Zone C', 'Zone D'].map(r => (
-                        <option key={r} value={r}>{r}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+                {/* Today Shortcut */}
+                <button 
+                  className="ac-export-btn" 
+                  onClick={handleToday}
+                  style={{ background: 'var(--surface-3)', border: '1px solid var(--border)' }}
+                >
+                  TODAY
+                </button>
 
                 {/* Export */}
                 <button className="ac-export-btn" onClick={handleExport} aria-label="Export analytics data">
@@ -272,16 +288,17 @@ export default function AnalyticsTabs() {
 
           {active === 'global' && (
             <GlobalInsights
-              userBarangay={userBarangay}
               selectedBarangay={selectedBarangay}
-              selectedPeriod={selectedPeriod}
+              dateFrom={dateFrom}
+              dateTo={dateTo}
             />
           )}
 
           {active === 'perf' && (
             <PerformanceAnalytics
               selectedBarangay={selectedBarangay}
-              selectedPeriod={selectedPeriod}
+              dateFrom={dateFrom}
+              dateTo={dateTo}
               selectedRoute={selectedRoute}
             />
           )}

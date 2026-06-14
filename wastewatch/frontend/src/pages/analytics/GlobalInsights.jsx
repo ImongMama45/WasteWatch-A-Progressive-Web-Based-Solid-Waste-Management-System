@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect } from 'react'
+import { useAuth } from '../../context/AuthContext'
 import BarangayRankingCard from './BarangayRankingCard'
 import HotspotMap from './HotspotMap'
 import api from '../../api/client'
@@ -578,34 +579,31 @@ function RankingsSection({ rankings, problematic, userBarangay }) {
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
-export default function GlobalInsights({ userBarangay }) {
-  const [data, setData] = useState(PLACEHOLDER)
+export default function GlobalInsights({ selectedBarangay, dateFrom, dateTo }) {
+  const { user } = useAuth()
+  const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [period, setPeriod] = useState('This Week')
 
   useEffect(() => {
-    async function fetchAll() {
+    async function fetchDashboard() {
+      setLoading(true)
       try {
-        const [kpiRes, brgyRes, truckRes, trendRes] = await Promise.allSettled([
-          api.get('/api/analytics/kpi/'),
-          api.get('/api/analytics/barangay-performance/'),
-          api.get('/api/analytics/truck-performance/'),
-          api.get('/api/analytics/trends/'),
-        ])
-
-        setData(prev => ({
-          ...prev,
-          kpi: kpiRes.status === 'fulfilled' ? kpiRes.value.data[0] ?? prev.kpi : prev.kpi,
-          trucks: truckRes.status === 'fulfilled' ? truckRes.value.data ?? prev.trucks : prev.trucks,
-          issueTrends: trendRes.status === 'fulfilled'
-            ? trendRes.value.data.map(t => ({ label: t.date, value: t.report_count }))
-            : prev.issueTrends,
-        }))
-      } catch { /* stay on placeholder */ }
-      finally { setLoading(false) }
+        const res = await api.get('/api/analytics/dashboard/', {
+          params: {
+            barangay_id: selectedBarangay,
+            date_from: dateFrom,
+            date_to: dateTo
+          }
+        })
+        setData(res.data)
+      } catch (err) {
+        console.error("Failed to fetch analytics:", err)
+      } finally {
+        setLoading(false)
+      }
     }
-    fetchAll()
-  }, [period])
+    fetchDashboard()
+  }, [selectedBarangay, dateFrom, dateTo])
 
   if (loading) return (
     <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
@@ -614,32 +612,128 @@ export default function GlobalInsights({ userBarangay }) {
     </div>
   )
 
+  if (!data) return (
+    <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+      No data available for the selected filters.
+    </div>
+  )
+
+  const { summary, charts, insights } = data
+  const role = user?.role?.toLowerCase()
+
   return (
     <>
       {/* ── Overview KPIs ── */}
-      <OverviewKPIs kpi={data.kpi} />
-
-      {/* ── Two-column mid section ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, alignItems: 'start' }}>
-        <div>
-          <WasteCollectionChart data={data.wasteDaily} />
-          <CollectionEfficiency kpi={data.kpi} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10, marginBottom: 16 }}>
+        <div className="ac-kpi-card">
+          <span className="msi" style={{ color: 'var(--accent)' }}>flag</span>
+          <div className="ac-kpi-value">{summary.total_reports}</div>
+          <div className="ac-kpi-label">Total Reports</div>
         </div>
-        <div>
-          <RankingsSection rankings={data.rankings} problematic={data.problematic} userBarangay={userBarangay} />
+        <div className="ac-kpi-card">
+          <span className="msi" style={{ color: 'var(--accent)' }}>check_circle</span>
+          <div className="ac-kpi-value">{summary.resolved_reports}</div>
+          <div className="ac-kpi-label">Resolved</div>
         </div>
+        <div className="ac-kpi-card">
+          <span className="msi" style={{ color: 'var(--warning)' }}>pending</span>
+          <div className="ac-kpi-value">{summary.pending_reports}</div>
+          <div className="ac-kpi-label">Pending</div>
+        </div>
+        <div className="ac-kpi-card">
+          <span className="msi" style={{ color: 'var(--info)' }}>trending_up</span>
+          <div className="ac-kpi-value">{summary.resolution_rate}%</div>
+          <div className="ac-kpi-label">Resolution Rate</div>
+        </div>
+        {role === 'admin' && (
+          <>
+            <div className="ac-kpi-card">
+              <span className="msi" style={{ color: 'var(--info)' }}>group</span>
+              <div className="ac-kpi-value">{summary.total_users}</div>
+              <div className="ac-kpi-label">Total Users</div>
+            </div>
+            <div className="ac-kpi-card">
+              <span className="msi" style={{ color: 'var(--danger)' }}>local_fire_department</span>
+              <div className="ac-kpi-value">{summary.active_hotspots}</div>
+              <div className="ac-kpi-label">Active Hotspots</div>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* ── Lower sections ── */}
-      <IssueTrendsSection trends={data.issueTrends} hotspots={data.hotspots} />
-      <HotspotsSection hotspots={data.hotspots} stats={data.stats} />
-      <TruckPerformanceSection trucks={data.trucks} />
-      <WasteComposition segments={data.wasteComposition} />
+      {/* ── Insights Section ── */}
+      {insights.length > 0 && (
+        <GCard style={{ background: 'rgba(46,204,113,.05)', border: '1px solid rgba(46,204,113,.2)' }}>
+          <SHead icon="tips_and_updates" title="Dynamic Insights" subtitle="Automated intelligence based on current data" />
+          <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: 'var(--text)' }}>
+            {insights.map((insight, idx) => (
+              <li key={idx} style={{ marginBottom: 6 }}>{insight}</li>
+            ))}
+          </ul>
+        </GCard>
+      )}
 
-      {/* ── Map ── */}
+      {/* ── Charts Section ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16, marginBottom: 16 }}>
+        <GCard>
+          <SHead icon="show_chart" title="Reporting Trend" subtitle="Daily reports submitted over time" />
+          <MiniLine 
+            data={charts.report_trend.map(d => ({ label: d.day, value: d.count }))} 
+            valueKey="value" 
+            color="var(--accent)" 
+          />
+        </GCard>
+        <GCard>
+          <SHead icon="pie_chart" title="Waste Categories" subtitle="Distribution of reported issues" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+            <Donut 
+              segments={charts.waste_categories.map((c, i) => ({
+                label: c.issue_type,
+                value: c.value,
+                color: ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444'][i % 4]
+              }))} 
+              size={100} 
+            />
+            <div style={{ flex: 1 }}>
+              {charts.waste_categories.map((c, i) => (
+                <div key={c.issue_type} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 11 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: 2, background: ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444'][i % 4] }} />
+                  <span style={{ flex: 1 }}>{c.issue_type.replace('_', ' ').toUpperCase()}</span>
+                  <span style={{ fontWeight: 700 }}>{c.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </GCard>
+      </div>
+
+      {/* ── Admin Specific: Barangay Comparison ── */}
+      {role === 'admin' && charts.barangay_comparison && (
+        <GCard>
+          <SHead icon="leaderboard" title="Barangay Performance Comparison" subtitle="Ranking based on reporting activity and resolution" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {charts.barangay_comparison.map((b, i) => (
+              <div key={b.name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', width: 20 }}>#{i + 1}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{b.name}</span>
+                <div style={{ flex: 2, height: 8, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{ 
+                    width: `${(b.report_count / Math.max(...charts.barangay_comparison.map(x => x.report_count), 1)) * 100}%`, 
+                    height: '100%', 
+                    background: 'var(--accent)' 
+                  }} />
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 700, width: 40, textAlign: 'right' }}>{b.report_count}</span>
+              </div>
+            ))}
+          </div>
+        </GCard>
+      )}
+
+      {/* ── Map (Existing) ── */}
       <GCard>
         <SHead icon="map" title="Barangay Cleanliness Map" subtitle="Color-coded by compliance score · Red = active hotspots" />
-        <HotspotMap userBarangay={userBarangay} />
+        <HotspotMap mapData={data.map_data} userBarangay={user?.barangay_name} />
       </GCard>
     </>
   )
