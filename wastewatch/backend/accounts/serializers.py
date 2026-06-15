@@ -8,16 +8,33 @@ Three serializers:
 """
 
 from rest_framework import serializers
-from .models import User, Barangay, UserRole
+from .models import User, Barangay, UserRole, BarangayEstablishment
 
 
 # ---------------------------------------------------------------------------
 # Barangay
 # ---------------------------------------------------------------------------
+class EstablishmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = BarangayEstablishment
+        fields = ['id', 'name', 'count']
+
+
 class BarangaySerializer(serializers.ModelSerializer):
+    establishments = EstablishmentSerializer(many=True, read_only=True)
+    users_count = serializers.SerializerMethodField()
+    brgy_officials = serializers.SerializerMethodField()
+
     class Meta:
         model  = Barangay
-        fields = ['id', 'name']
+        fields = ['id', 'name', 'population', 'establishments', 'users_count', 'brgy_officials']
+
+    def get_users_count(self, obj):
+        return obj.residents.count()
+
+    def get_brgy_officials(self, obj):
+        officials = obj.residents.filter(role=UserRole.BRGY_OFFICIAL)
+        return [off.full_name for off in officials]
 
 
 # ---------------------------------------------------------------------------

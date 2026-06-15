@@ -7,7 +7,7 @@ This is where admins can change user roles.
 
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from .models import User, Barangay
+from .models import Barangay, BarangayEstablishment , User
 
 
 @admin.register(User)
@@ -35,7 +35,13 @@ class UserAdmin(BaseUserAdmin):
     )
 
 
+
+class EstablishmentInline(admin.TabularInline):
+    model  = BarangayEstablishment
+    extra  = 1   # Show one blank row by default
+    fields = ['name', 'count']
+
 @admin.register(Barangay)
 class BarangayAdmin(admin.ModelAdmin):
-    list_display  = ('id', 'name')
-    search_fields = ('name',)
+    list_display  = ['name', 'population']
+    inlines       = [EstablishmentInline]

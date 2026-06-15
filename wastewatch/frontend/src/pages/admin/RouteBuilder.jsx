@@ -78,6 +78,11 @@ function detectBarangay(lat, lng, geoJson) {
   return null
 }
 
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return Date.now().toString(36) + Math.random().toString(36).substring(2);
+}
+
 function optimizeStopOrder(origin, stops) {
   if (stops.length <= 2) return stops
   const remaining = [...stops]; const ordered = []; let current = origin
@@ -89,7 +94,7 @@ function optimizeStopOrder(origin, stops) {
   return ordered
 }
 
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const STEP_LABELS = ['Config', 'Schedule', 'Stops', 'Dumpsite', 'Review']
 
 // ── Minimal SVG icons ──────────────────────────────────────────────────────
@@ -137,6 +142,8 @@ export default function RouteBuilder() {
   const [showEventModal, setShowEventModal] = useState(false)
   const [newEvent, setNewEvent] = useState({ title: '', date: '', location: '', assigned_to: '' })
   const [calDayModal, setCalDayModal] = useState(null)
+  const [calMonth, setCalMonth] = useState(() => new Date().getMonth())
+  const [calYear, setCalYear] = useState(() => new Date().getFullYear())
 
   // Calendar truck filter — null = show all
   const [calTruckFilter, setCalTruckFilter] = useState(null)
@@ -248,13 +255,26 @@ export default function RouteBuilder() {
       if (!addModeRef.current) return
       const { lat, lng } = e.latlng
       const detectedName = detectBarangay(lat, lng, barangayGeoRef.current)
+
+      // Normalize names for robust matching (e.g. Gulang-Gulang vs Gulang-gulang, Kanlurang Mayao vs Mayao Kanluran)
+      const matchName = (dbName, geoName) => {
+        if (!geoName) return false
+        const n1 = dbName.toLowerCase().trim()
+        const n2 = geoName.toLowerCase().trim()
+        if (n1 === n2) return true
+        if (n1 === 'kanlurang mayao' && n2 === 'mayao kanluran') return true
+        if (n1 === 'mayao kanluran' && n2 === 'kanlurang mayao') return true
+        return false
+      }
+
       if (selectedBarangaysRef.current.length > 0) {
-        const matchedBarangay = barangaysRef.current.find(x => x.name === detectedName)
+        const matchedBarangay = barangaysRef.current.find(x => matchName(x.name, detectedName))
         if (!matchedBarangay || !selectedBarangaysRef.current.includes(matchedBarangay.id)) { showToast('⛔ Pin is outside the selected barangay area'); return }
       }
+
       let assignedBarangayId = null
       if (detectedName) {
-        const b = barangaysRef.current.find(x => x.name === detectedName)
+        const b = barangaysRef.current.find(x => matchName(x.name, detectedName))
         if (b) {
           assignedBarangayId = b.id
           if (!selectedBarangaysRef.current.includes(b.id)) { setSelectedBarangays(prev => [...prev, b.id]); showToast(`📍 Auto-added: ${b.name}`) }
@@ -262,7 +282,8 @@ export default function RouteBuilder() {
       } else {
         showToast('⚠️ Warning: Stop is not inside any recognized barangay')
       }
-      setStops(prev => [...prev, { stop_id: crypto.randomUUID(), lat, lng, label: '', barangay_id: assignedBarangayId }]); setAddMode(false)
+
+      setStops(prev => [...prev, { stop_id: generateUUID(), lat, lng, label: '', barangay_id: assignedBarangayId }]); setAddMode(false)
     })
     mapInst.current = map
     setTimeout(() => { try { map.invalidateSize() } catch { } }, 200)
@@ -420,21 +441,63 @@ export default function RouteBuilder() {
   }
   async function handleSave() {
     try {
-      const payload = { truck, driver, barangays: selectedBarangays, dumpsite, days: days.join(', '), start_time: time, end_time: endTime, waypoints: [startPoint, ...stops], universal_start: universalStart, start_location: { lat: startPoint.lat, lng: startPoint.lng, label: startPoint.label } }
+      const payload = {
+        truck: truck || null,
+        driver: driver || null,
+        dumpsite: dumpsite || null,
+        barangays: selectedBarangays,
+        days: days.join(', '),
+        start_time: time,
+        end_time: endTime,
+        waypoints: [startPoint, ...stops],  // now writes to the real JSONField
+      }
       if (editId) await api.patch(`/api/driver/collection-schedules/${editId}/`, payload)
       else await api.post('/api/driver/collection-schedules/', payload)
-      setSaved(true); showToast(`✅ Route ${editId ? 'updated' : 'saved'}!`)
-      setTimeout(() => { setStep(0); setEditId(null); setTruck(''); setDriver(''); setSelectedBarangays([]); setDays([]); setStops([]); setDumpsite(''); setSaved(false); setStartPoint(HOME_BASE); setOrsData(null) }, 2000)
-    } catch (err) { showToast(`❌ Failed to ${editId ? 'update' : 'save'} schedule.`); console.error(err) }
+
+      setSaved(true)
+      showToast(`✅ Route ${editId ? 'updated' : 'saved'}!`)
+      setTimeout(() => {
+        setStep(0); setEditId(null); setTruck(''); setDriver('')
+        setSelectedBarangays([]); setDays([]); setStops([])
+        setDumpsite(''); setSaved(false); setStartPoint(HOME_BASE)
+        setOrsData(null); setActiveTab('list')
+      }, 2000)
+    } catch (err) {
+      const detail = err.response?.data
+      const msg = typeof detail === 'object'
+        ? Object.entries(detail)
+          .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
+          .join(' | ')
+        : String(detail || 'Unknown error')
+      showToast(`❌ ${msg}`)
+      console.error('Save error:', err.response?.status, detail)
+    }
   }
+
   function handleEdit(s) {
-    setActiveTab('builder'); setStep(2); setEditId(s.id); setTruck(s.truck || ''); setDriver(s.driver || '')
-    setSelectedBarangays(s.barangays || []); setDays(s.days ? s.days.split(', ') : [])
-    setTime(s.start_time ? s.start_time.slice(0, 5) : '06:00'); setEndTime(s.end_time ? s.end_time.slice(0, 5) : '14:00'); setDumpsite(s.dumpsite || '')
-    if (s.waypoints?.length > 0) { const wps = s.waypoints.map(w => ({ ...w, lat: +w.lat, lng: +w.lng })); const sp = wps.shift(); setStartPoint(sp); setStops(wps) }
-    else { setStartPoint(HOME_BASE); setStops([]) }
-    setTimeout(() => { try { if (mapInst.current) mapInst.current.invalidateSize() } catch { } }, 300)
+    setActiveTab('builder'); setStep(2); setEditId(s.id)
+    setTruck(s.truck ? String(s.truck) : '')
+    setDriver(s.driver ? String(s.driver) : '')
+    setSelectedBarangays(s.barangays || [])
+    setDays(s.days ? s.days.split(', ') : [])
+    setTime(s.start_time ? s.start_time.slice(0, 5) : '06:00')
+    setEndTime(s.end_time ? s.end_time.slice(0, 5) : '14:00')
+    setDumpsite(s.dumpsite ? String(s.dumpsite) : '')
+
+    // Use raw waypoints (JSONField), fall back to waypoints_display
+    const raw = s.waypoints?.length ? s.waypoints : (s.waypoints_display || [])
+    if (raw.length > 0) {
+      const wps = raw.map(w => ({ ...w, lat: +w.lat, lng: +w.lng }))
+      const sp = wps.shift()
+      setStartPoint(sp)
+      setStops(wps)
+    } else {
+      setStartPoint(HOME_BASE)
+      setStops([])
+    }
+    setTimeout(() => { try { mapInst.current?.invalidateSize() } catch { } }, 300)
   }
+
   function undoDelete(id, item) {
     const t = pendingDeletesRef.current[id]
     if (t) { clearTimeout(t); delete pendingDeletesRef.current[id]; setSchedules(p => [item, ...p]); showToast('↩️ Undone') }
@@ -484,13 +547,19 @@ export default function RouteBuilder() {
     return idx !== undefined ? idx : 0
   }
 
+  const calNavPrev = () => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1) } else { setCalMonth(m => m - 1) } }
+  const calNavNext = () => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1) } else { setCalMonth(m => m + 1) } }
+
   const renderCalendar = () => {
-    const today = new Date(); const cm = today.getMonth(), cy = today.getFullYear()
+    const today = new Date()
+    const cm = calMonth, cy = calYear
+    const isCurrentMonth = today.getMonth() === cm && today.getFullYear() === cy
     const dim = new Date(cy, cm + 1, 0).getDate(); const fdom = new Date(cy, cm, 1).getDay()
     const cells = []; for (let i = 0; i < fdom; i++) cells.push(null); for (let i = 1; i <= dim; i++) cells.push(i)
     const dayFull = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
     const dayShort = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
     const dayAbbr = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const monthLabel = new Date(cy, cm, 1).toLocaleString('default', { month: 'long', year: 'numeric' })
 
     // Unique trucks in schedule list
     const uniqueTrucks = []
@@ -508,10 +577,16 @@ export default function RouteBuilder() {
         <div className="cal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <button className="cal-nav-btn">‹</button>
-              <button className="cal-nav-btn">›</button>
+              <button className="cal-nav-btn" onClick={calNavPrev}>‹</button>
+              <button className="cal-nav-btn" onClick={calNavNext}>›</button>
             </div>
-            <span className="cal-month-label">{today.toLocaleString('default', { month: 'long', year: 'numeric' })}</span>
+            <span className="cal-month-label">{monthLabel}</span>
+            {!isCurrentMonth && (
+              <button onClick={() => { setCalMonth(today.getMonth()); setCalYear(today.getFullYear()) }}
+                style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-light)', border: '1px solid rgba(22,163,74,.2)', borderRadius: 20, padding: '2px 9px', cursor: 'pointer' }}>
+                Today
+              </button>
+            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, cursor: 'pointer', color: 'var(--text-muted)', userSelect: 'none' }}>
@@ -538,7 +613,7 @@ export default function RouteBuilder() {
         <div className="cal-grid">
           {cells.map((d, cellIdx) => {
             if (!d) return <div key={cellIdx} className="cal-cell empty" />
-            const isToday = d === today.getDate()
+            const isToday = isCurrentMonth && d === today.getDate()
             const cellDayName = dayFull[new Date(cy, cm, d).getDay()]
             const dateStr = `${cy}-${String(cm + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
             const daySched = showSchedulesOnCalendar
@@ -791,6 +866,50 @@ export default function RouteBuilder() {
     .cal-day-header-cell .short { display:none; }
     .cal-day-header-cell .full  { display:inline; }
 
+    /* ── Calendar wrapper ── */
+    .cal-wrapper { background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden; box-shadow:var(--shadow-sm); }
+
+    /* ── Calendar header ── */
+    .cal-header { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid var(--border); gap:10px; flex-wrap:wrap; }
+    .cal-month-label { font-family:var(--font-head); font-size:16px; font-weight:800; color:var(--text); }
+    .cal-nav-btn { width:30px; height:30px; border-radius:8px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all .12s; line-height:1; }
+    .cal-nav-btn:hover { background:var(--surface-3); border-color:var(--border-2); }
+
+    /* ── Calendar day-of-week header ── */
+    .cal-day-header { display:grid; grid-template-columns:repeat(7,1fr); border-bottom:1px solid var(--border); }
+    .cal-day-header-cell { text-align:center; padding:9px 4px; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; color:var(--text-muted); }
+
+    /* ── Calendar grid ── */
+    .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); }
+    .cal-cell { min-height:88px; padding:7px 6px 5px; border-right:1px solid var(--border); border-bottom:1px solid var(--border); cursor:pointer; transition:background .12s; position:relative; }
+    .cal-cell:nth-child(7n) { border-right:none; }
+    .cal-cell.empty { background:var(--surface-2); cursor:default; }
+    .cal-cell:hover:not(.empty) { background:rgba(22,163,74,.03); }
+    .cal-cell.today { background:rgba(22,163,74,.04); }
+    .cal-cell.today .cal-date-num { background:var(--accent); color:#fff; }
+
+    /* ── Date number badge ── */
+    .cal-date-num { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; font-size:12px; font-weight:700; color:var(--text); }
+
+    /* ── Event count badge ── */
+    .cal-count { font-size:9px; font-weight:800; background:var(--accent); color:#fff; border-radius:20px; padding:1px 5px; line-height:1.4; }
+
+    /* ── Event chips ── */
+    .cal-event-chip { display:flex; align-items:center; gap:3px; font-size:9px; font-weight:700; border-radius:3px; padding:2px 5px; border-left:2px solid; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+    .cal-event-chip.event-type { background:#FEF3C7; border-left-color:#D97706; color:#92400E; }
+    .cal-more-link { font-size:9px; font-weight:700; color:var(--text-muted); padding-left:2px; }
+
+    /* ── Mobile dots ── */
+    .cal-dots-row { display:none; flex-wrap:wrap; gap:3px; margin-top:4px; }
+    .cal-dot-sm { width:5px; height:5px; border-radius:50%; }
+
+    /* ── Legend ── */
+    .cal-legend { display:flex; align-items:center; flex-wrap:wrap; gap:6px; padding:10px 16px; border-top:1px solid var(--border); background:var(--surface-2); }
+    .cal-legend-item { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; color:var(--text-muted); background:var(--surface); border:1px solid transparent; border-radius:20px; padding:3px 10px; cursor:pointer; transition:all .12s; }
+    .cal-legend-item:hover { border-color:var(--border-2); color:var(--text); }
+    .cal-legend-item.active { border-color:currentColor; }
+    .cal-legend-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+
     @media (max-width:900px) {
       .rb-builder-grid { grid-template-columns:1fr; }
       .rb-map-wrap { height:300px; display:none; }
@@ -798,6 +917,9 @@ export default function RouteBuilder() {
       .rb-map-toggle { display:flex; width:100%; align-items:center; justify-content:center; gap:8px; padding:10px; margin-bottom:12px; border-radius:10px; border:1px solid var(--border); background:var(--surface); font-size:13px; font-weight:600; color:var(--text); cursor:pointer; }
       .rb-step-label { display:none; }
       .rb-step-conn { width:16px !important; }
+      .cal-cell { min-height:60px; }
+      .cal-event-chip { display:none; }
+      .cal-dots-row { display:flex; }
     }
     @media (max-width:680px) {
       .rb-list-desktop { display:none !important; }
@@ -806,6 +928,8 @@ export default function RouteBuilder() {
     @media (max-width:480px) {
       .cal-day-header-cell .short { display:inline; }
       .cal-day-header-cell .full  { display:none; }
+      .cal-cell { min-height:48px; padding:4px 3px; }
+      .cal-date-num { width:18px; height:18px; font-size:10px; }
     }
   `
 

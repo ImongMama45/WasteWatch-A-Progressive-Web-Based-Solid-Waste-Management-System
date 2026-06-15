@@ -6,7 +6,9 @@ import {
 } from 'lucide-react'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useAuth } from '../../context/AuthContext'
+import { useNotification } from '../../context/NotificationContext'
 import api from '../../api/client'
+import { getApiErrorMessage } from '../../utils/notificationHelpers'
 
 const TYPE_OPTIONS = [
   { value: 'announcement', label: 'Announcement', Icon: Megaphone,     desc: 'Official LGU notices and advisories' },
@@ -62,6 +64,7 @@ export default function CreateAnnouncementPage() {
   inject()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { notify } = useNotification()
   const isBrgyOfficial = user?.role === 'brgy_official'
   const fileInputRef = useRef(null)
 
@@ -108,7 +111,7 @@ export default function CreateAnnouncementPage() {
   // ── Submit ──────────────────────────────────────────────────────────────────
   async function handleSubmit(isDraft = false) {
     if (!form.title.trim() || !form.body.trim()) {
-      alert('Title and content are required.')
+      notify({ variant: 'error-solid', message: 'Title and content are required.' })
       return
     }
     setSaving(true)
@@ -133,15 +136,10 @@ export default function CreateAnnouncementPage() {
       })
       setSaving(false)
       if (!isDraft) setSubmitted(true)
-      else { alert('Draft saved.'); navigate('/announcements') }
+      else { notify({ variant: 'success', message: 'Draft saved.' }); navigate('/announcements') }
     } catch (err) {
       console.error(err)
-      const detail = err.response?.data
-      alert(
-        typeof detail === 'object'
-          ? Object.entries(detail).map(([k, v]) => `${k}: ${v}`).join('\n')
-          : 'Failed to save post.'
-      )
+      notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed to save post.') })
       setSaving(false)
     }
   }

@@ -2,10 +2,12 @@ import { useState, useMemo, useRef } from 'react'
 import { Bell, PlusCircle, X, Megaphone, AlertTriangle, Newspaper, Send, Save, CheckCircle, Image as ImageIcon } from 'lucide-react'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useAuth } from '../../context/AuthContext'
+import { useNotification } from '../../context/NotificationContext'
 import { useNewsItems } from '../../hooks/useNewsItems'
 import { useEmergencyAlerts } from '../../hooks/useEmergencyAlerts'
 import { useBarangaySpotlights } from '../../hooks/useBarangaySpotlights'
 import api from '../../api/client'
+import { getApiErrorMessage } from '../../utils/notificationHelpers'
 
 import EmergencyAlertBanner from './components/EmergencyAlertBanner'
 import FeaturedNewsCarousel from './components/FeaturedNewsCarousel'
@@ -45,6 +47,7 @@ function CreatePostModal({ barangays, onClose, onPublished }) {
   const [imagePreview, setImagePreview] = useState(null)
   const [dragging, setDragging] = useState(false)
   const fileInputRef = useRef(null)
+  const { notify } = useNotification()
 
   function set(key, val) { setForm(f => ({ ...f, [key]: val })) }
 
@@ -59,7 +62,7 @@ function CreatePostModal({ barangays, onClose, onPublished }) {
 
   async function handleSubmit(isDraft = false) {
     if (!form.title.trim() || !form.body.trim()) {
-      alert('Title and content are required.')
+      notify({ variant: 'error-solid', message: 'Title and content are required.' })
       return
     }
     setSaving(true)
@@ -78,16 +81,11 @@ function CreatePostModal({ barangays, onClose, onPublished }) {
       if (imageFile)     fd.append('image', imageFile)
       await api.post(endpoint, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
       setSaving(false)
-      if (isDraft) { alert('Draft saved.'); onClose() }
+      if (isDraft) { notify({ variant: 'success', message: 'Draft saved.' }); onClose() }
       else { setSubmitted(true); onPublished?.() }
     } catch (err) {
       console.error(err)
-      const detail = err.response?.data
-      alert(
-        typeof detail === 'object'
-          ? Object.entries(detail).map(([k, v]) => `${k}: ${v}`).join('\n')
-          : 'Failed to save post.'
-      )
+      notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed to save post.') })
       setSaving(false)
     }
   }

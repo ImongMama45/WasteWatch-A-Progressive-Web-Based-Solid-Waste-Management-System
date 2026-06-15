@@ -10,7 +10,9 @@ import { useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import BottomNav from '../components/BottomNav'
 import { useAuth } from '../context/AuthContext'
+import { useNotification } from '../context/NotificationContext'
 import api from '../api/client'
+import { getApiErrorMessage } from '../utils/notificationHelpers'
 
 const ISSUE_TYPES = [
   { value: '', label: 'Select Issue Type' },
@@ -30,6 +32,7 @@ const ALL_TAGS = ['Near School', 'Near market', 'Side Road', 'Residential', 'Hig
 export default function ReportForm() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const { notify } = useNotification()
   const fileRef = useRef(null)
 
   const [gps, setGps] = useState({ lat: null, lng: null, status: 'detecting', address: '' })
@@ -158,7 +161,7 @@ export default function ReportForm() {
           .join('\n')
       }
       
-      alert(`Report failed:\n${errorDetails}`)
+      notify({ variant: 'error-dark', message: getApiErrorMessage(err, `Report failed: ${errorDetails}`) })
 
       if (typeof data === 'object') {
         Object.keys(data).forEach(key => {

@@ -12,6 +12,8 @@ import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useTrucks } from '../../hooks/useTrucks'
 import { useUsers } from '../../hooks/useUsers'
+import { useNotification } from '../../context/NotificationContext'
+import { getApiErrorMessage } from '../../utils/notificationHelpers'
 import api from '../../api/client'
 import { ICONS } from '../../api/navConfig'
 
@@ -66,6 +68,7 @@ function decodePolyline(encoded) {
 const EMPTY_FORM = { plate_number: '', model: '', status: 'active', driver: '', crew: [], zone: '', last_service: '' }
 
 function TruckModal({ truck, onSave, onClose, drivers, crewPool }) {
+  const { notify } = useNotification()
   const [form, setForm] = useState(truck ? {
     plate_number: truck.plate_number, model: truck.model, status: truck.status,
     driver: truck.driver || '', crew: truck.crew || [],
@@ -200,7 +203,7 @@ function TruckModal({ truck, onSave, onClose, drivers, crewPool }) {
             className="btn btn-primary"
             style={{ flex: 1 }}
             onClick={() => {
-              if (!form.plate_number.trim()) return alert('Plate number is required.')
+              if (!form.plate_number.trim()) return notify({ variant: 'error-solid', message: 'Plate number is required.' })
               onSave(form)
             }}
           >
@@ -433,6 +436,7 @@ export default function TruckManagement() {
   const navigate = useNavigate()
   const { trucks, loading, saveTruck, deleteTruck: apiDeleteTruck } = useTrucks()
   const { drivers, crew: crewPool } = useUsers()
+  const { notify } = useNotification()
 
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
@@ -453,7 +457,7 @@ export default function TruckManagement() {
       showToast(id ? '✅ Truck updated successfully.' : '✅ Truck added successfully.')
       setModal(null)
     } else {
-      alert(JSON.stringify(res.error))
+      notify({ variant: 'error-outline', message: getApiErrorMessage({ response: { data: res.error } }, 'Failed to save truck.') })
     }
   }
 

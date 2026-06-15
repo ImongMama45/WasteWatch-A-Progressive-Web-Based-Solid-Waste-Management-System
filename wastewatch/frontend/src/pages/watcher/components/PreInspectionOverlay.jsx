@@ -41,6 +41,9 @@ import { useState, useEffect } from 'react'
 import api from '../../../api/client'
 import { broadcastPickupStatusSync } from '../../../utils/pickupStatusSync'
 import { ICONS } from '../../../api/navConfig'
+import { useOnline } from '../../../hooks/useOnline'
+import { getQueue } from '../../../hooks/useOfflineQueue'
+import { useAuth } from '../../../context/AuthContext'
 
 export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete, onBack, MultiPhotoPicker }) {
   const [outcome, setOutcome] = useState('')     // 'present' | 'empty'
@@ -48,32 +51,71 @@ export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete
   const [photos, setPhotos] = useState([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const isOnline = useOnline()
+  const inspectQueue = getQueue('inspection_submissions')
+  const { user } = useAuth()
 
   useEffect(() => {
     if (visible) { setOutcome(''); setNotes(''); setPhotos([]); setError('') }
   }, [visible, task?.id])
 
   async function handleSubmit() {
+    if (!user?.id) {
+      setError('You must be logged in to submit an inspection.')
+      return
+    }
     if (!outcome) { setError('Please select an inspection outcome.'); return }
     if (photos.length === 0) { setError('At least one photo is required.'); return }
     if (!gpsPos) { setError('GPS location required.'); return }
 
     setSubmitting(true); setError('')
+
+    const payload = {
+      ownerId: String(user.id),   // always a real watcher ID, never anonymous
+      schedule_id: task.schedule_id,
+      stop_order: task.stop_order,
+      lat: gpsPos.lat,
+      lng: gpsPos.lng,
+      outcome,
+      notes: notes.trim(),
+      photos,
+    }
+
+    if (isOnline) {
+      // ── ONLINE PATH ───────────────────────────────────────────────────────
+      try {
+        const form = new FormData()
+        form.append('schedule_id', payload.schedule_id)
+        form.append('stop_order', payload.stop_order)
+        form.append('lat', payload.lat)
+        form.append('lng', payload.lng)
+        form.append('outcome', payload.outcome)
+        form.append('notes', payload.notes)
+        photos.forEach((file, i) =>
+          form.append(i === 0 ? 'photo' : `photo_${i + 1}`, file)
+        )
+        await api.post('/api/watcher/stop-validations/pre-inspect/', form)
+        broadcastPickupStatusSync()
+        onComplete()
+        return
+      } catch (netErr) {
+        const isNetworkErr = !netErr?.response
+        if (!isNetworkErr) {
+          setError(netErr.response?.data?.error || 'Submission failed.')
+          setSubmitting(false)
+          return
+        }
+        // Network blip → fall through to queue
+      }
+    }
+
+    // ── OFFLINE PATH ──────────────────────────────────────────────────────
     try {
-      const form = new FormData()
-      form.append('schedule_id', task.schedule_id)
-      form.append('stop_order', task.stop_order)
-      form.append('lat', gpsPos.lat)
-      form.append('lng', gpsPos.lng)
-      form.append('outcome', outcome)
-      form.append('notes', notes.trim())
-      photos.forEach((file, i) => form.append(i === 0 ? 'photo' : `photo_${i + 1}`, file))
-      await api.post('/api/watcher/stop-validations/pre-inspect/', form)
+      await inspectQueue.enqueue(payload, 1 /* high priority */)
       broadcastPickupStatusSync()
-      onComplete()
-    } catch (err) {
-      setError(err.response?.data?.error || 'Submission failed.')
-    } finally {
+      onComplete()   // let watcher proceed immediately
+    } catch (qErr) {
+      setError('Failed to save offline. Please try again.')
       setSubmitting(false)
     }
   }

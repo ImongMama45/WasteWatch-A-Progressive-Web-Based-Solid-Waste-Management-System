@@ -68,17 +68,45 @@ class DumpsiteSerializer(serializers.ModelSerializer):
 
 
 class CollectionScheduleSerializer(serializers.ModelSerializer):
-    truck_plate   = serializers.CharField(source='truck.plate_number', read_only=True)
-    driver_name   = serializers.CharField(source='driver.full_name', read_only=True)
-    dumpsite_name = serializers.CharField(source='dumpsite.name', read_only=True)
+    truck_plate    = serializers.CharField(source='truck.plate_number', read_only=True)
+    driver_name    = serializers.CharField(source='driver.full_name',   read_only=True)
+    dumpsite_name  = serializers.CharField(source='dumpsite.name',      read_only=True)
     barangay_names = serializers.SerializerMethodField()
+    waypoints_display = serializers.SerializerMethodField()  # renamed — read-only enriched version
 
     class Meta:
-        model = CollectionSchedule
-        fields = '__all__'
+        model  = CollectionSchedule
+        fields = '__all__'  # 'waypoints' (the raw JSONField) is now included automatically
 
     def get_barangay_names(self, obj):
         return ", ".join([b.name for b in obj.barangays.all()])
+
+    def get_waypoints_display(self, obj):
+        from accounts.models import User
+        wps = obj.waypoints or []
+        barangay_ids = [wp.get('barangay_id') for wp in wps if wp.get('barangay_id')]
+
+        watcher_map = {}
+        if barangay_ids:
+            watchers = User.objects.filter(
+                role='watcher', barangay_id__in=barangay_ids
+            ).values('barangay_id', 'full_name')
+            for w in watchers:
+                bid = w['barangay_id']
+                if bid not in watcher_map:
+                    watcher_map[bid] = []
+                watcher_map[bid].append(w['full_name'])
+
+        result = []
+        for wp in wps:
+            wp = dict(wp)  # don't mutate original
+            bid = wp.get('barangay_id')
+            wp['watcher_names'] = (
+                ", ".join(watcher_map[bid]) if bid and bid in watcher_map
+                else "No assigned watcher"
+            )
+            result.append(wp)
+        return result
 
 class RouteAssignmentSerializer(serializers.ModelSerializer):
     class Meta:

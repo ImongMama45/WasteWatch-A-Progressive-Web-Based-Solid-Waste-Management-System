@@ -6,8 +6,10 @@
 import { useState, useEffect, useMemo } from 'react'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useUsers } from '../../hooks/useUsers'
+import { useNotification } from '../../context/NotificationContext'
 import api from '../../api/client'
 import BarangaySelect from '../../components/BarangaySelect'
+import { getApiErrorMessage } from '../../utils/notificationHelpers'
 
 // ── Mock Data ─────────────────────────────────────────────────────────────────
 
@@ -98,10 +100,10 @@ function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
     // Strip employee_type unless citizen
     const payload = { ...form }
     if (payload.role !== 'citizen') payload.employee_type = ''
-    
+
     // Auto-generate full_name for backend models
     payload.full_name = `${form.first_name} ${form.last_name}`.trim()
-    
+
     onSave(payload)
   }
 
@@ -274,6 +276,7 @@ function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
 
 export default function UserManagement() {
   const { users, loading, refresh: refreshUsers } = useUsers()
+  const { notify } = useNotification()
   const [barangays, setBarangays] = useState([])
   const [dumpsites, setDumpsites] = useState([])
 
@@ -315,6 +318,9 @@ export default function UserManagement() {
 
       if (modal === 'add') {
         await api.post('/api/accounts/users/', formData)
+        setRoleFilter('all')
+        setStatusFilter('all')
+        setSearch('')
         showToast('✅ User created successfully.')
       } else {
         await api.patch(`/api/accounts/users/${modal.id}/`, formData)
@@ -324,7 +330,7 @@ export default function UserManagement() {
       await refreshUsers()
       setModal(null)
     } catch (err) {
-      alert(JSON.stringify(err.response?.data || 'Failed to save user'))
+      notify({ variant: 'error-outline', message: getApiErrorMessage(err, 'Failed to save user') })
     }
   }
 
@@ -414,7 +420,9 @@ export default function UserManagement() {
       `}</style>
 
       <div className="page">
-
+        <div style={{ color: 'red', padding: 8, fontSize: 12 }}>
+          DEBUG: loading={String(loading)} | users={users.length} | filtered={filtered.length} | page={currentPage}/{totalPages}
+        </div>
         {/* ── Header ── */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
           <div>

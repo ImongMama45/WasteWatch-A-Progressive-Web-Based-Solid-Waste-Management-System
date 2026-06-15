@@ -283,6 +283,7 @@ export default function VerificationTasksModule() {
   const userMarkerRef = useRef(null)
   const stopMarkersRef = useRef(new Map())
   const routeLayerRef = useRef(null)
+  const lastFetchPosRef = useRef(null)   // throttle ORS re-fetch — watcher walks, threshold 30m
 
   // ── Data state ──
   const [stops, setStops] = useState([])   // filtered stops
@@ -444,7 +445,7 @@ export default function VerificationTasksModule() {
     })
   }, [stops, leafletReady, nearestStop])
 
-  // ── Watcher marker (heading-aware) ──
+  // ── Watcher marker (heading-aware) + map follows user ──
   useEffect(() => {
     const L = window.L
     if (!L || !mapInstance.current || !gpsPos) return
@@ -454,16 +455,37 @@ export default function VerificationTasksModule() {
         icon: L.divIcon({ html, className: '', iconSize: [40, 40], iconAnchor: [20, 20] }),
         zIndexOffset: 1000,
       }).addTo(mapInstance.current)
-      mapInstance.current.setView([gpsPos.lat, gpsPos.lng], 16)
+      mapInstance.current.setView([gpsPos.lat, gpsPos.lng], 17)
     } else {
       userMarkerRef.current.setLatLng([gpsPos.lat, gpsPos.lng])
       userMarkerRef.current.setIcon(L.divIcon({ html, className: '', iconSize: [40, 40], iconAnchor: [20, 20] }))
+      // Pan to follow user smoothly
+      mapInstance.current.panTo([gpsPos.lat, gpsPos.lng], { animate: true, duration: 0.5 })
     }
   }, [gpsPos, heading, leafletReady])
 
-  // ── ORS route to nearest stop ──
+  // ── ORS route from user → nearest pending stop (foot-walking)
+  // Re-fetches when target stop changes OR user has moved ≥30m since last fetch.
   useEffect(() => {
-    if (!gpsPos || !nearestStop?.lat || !nearestStop?.lng || !ORS_KEY) { setOrsRoute(null); return }
+    if (!gpsPos || !nearestStop?.lat || !nearestStop?.lng) { setOrsRoute(null); return }
+
+    // Movement throttle: skip if user hasn't moved 30m since last ORS fetch
+    if (lastFetchPosRef.current) {
+      const moved = haversineDistance(
+        lastFetchPosRef.current.lat, lastFetchPosRef.current.lng,
+        gpsPos.lat, gpsPos.lng,
+      )
+      if (moved < 30) return
+    }
+
+    if (!ORS_KEY) {
+      // Straight-line fallback when no ORS key
+      setOrsRoute([[gpsPos.lat, gpsPos.lng], [nearestStop.lat, nearestStop.lng]])
+      return
+    }
+
+    lastFetchPosRef.current = { lat: gpsPos.lat, lng: gpsPos.lng }
+
     const ctrl = new AbortController()
     fetch(
       `https://api.openrouteservice.org/v2/directions/foot-walking?api_key=${ORS_KEY}&start=${gpsPos.lng},${gpsPos.lat}&end=${nearestStop.lng},${nearestStop.lat}`,
@@ -509,6 +531,23 @@ export default function VerificationTasksModule() {
         {/* MAP */}
         <div style={{ position: 'absolute', inset: 0, zIndex: 0, background: '#e8f0e8' }}>
           <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+          {/* Re-center button */}
+          <button
+            onClick={() => {
+              if (gpsPos && mapInstance.current) mapInstance.current.setView([gpsPos.lat, gpsPos.lng], 17, { animate: true })
+            }}
+            title="Re-center on your location"
+            style={{
+              position: 'absolute', bottom: 220, right: 14, zIndex: 500,
+              width: 44, height: 44, borderRadius: '50%',
+              background: '#fff', border: '2px solid #e2e8f0',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', fontSize: 18,
+            }}
+          >
+            🧭
+          </button>
+
           {leafletReady && <MapLegend />}
 
           {/* DEV TOOLS */}

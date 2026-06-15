@@ -12,7 +12,9 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useDumpsites } from '../../hooks/useDumpsites'
+import { useNotification } from '../../context/NotificationContext'
 import api from '../../api/client'
+import { getApiErrorMessage } from '../../utils/notificationHelpers'
 
 const LUCENA_CENTER = [13.9373, 121.617]
 
@@ -405,6 +407,7 @@ export default function DumpsiteManagement() {
   const pendingRef = useRef(null)     // temp marker while modal is open
 
   const { sites, loading, saveSite, deleteSite: apiDeleteSite, createAccount } = useDumpsites()
+  const { notify } = useNotification()
   const [barangays, setBarangays] = useState([])
 
   const [mapReady, setMapReady] = useState(false)
@@ -542,7 +545,7 @@ export default function DumpsiteManagement() {
       if (res.ok) showToast('✅ Site updated.')
     }
     if (res.ok) setModal(null)
-    else alert(JSON.stringify(res.error))
+    else notify({ variant: 'error-outline', message: getApiErrorMessage(res.error, 'Failed to save site.') })
   }
 
   async function deleteSite(id) {

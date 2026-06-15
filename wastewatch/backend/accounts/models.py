@@ -23,7 +23,8 @@ from django.contrib.auth.models import AbstractUser
 #    Simple lookup table.  Add more fields later (e.g. coordinates, zone).
 # ---------------------------------------------------------------------------
 class Barangay(models.Model):
-    name = models.CharField(max_length=100, unique=True)
+    name       = models.CharField(max_length=100, unique=True)
+    population = models.PositiveIntegerField(default=0)
 
     class Meta:
         verbose_name_plural = 'Barangays'
@@ -31,6 +32,42 @@ class Barangay(models.Model):
 
     def __str__(self):
         return self.name
+
+    def get_establishments_dict(self):
+        """Returns {'Hospital': 3, 'Store': 10} — useful for analytics."""
+        return {
+            e.name: e.count
+            for e in self.establishments.all()
+        }
+
+
+class BarangayEstablishment(models.Model):
+    """
+    Flexible key-value store for establishment counts per barangay.
+    Admin can add any type: Hospital, Clinic, School, Store, Church, etc.
+    """
+    barangay = models.ForeignKey(
+        Barangay,
+        on_delete=models.CASCADE,
+        related_name='establishments',
+    )
+    name  = models.CharField(
+        max_length=100,
+        help_text="Type of establishment, e.g. Hospital, School, Store"
+    )
+    count = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of this establishment type in the barangay"
+    )
+
+    class Meta:
+        ordering = ['name']
+        unique_together = ['barangay', 'name']  # No duplicate types per barangay
+        verbose_name        = 'Establishment'
+        verbose_name_plural = 'Establishments'
+
+    def __str__(self):
+        return f"{self.barangay.name} — {self.name}: {self.count}"
 
 
 # ---------------------------------------------------------------------------

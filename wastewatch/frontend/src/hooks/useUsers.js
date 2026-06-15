@@ -7,6 +7,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import api from '../api/client'
 
+function normalizeUsersPayload(data) {
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data?.results)) return data.results
+  return []
+}
+
 export function useUsers() {
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -15,8 +21,9 @@ export function useUsers() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await api.get('/api/accounts/users/')
-      setUsers(res.data)
+      const res = await api.get('/api/accounts/users/', { params: { t: Date.now() } })
+      console.log('users raw:', res.data)
+      setUsers(normalizeUsersPayload(res.data))
       setError(null)
     } catch (err) {
       setError('Failed to fetch users')

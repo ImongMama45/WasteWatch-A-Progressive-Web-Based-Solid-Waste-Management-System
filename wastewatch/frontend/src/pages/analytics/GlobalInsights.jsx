@@ -54,6 +54,16 @@ function PeriodToggle({ value, onChange, options }) {
   )
 }
 
+function asList(payload) {
+  if (Array.isArray(payload)) return payload
+  if (payload && Array.isArray(payload.results)) return payload.results
+  return []
+}
+
+function normalizePeriod(period) {
+  return (period || '').trim().toLowerCase()
+}
+
 // ─── Mini bar chart ───────────────────────────────────────────────────────────
 function MiniBar({ data, valueKey = 'value', color = 'var(--accent)', height = 80 }) {
   const max = Math.max(...data.map(d => d[valueKey] || 0), 1)
@@ -578,10 +588,10 @@ function RankingsSection({ rankings, problematic, userBarangay }) {
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
-export default function GlobalInsights({ userBarangay }) {
+export default function GlobalInsights({ userBarangay, selectedBarangay, selectedPeriod }) {
   const [data, setData] = useState(PLACEHOLDER)
   const [loading, setLoading] = useState(true)
-  const [period, setPeriod] = useState('This Week')
+  const period = selectedPeriod || 'This Week'
 
   useEffect(() => {
     async function fetchAll() {
@@ -593,19 +603,115 @@ export default function GlobalInsights({ userBarangay }) {
           api.get('/api/analytics/trends/'),
         ])
 
+        const kpis = kpiRes.status === 'fulfilled' ? asList(kpiRes.value.data) : []
+        const barangayRows = brgyRes.status === 'fulfilled' ? asList(brgyRes.value.data) : []
+        const truckRows = truckRes.status === 'fulfilled' ? asList(truckRes.value.data) : []
+        const trendRows = trendRes.status === 'fulfilled' ? asList(trendRes.value.data) : []
+
+        const targetPeriod = normalizePeriod(period)
+        const selectedKpi = kpis.find(row => normalizePeriod(row.period) === targetPeriod) ?? kpis[0] ?? prev.kpi
+        const selectedTruckRows = truckRows.filter(row => normalizePeriod(row.period) === targetPeriod)
+        const selectedBrgyRows = barangayRows.filter(row => normalizePeriod(row.period) === targetPeriod)
+        const selectedTruckCount = selectedTruckRows.length || prev.kpi.active_trucks || 0
+        const selectedBarangayCount = selectedBrgyRows.length || prev.kpi.barangays_served || 0
+        const selectedCollectionRate = selectedKpi.total_routes
+          ? Math.round(((selectedKpi.completed_routes || 0) / Math.max(selectedKpi.total_routes, 1)) * 100)
+          : prev.kpi.collection_rate
+        const selectedResolutionRate = selectedKpi.total_reports
+          ? Math.round(((selectedKpi.resolved_reports || 0) / Math.max(selectedKpi.total_reports, 1)) * 100)
+          : prev.kpi.resolution_rate
+        const normalizedKpi = {
+          ...prev.kpi,
+          collected_kg: selectedKpi.collected_kg ?? prev.kpi.collected_kg,
+          collection_rate: selectedCollectionRate,
+          active_trucks: selectedTruckCount,
+          open_hotspots: prev.kpi.open_hotspots,
+          escalations: selectedKpi.total_reports != null
+            ? Math.max(0, (selectedKpi.total_reports || 0) - (selectedKpi.resolved_reports || 0))
+            : prev.kpi.escalations,
+          barangays_served: selectedBarangayCount,
+          total_routes: selectedKpi.total_routes ?? prev.kpi.total_routes,
+          completed_routes: selectedKpi.completed_routes ?? prev.kpi.completed_routes,
+          missed_stops: selectedKpi.missed_stops ?? prev.kpi.missed_stops,
+          avg_fill_rate: selectedKpi.avg_fill_rate ?? prev.kpi.avg_fill_rate,
+          total_reports: selectedKpi.total_reports ?? prev.kpi.total_reports,
+          resolved_reports: selectedKpi.resolved_reports ?? prev.kpi.resolved_reports,
+          collected_kg_delta: prev.kpi.collected_kg_delta,
+          collection_rate_delta: prev.kpi.collection_rate_delta,
+          hotspots_delta: prev.kpi.hotspots_delta,
+          resolution_rate: selectedResolutionRate,
+        }
+        const mappedTrucks = selectedTruckRows.length
+          ? selectedTruckRows.map(row => ({
+              id: row.truck_id,
+              driver: row.driver_name,
+              routes: Number(row.routes || 0),
+              completed: Number(row.completed || 0),
+              missed: Number(row.missed || 0),
+              fill: Number(row.avg_fill || 0),
+              km: Number(row.total_km || 0),
+            }))
+          : prev.trucks
+
+        const mappedRankings = selectedBrgyRows.length
+          ? selectedBrgyRows
+              .map(row => {
+                const reports = Number(row.reports || 0)
+                const resolved = Number(row.resolved || 0)
+                const score = Math.max(0, Math.min(100, Math.round(((resolved / Math.max(reports, 1)) * 100) * 0.7 + Math.min(Number(row.waste_collected_kg || 0) / 100, 30))))
+                const trend = resolved >= reports ? 'up' : resolved >= reports * 0.6 ? 'same' : 'down'
+                return {
+                  name: row.barangay_name,
+                  score,
+                  compliance: Math.round((resolved / Math.max(reports, 1)) * 100),
+                  trend,
+                  population: row.population || null,
+                  hotspots: row.hotspots || 0,
+                  reports,
+                }
+              })
+              .sort((a, b) => b.score - a.score)
+          : prev.rankings
+
+        const mappedProblematic = selectedBrgyRows.length
+          ? [...selectedBrgyRows]
+              .map(row => {
+                const reports = Number(row.reports || 0)
+                const resolved = Number(row.resolved || 0)
+                const score = Math.max(0, Math.min(100, Math.round(((resolved / Math.max(reports, 1)) * 100) * 0.7 + Math.min(Number(row.waste_collected_kg || 0) / 100, 30))))
+                const trend = resolved >= reports ? 'up' : resolved >= reports * 0.6 ? 'same' : 'down'
+                return {
+                  name: row.barangay_name,
+                  score,
+                  compliance: Math.round((resolved / Math.max(reports, 1)) * 100),
+                  trend,
+                  population: row.population || null,
+                  hotspots: row.hotspots || 0,
+                  reports,
+                }
+              })
+              .filter(row => row.score < 60)
+              .sort((a, b) => a.score - b.score)
+          : prev.problematic
+
         setData(prev => ({
           ...prev,
-          kpi: kpiRes.status === 'fulfilled' ? kpiRes.value.data[0] ?? prev.kpi : prev.kpi,
-          trucks: truckRes.status === 'fulfilled' ? truckRes.value.data ?? prev.trucks : prev.trucks,
-          issueTrends: trendRes.status === 'fulfilled'
-            ? trendRes.value.data.map(t => ({ label: t.date, value: t.report_count }))
+          kpi: normalizedKpi,
+          trucks: mappedTrucks,
+          rankings: mappedRankings,
+          problematic: mappedProblematic,
+          issueTrends: trendRows.length
+            ? trendRows.map(t => ({
+                label: t.date,
+                value: t.report_count,
+              }))
             : prev.issueTrends,
         }))
       } catch { /* stay on placeholder */ }
       finally { setLoading(false) }
     }
     fetchAll()
-  }, [period])
+  }, [period, selectedBarangay])
 
   if (loading) return (
     <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>

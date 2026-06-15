@@ -24,6 +24,12 @@ const api = axios.create({
 })
 
 api.interceptors.request.use((config) => {
+  // Append timestamp to all GET requests to prevent aggressive browser caching
+  if (config.method === 'get') {
+    config.params = config.params || {}
+    config.params._t = Date.now()
+  }
+
   const csrfToken = getCsrfToken()
   if (csrfToken && ['post', 'put', 'patch', 'delete'].includes(config.method)) {
     config.headers['X-CSRFToken'] = csrfToken

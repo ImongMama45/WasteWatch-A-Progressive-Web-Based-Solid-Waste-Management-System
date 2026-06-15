@@ -50,6 +50,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react
 import { useNavigate } from 'react-router-dom'
 import useShiftTimer from '../../../hooks/useShiftTimer'
 import { useDriverGps } from '../../../context/DriverGpsContext'
+import { useNotification } from '../../../context/NotificationContext'
 import Navbar from '../../../components/Navbar'
 import api from '../../../api/client'
 import { useAuth } from '../../../context/AuthContext'
@@ -769,7 +770,7 @@ function EndShiftOverlay({ visible, gpsPos, schedule, onClose }) {
       await api.post('/api/driver/shift/end/', { ended_early: true, reason, notes: customNote.trim() || null, started_at: startTime ? new Date(startTime).toISOString() : null, ended_at: endTime.toISOString(), duration_ms: durationMs })
       endShift(); clearRouteSession(); setSubmitted(true)
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to end shift. Please try again.')
+      notify({ variant: 'error-dark', message: err.response?.data?.error || 'Failed to end shift. Please try again.' })
     } finally { setSubmitting(false) }
   }
 
@@ -783,7 +784,7 @@ function EndShiftOverlay({ visible, gpsPos, schedule, onClose }) {
       endShift(); clearRouteSession()
       navigate('/dashboard', { replace: true })
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to end shift. Please try again.')
+      notify({ variant: 'error-dark', message: err.response?.data?.error || 'Failed to end shift. Please try again.' })
     } finally { setSubmitting(false) }
   }
 
@@ -929,6 +930,7 @@ function EndShiftOverlay({ visible, gpsPos, schedule, onClose }) {
 export default function ShiftRouteModule({ routeState: externalRouteState, setRouteState: externalSetRouteState }) {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const { notify } = useNotification()
   const { formattedTime, shiftActive } = useShiftTimer()
   const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } = useDriverGps()
 
@@ -1070,8 +1072,9 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
     const popupHtml = `
       <b>${waypoints[wpIndex]?.label || ('Stop ' + wpIndex)}</b>
       <br/><span style="font-size:11px;color:${displayColor};font-weight:700;text-transform:uppercase">${STOP_STATUS_LABELS[safeStatus] || safeStatus}</span>
+      ${safeStatus === 'PENDING_INSPECTION' ? `<div style="margin-top:6px;font-size:10px;color:#f59e0b;font-weight:bold;">Pending Verification by: ${waypoints[wpIndex]?.watcher_names || 'Unknown'}</div>` : ''}
       ${details?.collectedAt ? `<div style="margin-top:6px;font-size:11px;color:#10b981">Reported: ${details.collectedAt}</div>` : ''}
-      ${details?.truck ? `<div style="font-size:11px;color:#64748b">Truck: ${details.truck}</div>` : ''}
+      <div style="font-size:11px;color:#64748b;margin-top:2px;">Truck: ${details?.truck || schedule?.truck_plate || 'Unknown'}</div>
     `
     marker.getPopup()?.setContent(popupHtml)
   }, [waypoints, schedule, currentStopIndex])
@@ -1267,11 +1270,14 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
       const marker = L.marker([wp.lat, wp.lng], { icon })
         .addTo(mapInstance.current)
         .bindPopup(`
-          <div style="font-family:sans-serif;min-width:160px;">
+          <div style="font-family:sans-serif;min-width:180px;">
             <b style="font-size:13px;">${wp.label || ('Stop ' + wpIndex)}</b><br/>
             <span style="font-size:11px;color:${displayColor};font-weight:700;text-transform:uppercase">
               ${STOP_STATUS_LABELS[safeStatus] || safeStatus}
             </span>
+            ${safeStatus === 'PENDING_INSPECTION' ? `<div style="margin-top:6px;font-size:10px;color:#f59e0b;font-weight:bold;">Pending Verification by: ${wp.watcher_names || 'Unknown'}</div>` : ''}
+            ${details?.collectedAt ? `<div style="margin-top:6px;font-size:11px;color:#10b981">Reported: ${details.collectedAt}</div>` : ''}
+            <div style="font-size:11px;color:#64748b;margin-top:2px;">Truck: ${details?.truck || schedule?.truck_plate || 'Unknown'}</div>
           </div>`)
       stopMarkersRef.current.set(wpIndex, marker)
     })

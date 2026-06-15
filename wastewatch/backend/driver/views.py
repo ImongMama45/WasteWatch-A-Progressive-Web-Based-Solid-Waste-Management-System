@@ -96,7 +96,7 @@ class DumpsiteViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_201_CREATED)
 
 class CollectionScheduleViewSet(viewsets.ModelViewSet):
-    queryset = CollectionSchedule.objects.all()
+    queryset = CollectionSchedule.objects.all().order_by('-id')
     serializer_class = CollectionScheduleSerializer
     permission_classes = [permissions.IsAuthenticated]
 

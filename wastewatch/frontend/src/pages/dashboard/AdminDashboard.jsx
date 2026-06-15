@@ -1,9 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
 import MiniMap from "../../components/MiniMap";
 import api from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
-import { ICONS } from "../../api/navConfig";
 
 // ─── Priority config ──────────────────────────────────────────────────────────
 
@@ -14,6 +12,27 @@ const PRIORITY = {
 };
 
 const FEED_DOT = { danger: "var(--danger)", warning: "var(--warning)", success: "var(--accent)", info: "#378ADD" };
+
+const TRUCK_COLORS = [
+  { color: '#2563EB', bg: '#EFF6FF' },
+  { color: '#D97706', bg: '#FFFBEB' },
+  { color: '#7C3AED', bg: '#F5F3FF' },
+  { color: '#DC2626', bg: '#FEF2F2' },
+  { color: '#0891B2', bg: '#ECFEFF' },
+  { color: '#059669', bg: '#ECFDF5' },
+];
+
+const Ico = ({ d, size = 14, color = 'currentColor', sw = 1.75 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={sw}
+    strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, display: 'block' }}>
+    <path d={d} />
+  </svg>
+);
+const IcoTruck = p => <Ico {...p} d="M1 3h15v13H1zM16 8h4l3 3v5h-7V8zM5.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM18.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />;
+const IcoCal = p => <Ico {...p} d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />;
+const IcoClock = p => <Ico {...p} d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2zM12 6v6l4 2" />;
+const IcoPin = p => <Ico {...p} d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1 1 18 0zM12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />;
+const IcoX = p => <Ico {...p} d="M18 6L6 18M6 6l12 12" />;
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -71,7 +90,6 @@ function BarChart({ data }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function AdminDashboard() {
-  const navigate = useNavigate();
   const { user } = useAuth();
 
   const [mainTab, setMainTab] = useState("drivers");
@@ -86,6 +104,10 @@ export default function AdminDashboard() {
   const [feed, setFeed] = useState([]);
   const [brgyWaste, setBrgyWaste] = useState([]);
   const [schedule, setSchedule] = useState([]);
+  const [calendarEvents, setCalendarEvents] = useState([]);
+  const [calDayModal, setCalDayModal] = useState(null);
+  const [calMonth, setCalMonth] = useState(() => new Date().getMonth());
+  const [calYear, setCalYear] = useState(() => new Date().getFullYear());
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
 
@@ -98,8 +120,9 @@ export default function AdminDashboard() {
       api.get('/api/driver/trucks/').catch(() => ({ data: [] })),
       api.get('/api/analytics/activity-logs/').catch(() => ({ data: [] })),
       api.get('/api/analytics/barangay-performance/').catch(() => ({ data: [] })),
-      api.get('/api/public/schedule/').catch(() => ({ data: [] })),
-    ]).then(([st, esc, hs, dr, fd, bw, sc]) => {
+      api.get('/api/driver/collection-schedules/').catch(() => ({ data: [] })),
+      api.get('/api/driver/calendar-events/').catch(() => ({ data: [] })),
+    ]).then(([st, esc, hs, dr, fd, bw, sc, ce]) => {
       if (st.data) setStats(prev => ({ ...prev, ...st.data }))
       if (esc.data) setEscalations(esc.data)
       if (hs.data) setHotspots(hs.data)
@@ -107,6 +130,7 @@ export default function AdminDashboard() {
       if (fd.data) setFeed(fd.data.slice(0, 8))
       if (bw.data) setBrgyWaste(bw.data.map(b => ({ name: b.barangay_name, kg: b.waste_collected_kg, status: b.resolved >= b.reports ? 'completed' : 'in-progress' })))
       if (sc.data) setSchedule(sc.data)
+      if (ce.data) setCalendarEvents(ce.data)
     }).finally(() => setLoading(false))
   }, []);
 
@@ -128,6 +152,95 @@ export default function AdminDashboard() {
   const criticalCount = escalations.filter(e => e.priority === "critical").length;
   const pendingHots = hotspots.filter(h => h.status === "pending").length;
 
+  const truckColorMap = useMemo(() => {
+    const map = {};
+    schedule.forEach(s => {
+      const key = String(s.truck || s.truck_id || s.truck_plate || 'route');
+      if (!(key in map)) map[key] = Object.keys(map).length % TRUCK_COLORS.length;
+    });
+    return map;
+  }, [schedule]);
+
+  function getTruckColorIdx(route) {
+    const key = String(route.truck || route.truck_id || route.truck_plate || 'route');
+    return truckColorMap[key] ?? 0;
+  }
+
+  function routeMatchesDay(route, dayName) {
+    const days = Array.isArray(route.days) ? route.days.join(',') : route.days || route.day || route.collection_days || '';
+    return String(days).toLowerCase().includes(dayName.toLowerCase());
+  }
+
+  function openCalDayModal(d, dateStr, cellDayName, routes, events) {
+    setCalDayModal({
+      dateStr,
+      cellDayName,
+      label: new Date(calYear, calMonth, d).toLocaleDateString('default', { month: 'long', day: 'numeric', year: 'numeric' }),
+      routes,
+      events,
+    });
+  }
+
+  const calNavPrev = () => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1) } else { setCalMonth(m => m - 1) } };
+  const calNavNext = () => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1) } else { setCalMonth(m => m + 1) } };
+
+  function renderCalendar() {
+    const today = new Date();
+    const isCurrentMonth = today.getMonth() === calMonth && today.getFullYear() === calYear;
+    const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+    const firstDay = new Date(calYear, calMonth, 1).getDay();
+    const cells = [...Array(firstDay).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+    const dayFull = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayAbbr = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const monthLabel = new Date(calYear, calMonth, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+
+    return (
+      <div className="admin-cal">
+        <div className="admin-cal-head">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button className="admin-cal-nav" onClick={calNavPrev}>‹</button>
+            <button className="admin-cal-nav" onClick={calNavNext}>›</button>
+            <span className="admin-cal-month">{monthLabel}</span>
+          </div>
+          {!isCurrentMonth && (
+            <button className="admin-cal-today" onClick={() => { setCalMonth(today.getMonth()); setCalYear(today.getFullYear()) }}>Today</button>
+          )}
+        </div>
+        <div className="admin-cal-dow">{dayAbbr.map(d => <div key={d}>{d}</div>)}</div>
+        <div className="admin-cal-grid">
+          {cells.map((d, i) => {
+            if (!d) return <div key={i} className="admin-cal-cell empty" />;
+            const cellDate = new Date(calYear, calMonth, d);
+            const cellDayName = dayFull[cellDate.getDay()];
+            const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            const dayRoutes = schedule.filter(s => routeMatchesDay(s, cellDayName));
+            const dayEvents = calendarEvents.filter(e => e.date === dateStr);
+            const total = dayRoutes.length + dayEvents.length;
+            const isToday = isCurrentMonth && d === today.getDate();
+
+            return (
+              <button key={i} className={`admin-cal-cell${isToday ? ' today' : ''}`} onClick={() => openCalDayModal(d, dateStr, cellDayName, dayRoutes, dayEvents)}>
+                <div className="admin-cal-date-row">
+                  <span className="admin-cal-date">{d}</span>
+                  {total > 0 && <span className="admin-cal-count">{total}</span>}
+                </div>
+                {dayRoutes.slice(0, 2).map(s => {
+                  const tc = TRUCK_COLORS[getTruckColorIdx(s)];
+                  return (
+                    <span key={`r-${s.id}`} className="admin-cal-chip" style={{ background: tc.bg, borderLeftColor: tc.color, color: tc.color }}>
+                      <IcoTruck size={7} color={tc.color} /> {s.barangay_names || s.truck_plate || 'Route'}
+                    </span>
+                  );
+                })}
+                {dayEvents.slice(0, 1).map(ev => <span key={`e-${ev.id}`} className="admin-cal-chip event"><IcoCal size={7} color="#D97706" /> {ev.title}</span>)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Loading dashboard data...</div>
 
   return (
@@ -142,6 +255,28 @@ export default function AdminDashboard() {
         .abtn:active { transform:scale(.97); }
         .esc-row { transition: background .15s; cursor:pointer; }
         .esc-row:hover { background: var(--surface-2) !important; }
+        .admin-cal { overflow:hidden; border:1px solid var(--border); border-radius:14px; background:var(--surface); }
+        .admin-cal-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+        .admin-cal-month { font-family:var(--font-head); font-size:15px; font-weight:800; color:var(--text); }
+        .admin-cal-nav { width:28px; height:28px; border-radius:8px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); cursor:pointer; display:inline-flex; align-items:center; justify-content:center; font-size:16px; line-height:1; }
+        .admin-cal-today { border:1px solid rgba(22,163,74,.2); border-radius:20px; background:var(--accent-light); color:var(--accent-dim); font-size:10px; font-weight:800; padding:3px 9px; cursor:pointer; }
+        .admin-cal-dow { display:grid; grid-template-columns:repeat(7,1fr); border-bottom:1px solid var(--border); }
+        .admin-cal-dow div { text-align:center; padding:8px 2px; font-size:9px; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:.04em; }
+        .admin-cal-grid { display:grid; grid-template-columns:repeat(7,1fr); }
+        .admin-cal-cell { min-height:68px; padding:5px; border:0; border-right:1px solid var(--border); border-bottom:1px solid var(--border); background:var(--surface); text-align:left; cursor:pointer; overflow:hidden; }
+        .admin-cal-cell:nth-child(7n) { border-right:none; }
+        .admin-cal-cell.empty { background:var(--surface-2); cursor:default; }
+        .admin-cal-cell:hover:not(.empty) { background:rgba(22,163,74,.03); }
+        .admin-cal-cell.today { background:rgba(22,163,74,.04); }
+        .admin-cal-date-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; }
+        .admin-cal-date { width:20px; height:20px; display:inline-flex; align-items:center; justify-content:center; border-radius:50%; font-size:11px; font-weight:800; color:var(--text); }
+        .admin-cal-cell.today .admin-cal-date { background:var(--accent); color:#fff; }
+        .admin-cal-count { font-size:9px; font-weight:800; background:var(--accent); color:#fff; border-radius:20px; padding:1px 5px; }
+        .admin-cal-chip { display:flex; align-items:center; gap:3px; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border-left:2px solid; border-radius:3px; padding:2px 4px; font-size:8px; font-weight:800; margin-bottom:2px; }
+        .admin-cal-chip.event { background:#FEF3C7; border-left-color:#D97706; color:#92400E; }
+        .admin-modal-ov { position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:9998; display:flex; align-items:center; justify-content:center; padding:16px; backdrop-filter:blur(3px); }
+        .admin-modal { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:22px; width:100%; max-width:440px; max-height:85vh; overflow-y:auto; box-shadow:var(--shadow-lg); }
+        @media (max-width:520px) { .admin-cal-cell { min-height:48px; padding:3px; } .admin-cal-chip { display:none; } .admin-cal-dow div { font-size:8px; } }
       `}</style>
 
       {toast && (
@@ -277,22 +412,69 @@ export default function AdminDashboard() {
 
           <div className="sidebar">
             <div className="card">
-              <h3 className="section-title">Quick Actions</h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {[
-                  { label: "Live Map", icon: ICONS.map, route: "/map" },
-                  { label: "Trucks", icon: ICONS.truck, route: "/admin/trucks" },
-                  { label: "Schedule", icon: ICONS.schedule, route: "/schedule" },
-                ].map(a => (
-                  <button key={a.label} className="abtn" onClick={() => navigate(a.route)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13 }}>
-                    <span style={{ width: 14, height: 14, display: 'inline-flex' }}>{a.icon}</span> {a.label}
-                  </button>
-                ))}
-              </div>
+              <h3 className="section-title">Calendar</h3>
+              {renderCalendar()}
             </div>
           </div>
         </div>
       </div>
+
+      {calDayModal && (
+        <div className="admin-modal-ov" onClick={e => { if (e.target === e.currentTarget) setCalDayModal(null) }}>
+          <div className="admin-modal">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text-muted)', marginBottom: 3 }}>{calDayModal.cellDayName}</div>
+                <h3 style={{ margin: 0, fontSize: 19, fontWeight: 800, color: 'var(--text)', fontFamily: 'var(--font-head)' }}>{calDayModal.label}</h3>
+              </div>
+              <button onClick={() => setCalDayModal(null)} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '5px 7px', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}><IcoX size={13} /></button>
+            </div>
+
+            {calDayModal.routes.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--accent)', marginBottom: 9, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <IcoTruck size={11} color="var(--accent)" /> Route Schedules ({calDayModal.routes.length})
+                </div>
+                {calDayModal.routes.map(s => {
+                  const tc = TRUCK_COLORS[getTruckColorIdx(s)];
+                  return (
+                    <div key={s.id} style={{ background: tc.bg, border: `1.5px solid ${tc.color}33`, borderRadius: 10, padding: '11px 13px', marginBottom: 7 }}>
+                      <div style={{ fontWeight: 800, fontSize: 13, color: 'var(--text)', marginBottom: 7 }}>{s.barangay_names || 'No barangays'}</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {s.truck_plate && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: tc.color, background: '#fff', borderRadius: 20, padding: '3px 9px', fontWeight: 700, border: `1px solid ${tc.color}30` }}><IcoTruck size={10} color={tc.color} />{s.truck_plate}</span>}
+                        {s.driver_name && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)', background: '#fff', borderRadius: 20, padding: '3px 9px', fontWeight: 700, border: '1px solid var(--border)' }}>{s.driver_name}</span>}
+                        {s.start_time && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)', background: '#fff', borderRadius: 20, padding: '3px 9px', fontWeight: 700, border: '1px solid var(--border)' }}><IcoClock size={10} color="var(--text-muted)" />{s.start_time.slice(0, 5)}-{s.end_time?.slice(0, 5)}</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {calDayModal.events.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: '#D97706', marginBottom: 9, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <IcoCal size={11} color="#D97706" /> Events ({calDayModal.events.length})
+                </div>
+                {calDayModal.events.map(ev => (
+                  <div key={ev.id} style={{ background: '#FFFBEB', border: '1.5px solid #FDE68A', borderRadius: 10, padding: '11px 13px', marginBottom: 7 }}>
+                    <div style={{ fontWeight: 800, fontSize: 13, color: 'var(--text)', marginBottom: 6 }}>{ev.title}</div>
+                    {ev.location && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)', background: '#fff', borderRadius: 20, padding: '3px 9px', fontWeight: 700, border: '1px solid var(--border)' }}><IcoPin size={10} color="var(--text-muted)" />{ev.location}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {calDayModal.routes.length === 0 && calDayModal.events.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                <IcoCal size={34} color="var(--text-light)" />
+                <div style={{ marginTop: 12, fontWeight: 800, fontSize: 14, color: 'var(--text-muted)' }}>Nothing scheduled</div>
+                <div style={{ fontSize: 12, color: 'var(--text-light)', marginTop: 4 }}>No routes or events for this day.</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }

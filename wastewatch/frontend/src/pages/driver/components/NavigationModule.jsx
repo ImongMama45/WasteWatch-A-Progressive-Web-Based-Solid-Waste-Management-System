@@ -154,6 +154,7 @@ export default function NavigationModule({ setRouteState }) {
   const mapInstance = useRef(null)
   const driverMarker = useRef(null)
   const routeLayer = useRef(null)
+  const lastFetchPosRef = useRef(null)   // last GPS position where ORS was fetched
   const [leafletReady, setLeafletReady] = useState(false)
   const [schedule, setSchedule] = useState(null)
   const [mapLoading, setMapLoading] = useState(true)
@@ -251,26 +252,45 @@ export default function NavigationModule({ setRouteState }) {
     }
   }, [leafletReady, schedule, mapLoading])
 
-  // 4. Fetch ORS Directions
+  // 4. Fetch ORS Directions — from user's current GPS to the NEXT stop only
+  // Re-fetches whenever target changes OR user moves ≥50m from last fetch point.
   useEffect(() => {
-    // Only fetch if we have a valid end (currentTarget)
     if (!currentTarget) return
 
     const startLng = gpsPos ? gpsPos.lng : (waypoints[0]?.lng || 121.617)
     const startLat = gpsPos ? gpsPos.lat : (waypoints[0]?.lat || 13.9373)
 
+    // Throttle: only re-fetch if the user has moved ≥50m from the last fetch position
+    if (lastFetchPosRef.current && gpsPos) {
+      const moved = haversineDistance(
+        lastFetchPosRef.current.lat, lastFetchPosRef.current.lng,
+        startLat, startLng,
+      )
+      if (moved < 50) return   // not enough movement — skip
+    }
+
     const orsApiKey = import.meta.env.VITE_ORS_API_KEY
     if (!orsApiKey) {
-      console.warn("VITE_ORS_API_KEY is missing. Using straight line fallback.")
+      console.warn('VITE_ORS_API_KEY is missing. Using straight line fallback.')
+      // Draw straight-line fallback
+      if (mapInstance.current && window.L) {
+        if (routeLayer.current) mapInstance.current.removeLayer(routeLayer.current)
+        routeLayer.current = window.L.polyline(
+          [[startLat, startLng], [currentTarget.lat, currentTarget.lng]],
+          { color: '#3b82f6', weight: 4, opacity: 0.6, dashArray: '8,6' }
+        ).addTo(mapInstance.current)
+      }
       return
     }
 
-    // ORS uses [lng, lat] format. Include up to 40 remaining stops to stay under ORS limits.
-    const remainingStops = waypoints.slice(currentStopIndex, currentStopIndex + 40).map(wp => [wp.lng, wp.lat])
+    // Route: user → NEXT stop only (not all remaining stops)
     const coordinates = [
       [startLng, startLat],
-      ...remainingStops
+      [currentTarget.lng, currentTarget.lat],
     ]
+
+    // Record position at fetch time
+    lastFetchPosRef.current = { lat: startLat, lng: startLng }
 
     fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
       method: 'POST',
@@ -279,39 +299,29 @@ export default function NavigationModule({ setRouteState }) {
         'Content-Type': 'application/json',
         'Authorization': orsApiKey
       },
-      body: JSON.stringify({
-        coordinates: coordinates,
-        instructions: true,
-      })
+      body: JSON.stringify({ coordinates, instructions: true }),
     })
       .then(res => res.json())
       .then(data => {
-        if (data.routes && data.routes.length > 0) {
+        if (data.routes?.length > 0) {
           setOrsData(data.routes[0])
-
-          // Draw the route on the map
           if (mapInstance.current && window.L) {
             const L = window.L
-            if (routeLayer.current) {
-              mapInstance.current.removeLayer(routeLayer.current)
-            }
+            if (routeLayer.current) mapInstance.current.removeLayer(routeLayer.current)
             const decoded = decodePolyline(data.routes[0].geometry)
-            routeLayer.current = L.polyline(decoded, { color: '#3b82f6', weight: 6, opacity: 0.8 }).addTo(mapInstance.current)
-
-            // Optionally fit bounds, but might be jarring while driving.
-            // mapInstance.current.fitBounds(routeLayer.current.getBounds(), { padding: [30,30] })
+            routeLayer.current = L.polyline(decoded, { color: '#3b82f6', weight: 6, opacity: 0.85 }).addTo(mapInstance.current)
           }
         }
       })
       .catch(console.error)
   }, [gpsPos?.lat, gpsPos?.lng, currentTarget])
 
-  // Update Driver Marker Position & Pan Map
+  // 5. Update Driver Marker Position & Pan Map
   useEffect(() => {
     if (gpsPos && driverMarker.current && mapInstance.current) {
       driverMarker.current.setLatLng([gpsPos.lat, gpsPos.lng])
-      // Smooth pan to driver
-      mapInstance.current.panTo([gpsPos.lat, gpsPos.lng])
+      // Smooth pan to keep driver centered
+      mapInstance.current.panTo([gpsPos.lat, gpsPos.lng], { animate: true, duration: 0.5 })
     }
   }, [gpsPos])
 
@@ -444,6 +454,22 @@ export default function NavigationModule({ setRouteState }) {
               )}
             </div>
           )}
+          {/* Re-center button */}
+          <button
+            onClick={() => {
+              if (gpsPos && mapInstance.current) mapInstance.current.setView([gpsPos.lat, gpsPos.lng], 16, { animate: true })
+            }}
+            title="Re-center map on your location"
+            style={{
+              position: 'absolute', bottom: 220, right: 14, zIndex: 500,
+              width: 44, height: 44, borderRadius: '50%',
+              background: '#fff', border: '2px solid #e2e8f0',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', fontSize: 20,
+            }}
+          >
+            📍
+          </button>
         </div>
 
         {/* ── ① STOP INFO HEADER (Floating Top) ── */}

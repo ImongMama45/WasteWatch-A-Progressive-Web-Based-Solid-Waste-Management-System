@@ -31,13 +31,13 @@ const ENDPOINTS = {
     url: '/api/watcher/reports/',
     transform: (r) => {
       const payload = {
-        issue_type:  r.issue_type || 'overflow',
-        severity:    r.severity   || 'medium',
+        issue_type: r.issue_type || 'overflow',
+        severity: r.severity || 'medium',
         description: r.description || '',
-        address:     r.address || '',
-        created_at:  r.createdAt,
+        address: r.address || '',
+        created_at: r.createdAt,
       }
-      if (r.latitude  != null && !isNaN(r.latitude))  payload.latitude  = Math.round(r.latitude  * 1e6) / 1e6
+      if (r.latitude != null && !isNaN(r.latitude)) payload.latitude = Math.round(r.latitude * 1e6) / 1e6
       if (r.longitude != null && !isNaN(r.longitude)) payload.longitude = Math.round(r.longitude * 1e6) / 1e6
       return payload
     },
@@ -50,23 +50,58 @@ const ENDPOINTS = {
     url: '/api/watcher/escalations/',
     transform: (r) => r.payload,
   },
+  // Add these two entries inside the ENDPOINTS object,
+  // after the existing events_queue entry:
+
+  proof_submissions: {
+    url: (r) => `/api/driver/stops/${r.stopId}/collect/`,
+    isDynamic: true,
+    transform: (r) => {
+      const form = new FormData()
+      form.append('photo', r.photo, r.photoName || 'proof.jpg')
+      form.append('note', r.note || '')
+      form.append('collected_at', r.collected_at || r.createdAt)
+      if (r.lat) form.append('lat', r.lat)
+      if (r.lng) form.append('lng', r.lng)
+      return form
+    },
+  },
+
+  inspection_submissions: {
+    url: '/api/watcher/stop-validations/pre-inspect/',
+    transform: (r) => {
+      const form = new FormData()
+      form.append('schedule_id', r.schedule_id)
+      form.append('stop_order', r.stop_order)
+      form.append('lat', r.lat)
+      form.append('lng', r.lng)
+      form.append('outcome', r.outcome)
+      form.append('notes', r.notes || '')
+        // photos stored as array of Blobs
+        ; (r.photos || []).forEach((blob, i) =>
+          form.append(i === 0 ? 'photo' : `photo_${i + 1}`, blob, `inspect-${i}.jpg`)
+        )
+      return form
+    },
+  },
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useOfflineSyncManager() {
-  const isOnline    = useOnline()
-  const { user }    = useAuth()
-  const inFlight    = useRef(new Set())
-  const syncingRef  = useRef(false)
+  const isOnline = useOnline()
+  const { user } = useAuth()
+  const inFlight = useRef(new Set())
+  const syncingRef = useRef(false)
 
   const [isSyncing, setIsSyncing] = useState(false)
   const [lastSyncAt, setLastSyncAt] = useState(null)
   const [summary, setSummary] = useState({ synced: 0, failed: 0, remaining: 0 })
 
-  const currentOwnerId = (user && user.id) ? String(user.id) : 'anonymous'
+  const currentOwnerId = user?.id ? String(user.id) : null
 
   // ── Push a single item ──────────────────────────────────────────────────────
+  // Replace the existing pushItem callback with this:
   const pushItem = useCallback(async (storeName, item) => {
     if (inFlight.current.has(item.id)) return null
     inFlight.current.add(item.id)
@@ -76,7 +111,14 @@ export function useOfflineSyncManager() {
 
     try {
       if (ep) {
-        await api.post(ep.url, ep.transform(item))
+        const url = ep.isDynamic ? ep.url(item) : ep.url
+        const payload = ep.transform(item)
+        const isForm = payload instanceof FormData
+
+        await api.post(url, payload, isForm
+          ? { headers: { 'Content-Type': 'multipart/form-data' } }
+          : {}
+        )
       }
       await queue.updateItem(item.id, { status: 'synced', syncedAt: new Date().toISOString() })
       return { ok: true, id: item.id }
@@ -93,6 +135,10 @@ export function useOfflineSyncManager() {
   // ── Full sync cycle ─────────────────────────────────────────────────────────
   const syncNow = useCallback(async () => {
     if (!isOnline || syncingRef.current) return
+    if (!currentOwnerId) {
+      console.warn('[SyncManager] Skipping sync — no authenticated user.')
+      return
+    }
     syncingRef.current = true
     setIsSyncing(true)
 
@@ -106,12 +152,13 @@ export function useOfflineSyncManager() {
         const all = await queue.getAll()
 
         // Sort by priority then severity
+        // Replace the owner filter inside syncNow:
         const pending = all
           .filter(r => {
             if (r.status !== 'pending') return false
-            // Session isolation check
-            const rOwner = r.ownerId ? String(r.ownerId) : 'anonymous'
-            return rOwner === currentOwnerId
+            // If no ownerId on the record, it was queued without auth — skip it
+            if (!r.ownerId) return false
+            return String(r.ownerId) === currentOwnerId
           })
           .sort((a, b) => {
             const pa = PRIORITY_MAP[a.severity] ?? a.priority ?? 2
@@ -141,7 +188,9 @@ export function useOfflineSyncManager() {
       setIsSyncing(false)
       syncingRef.current = false
     }
-  }, [isOnline, pushItem])
+  }, [isOnline, pushItem, currentOwnerId])
+
+
 
   // ── Auto-sync on reconnect ──────────────────────────────────────────────────
   useEffect(() => {
@@ -150,3 +199,5 @@ export function useOfflineSyncManager() {
 
   return { syncNow, isSyncing, lastSyncAt, summary }
 }
+
+

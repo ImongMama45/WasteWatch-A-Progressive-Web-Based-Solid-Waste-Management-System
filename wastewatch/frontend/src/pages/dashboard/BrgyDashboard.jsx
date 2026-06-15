@@ -14,8 +14,10 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
+import { useNotification } from '../../context/NotificationContext'
 import HomeCarousel from '../../components/carousel/HomeCarousel'
 import { ICONS } from '../../api/navConfig'
+import { getApiErrorMessage } from '../../utils/notificationHelpers'
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 
@@ -96,6 +98,7 @@ const STATUS_LABELS = { collecting: 'Collecting', en_route: 'En Route', idle: 'I
 
 export default function BrgyDashboard() {
   const { user } = useAuth()
+  const { notify } = useNotification()
   const trucksRef = useRef(null);
   const navigate = useNavigate()
 
@@ -163,14 +166,14 @@ export default function BrgyDashboard() {
       fetchStats()
       showToast('✅ Report approved — now visible on the live map.')
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to approve report')
+      notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed to approve report') })
     }
   }
 
   async function handleReject(id) {
     const reason = prompt('Please enter rejection reason:')
     if (reason === null) return
-    if (!reason.trim()) return alert('Reason required')
+    if (!reason.trim()) return notify({ variant: 'error-solid', message: 'Reason required' })
 
     try {
       await api.post(`/api/watcher/reports/${id}/reject/`, { rejection_reason: reason })
@@ -179,7 +182,7 @@ export default function BrgyDashboard() {
       fetchStats()
       showToast('✕ Report rejected.')
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to reject report')
+      notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed to reject report') })
     }
   }
 

@@ -20,6 +20,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
+import { useNotification } from '../../../context/NotificationContext'
 import useShiftTimer from '../../../hooks/useShiftTimer'
 import useGpsTracking from '../../../hooks/useGpsTracking'
 import api from '../../../api/client'
@@ -158,15 +159,18 @@ function StatCell({ value, label }) {
 export default function EndShiftModule({ setRouteState }) {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { notify } = useNotification()
   const { formattedTime, startTime, endShift } = useShiftTimer()
 
   const isRouteComplete = sessionStorage.getItem('ww_route_complete') === 'true'
   const firstName = user?.full_name?.split(' ')[0] || 'Driver'
 
   // ── Phase gate ────────────────────────────────────────────────────────────
+  // 'loading'   → fetching schedule data
+  // 'dump_site' → driver navigates to dump site (if exists)
   // 'returning' → driver navigates back to base
   // 'at_base'   → driver can proceed to end-shift form
-  const [phase, setPhase] = useState('returning')
+  const [phase, setPhase] = useState('loading')
   const dumpMapRef = useRef(null)
   const dumpMapInstance = useRef(null)
   const dumpDriverMarker = useRef(null)
@@ -198,9 +202,15 @@ export default function EndShiftModule({ setRouteState }) {
         if (match?.dumpsite_detail) {
           setDumpSiteLocation(match.dumpsite_detail)
           setDumpSiteName(match.dumpsite_detail?.name || 'Dump Site')
+          setPhase('dump_site')
+        } else {
+          setPhase('returning')
         }
       })
-      .catch(console.error)
+      .catch((err) => {
+        console.error(err)
+        setPhase('returning')
+      })
   }, [user?.id])
 
   // ── Distance / arrival detection ──────────────────────────────────────────
@@ -443,7 +453,7 @@ export default function EndShiftModule({ setRouteState }) {
       setSubmitted(true)
     } catch (err) {
       console.error('shift/end error:', err.response?.data)
-      alert(err.response?.data?.error || 'Failed to end shift. Please try again.')
+      notify({ variant: 'error-dark', message: err.response?.data?.error || 'Failed to end shift. Please try again.' })
     } finally {
       setSubmitting(false)
     }
@@ -467,7 +477,7 @@ export default function EndShiftModule({ setRouteState }) {
       clearRouteSession()
       navigate('/dashboard', { replace: true })
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to end shift. Please try again.')
+      notify({ variant: 'error-dark', message: err.response?.data?.error || 'Failed to end shift. Please try again.' })
     } finally {
       setSubmitting(false)
     }
@@ -477,6 +487,23 @@ export default function EndShiftModule({ setRouteState }) {
     sessionStorage.setItem('ww_extended_mode', 'true')
     sessionStorage.setItem('ww_route_state', 'navigating')
     setRouteState('navigating')
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PHASE 0 — LOADING
+  // ══════════════════════════════════════════════════════════════════════════
+
+  if (phase === 'loading') {
+    return (
+      <>
+        <Navbar />
+        <div style={{ height: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', flexDirection: 'column', gap: 12 }}>
+          <div style={{ width: 32, height: 32, borderRadius: '50%', border: '3px solid #e2e8f0', borderTopColor: '#0f172a', animation: 'spin 1s linear infinite' }} />
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          <div style={{ fontSize: 14, color: '#64748b', fontWeight: 600 }}>Loading route data...</div>
+        </div>
+      </>
+    )
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -987,7 +1014,7 @@ export default function EndShiftModule({ setRouteState }) {
               )}
               <button
                 disabled={!isAtDump}
-                onClick={() => setPhase('returning_home')}
+                onClick={() => setPhase('returning')}
                 style={{
                   width: '100%', maxWidth: 320, padding: '18px', borderRadius: 30, border: 'none',
                   fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, letterSpacing: '.06em',
@@ -1001,7 +1028,7 @@ export default function EndShiftModule({ setRouteState }) {
                 {isAtDump ? '✓ Confirm Arrival at Dump Site' : 'Confirm on Arrival'}
               </button>
               {import.meta.env.DEV && (
-                <button onClick={() => setPhase('returning_home')} style={{ width: '100%', maxWidth: 320, marginTop: 8, padding: '10px', borderRadius: 20, background: 'none', border: '1px dashed #cbd5e1', color: '#94a3b8', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                <button onClick={() => setPhase('returning')} style={{ width: '100%', maxWidth: 320, marginTop: 8, padding: '10px', borderRadius: 20, background: 'none', border: '1px dashed #cbd5e1', color: '#94a3b8', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
                   DEV: Skip to Return Home
                 </button>
               )}
@@ -1012,125 +1039,6 @@ export default function EndShiftModule({ setRouteState }) {
     )
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // PHASE 4 — RETURNING HOME (from dump site back to base)
-  // ══════════════════════════════════════════════════════════════════════════
-
-  if (phase === 'returning_home') {
-    const gpsColor = gpsError ? '#ef4444' : (!isTracking) ? '#f59e0b'
-      : (gpsAccuracy != null && gpsAccuracy >= 50) ? '#f59e0b' : '#2ecc71'
-    const gpsLabel = gpsError ? 'GPS Lost' : !isTracking ? 'GPS…'
-      : gpsAccuracy != null ? `GPS ±${Math.round(gpsAccuracy)}m` : 'GPS Active'
-    const distLabel = distanceToBase == null ? 'Calculating…'
-      : distanceToBase > 1000 ? `${(distanceToBase / 1000).toFixed(1)} km to base`
-        : `${Math.round(distanceToBase)} m to base`
-
-    // Reuse the existing mapRef / mapInstance for returning_home
-    // but we need to re-draw it since it was destroyed after 'returning' phase.
-    // We use a separate ref for this phase's map.
-    return (
-      <>
-        <Navbar />
-        <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-body)', overflow: 'hidden', position: 'relative' }}>
-          <div style={{ position: 'absolute', inset: 0, zIndex: 0, background: '#2a3441' }}>
-            {/* Reuse the same mapRef — leaflet init effect fires again
-                because mapInstance.current was cleared when phase left 'returning' */}
-            <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
-            {import.meta.env.DEV && (
-              <div style={{ position: 'absolute', top: '50%', right: 14, marginTop: 54, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button
-                  onClick={() => {
-                    if (!baseLocation) return
-                    const lat = Number(baseLocation.lat), lng = Number(baseLocation.lng)
-                    setMockGps({ lat, lng })
-                    mapInstance.current?.panTo([lat, lng])
-                  }}
-                  title="DEV: Teleport to Base"
-                  style={{ width: 44, height: 44, borderRadius: '50%', background: '#16a34a', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 20 }}
-                >🏠</button>
-                {isMock && (
-                  <button onClick={() => setMockGps(null)} title="Clear Mock GPS"
-                    style={{ width: 44, height: 44, borderRadius: '50%', background: '#ef4444', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 16, fontWeight: 800, color: '#fff' }}>✕</button>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* HEADER */}
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(15,23,42,0.93)', backdropFilter: 'blur(8px)', padding: '16px 18px 18px', color: '#fff', boxShadow: '0 4px 20px rgba(0,0,0,.2)' }}>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: `${gpsColor}18`, border: `1px solid ${gpsColor}44`, borderRadius: 20, padding: '3px 10px' }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: gpsColor, display: 'inline-block', animation: isTracking && !gpsError ? 'esMapPulse 2s ease infinite' : 'none' }} />
-                <span style={{ fontSize: 10, fontWeight: 700, color: gpsColor, letterSpacing: '.04em' }}>{gpsLabel}</span>
-              </div>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(22,163,74,0.15)', border: '1px solid rgba(22,163,74,0.5)', borderRadius: 20, padding: '3px 10px' }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: '#16a34a', letterSpacing: '.04em' }}>RETURNING TO BASE</span>
-              </div>
-              <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: '3px 10px' }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.65)', letterSpacing: '.04em' }}>⏱ {formattedTime}</span>
-              </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-              <span style={{ fontSize: 22, marginTop: 1 }}>🏠</span>
-              <div>
-                <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, marginBottom: 2 }}>{baseName}</div>
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>Head back to base to complete your shift · {distLabel}</div>
-              </div>
-            </div>
-          </div>
-
-          {/* TURN CARD */}
-          <div style={{ position: 'absolute', top: 122, left: 14, right: 14, zIndex: 10, background: 'rgba(255,255,255,0.97)', borderRadius: 16, overflow: 'hidden', display: 'flex', alignItems: 'stretch', boxShadow: '0 6px 28px rgba(0,0,0,.18)', animation: 'esNavFadeUp .25s ease' }}>
-            <div style={{ width: 76, flexShrink: 0, background: '#16a34a12', borderRight: '3px solid #16a34a28', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
-              <span style={{ fontSize: 30 }}>🏠</span>
-            </div>
-            <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <div style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 900, color: '#0f172a', lineHeight: 1.2, marginBottom: 4 }}>Head back to home base</div>
-              <div style={{ fontSize: 13, color: '#16a34a', fontWeight: 700 }}>{distLabel}</div>
-            </div>
-          </div>
-
-          {/* BOTTOM PANEL */}
-          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(12px)', borderTopLeftRadius: 24, borderTopRightRadius: 24, boxShadow: '0 -4px 24px rgba(0,0,0,.1)', display: 'flex', flexDirection: 'column', paddingBottom: 'env(safe-area-inset-bottom, 24px)' }}>
-            <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2, margin: '12px auto' }} />
-            <div style={{ padding: '20px 20px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <p style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, textAlign: 'center', color: isAtBase ? '#16a34a' : '#64748b', marginBottom: 6, transition: 'color .3s' }}>
-                {isAtBase ? "You've reached home base!" : 'Heading back to base…'}
-              </p>
-              {!isAtBase && distanceToBase != null && (
-                <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12 }}>
-                  {distanceToBase > 1000 ? `${(distanceToBase / 1000).toFixed(1)} km remaining` : `${Math.round(distanceToBase)} m remaining`}
-                </p>
-              )}
-              {!isAtBase && distanceToBase == null && (
-                <p style={{ fontSize: 12, color: '#f59e0b', marginBottom: 12 }}>📡 Waiting for GPS signal…</p>
-              )}
-              <button
-                disabled={!isAtBase}
-                onClick={handleDone}
-                style={{
-                  width: '100%', maxWidth: 320, padding: '18px', borderRadius: 30, border: 'none',
-                  fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, letterSpacing: '.06em',
-                  transition: 'all .35s ease',
-                  cursor: isAtBase ? 'pointer' : 'not-allowed',
-                  background: isAtBase ? '#16a34a' : '#e2e8f0',
-                  color: isAtBase ? '#fff' : '#94a3b8',
-                  boxShadow: isAtBase ? '0 6px 20px rgba(22,163,74,0.35)' : 'none',
-                }}
-              >
-                {isAtBase ? '✓ Complete Shift' : 'Confirm on Arrival'}
-              </button>
-              {import.meta.env.DEV && (
-                <button onClick={handleDone} style={{ width: '100%', maxWidth: 320, marginTop: 8, padding: '10px', borderRadius: 20, background: 'none', border: '1px dashed #cbd5e1', color: '#94a3b8', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
-                  DEV: Complete Shift
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </>
-    )
-  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // PHASE 2b — ROUTE COMPLETED — celebration screen

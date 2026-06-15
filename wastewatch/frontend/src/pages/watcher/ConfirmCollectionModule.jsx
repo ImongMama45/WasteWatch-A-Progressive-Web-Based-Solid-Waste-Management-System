@@ -614,25 +614,25 @@ export default function VerificationTasksModule() {
                                         boxShadow: isNearStop ? '0 6px 20px rgba(15,23,42,.3)' : 'none',
                                     }}>
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                                    {isNearStop ? <><div style={{ width: 18, height: 18 }}>{ICONS.search}</div> Inspect Stop</> : 'Confirm on Arrival'}
-                                </div>
-                            </button>
+                                        {isNearStop ? <><div style={{ width: 18, height: 18 }}>{ICONS.search}</div> Inspect Stop</> : 'Confirm on Arrival'}
+                                    </div>
+                                </button>
                             </div>
-                ) : null}
-            </div>
+                        ) : null}
+                    </div>
                 )}
-        </div >
+            </div >
 
-            {/* INSPECTION OVERLAY — passes MultiPhotoPicker requirement down */ }
+            {/* INSPECTION OVERLAY — passes MultiPhotoPicker requirement down */}
             < PostCollectionOverlay
-    visible = {!!selectedTask
-}
-task = { selectedTask }
-gpsPos = { gpsPos }
-onComplete = {() => { setSelectedTask(null); loadStops() }}
-onBack = {() => setSelectedTask(null)}
-MultiPhotoPicker = { MultiPhotoPicker }
-    />
+                visible={!!selectedTask
+                }
+                task={selectedTask}
+                gpsPos={gpsPos}
+                onComplete={() => { setSelectedTask(null); loadStops() }}
+                onBack={() => setSelectedTask(null)}
+                MultiPhotoPicker={MultiPhotoPicker}
+            />
         </>
     )
 }

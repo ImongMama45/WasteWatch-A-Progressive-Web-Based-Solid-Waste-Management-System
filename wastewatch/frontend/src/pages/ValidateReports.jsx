@@ -458,7 +458,7 @@ export default function ValidateReports() {
 
         {/* ── REPORT LIST ── */}
         {loading ? (
-           <div style={{ textAlign: 'center', padding: '40px' }}>Loading reports...</div>
+          <div style={{ textAlign: 'center', padding: '40px' }}>Loading reports...</div>
         ) : filtered.length === 0 ? (
           <div className="card" style={{ textAlign: 'center', padding: '48px 20px' }}>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>

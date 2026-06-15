@@ -68,7 +68,7 @@ function extractExifGps(arrayBuffer) {
         const read16 = o => le ? view.getUint16(tiffStart + o, true) : view.getUint16(tiffStart + o)
         const read32 = o => le ? view.getUint32(tiffStart + o, true) : view.getUint32(tiffStart + o)
         const ifdOffset = read32(4)
-        const ifdCount  = read16(ifdOffset)
+        const ifdCount = read16(ifdOffset)
 
         let gpsIfdOffset = null
         for (let i = 0; i < ifdCount; i++) {
@@ -82,7 +82,7 @@ function extractExifGps(arrayBuffer) {
         if (gpsIfdOffset == null) return null
 
         const gpsCount = read16(gpsIfdOffset)
-        const gpsMap   = {}
+        const gpsMap = {}
         for (let i = 0; i < gpsCount; i++) {
           const e = gpsIfdOffset + 2 + i * 12
           gpsMap[read16(e)] = { type: read16(e + 2), count: read32(e + 4), value: read32(e + 8) }
@@ -136,21 +136,21 @@ export default function CameraProofModal({
   onClose,
 }) {
   // ── Camera state ────────────────────────────────────────────────────────────
-  const videoRef  = useRef(null)
+  const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
 
-  const [cameraPhase, setCameraPhase]     = useState('idle')
-  const [cameraError, setCameraError]     = useState('')
-  const [photoPreview, setPhotoPreview]   = useState(null)
-  const [capturedBlob, setCapturedBlob]   = useState(null)
+  const [cameraPhase, setCameraPhase] = useState('idle')
+  const [cameraError, setCameraError] = useState('')
+  const [photoPreview, setPhotoPreview] = useState(null)
+  const [capturedBlob, setCapturedBlob] = useState(null)
   const [capturedBuffer, setCapturedBuffer] = useState(null)
 
   // ── GPS verification state ──────────────────────────────────────────────────
   const [gpsCheck, setGpsCheck] = useState(null)
 
   // ── Upload state ────────────────────────────────────────────────────────────
-  const [uploading, setUploading]     = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
 
   // ── Shutter animation ───────────────────────────────────────────────────────
@@ -197,7 +197,7 @@ export default function CameraProofModal({
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
-        await videoRef.current.play().catch(() => {})
+        await videoRef.current.play().catch(() => { })
       }
       setCameraPhase('live')
     } catch (err) {
@@ -208,11 +208,11 @@ export default function CameraProofModal({
 
   // ── Capture photo ───────────────────────────────────────────────────────────
   async function handleCapture() {
-    const video  = videoRef.current
+    const video = videoRef.current
     const canvas = canvasRef.current
     if (!video || !canvas || cameraPhase !== 'live') return
 
-    canvas.width  = video.videoWidth  || 1280
+    canvas.width = video.videoWidth || 1280
     canvas.height = video.videoHeight || 720
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height)
 
@@ -278,10 +278,10 @@ export default function CameraProofModal({
 
     try {
       const form = new FormData()
-      form.append('photo',        capturedBlob, `pickup-${stopIndex ?? 'x'}-${Date.now()}.jpg`)
-      form.append('schedule_id',  String(scheduleId))
-      form.append('stop_order',   String(stopIndex ?? 0))
-      form.append('note',         note?.trim() || '')
+      form.append('photo', capturedBlob, `pickup-${stopIndex ?? 'x'}-${Date.now()}.jpg`)
+      form.append('schedule_id', String(scheduleId))
+      form.append('stop_order', String(stopIndex ?? 0))
+      form.append('note', note?.trim() || '')
       form.append('collected_at', new Date().toISOString())
       if (gpsPos) {
         form.append('lat', String(gpsPos.lat))
@@ -292,9 +292,9 @@ export default function CameraProofModal({
 
       broadcastPickupStatusSync({
         scheduleId: scheduleId ?? null,
-        stopOrder:  stopIndex ?? null,
-        status:     'COMPLETED',
-        source:     'camera-proof-modal',
+        stopOrder: stopIndex ?? null,
+        status: 'COMPLETED',
+        source: 'camera-proof-modal',
       })
 
       // Store the returned PickupStatus id for StopCompletedOverlay
@@ -320,16 +320,16 @@ export default function CameraProofModal({
 
   if (!visible) return null
 
-  const isLive     = cameraPhase === 'live'
+  const isLive = cameraPhase === 'live'
   const isCaptured = cameraPhase === 'captured'
-  const isError    = cameraPhase === 'error'
-  const isDone     = cameraPhase === 'done'
-  const canSubmit  = !!capturedBlob && !uploading
+  const isError = cameraPhase === 'error'
+  const isDone = cameraPhase === 'done'
+  const canSubmit = !!capturedBlob && !uploading
 
   const gpsStatusConfig = gpsCheck ? {
-    verified: { color: '#16a34a', bg: 'rgba(22,163,74,0.1)',   border: 'rgba(22,163,74,0.3)',   icon: '✅', label: 'GPS verified' },
-    warning:  { color: '#f59e0b', bg: 'rgba(245,158,11,0.1)',  border: 'rgba(245,158,11,0.3)',  icon: '⚠️', label: `${gpsCheck.distanceM}m from stop` },
-    no_exif:  { color: '#64748b', bg: 'rgba(100,116,139,0.1)', border: 'rgba(100,116,139,0.3)', icon: '📡', label: 'Driver GPS recorded' },
+    verified: { color: '#16a34a', bg: 'rgba(22,163,74,0.1)', border: 'rgba(22,163,74,0.3)', icon: '✅', label: 'GPS verified' },
+    warning: { color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.3)', icon: '⚠️', label: `${gpsCheck.distanceM}m from stop` },
+    no_exif: { color: '#64748b', bg: 'rgba(100,116,139,0.1)', border: 'rgba(100,116,139,0.3)', icon: '📡', label: 'Driver GPS recorded' },
   }[gpsCheck.status] : null
 
   return (
@@ -464,10 +464,10 @@ export default function CameraProofModal({
               ].map((pos, i) => (
                 <div key={i} style={{
                   position: 'absolute', width: 20, height: 20, ...pos,
-                  borderTop:    pos.top    != null ? '2.5px solid rgba(255,255,255,0.6)' : 'none',
+                  borderTop: pos.top != null ? '2.5px solid rgba(255,255,255,0.6)' : 'none',
                   borderBottom: pos.bottom != null ? '2.5px solid rgba(255,255,255,0.6)' : 'none',
-                  borderLeft:   pos.left   != null ? '2.5px solid rgba(255,255,255,0.6)' : 'none',
-                  borderRight:  pos.right  != null ? '2.5px solid rgba(255,255,255,0.6)' : 'none',
+                  borderLeft: pos.left != null ? '2.5px solid rgba(255,255,255,0.6)' : 'none',
+                  borderRight: pos.right != null ? '2.5px solid rgba(255,255,255,0.6)' : 'none',
                   borderRadius: i === 0 ? '3px 0 0 0' : i === 1 ? '0 3px 0 0' : i === 2 ? '0 0 0 3px' : '0 0 3px 0',
                 }} />
               ))}
