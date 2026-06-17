@@ -228,6 +228,7 @@ export const ROLE_NAV_CONFIG = {
     {
       type: 'group', label: 'Monitoring', icon: 'hotspot',
       items: [
+        { path: '/admin/reports',      label: 'Waste Reports',     icon: 'report' },
         { path: '/admin/hotspots',     label: 'Reported Hotspots', icon: 'hotspot' },
         { path: '/admin/escalations',  label: 'Escalations',       icon: 'escalation' },
         { path: '/admin/activity-log', label: 'Activity Logs',     icon: 'activity' },
@@ -357,7 +358,7 @@ export const SIDEBAR_NAV = {
     { path: '/announcements', label: 'News & Alerts', icon: '📰' },
     { path: '/schedule', label: 'Schedule', icon: '📅' },
     { path: '/map', label: 'Live Map', icon: '🗺️' },
-    { path: '/brgy/validate-reports', label: 'Reports', icon: '📋' },
+    { path: '/admin/reports', label: 'Waste Reports', icon: '📋' },
     { path: '/admin/trucks', label: 'Trucks & Drivers', icon: '🚛' },
     { path: '/admin/users', label: 'User Management', icon: '👥' },
     { path: '/admin/dumpsites', label: 'Dumpsites', icon: '🏔️' },

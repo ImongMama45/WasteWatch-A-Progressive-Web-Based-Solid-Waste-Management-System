@@ -32,6 +32,7 @@ INSTALLED_APPS = [
 
     # Third-party
     'rest_framework',          # Django REST framework
+    'django_filters',          # Filtering support
     'corsheaders',          # Allow React frontend to talk to Django
 
     # WasteWatch apps
@@ -218,3 +219,15 @@ if lan_ip:
 # No LOGIN_URL / REDIRECT settings — the backend is API-only.
 # All auth is handled by the React frontend via /api/auth/login/ etc.
 # Unauthenticated API requests return HTTP 401 JSON, not a redirect.
+
+# ---------------------------------------------------------------------------
+# REST Framework Configuration
+# ---------------------------------------------------------------------------
+REST_FRAMEWORK = {
+    'DEFAULT_FILTER_BACKENDS': (
+        'django_filters.rest_framework.DjangoFilterBackend',
+    ),
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+}

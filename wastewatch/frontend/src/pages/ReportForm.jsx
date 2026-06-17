@@ -25,7 +25,7 @@ const SEVERITIES = [
   { value: 'high', label: 'High' },
 ]
 
-const ALL_TAGS = ['Near School', 'Near market', 'Side Road', 'Residential', 'Highway', 'Near River']
+const ALL_TAGS = ['Near School', 'Near market', 'Side Road', 'Residential', 'Highway', 'Near River', 'Misconduct']
 
 export default function ReportForm() {
   const { user } = useAuth()
@@ -34,6 +34,7 @@ export default function ReportForm() {
 
   const [gps, setGps] = useState({ lat: null, lng: null, status: 'detecting', address: '' })
   const [barangays, setBarangays] = useState([])
+  const [systemUsers, setSystemUsers] = useState([])
   const [preview, setPreview] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [errors, setErrors] = useState({})
@@ -47,6 +48,7 @@ export default function ReportForm() {
     description: '',
     image: null,
     manual_address: '',
+    reported_user: '',
   })
 
   // Silently capture GPS on mount
@@ -74,6 +76,14 @@ export default function ReportForm() {
 
   useEffect(() => {
     api.get('/api/barangays/').then(r => setBarangays(r.data)).catch(() => { })
+    
+    // Fetch users for misconduct reporting
+    // Note: This endpoint might require auth/role checks on backend
+    api.get('/api/accounts/users/').then(r => {
+      setSystemUsers(r.data)
+    }).catch(err => {
+      console.error('Failed to fetch system users:', err)
+    })
   }, [])
 
   function handleChange(e) {
@@ -83,9 +93,14 @@ export default function ReportForm() {
   }
 
   function toggleTag(tag) {
-    setSelectedTags(prev =>
-      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
-    )
+    setSelectedTags(prev => {
+      const next = prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+      // Clear reported_user if Misconduct tag removed
+      if (!next.includes('Misconduct')) {
+        setForm(f => ({ ...f, reported_user: '' }))
+      }
+      return next
+    })
   }
 
   function handleFile(e) {
@@ -122,6 +137,7 @@ export default function ReportForm() {
     fd.append('severity', form.severity)
     fd.append('description', form.description)
     fd.append('tags', selectedTags.join(','))
+    if (form.reported_user) fd.append('reported_user', form.reported_user)
     if (form.image) fd.append('image', form.image)
     if (user?.barangay) fd.append('barangay', user.barangay)
 
@@ -292,7 +308,6 @@ export default function ReportForm() {
                   onClick={() => toggleTag(tag)}
                   className="tag-chip"
                   style={{
-
                     background: selectedTags.includes(tag) ? 'rgba(46,204,113,.15)' : 'transparent',
                     borderColor: selectedTags.includes(tag) ? 'var(--accent)' : 'var(--border)',
                     color: selectedTags.includes(tag) ? 'var(--accent)' : 'white',
@@ -311,6 +326,27 @@ export default function ReportForm() {
               </button>
             </div>
           </div>
+
+          {/* Reported User (only if Misconduct tag selected) */}
+          {selectedTags.includes('Misconduct') && (
+            <div className="form-group animate-fade-in">
+              <label className="form-label">Person to Report</label>
+              <select
+                className={`form-input ${errors.reported_user ? 'error' : ''}`}
+                name="reported_user"
+                value={form.reported_user}
+                onChange={handleChange}
+              >
+                <option value="">Select Person (Driver/Watcher/Official)</option>
+                {systemUsers.map(u => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name} ({u.role?.replace('_', ' ')})
+                  </option>
+                ))}
+              </select>
+              {errors.reported_user && <p className="form-error">{errors.reported_user}</p>}
+            </div>
+          )}
 
           {/* Description */}
           <div className="form-group">

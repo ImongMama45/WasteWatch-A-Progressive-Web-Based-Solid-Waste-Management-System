@@ -168,6 +168,8 @@ function ReportPanel({ report, canModerate, onAction, onClose }) {
     ? new Date(report.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
     : 'Unknown'
 
+  const tags = report.tags ? report.tags.split(',') : []
+
   return (
     <div style={{
       background: '#0f172a', borderTop: '2px solid #f59e0b',
@@ -194,6 +196,27 @@ function ReportPanel({ report, canModerate, onAction, onClose }) {
           ✕
         </button>
       </div>
+
+      {tags.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 12 }}>
+          {tags.map(tag => (
+            <span key={tag} style={{ 
+              fontSize: 9, background: tag === 'Misconduct' ? '#ef4444' : 'rgba(255,255,255,0.08)', 
+              color: tag === 'Misconduct' ? 'white' : '#cbd5e1', 
+              padding: '1px 6px', borderRadius: 4, border: tag === 'Misconduct' ? 'none' : '1px solid rgba(255,255,255,0.1)'
+            }}>{tag}</span>
+          ))}
+        </div>
+      )}
+
+      {report.reported_user_name && (
+        <div style={{ 
+          background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', 
+          borderRadius: 6, padding: '8px 10px', marginBottom: 12, color: '#fca5a5', fontSize: 11
+        }}>
+          <b>Reported Person:</b> {report.reported_user_name}
+        </div>
+      )}
 
       <PanelRow label="TYPE" value={TYPE_LABELS[report.issue_type || report.type] ?? ''} />
       <PanelRow label="REPORTED" value={reportedStr} />

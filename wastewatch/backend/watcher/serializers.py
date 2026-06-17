@@ -8,10 +8,11 @@ from .models import (
 )
 
 class GarbageReportSerializer(serializers.ModelSerializer):
-    barangay_name = serializers.CharField(source='barangay.name', read_only=True)
+    barangay_name = serializers.SerializerMethodField()
     user_name = serializers.SerializerMethodField()
-    approved_by_name = serializers.CharField(source='approved_by.full_name', read_only=True)
-    rejected_by_name = serializers.CharField(source='rejected_by.full_name', read_only=True)
+    reported_user_name = serializers.CharField(source='reported_user.full_name', read_only=True, default='')
+    approved_by_name = serializers.CharField(source='approved_by.full_name', read_only=True, default='')
+    rejected_by_name = serializers.CharField(source='rejected_by.full_name', read_only=True, default='')
     
     class Meta:
         model = GarbageReport
@@ -21,6 +22,9 @@ class GarbageReportSerializer(serializers.ModelSerializer):
             'rejected_by', 'rejected_at', 'rejection_reason',
             'created_at', 'updated_at',
         ]
+
+    def get_barangay_name(self, obj):
+        return obj.barangay.name if obj.barangay else "Unknown"
 
     def get_user_name(self, obj):
         # 1. Anonymous submissions

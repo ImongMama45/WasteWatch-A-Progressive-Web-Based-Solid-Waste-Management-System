@@ -44,6 +44,7 @@ import PerformanceAnalytics from './pages/analytics/PerformanceAnalytics'
 import HotspotDetection from './pages/admin/HotspotDetection'
 import NotificationCenter from './pages/admin/NotificationCenter'
 import ActivityLog from './pages/admin/ActivityLog'
+import AdminReports from './pages/admin/AdminReports'
 
 import RouteOverview from './pages/driver/RouteOverview'
 import DriverAnalytics from './pages/driver/DriverAnalytics'
@@ -156,6 +157,10 @@ export default function App() {
 
           <Route path="/admin/activity-log" element={
             <PrivateRoute><ActivityLog /></PrivateRoute>
+          } />
+
+          <Route path="/admin/reports" element={
+            <PrivateRoute roles={['admin']}><AdminReports /></PrivateRoute>
           } />
 
           {/* ── DRIVER MODULE ── */}

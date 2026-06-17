@@ -1,5 +1,6 @@
 from django.utils import timezone
-from rest_framework import viewsets, permissions, status
+from rest_framework import viewsets, permissions, status, filters
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import (
@@ -35,6 +36,10 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
     queryset = GarbageReport.objects.all()
     serializer_class = GarbageReportSerializer
     permission_classes = [permissions.AllowAny]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['barangay', 'status', 'issue_type', 'severity']
+    search_fields = ['address', 'description']
+    ordering_fields = ['created_at', 'severity']
 
     def get_queryset(self):
         user = self.request.user

@@ -1410,6 +1410,8 @@ function ReportPanel({ report, onStatusChange }) {
     rejected: 'Rejected (Hidden)'
   }[report.status] ?? report.status?.toUpperCase()
 
+  const tags = report.tags ? report.tags.split(',') : []
+
   function handleApprove() {
     const id = report.report_id || report.id
     api.post(`/api/watcher/reports/${id}/approve/`)
@@ -1455,6 +1457,28 @@ function ReportPanel({ report, onStatusChange }) {
           <span style={{ color: severityColors[report.severity], fontSize: 12, fontWeight: 700 }}>{report.severity?.toUpperCase()}</span>
         </div>
       </div>
+      
+      {tags.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+          {tags.map(tag => (
+            <span key={tag} style={{ 
+              fontSize: 10, background: tag === 'Misconduct' ? '#ef4444' : 'rgba(255,255,255,0.08)', 
+              color: tag === 'Misconduct' ? 'white' : '#cbd5e1', 
+              padding: '2px 8px', borderRadius: 6, border: tag === 'Misconduct' ? 'none' : '1px solid rgba(255,255,255,0.1)'
+            }}>{tag}</span>
+          ))}
+        </div>
+      )}
+
+      {report.reported_user_name && (
+        <div style={{ 
+          background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', 
+          borderRadius: 8, padding: '10px 12px', marginBottom: 14, color: '#fca5a5', fontSize: 12
+        }}>
+          <b>Reported Person:</b> {report.reported_user_name}
+        </div>
+      )}
+
       <Row label="REPORT TYPE" value={typeLabels[report.issue_type || report.type] ?? (report.issue_type || report.type)} />
       <Row label="REPORTED" value={reportedStr} />
       <Row label="STATUS" value={statusLabel} accent />
