@@ -266,14 +266,30 @@ export default function HotspotDetection() {
                     <span style={{ color: r.accent ? STATUS_META[selected.status].color : '#e2e8f0', fontSize: 12, fontWeight: r.accent ? 800 : 400 }}>{r.value}</span>
                   </div>
                 ))}
-                <button style={{
-                  width: '100%', marginTop: 12, background: 'rgba(46,204,113,0.1)',
-                  border: '1px solid rgba(46,204,113,0.35)', color: '#2ecc71',
-                  borderRadius: 8, padding: '8px', fontWeight: 700, fontSize: 12,
-                  cursor: 'pointer', fontFamily: 'var(--font-body)',
-                }} onClick={() => window.location.href = '/admin/escalations'}>
-                  Create Escalation →
-                </button>
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  <button style={{
+                    flex: 1, background: 'rgba(46,204,113,0.1)',
+                    border: '1px solid rgba(46,204,113,0.35)', color: '#2ecc71',
+                    borderRadius: 8, padding: '8px', fontWeight: 700, fontSize: 11,
+                    cursor: 'pointer', fontFamily: 'var(--font-body)',
+                  }} onClick={() => window.location.href = '/admin/escalations'}>
+                    Escalate
+                  </button>
+                  <button style={{
+                    flex: 1, background: 'rgba(52,152,219,0.1)',
+                    border: '1px solid rgba(52,152,219,0.35)', color: '#3498db',
+                    borderRadius: 8, padding: '8px', fontWeight: 700, fontSize: 11,
+                    cursor: 'pointer', fontFamily: 'var(--font-body)',
+                  }} onClick={() => {
+                    const confirm = window.confirm(`Generate automated collection route for Brgy. ${selected.barangay_name}?`)
+                    if (!confirm) return
+                    // In a real app, this would call a specific endpoint. 
+                    // For now, we rely on the backend automation signal or a manual route builder.
+                    alert(`Route generation requested for ${selected.barangay_name}. The system will assign an available truck soon.`)
+                  }}>
+                    Gen. Route
+                  </button>
+                </div>
               </div>
             )}
           </div>

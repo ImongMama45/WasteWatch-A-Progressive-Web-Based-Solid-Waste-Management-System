@@ -107,6 +107,16 @@ class GarbageReport(models.Model):
     description = models.TextField(blank=True)
     tags = models.CharField(max_length=255, blank=True, help_text='Comma-separated tags')
 
+    # For misconduct reports
+    reported_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='received_misconduct_reports',
+        help_text='The person (driver/watcher) being reported for misconduct'
+    )
+
     # Lifecycle status — starts as pending, admin/official changes it
     status = models.CharField(
         max_length=20,
@@ -339,3 +349,14 @@ class Escalation(models.Model):
 
     def __str__(self):
         return f'{self.title} - {self.status}'
+
+
+class SystemSetting(models.Model):
+    key = models.CharField(max_length=50, unique=True)
+    value = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.key

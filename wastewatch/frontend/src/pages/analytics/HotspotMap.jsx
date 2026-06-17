@@ -60,12 +60,16 @@ function loadLeaflet(cb) {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-export default function HotspotMap({ userBarangay }) {
+export default function HotspotMap({ userBarangay, mapData }) {
   const containerRef   = useRef(null)
   const mapRef         = useRef(null)
   const geoLayerRef    = useRef(null)
   const [tip, setTip]  = useState(null)   // { name, score, hotspots }
   const [ready, setReady] = useState(false)
+
+  // Extract from prop or use defaults
+  const getBrgyScore = (name) => mapData?.[name]?.score ?? 75
+  const getBrgyHotspots = (name) => mapData?.[name]?.hotspots ?? 0
 
   // ── Init map ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -105,7 +109,7 @@ export default function HotspotMap({ userBarangay }) {
         const layer = L.geoJSON(geo, {
           style: feature => {
             const name  = feature.properties.brgy_name
-            const score = BRGY_SCORES[name] ?? 75
+            const score = getBrgyScore(name)
             const c     = scoreColor(score)
             const isUser = userBarangay && name.toLowerCase() === userBarangay.toLowerCase()
             return {
@@ -119,8 +123,8 @@ export default function HotspotMap({ userBarangay }) {
 
           onEachFeature: (feature, flayer) => {
             const name     = feature.properties.brgy_name
-            const score    = BRGY_SCORES[name] ?? 75
-            const hotspots = HOTSPOT_COUNTS[name] ?? 0
+            const score    = getBrgyScore(name)
+            const hotspots = getBrgyHotspots(name)
             const isUser   = userBarangay && name.toLowerCase() === userBarangay.toLowerCase()
 
             flayer.on('mouseover', () => {
@@ -152,18 +156,6 @@ export default function HotspotMap({ userBarangay }) {
                 className: 'ww-mini-tip',
               })
             }
-
-            // User barangay marker
-            if (isUser) {
-              const center = flayer.getBounds().getCenter()
-              L.circleMarker(center, {
-                radius:      6,
-                fillColor:   '#fff',
-                color:       '#16a34a',
-                weight:      2,
-                fillOpacity: 1,
-              }).addTo(map).bindTooltip('Your barangay', { direction: 'top', className: 'ww-mini-tip' })
-            }
           },
         }).addTo(map)
 
@@ -175,27 +167,24 @@ export default function HotspotMap({ userBarangay }) {
         } catch { /* layer might be empty */ }
       })
       .catch(() => {
-        // GeoJSON not found — show fallback message
         console.warn('HotspotMap: /data/lucena_barangays.geojson not found')
       })
 
     return () => {
-      // Cleanup on unmount
       if (mapRef.current) {
         mapRef.current.remove()
         mapRef.current = null
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready])
+  }, [ready, mapData]) // Trigger re-creation or update on mapData change
 
-  // Re-style when userBarangay changes (no full reinit needed)
+  // Re-style when userBarangay changes
   useEffect(() => {
     if (!geoLayerRef.current || !window.L) return
     geoLayerRef.current.eachLayer(flayer => {
       const name    = flayer.feature?.properties?.brgy_name
       if (!name) return
-      const score   = BRGY_SCORES[name] ?? 75
+      const score   = getBrgyScore(name)
       const c       = scoreColor(score)
       const isUser  = userBarangay && name.toLowerCase() === userBarangay.toLowerCase()
       flayer.setStyle({
@@ -205,7 +194,7 @@ export default function HotspotMap({ userBarangay }) {
         fillOpacity: c.opacity,
       })
     })
-  }, [userBarangay])
+  }, [userBarangay, mapData])
 
   return (
     <div>
