@@ -21,7 +21,7 @@ import { useNotifications } from '../hooks/useNotifications'
 
 
 // ─── NavGroup: collapsible sidebar section ────────────────────────────────────
-function NavGroup({ group, currentPath, onNavigate }) {
+function NavGroup({ group, currentPath, onNavigate, onExpandSidebar }) {
   const hasActive = group.items?.some(item => item.path === currentPath)
   const [open, setOpen] = useState(hasActive)
 
@@ -31,7 +31,7 @@ function NavGroup({ group, currentPath, onNavigate }) {
     <div className="ww-nav-group" data-open={open}>
       <button
         className={`ww-group-toggle ${hasActive ? 'has-active' : ''}`}
-        onClick={() => setOpen(o => !o)}
+        onClick={() => { setOpen(o => !o); if (onExpandSidebar) onExpandSidebar(); }}
         aria-expanded={open}
       >
         <span className="ww-group-icon">{ICONS[group.icon]}</span>
@@ -271,7 +271,8 @@ const SIDEBAR_CSS = `
   left: var(--sb-width); right: 0;
   height: var(--topbar-h);
   background: #fff;
-  border-bottom: 1px solid rgba(0,0,0,0.07);
+  border-bottom: 4px solid #16a34a !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 24px;
   z-index: 100; gap: 16px;
@@ -349,6 +350,63 @@ const SIDEBAR_CSS = `
   }
 }
 
+
+/* ── Sidebar Collapse ── */
+.layout-desktop.sidebar-collapsed {
+  --sb-width: 76px;
+}
+
+.layout-desktop.sidebar-collapsed .sidebar-brand-name,
+.layout-desktop.sidebar-collapsed .sidebar-brand-tag,
+.layout-desktop.sidebar-collapsed .ww-nav-section,
+.layout-desktop.sidebar-collapsed .ww-group-label,
+.layout-desktop.sidebar-collapsed .ww-group-chevron,
+.layout-desktop.sidebar-collapsed .ww-nav-item span:nth-child(2),
+.layout-desktop.sidebar-collapsed .ww-nav-child span:nth-child(2) {
+  display: none;
+}
+
+.layout-desktop.sidebar-collapsed .ww-nav-item,
+.layout-desktop.sidebar-collapsed .ww-group-toggle {
+  justify-content: center;
+  padding: 12px 0;
+  width: 44px;
+  margin: 0 auto 4px auto;
+}
+
+.layout-desktop.sidebar-collapsed .desktop-sidebar-logo {
+  padding: 0;
+  justify-content: center;
+}
+
+.layout-desktop.sidebar-collapsed .ww-group-items {
+  display: none !important;
+}
+
+.layout-desktop.sidebar-collapsed .ww-item-icon,
+.layout-desktop.sidebar-collapsed .ww-group-icon {
+  margin: 0;
+  opacity: 0.9;
+}
+
+.desktop-sidebar, .desktop-topbar, .dashboard-main {
+  transition: width 0.25s ease, left 0.25s ease, margin-left 0.25s ease;
+}
+
+.desktop-topbar-left {
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-toggle-btn {
+  background: none; border: none; cursor: pointer;
+  color: rgba(0,0,0,0.6); padding: 8px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s;
+  margin-left: -8px;
+}
+.sidebar-toggle-btn:hover { background: rgba(0,0,0,0.05); color: #000; }
+
 /* ── Notification dropdown ── */
 .notif-dropdown {
   position: fixed;
@@ -381,6 +439,7 @@ const SIDEBAR_CSS = `
   padding: 12px 16px;
   border-bottom: 1px solid rgba(0,0,0,0.06);
   font-size: 13px; transition: background 0.12s;
+  cursor: pointer;
 }
 .notif-item:last-of-type { border-bottom: none; }
 .notif-item:hover { background: rgba(0,0,0,0.03); }
@@ -408,6 +467,15 @@ function injectSidebarCSS() {
   document.head.appendChild(el)
 }
 
+
+const MenuIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="3" y1="12" x2="21" y2="12"></line>
+    <line x1="3" y1="6" x2="21" y2="6"></line>
+    <line x1="3" y1="18" x2="21" y2="18"></line>
+  </svg>
+)
+
 const LeafIcon = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
     <path d="M17 8C8 10 5.9 16.17 3.82 21.34L5.71 22l1-2.3A4.49 4.49 0 0 0 8 20C19 20 22 3 22 3c-1 2-8 5.25-8 5.25S17.7 9.08 17 8z" />
@@ -417,7 +485,7 @@ const LeafIcon = () => (
 // ─── Section label rendering ──────────────────────────────────────────────────
 // nav items can optionally carry a `section` key to inject a label above them.
 // We detect the first item of each new section and render the label before it.
-function renderNavItems(navItems, currentPath, navigate) {
+function renderNavItems(navItems, currentPath, navigate, onExpandSidebar) {
   const rendered = []
   let lastSection = null
 
@@ -439,6 +507,7 @@ function renderNavItems(navItems, currentPath, navigate) {
           group={item}
           currentPath={currentPath}
           onNavigate={navigate}
+          onExpandSidebar={onExpandSidebar}
         />
       )
     } else {
@@ -446,7 +515,7 @@ function renderNavItems(navItems, currentPath, navigate) {
         <button
           key={item.path + idx}
           className={`ww-nav-item ${currentPath === item.path ? 'active' : ''}`}
-          onClick={() => navigate(item.path)}
+          onClick={() => { navigate(item.path); if (onExpandSidebar) onExpandSidebar(); }}
           aria-current={currentPath === item.path ? 'page' : undefined}
         >
           <span className="ww-item-icon">{ICONS[item.icon]}</span>
@@ -467,7 +536,10 @@ export default function DashboardLayout({ children }) {
   const isOnline = useOnline()
   const { notifications, unreadCount, markRead } = useNotifications()
 
-  const [searchVal, setSearchVal] = useState('')
+  const [isPinned, setIsPinned] = useState(false)
+  const [isHovered, setIsHovered] = useState(false)
+
+  const isCollapsed = !(isPinned || isHovered)
   const [notifOpen, setNotifOpen] = useState(false)
 
   useEffect(() => { injectSidebarCSS() }, [])
@@ -481,22 +553,29 @@ export default function DashboardLayout({ children }) {
   }
 
   return (
-    <>
+    <div
+      className="dashboard-root"
+      style={{ '--sb-width': isCollapsed ? '76px' : '240px', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}
+      onClick={() => {
+        // Tapping somewhere in the page tucks the sidebar in
+        if (isPinned) setIsPinned(false);
+      }}
+    >
       {/* ── MOBILE: top navbar only ── */}
       <div className="layout-mobile">
         <Navbar />
       </div>
 
       {/* ── DESKTOP: sidebar + topbar ── */}
-      <div className="layout-desktop">
+      <div className={`layout-desktop ${isCollapsed ? 'sidebar-collapsed' : ''}`}>
 
         {/* ─── Left Sidebar ─── */}
-        <aside className="desktop-sidebar" role="navigation" aria-label="Main sidebar">
+        <aside className="desktop-sidebar" role="navigation" aria-label="Main sidebar" onMouseEnter={() => setIsHovered(true)} onMouseLeave={() => setIsHovered(false)} onClick={e => e.stopPropagation()}>
 
           {/* Brand / Logo — same height as topbar */}
           <div
             className="desktop-sidebar-logo"
-            onClick={() => navigate('/dashboard')}
+            onClick={() => isCollapsed ? setIsPinned(true) : navigate('/dashboard')}
             role="button" tabIndex={0}
             onKeyDown={e => e.key === 'Enter' && navigate('/dashboard')}
             aria-label="Go to dashboard"
@@ -512,7 +591,7 @@ export default function DashboardLayout({ children }) {
 
           {/* Nav Items with section labels */}
           <nav className="desktop-sidebar-nav">
-            {renderNavItems(navItems, location.pathname, (path) => navigate(path))}
+            {renderNavItems(navItems, location.pathname, (path) => navigate(path), () => !isPinned && setIsPinned(true))}
           </nav>
 
           {/* Footer */}
@@ -536,16 +615,9 @@ export default function DashboardLayout({ children }) {
         </aside>
 
         {/* ─── Top Bar ─── */}
-        <header className="desktop-topbar">
-          <div className="desktop-topbar-search">
-            {ICONS.search}
-            <input
-              type="text"
-              placeholder="Search..."
-              value={searchVal}
-              onChange={e => setSearchVal(e.target.value)}
-              aria-label="Search"
-            />
+        <header className="desktop-topbar" onClick={e => e.stopPropagation()}>
+          <div className="desktop-topbar-left">
+
           </div>
 
           <div className="desktop-topbar-right">
@@ -579,9 +651,13 @@ export default function DashboardLayout({ children }) {
               onKeyDown={e => e.key === 'Enter' && navigate('/profile')}
               aria-label="View profile"
             >
-              <div className="desktop-topbar-avatar">
-                {user?.full_name?.[0]?.toUpperCase() || '?'}
-              </div>
+              {user?.profile_pic ? (
+                <img src={user.profile_pic} alt="Avatar" className="desktop-topbar-avatar" style={{ objectFit: 'cover', background: '#fff' }} />
+              ) : (
+                <div className="desktop-topbar-avatar">
+                  {user?.full_name?.[0]?.toUpperCase() || '?'}
+                </div>
+              )}
               <div>
                 <div className="desktop-topbar-username">
                   {user?.full_name?.split(' ')[0] || 'User'}
@@ -622,7 +698,11 @@ export default function DashboardLayout({ children }) {
             </div>
           ) : (
             notifications.slice(0, 5).map(n => (
-              <div key={n.id} className={`notif-item ${!n.is_read ? 'unread' : ''}`}>
+              <div
+                key={n.id}
+                className={`notif-item ${!n.is_read ? 'unread' : ''}`}
+                onClick={() => { navigate('/notifications'); setNotifOpen(false); }}
+              >
                 {!n.is_read
                   ? <div className="notif-dot-inline" />
                   : <div style={{ width: 8, flexShrink: 0 }} />
@@ -646,10 +726,16 @@ export default function DashboardLayout({ children }) {
             ))
           )}
 
-          <div style={{ padding: '10px 16px', borderTop: '1px solid rgba(0,0,0,0.07)' }}>
+          <div style={{ padding: '10px 16px', borderTop: '1px solid rgba(0,0,0,0.07)', display: 'flex', gap: '10px' }}>
+            <button
+              onClick={() => { navigate('/notifications'); setNotifOpen(false); }}
+              style={{ flex: 1, background: 'none', border: 'none', color: '#1a2e1a', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              View all
+            </button>
             <button
               onClick={() => markRead()}
-              style={{ width: '100%', background: 'none', border: 'none', color: '#16a34a', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+              style={{ flex: 1, background: 'none', border: 'none', color: '#16a34a', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
             >
               Mark all as read
             </button>
@@ -672,6 +758,6 @@ export default function DashboardLayout({ children }) {
       {notifOpen && (
         <div className="nav-backdrop" onClick={() => setNotifOpen(false)} aria-hidden="true" />
       )}
-    </>
+    </div>
   )
 }

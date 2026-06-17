@@ -1,4 +1,5 @@
 from django.db import models
+from cloudinary.models import CloudinaryField
 
 
 class NewsType(models.TextChoices):
@@ -51,8 +52,8 @@ class NewsItem(models.Model):
     is_active   = models.BooleanField(default=True)
 
     # Optional cover image uploaded with the announcement
-    image = models.ImageField(
-        upload_to='news/',
+    image = CloudinaryField(
+        'image',
         null=True,
         blank=True,
         help_text='Cover image shown on dashboards and the news feed.',

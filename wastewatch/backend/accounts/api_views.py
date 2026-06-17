@@ -34,10 +34,11 @@ class UserViewSet(viewsets.ModelViewSet):
         return UserSerializer
 
     def get_queryset(self):
+        queryset = self.queryset.all()
         role = self.request.query_params.get('role')
         if role:
-            return self.queryset.filter(role=role)
-        return self.queryset
+            return queryset.filter(role=role)
+        return queryset
 
 class BarangayViewSet(viewsets.ModelViewSet):
     queryset = Barangay.objects.all()
@@ -64,6 +65,7 @@ def user_to_dict(user):
         'dumpsite_id':   user.dumpsite_id,
         'dumpsite_name': user.dumpsite.name if user.dumpsite else None,
         'is_active':     user.is_active,
+        'profile_pic':   user.profile_pic.url if user.profile_pic else None,
         'created_at':    user.created_at.isoformat() if user.created_at else None,
     }
 
@@ -75,31 +77,28 @@ def _json_body(request):
         return None
 
 
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
 # ── GET  /api/auth/me/ ────────────────────────────────────────────────────────
-@ensure_csrf_cookie   # Sets the csrftoken cookie so React can read it
-@require_http_methods(['GET', 'PATCH'])
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated])
 def me_view(request):
-    if not request.user.is_authenticated:
-        return JsonResponse({'error': 'Not authenticated'}, status=401)
-
     if request.method == 'PATCH':
-        data = _json_body(request)
-        if data is None:
-            return JsonResponse({'error': 'Invalid JSON payload.'}, status=400)
-
-        allowed = {
-            field: data[field]
-            for field in ('full_name', 'barangay')
-            if field in data
-        }
+        allowed = {}
+        for field in ('full_name', 'first_name', 'last_name', 'username', 'barangay', 'profile_pic'):
+            if field in request.data:
+                allowed[field] = request.data[field]
+                
         serializer = UserSerializer(request.user, data=allowed, partial=True)
         if not serializer.is_valid():
-            return JsonResponse(serializer.errors, status=400)
+            return Response(serializer.errors, status=400)
 
         serializer.save()
-        return JsonResponse(user_to_dict(request.user))
+        return Response(user_to_dict(request.user))
 
-    return JsonResponse(user_to_dict(request.user))
+    return Response(user_to_dict(request.user))
 
 
 # ── POST /api/auth/login/ ─────────────────────────────────────────────────────

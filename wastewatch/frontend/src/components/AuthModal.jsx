@@ -9,6 +9,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import BarangaySelect from './BarangaySelect'
+import { ICONS } from '../api/navConfig'
 
 export default function AuthModal({ defaultMode = 'login', onClose }) {
   const { login, register, barangays } = useAuth()
@@ -27,6 +28,8 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
   })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [showPassword2, setShowPassword2] = useState(false)
 
   useEffect(() => {
     document.body.style.overflow = 'hidden'
@@ -156,8 +159,10 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
         }
 
         .auth-overlay {
-          background: linear-gradient(135deg, var(--accent) 0%, #16a085 100%);
-          color: #0d1117; position: relative; left: -100%; height: 100%; width: 200%;
+          background: linear-gradient(rgba(10, 25, 15, 0.6), rgba(10, 25, 15, 0.8)), url('/lucena_cleaning_bg.png');
+          background-size: cover;
+          background-position: center;
+          color: white; position: relative; left: -100%; height: 100%; width: 200%;
           transform: translateX(0); transition: transform 0.6s ease-in-out;
         }
         .auth-modal-container.right-panel-active .auth-overlay {
@@ -269,8 +274,14 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
               <BarangaySelect barangays={barangays} value={form.barangay} onChange={id => setForm(f => ({ ...f, barangay: id }))} label="Piliin ang barangay (Opsyonal)" />
             </div>
 
-            <input className="form-input" style={{ marginBottom: 8, background: 'var(--surface-2)' }} type="password" name="password" value={form.password} onChange={handleChange} placeholder="Password" required />
-            <input className="form-input" style={{ marginBottom: 12, background: 'var(--surface-2)' }} type="password" name="password2" value={form.password2} onChange={handleChange} placeholder="Confirm Password" required />
+            <div style={{ position: 'relative', width: '100%', marginBottom: 8 }}>
+              <input className="form-input" style={{ width: '100%', background: 'var(--surface-2)', paddingRight: 40 }} type={showPassword ? "text" : "password"} name="password" value={form.password} onChange={handleChange} placeholder="Password" required />
+              <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex' }}>{showPassword ? ICONS.eyeOff : ICONS.eye}</button>
+            </div>
+            <div style={{ position: 'relative', width: '100%', marginBottom: 12 }}>
+              <input className="form-input" style={{ width: '100%', background: 'var(--surface-2)', paddingRight: 40 }} type={showPassword2 ? "text" : "password"} name="password2" value={form.password2} onChange={handleChange} placeholder="Confirm Password" required />
+              <button type="button" onClick={() => setShowPassword2(!showPassword2)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex' }}>{showPassword2 ? ICONS.eyeOff : ICONS.eye}</button>
+            </div>
 
             <button className="btn btn-primary" style={{ width: 160, borderRadius: 30 }} type="submit" disabled={loading}>{loading ? 'WAIT…' : 'SIGN UP'}</button>
             <p className="mobile-only" style={{ marginTop: 16, fontSize: 13 }} onClick={() => setIsRegister(false)}>Already have an account? <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Sign in</span></p>
@@ -283,7 +294,10 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
             <h1 style={{ marginBottom: 20 }}>Sign in</h1>
             {error && !isRegister && <div className="alert alert-error" style={{ marginBottom: 10, width: '100%' }}>{error}</div>}
             <input className="form-input" style={{ marginBottom: 12, background: 'var(--surface-2)' }} type="email" name="email" value={form.email} onChange={handleChange} placeholder="Email" required />
-            <input className="form-input" style={{ marginBottom: 24, background: 'var(--surface-2)' }} type="password" name="password" value={form.password} onChange={handleChange} placeholder="Password" required />
+            <div style={{ position: 'relative', width: '100%', marginBottom: 24 }}>
+              <input className="form-input" style={{ width: '100%', background: 'var(--surface-2)', paddingRight: 40 }} type={showPassword ? "text" : "password"} name="password" value={form.password} onChange={handleChange} placeholder="Password" required />
+              <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex' }}>{showPassword ? ICONS.eyeOff : ICONS.eye}</button>
+            </div>
             <button className="btn btn-primary" style={{ width: 160, borderRadius: 30 }} type="submit" disabled={loading}>{loading ? 'WAIT…' : 'SIGN IN'}</button>
             <p className="mobile-only" style={{ marginTop: 20, fontSize: 13 }} onClick={() => setIsRegister(true)}>New here? <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Sign up</span></p>
           </form>
@@ -294,13 +308,13 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
           <div className="auth-overlay">
             <div className="auth-overlay-panel auth-overlay-left">
               <h1>Welcome Back!</h1>
-              <p style={{ marginBottom: 30 }}>To keep connected with us please login with your personal info</p>
-              <button className="btn" style={{ background: 'transparent', border: '2px solid #0d1117', color: '#0d1117', borderRadius: 30 }} onClick={() => setIsRegister(false)}>SIGN IN</button>
+              <p style={{ marginBottom: 30 }}>Already have an account? Log in to continue where you left off!</p>
+              <button className="btn" style={{ background: 'transparent', border: '2px solid white', color: 'white', borderRadius: 30 }} onClick={() => setIsRegister(false)}>SIGN IN</button>
             </div>
             <div className="auth-overlay-panel auth-overlay-right">
-              <h1>Hello, Friend!</h1>
-              <p style={{ marginBottom: 30 }}>Enter your personal details and start your journey with us</p>
-              <button className="btn" style={{ background: 'transparent', border: '2px solid #0d1117', color: '#0d1117', borderRadius: 30 }} onClick={() => setIsRegister(true)}>SIGN UP</button>
+              <h1>New Here?</h1>
+              <p style={{ marginBottom: 30 }}>Sign up and help us keep Lucena City clean!</p>
+              <button className="btn" style={{ background: 'transparent', border: '2px solid white', color: 'white', borderRadius: 30 }} onClick={() => setIsRegister(true)}>SIGN UP</button>
             </div>
           </div>
         </div>

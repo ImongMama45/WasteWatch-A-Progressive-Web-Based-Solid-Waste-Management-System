@@ -24,7 +24,8 @@ const NAVBAR_CSS = `
   top: 0; left: 0; right: 0;
   height: 60px;
   background: #ffffff;
-  border-bottom: 2px solid #c8e6c9;
+  border-bottom: 4px solid #16a34a !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -203,6 +204,7 @@ const NAVBAR_CSS = `
   z-index: 999; letter-spacing: .04em;
 }
 
+
 /* ── Notification dropdown ── */
 .ww-notif-drop {
   position: fixed;
@@ -247,6 +249,8 @@ const NAVBAR_CSS = `
   padding: 12px 16px;
   border-bottom: 1px solid rgba(0,0,0,0.06);
   transition: background .1s;
+  cursor: pointer;
+  text-decoration: none;
 }
 .ww-notif-item:last-of-type { border-bottom: none; }
 .ww-notif-item:hover { background: rgba(0,0,0,0.03); }
@@ -264,9 +268,11 @@ const NAVBAR_CSS = `
 .ww-notif-footer {
   padding: 10px 16px;
   border-top: 1px solid rgba(0,0,0,0.07);
+  display: flex;
+  gap: 10px;
 }
 .ww-notif-footer button {
-  width: 100%; background: none; border: none;
+  flex: 1; background: none; border: none;
   color: #16a34a; font-size: 12px; font-weight: 600;
   cursor: pointer; font-family: inherit; padding: 0;
 }
@@ -476,6 +482,7 @@ export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
 
+
   useEffect(() => { injectStyles() }, [])
 
   // Close drawer/notif on route change
@@ -595,9 +602,13 @@ export default function Navbar() {
               onKeyDown={e => e.key === 'Enter' && navTo('/profile')}
               title="Go to profile"
             >
-              <div className="ww-avatar">
-                {user.full_name?.[0]?.toUpperCase() || '?'}
-              </div>
+              {user.profile_pic ? (
+                <img src={user.profile_pic} alt="Avatar" className="ww-avatar" style={{ objectFit: 'cover', background: '#fff' }} />
+              ) : (
+                <div className="ww-avatar">
+                  {user.full_name?.[0]?.toUpperCase() || '?'}
+                </div>
+              )}
               <span className="ww-avatar__name">
                 {user.full_name?.split(' ')[0]}
               </span>
@@ -620,6 +631,7 @@ export default function Navbar() {
           )}
         </div>
       </nav>
+
 
       {/* ════════ NOTIFICATION DROPDOWN ════════ */}
       {notifOpen && (
@@ -648,7 +660,11 @@ export default function Navbar() {
             </div>
           ) : (
             notifications.slice(0, 5).map(n => (
-              <div key={n.id} className={`ww-notif-item ${!n.is_read ? 'unread' : ''}`}>
+              <div
+                key={n.id}
+                className={`ww-notif-item ${!n.is_read ? 'unread' : ''}`}
+                onClick={() => navTo('/notifications')}
+              >
                 {!n.is_read
                   ? <div className="ww-notif-dot" />
                   : <div style={{ width: 8, flexShrink: 0 }} />
@@ -673,6 +689,7 @@ export default function Navbar() {
           )}
 
           <div className="ww-notif-footer">
+            <button onClick={() => navTo('/notifications')} style={{ color: '#1a2e1a' }}>View all</button>
             <button onClick={() => markRead()}>Mark all as read</button>
           </div>
         </div>
@@ -760,7 +777,7 @@ export default function Navbar() {
       {(menuOpen || notifOpen) && (
         <div
           className="ww-backdrop"
-          onClick={() => { setMenuOpen(false); setNotifOpen(false) }}
+          onClick={() => { setMenuOpen(false) }}
           aria-hidden="true"
         />
       )}

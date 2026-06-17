@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import api from '../api/client'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import DashboardLayout from '../components/DashboardLayout'
@@ -23,6 +24,11 @@ const MOCK_ACTIVITIES = [
 export default function Profile() {
   const { user, barangays, updateUser } = useAuth()
   const navigate = useNavigate()
+
+
+  const [siteData, setSiteData] = useState(null)
+  const [uploading, setUploading] = useState(false)
+  const fileRef = useRef()
 
   const [isEditing, setIsEditing] = useState(false)
   const [toast, setToast] = useState(null)
@@ -53,6 +59,31 @@ export default function Profile() {
   const extra = MOCK_EXTRA_DATA[role] || MOCK_EXTRA_DATA.citizen
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
+
+  useEffect(() => {
+    if (role === 'dumpsite') {
+      api.get('/api/dumpsite/dumpsites/').then(res => {
+        if (res.data.length > 0) setSiteData(res.data[0])
+      }).catch(() => { })
+    }
+  }, [role])
+
+  const handlePhoto = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('profile_pic', file)
+      await updateUser(fd)
+      showToast('Profile photo updated successfully.')
+    } catch {
+      showToast('Failed to update photo.')
+    } finally {
+      setUploading(false)
+    }
+  }
+
 
   async function handleSaveProfile(e) {
     e.preventDefault()
@@ -114,17 +145,34 @@ export default function Profile() {
 
         {/* 1. Header Card */}
         <div className="profile-card" style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-          {user.profile_pic ? (
-            <img 
-              src={user.profile_pic} 
-              alt="Profile" 
-              style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }} 
-            />
-          ) : (
-            <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'var(--accent)', color: '#0d1117', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontWeight: 800 }}>
-              {user.first_name?.[0]?.toUpperCase() || user.full_name?.[0]?.toUpperCase() || '?'}
-            </div>
-          )}
+          <div style={{ position: 'relative' }}>
+            {user.profile_pic ? (
+              <img
+                src={user.profile_pic}
+                alt="Profile"
+                style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }}
+              />
+            ) : (
+              <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'var(--accent)', color: '#0d1117', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontWeight: 800 }}>
+                {user.first_name?.[0]?.toUpperCase() || user.full_name?.[0]?.toUpperCase() || '?'}
+              </div>
+            )}
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading}
+              style={{
+                position: 'absolute', bottom: -4, right: -4,
+                width: 28, height: 28, borderRadius: '50%',
+                background: 'var(--accent)', border: '2px solid var(--surface)',
+                cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: '#000', padding: 0
+              }}
+              title="Change photo"
+            >
+              {uploading ? '⏳' : '✏️'}
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" onChange={handlePhoto} style={{ display: 'none' }} />
+          </div>
           <div>
             <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>{user.full_name || `${user.first_name} ${user.last_name}`}</div>
             <div style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 8 }}>@{user.username || 'username'}</div>
@@ -178,7 +226,7 @@ export default function Profile() {
                   {(role === 'brgy_official' || role === 'watcher' || role === 'citizen') && (
                     <div>
                       <label className="form-label">Barangay (Opsyonal)</label>
-                      <BarangaySelect 
+                      <BarangaySelect
                         barangays={barangays}
                         value={form.barangay}
                         onChange={id => setForm({ ...form, barangay: id })}
@@ -204,7 +252,7 @@ export default function Profile() {
                 </div>
                 <div className="info-row">
                   <div className="info-label">Username</div>
-                  <div className="info-value">@{user.username || '—'}</div>
+                  <div className="info-value">{user.username || '—'}</div>
                 </div>
                 <div className="info-row">
                   <div className="info-label">Email Address</div>
@@ -261,6 +309,24 @@ export default function Profile() {
                 <div className="info-row">
                   <div className="info-label">Reports Handled</div>
                   <div className="info-value">{extra.reportsHandled} verified reports</div>
+                </div>
+              </>
+            )}
+
+
+            {role === 'dumpsite' && siteData && (
+              <>
+                <div className="info-row">
+                  <div className="info-label">Assigned Facility</div>
+                  <div className="info-value">{siteData.name} ({siteData.type.replace('_', ' ')})</div>
+                </div>
+                <div className="info-row">
+                  <div className="info-label">Location</div>
+                  <div className="info-value">Brgy. {siteData.barangay_name}</div>
+                </div>
+                <div className="info-row">
+                  <div className="info-label">Capacity</div>
+                  <div className="info-value">{Number(siteData.current_fill_kg).toLocaleString()} kg / {Number(siteData.max_capacity_kg).toLocaleString()} kg</div>
                 </div>
               </>
             )}

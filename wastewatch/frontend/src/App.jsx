@@ -22,7 +22,6 @@ import AuthModal from './components/AuthModal'
 // (these are placeholders — wire up your actual page components)
 import DashboardRouter from './pages/dashboard/DashboardRouter'
 import ReportForm from './pages/ReportForm'
-import ConfirmCollection from './pages/watcher/ConfirmCollection'
 import VerificationTasks from './pages/watcher/VerificationTasksModule'
 import MapView from './pages/MapView'
 import EscalateToAdmin from './pages/EscalateToAdmin'
@@ -33,6 +32,7 @@ import AnalyticsTabs from './pages/analytics/AnalyticsTabs'
 import NewsPage from './pages/news/NewsPage'
 import WatcherTasksHub from './pages/watcher/WatcherTasksHub'
 import ConfirmCollectionModule from './pages/watcher/ConfirmCollectionModule'
+import NotificationsPage from './pages/NotificationsPage'
 
 // These may not exist yet — uncomment when ready:
 import TruckManagement from './pages/admin/TruckManagement'
@@ -52,6 +52,11 @@ import DriverHotspotAlert from './pages/driver/DriverHotspotAlert'
 import DriverStatusPanel from './pages/driver/DriverStatusPanel'
 import DriverRouteFlow from './pages/driver/DriverRouteFlow'
 import AboutPage from './pages/AboutPage'
+
+import ArrivalLogger from './pages/dumpsite/ArrivalLogger'
+import CollectionLogs from './pages/dumpsite/CollectionLogs'
+import TruckQueue from './pages/dumpsite/TruckQueue'
+import BarangayBreakdown from './pages/dumpsite/BarangayBreakdown'
 
 function AuthOverlay({ mode }) {
   const navigate = useNavigate()
@@ -106,6 +111,10 @@ export default function App() {
           {/* General Page*/}
           <Route path="/profile" element={
             <PrivateRoute><Profile /></PrivateRoute>
+          } />
+
+          <Route path="/notifications" element={
+            <PrivateRoute><NotificationsPage /></PrivateRoute>
           } />
 
           <Route path="/analytics" element={
@@ -215,11 +224,33 @@ export default function App() {
             </PrivateRoute>
           } />
 
-          <Route path="/collection/confirm" element={
-            <PrivateRoute>
-              <ConfirmCollection />
+          {/* ── DUMPSITE MODULE ── */}
+          <Route path="/dumpsite/log-arrival" element={
+            <PrivateRoute roles={['dumpsite', 'admin']}>
+              <DashboardLayout><ArrivalLogger /></DashboardLayout>
             </PrivateRoute>
           } />
+
+          <Route path="/dumpsite/queue" element={
+            <PrivateRoute roles={['dumpsite', 'admin']}>
+              <DashboardLayout><TruckQueue /></DashboardLayout>
+            </PrivateRoute>
+          } />
+
+          <Route path="/dumpsite/logs" element={
+            <PrivateRoute roles={['dumpsite', 'admin']}>
+              <DashboardLayout><CollectionLogs /></DashboardLayout>
+            </PrivateRoute>
+          } />
+
+          <Route path="/dumpsite/barangay" element={
+            <PrivateRoute roles={['dumpsite', 'admin']}>
+              <DashboardLayout><BarangayBreakdown /></DashboardLayout>
+            </PrivateRoute>
+          } />
+
+
+
 
           {/* ── 404 ── */}
           <Route path="*" element={

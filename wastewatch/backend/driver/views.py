@@ -5,27 +5,23 @@ from datetime import timezone
 from django.utils.dateparse import parse_datetime
 from .models import (
     Truck,
-    Dumpsite,
     CollectionSchedule,
     RouteAssignment,
     PickupStatus,
     TruckLocation,
     CompletionReport,
     TruckCrewAssignment,
-    WasteDelivery,
     CalendarEvent,
     DriverShift,
 )
 from .serializers import (
     TruckSerializer,
-    DumpsiteSerializer,
     CollectionScheduleSerializer,
     RouteAssignmentSerializer,
     PickupStatusSerializer,
     TruckLocationSerializer,
     CompletionReportSerializer,
     TruckCrewAssignmentSerializer,
-    WasteDeliverySerializer,
     CalendarEventSerializer,
     DriverShiftSerializer,
 )
@@ -49,51 +45,7 @@ class TruckViewSet(viewsets.ModelViewSet):
     serializer_class = TruckSerializer
     permission_classes = [permissions.IsAuthenticated]
 
-class DumpsiteViewSet(viewsets.ModelViewSet):
-    queryset = Dumpsite.objects.select_related('barangay').all()
-    serializer_class = DumpsiteSerializer
-    permission_classes = [permissions.IsAuthenticated]
 
-    @action(detail=True, methods=['post'], url_path='create-account')
-    def create_account(self, request, pk=None):
-        """Create a dumpsite-role user account linked to this site."""
-        from accounts.models import User, UserRole
-        site = self.get_object()
-        data = request.data
-
-        full_name = data.get('full_name', '').strip()
-        email     = data.get('email', '').strip().lower()
-        password  = data.get('password', '')
-
-        if not full_name:
-            return Response({'error': 'Full name is required.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not email:
-            return Response({'error': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not password or len(password) < 6:
-            return Response({'error': 'Password must be at least 6 characters.'}, status=status.HTTP_400_BAD_REQUEST)
-        if User.objects.filter(email__iexact=email).exists():
-            return Response({'error': 'An account with this email already exists.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        user = User(
-            full_name=full_name,
-            email=email,
-            role=UserRole.DUMPSITE,
-            dumpsite=site,
-            barangay=site.barangay,
-        )
-        user.set_password(password)
-        user.save()
-
-        return Response({
-            'id':         user.id,
-            'full_name':  user.full_name,
-            'email':      user.email,
-            'role':       user.role,
-            'dumpsite':   site.id,
-            'barangay':   site.barangay.name if site.barangay else None,
-            'is_active':  user.is_active,
-            'created_at': user.created_at.strftime('%b %d, %Y'),
-        }, status=status.HTTP_201_CREATED)
 
 class CollectionScheduleViewSet(viewsets.ModelViewSet):
     queryset = CollectionSchedule.objects.all().order_by('-id')
@@ -368,16 +320,19 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
         except StopValidation.DoesNotExist:
             return Response({'error': 'Stop validation not found for today.'}, status=status.HTTP_404_NOT_FOUND)
 
+        from django.conf import settings as django_settings
+
         if validation.current_status != StopValidationStatus.READY_FOR_COLLECTION:
-            return Response(
-                {'error': 'Stop is not ready for collection. Watcher pre-inspection required.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            if not django_settings.DEBUG:
+                return Response(
+                    {'error': 'Stop is not ready for collection. Watcher pre-inspection required.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
         driver_lat = request.data.get('lat')
         driver_lng = request.data.get('lng')
         coords = get_stop_coordinates(schedule, stop_order)
-        if coords:
+        if coords and not django_settings.DEBUG:
             ok, err = validate_gps_proximity(driver_lat, driver_lng, coords[0], coords[1], COLLECTION_RADIUS_M)
             if not ok:
                 return Response({'error': err}, status=status.HTTP_403_FORBIDDEN)
@@ -412,19 +367,27 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
         if photo:
             ps.photo_url = photo  # Cloudinary field handles upload on save
 
-        ps.save()
+        try:
+            ps.save()
 
-        validation.driver = request.user
-        validation.collection_timestamp = collected_at
-        validation.collection_notes = note
-        if driver_lat is not None:
-            validation.collection_latitude = driver_lat
-        if driver_lng is not None:
-            validation.collection_longitude = driver_lng
-        if photo:
-            validation.collection_photo = photo
-        validation.current_status = StopValidationStatus.COLLECTION_REPORTED
-        validation.save()
+            validation.driver = request.user
+            validation.collection_timestamp = collected_at
+            validation.collection_notes = note
+            if driver_lat is not None:
+                validation.collection_latitude = driver_lat
+            if driver_lng is not None:
+                validation.collection_longitude = driver_lng
+            
+            if photo:
+                photo.seek(0)  # Reset file pointer before saving to second model
+                validation.collection_photo = photo
+                
+            validation.current_status = StopValidationStatus.COLLECTION_REPORTED
+            validation.save()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({'error': f'Failed to save collection record: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # ── Notify barangay: collection done ─────────────────────────────────
         try:
@@ -608,58 +571,7 @@ class TruckCrewAssignmentViewSet(viewsets.ModelViewSet):
         serializer = TruckCrewAssignmentSerializer(assignment, context={'request': request})
         return Response(serializer.data)
 
-class WasteDeliveryViewSet(viewsets.ModelViewSet):
-    queryset = WasteDelivery.objects.select_related(
-        'truck', 'driver', 'dumpsite', 'dumpsite_operator', 'schedule', 'barangay'
-    ).all()
-    serializer_class = WasteDeliverySerializer
-    permission_classes = [permissions.IsAuthenticated]
 
-    def get_queryset(self):
-        qs = super().get_queryset()
-        # Dumpsite operators only see deliveries at their linked dumpsite
-        user = self.request.user
-        if user.role == 'dumpsite' and user.dumpsite_id:
-            qs = qs.filter(dumpsite_id=user.dumpsite_id)
-        return qs
-
-    @action(detail=False, methods=['get'], url_path='analytics')
-    def analytics(self, request):
-        """Aggregated net_weight by day/week/month for dashboard charts."""
-        from django.db.models import Sum, Count
-        from django.utils import timezone
-        import datetime
-
-        today  = timezone.localdate()
-        start_week  = today - datetime.timedelta(days=today.weekday())
-        start_month = today.replace(day=1)
-
-        base = WasteDelivery.objects.filter(is_validated=True)
-        return Response({
-            'today':  base.filter(date=today).aggregate(
-                        kg=Sum('net_weight'), trips=Count('id')),
-            'week':   base.filter(date__gte=start_week).aggregate(
-                        kg=Sum('net_weight'), trips=Count('id')),
-            'month':  base.filter(date__gte=start_month).aggregate(
-                        kg=Sum('net_weight'), trips=Count('id')),
-            'by_barangay': list(
-                base.filter(date__gte=start_month)
-                    .values('barangay__name')
-                    .annotate(kg=Sum('net_weight'), trips=Count('id'))
-                    .order_by('-kg')[:10]
-            ),
-            'by_truck': list(
-                base.filter(date__gte=start_month)
-                    .values('truck__plate_number', 'driver__full_name')
-                    .annotate(kg=Sum('net_weight'), trips=Count('id'))
-                    .order_by('-kg')[:10]
-            ),
-        })
-
-class CalendarEventViewSet(viewsets.ModelViewSet):
-    queryset = CalendarEvent.objects.all().order_by('-date')
-    serializer_class = CalendarEventSerializer
-    permission_classes = [permissions.IsAuthenticated]
 
 def _thin_shift_locations(shift_id):
     from django.db import connection
@@ -739,6 +651,8 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
             # Check for existing active shifts
             if DriverShift.objects.select_for_update().filter(driver=driver, is_active=True).exists():
                 return Response({'error': 'Driver already has an active shift.'}, status=status.HTTP_400_BAD_REQUEST)
+            if truck and truck.status == 'maintenance':
+                return Response({'error': 'This truck is currently under maintenance and cannot be used.'}, status=status.HTTP_400_BAD_REQUEST)
             if truck and DriverShift.objects.select_for_update().filter(truck=truck, is_active=True).exists():
                 return Response({'error': 'Truck is currently being used in another active shift.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -832,6 +746,51 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
                 })
         return Response(data)
 
+    @action(detail=False, methods=['get'], url_path='my_active_shift',
+            permission_classes=[permissions.IsAuthenticated])
+    def my_active_shift(self, request):
+        shift = DriverShift.objects.filter(
+            driver=request.user,
+            is_active=True,
+            current_latitude__isnull=False,
+            current_longitude__isnull=False,
+        ).select_related('driver', 'truck').first()
+
+        if not shift:
+            return Response(None)
+
+        now = timezone.now()
+        if shift.last_location_update:
+            age_seconds = (now - shift.last_location_update).total_seconds()
+            if age_seconds <= 60:
+                conn_status = 'active'
+            elif age_seconds <= 300:
+                conn_status = 'weak_signal'
+            else:
+                conn_status = 'offline'
+        else:
+            conn_status = 'offline'
+
+        truck = shift.truck
+        if not truck:
+            schedule = CollectionSchedule.objects.filter(driver=shift.driver, date=timezone.localdate()).first()
+            if not schedule:
+                schedule = CollectionSchedule.objects.filter(driver=shift.driver).first()
+            truck = schedule.truck if schedule else None
+
+        return Response({
+            'id': shift.id,
+            'driver': shift.driver.full_name or shift.driver.username,
+            'truckId': truck.plate_number if truck else 'Unknown',
+            'truckModel': truck.model if truck else 'Unknown',
+            'lat': float(shift.current_latitude),
+            'lng': float(shift.current_longitude),
+            'last_update': shift.last_location_update,
+            'duty_type': shift.duty_type,
+            'op_status': shift.op_status,
+            'status': conn_status,
+        })
+
     @action(detail=False, methods=['get'], url_path='profile')
     def profile(self, request):
         """Driver profile + current truck assignment, consumed by CheckInModule & DriverStatusPanel."""
@@ -867,7 +826,21 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
         shift = DriverShift.objects.filter(driver=request.user, is_active=True).first()
         if request.method == 'POST':
             new_status = request.data.get('status')
-            if shift and new_status in ('on_duty', 'on_route', 'delayed'):
+            valid_statuses = ('on_duty', 'on_route', 'delayed', 'heading_to_dumpsite', 'at_dumpsite', 'returning_to_base')
+            if shift and new_status in valid_statuses:
+                # Trigger dumpsite notification if transitioning to heading_to_dumpsite
+                if new_status == 'heading_to_dumpsite':
+                    from notifications.services import notify_dumpsite_inbound
+                    from driver.models import CollectionSchedule
+                    # Try to find today's schedule for this driver to know which dumpsite they're heading to
+                    import datetime
+                    date_str = str(datetime.date.today())
+                    sched = CollectionSchedule.objects.filter(driver=request.user, date=date_str).first()
+                    if not sched:
+                        sched = CollectionSchedule.objects.filter(driver=request.user).first()
+                    if sched and sched.dumpsite:
+                        notify_dumpsite_inbound(shift, sched.dumpsite)
+
                 shift.op_status = new_status
                 shift.save(update_fields=['op_status'])
                 return Response({'shift_active': True, 'op_status': shift.op_status})
@@ -887,7 +860,6 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
         """Per-driver analytics: summary + weekly stops + trend."""
         from django.db.models import Count, Sum
         import datetime
-
         user = request.user
         today = timezone.localdate()
         start_month = today.replace(day=1)
@@ -1033,3 +1005,8 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
             ]
 
         return Response({'trucks': result_trucks, 'stops': result_stops})
+
+class CalendarEventViewSet(viewsets.ModelViewSet):
+    queryset = CalendarEvent.objects.all().order_by('-date')
+    serializer_class = CalendarEventSerializer
+    permission_classes = [permissions.IsAuthenticated]

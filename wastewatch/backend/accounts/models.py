@@ -16,6 +16,7 @@ Why AbstractUser instead of AbstractBaseUser?
 
 from django.db import models
 from django.contrib.auth.models import AbstractUser
+from cloudinary.models import CloudinaryField
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +127,7 @@ class User(AbstractUser):
     )
 
     dumpsite = models.ForeignKey(
-        'driver.Dumpsite',
+        'dumpsite.Dumpsite',
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -141,8 +142,8 @@ class User(AbstractUser):
         help_text="Set to 'crew_member' for citizens who serve on collection trucks.",
     )
 
-    profile_pic = models.ImageField(
-        upload_to='profiles/',
+    profile_pic = CloudinaryField(
+        'image',
         null=True,
         blank=True,
         help_text="User's profile picture."

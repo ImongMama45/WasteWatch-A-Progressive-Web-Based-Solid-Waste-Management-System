@@ -48,28 +48,45 @@ def public_stats_view(request):
     """
     from watcher.models import GarbageReport, ReportStatus, GarbageHotspot
     from driver.models import Truck, TruckStatus
+    from dumpsite.models import WasteDelivery
+    from django.utils import timezone
+    from django.db.models import Sum
+
+    today = timezone.localdate()
 
     try:
-        # Public stats only show verified (Approved or Resolved) reports
-        verified_reports = GarbageReport.objects.filter(
-            status__in=[ReportStatus.APPROVED, ReportStatus.RESOLVED]
-        )
+        verified_reports = GarbageReport.objects.filter(status__in=[ReportStatus.APPROVED, ReportStatus.RESOLVED])
         total_reports    = verified_reports.count()
         resolved_reports = verified_reports.filter(status=ReportStatus.RESOLVED).count()
+        pending_reports  = GarbageReport.objects.filter(status=ReportStatus.PENDING).count()
         active_trucks    = Truck.objects.filter(status=TruckStatus.ACTIVE).count()
         hotspots         = GarbageHotspot.objects.count()
+
+        deliveries_today = WasteDelivery.objects.filter(date=today)
+        completed_routes = deliveries_today.count()
+        total_waste      = deliveries_today.aggregate(total=Sum('estimated_kg'))['total'] or 0
+        barangays_covered = deliveries_today.values('barangays').distinct().count()
     except Exception:
         total_reports    = 0
         resolved_reports = 0
+        pending_reports  = 0
         active_trucks    = 0
         hotspots         = 0
+        completed_routes = 0
+        total_waste      = 0
+        barangays_covered = 0
 
     return JsonResponse({
         'total_reports':    total_reports,
         'resolved_reports': resolved_reports,
+        'pending_reports':  pending_reports,
         'active_trucks':    active_trucks,
         'hotspots':         hotspots,
+        'completed_routes': completed_routes,
+        'total_waste':      total_waste,
+        'barangays_covered': barangays_covered,
     })
+
 
 
 @require_http_methods(['GET'])

@@ -85,9 +85,8 @@ class GarbageReport(models.Model):
     address = models.CharField(max_length=255, blank=True)
 
     # Photo evidence
-    image = CloudinaryField(
-        'image',
-        folder='reports/',
+    image = models.ImageField(
+        upload_to='reports/',
         null=True,
         blank=True,
     )
@@ -137,23 +136,6 @@ class GarbageReport(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)  # Tracks when status changes
-
-    def save(self, *args, **kwargs):
-        """
-        Gracefully handle Cloudinary upload failures.
-        If credentials missing or invalid, clear image and proceed.
-        """
-        from cloudinary.exceptions import AuthorizationRequired
-        try:
-            super().save(*args, **kwargs)
-        except (ValueError, AuthorizationRequired) as e:
-            # If "Must supply api_key" or "Unknown API key", clear image and retry
-            if 'api_key' in str(e).lower():
-                print(f'[GarbageReport] Cloudinary config error: {e}. Saving without image.')
-                self.image = None
-                super().save(*args, **kwargs)
-            else:
-                raise e
 
     class Meta:
         ordering = ['-created_at']  # Newest first
@@ -272,10 +254,10 @@ class StopValidation(models.Model):
         related_name='pre_validations',
     )
     pre_validation_timestamp = models.DateTimeField(null=True, blank=True)
-    pre_validation_photo = CloudinaryField('pre validation proof', folder='stop-pre-validation/', null=True, blank=True)
-    pre_validation_photo_2 = CloudinaryField('pre validation proof 2', folder='stop-pre-validation/', null=True, blank=True)
-    pre_validation_photo_3 = CloudinaryField('pre validation proof 3', folder='stop-pre-validation/', null=True, blank=True)
-    pre_validation_photo_4 = CloudinaryField('pre validation proof 4', folder='stop-pre-validation/', null=True, blank=True)
+    pre_validation_photo = CloudinaryField('image', null=True, blank=True)
+    pre_validation_photo_2 = CloudinaryField('image', null=True, blank=True)
+    pre_validation_photo_3 = CloudinaryField('image', null=True, blank=True)
+    pre_validation_photo_4 = CloudinaryField('image', null=True, blank=True)
     pre_validation_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     pre_validation_longitude = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
     pre_validation_remarks = models.TextField(blank=True)
@@ -289,7 +271,7 @@ class StopValidation(models.Model):
         related_name='driver_stop_collections',
     )
     collection_timestamp = models.DateTimeField(null=True, blank=True)
-    collection_photo = CloudinaryField('collection proof', folder='stop-collection/', null=True, blank=True)
+    collection_photo = CloudinaryField('image', null=True, blank=True)
     collection_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     collection_longitude = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
     collection_notes = models.TextField(blank=True)
@@ -303,10 +285,10 @@ class StopValidation(models.Model):
         related_name='post_validations',
     )
     post_validation_timestamp = models.DateTimeField(null=True, blank=True)
-    post_validation_photo = CloudinaryField('post validation proof', folder='stop-post-validation/', null=True, blank=True)
-    post_validation_photo_2 = CloudinaryField('post validation proof 2', folder='stop-post-validation/', null=True, blank=True)
-    post_validation_photo_3 = CloudinaryField('post validation proof 3', folder='stop-post-validation/', null=True, blank=True)
-    post_validation_photo_4 = CloudinaryField('post validation proof 4', folder='stop-post-validation/', null=True, blank=True)
+    post_validation_photo = CloudinaryField('image', null=True, blank=True)
+    post_validation_photo_2 = CloudinaryField('image', null=True, blank=True)
+    post_validation_photo_3 = CloudinaryField('image', null=True, blank=True)
+    post_validation_photo_4 = CloudinaryField('image', null=True, blank=True)
     post_validation_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     post_validation_longitude = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
     dispute_reason = models.TextField(blank=True)

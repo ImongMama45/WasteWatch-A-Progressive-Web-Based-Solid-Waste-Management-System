@@ -298,10 +298,12 @@ function MapLegend() {
 }
 
 // ─── OVERLAY WRAPPER ──────────────────────────────────────────────────────────
-function RouteOverlay({ children, visible }) {
+function RouteOverlay({ children, visible, onClose }) {
   if (!visible) return null
   return (
-    <div style={{
+    <div 
+      onClick={onClose}
+      style={{
       position: 'fixed', inset: 0, zIndex: 3000,
       background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(5px)',
       display: 'flex', flexDirection: 'column',
@@ -310,7 +312,9 @@ function RouteOverlay({ children, visible }) {
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
         <Navbar />
       </div>
-      <div style={{
+      <div 
+        onClick={e => e.stopPropagation()}
+        style={{
         width: '100%', height: '80vh', overflow: 'auto',
         borderRadius: '18px 18px 0 0', background: '#f8fafc',
         boxShadow: '0 -8px 40px rgba(0,0,0,0.35)',
@@ -378,7 +382,7 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
 
   return (
     <>
-      <RouteOverlay visible={visible}>
+      <RouteOverlay visible={visible} onClose={onBack}>
         <style>{`
           @keyframes amSlideUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
           .am-card { animation: amSlideUp .25s ease both; }
@@ -957,6 +961,8 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
     sessionStorage.setItem('ww_route_state', next)
     if (externalSetRouteState) externalSetRouteState(next)
   }
+
+  const [showFullConfirm, setShowFullConfirm] = useState(false)
 
   const isExtendedMode = sessionStorage.getItem('ww_extended_mode') === 'true'
   useEffect(() => { injectStopMarkerStyles() }, [])
@@ -1590,21 +1596,33 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
               }
 
               return (
-                <button
-                  id="arrived-btn"
-                  disabled={!canArrive}
-                  onClick={handleArrived}
-                  style={{
-                    width: '100%', maxWidth: 320, padding: '18px', borderRadius: 30, border: 'none',
-                    fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, letterSpacing: '.06em',
-                    transition: 'all .35s ease',
-                    cursor: canArrive ? 'pointer' : 'not-allowed',
-                    background: canArrive ? '#0f172a' : '#e2e8f0',
-                    color: canArrive ? '#fff' : '#94a3b8',
-                    boxShadow: canArrive ? '0 6px 20px rgba(15,23,42,0.3)' : 'none',
-                  }}>
-                  {buttonText}
-                </button>
+                <div style={{ width: '100%', maxWidth: 360, display: 'flex', gap: 10 }}>
+                  <button
+                    id="arrived-btn"
+                    disabled={!canArrive}
+                    onClick={handleArrived}
+                    style={{
+                      flex: 1, padding: '18px 12px', borderRadius: 30, border: 'none',
+                      fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900, letterSpacing: '.06em',
+                      transition: 'all .35s ease',
+                      cursor: canArrive ? 'pointer' : 'not-allowed',
+                      background: canArrive ? '#0f172a' : '#e2e8f0',
+                      color: canArrive ? '#fff' : '#94a3b8',
+                      boxShadow: canArrive ? '0 6px 20px rgba(15,23,42,0.3)' : 'none',
+                    }}>
+                    {buttonText}
+                  </button>
+                  <button
+                    onClick={() => setShowFullConfirm(true)}
+                    style={{
+                      padding: '18px 16px', borderRadius: 30, border: '2px solid #ef4444',
+                      background: '#fff', color: '#ef4444', fontFamily: 'var(--font-head)',
+                      fontSize: 15, fontWeight: 900, letterSpacing: '.02em', flexShrink: 0,
+                      cursor: 'pointer', transition: 'all .2s'
+                    }}>
+                    Full
+                  </button>
+                </div>
               );
             })()}
           </div>
@@ -1634,7 +1652,58 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
 
       {routeState === 'end_shift' && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 3000 }}>
-          <EndShiftModule setRouteState={setRouteState} />
+          <EndShiftModule 
+            setRouteState={setRouteState}
+            schedule={schedule}
+            stopStatuses={stopStatuses}
+            currentStopIndex={currentStopIndex}
+          />
+        </div>
+      )}
+
+      {showFullConfirm && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 4000,
+          background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 24, animation: 'navFadeUp .2s ease'
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 20, padding: 24,
+            width: '100%', maxWidth: 340, textAlign: 'center',
+            boxShadow: '0 10px 40px rgba(0,0,0,0.2)'
+          }}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+            <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 20, fontWeight: 900, color: '#0f172a', marginBottom: 8 }}>Truck Full?</h3>
+            <p style={{ fontSize: 14, color: '#64748b', marginBottom: 24, lineHeight: 1.5 }}>
+              Are you sure your truck is full? This will end your route and navigate you directly to the dump site.
+            </p>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button
+                onClick={() => setShowFullConfirm(false)}
+                style={{
+                  flex: 1, padding: '14px', borderRadius: 14,
+                  background: '#f1f5f9', color: '#64748b', border: 'none',
+                  fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 800,
+                  cursor: 'pointer'
+                }}>
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowFullConfirm(false);
+                  handleEndShift();
+                }}
+                style={{
+                  flex: 1, padding: '14px', borderRadius: 14,
+                  background: '#ef4444', color: '#fff', border: 'none',
+                  fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 800,
+                  cursor: 'pointer', boxShadow: '0 4px 12px rgba(239,68,68,0.25)'
+                }}>
+                Yes
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>

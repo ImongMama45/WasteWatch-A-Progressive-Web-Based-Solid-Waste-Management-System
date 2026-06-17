@@ -49,7 +49,15 @@ function RoleBadge({ role }) {
   )
 }
 
-function Avatar({ name, active }) {
+function Avatar({ name, active, profile_pic }) {
+  if (profile_pic) {
+    return (
+      <img src={profile_pic} alt={name} style={{
+        width: 34, height: 34, borderRadius: '50%', flexShrink: 0, objectFit: 'cover',
+        border: active ? '2px solid var(--accent)' : '2px solid #bbb',
+      }} />
+    )
+  }
   return (
     <div style={{
       width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
@@ -287,6 +295,7 @@ export default function UserManagement() {
   const itemsPerPage = 20
 
   const [modal, setModal] = useState(null)  // null | 'add' | user object
+  const [deleteModal, setDeleteModal] = useState(null) // null | user object to delete
   const [toast, setToast] = useState(null)
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768)
   useEffect(() => {
@@ -304,7 +313,7 @@ export default function UserManagement() {
 
   useEffect(() => {
     api.get('/api/barangays/').then(res => setBarangays(res.data))
-    api.get('/api/driver/dumpsites/').then(res => setDumpsites(res.data))
+    api.get('/api/dumpsite/dumpsites/').then(res => setDumpsites(res.data))
   }, [])
 
   async function handleSave(formObj) {
@@ -344,28 +353,33 @@ export default function UserManagement() {
     }
   }
 
-  async function deleteUser(id) {
-    if (!window.confirm('Delete this user? This cannot be undone.')) return
+  async function confirmDeleteUser() {
+    if (!deleteModal) return
     try {
-      await api.delete(`/api/accounts/users/${id}/`)
+      await api.delete(`/api/accounts/users/${deleteModal.id}/`)
       showToast('🗑 User removed.')
       await refreshUsers()
+      setDeleteModal(null)
     } catch {
       showToast('❌ Failed to delete user.')
     }
   }
 
-  const counts = useMemo(() => ({
-    all: users.length,
-    watcher: users.filter(u => u.role === 'watcher').length,
-    driver: users.filter(u => u.role === 'driver').length,
-    brgy_official: users.filter(u => u.role === 'brgy_official').length,
-    citizen: users.filter(u => u.role === 'citizen').length,
-    dumpsite: users.filter(u => u.role === 'dumpsite').length,
-    crew_member: users.filter(u => u.employee_type === 'crew_member').length,
-    active: users.filter(u => u.is_active).length,
-    inactive: users.filter(u => !u.is_active).length,
-  }), [users])
+  const counts = useMemo(() => {
+    const todayStr = new Date().toDateString()
+    return {
+      all: users.length,
+      watcher: users.filter(u => u.role === 'watcher').length,
+      driver: users.filter(u => u.role === 'driver').length,
+      brgy_official: users.filter(u => u.role === 'brgy_official').length,
+      citizen: users.filter(u => u.role === 'citizen').length,
+      dumpsite: users.filter(u => u.role === 'dumpsite').length,
+      crew_member: users.filter(u => u.employee_type === 'crew_member').length,
+      active: users.filter(u => u.is_active).length,
+      inactive: users.filter(u => !u.is_active).length,
+      new_today: users.filter(u => u.created_at && new Date(u.created_at).toDateString() === todayStr).length,
+    }
+  }, [users])
 
   const filtered = useMemo(() => users.filter(u => {
     const matchRole = roleFilter === 'all'
@@ -449,7 +463,7 @@ export default function UserManagement() {
             { label: 'Total Users', value: counts.all, color: '#ffffffff' },
             { label: 'Active', value: counts.active, color: '#2ecc71' },
             { label: 'Inactive', value: counts.inactive, color: '#e74c3c' },
-            { label: 'Brgy. Officials', value: counts.brgy_official, color: '#9b59b6' },
+            { label: 'New Users Today', value: counts.new_today, color: '#3498db' },
           ].map(s => (
             <div key={s.label} className="stat-card">
               <div className="label">{s.label}</div>
@@ -551,7 +565,7 @@ export default function UserManagement() {
                 }}>
                   {/* Top row: avatar + name + role badge */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                    <Avatar name={getDisplayName(u)} active={u.is_active} />
+                    <Avatar name={getDisplayName(u)} active={u.is_active} profile_pic={u.profile_pic} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
                         fontSize: 14, fontWeight: 700,
@@ -639,7 +653,7 @@ export default function UserManagement() {
               >
                 {/* Name + avatar */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                  <Avatar name={getDisplayName(u)} active={u.is_active} />
+                  <Avatar name={getDisplayName(u)} active={u.is_active} profile_pic={u.profile_pic} />
                   <div style={{ minWidth: 0 }}>
                     <div style={{
                       fontSize: 13, fontWeight: 600, overflow: 'hidden',
@@ -700,7 +714,7 @@ export default function UserManagement() {
                     }}
                   >✏️</button>
                   <button
-                    onClick={() => deleteUser(u.id)}
+                    onClick={() => setDeleteModal(u)}
                     title="Delete"
                     style={{
                       background: 'rgba(231,76,60,0.07)', border: '1px solid rgba(231,76,60,0.25)',
@@ -744,6 +758,46 @@ export default function UserManagement() {
         </div>
 
       </div>
+
+      {deleteModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+          zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }} onClick={() => setDeleteModal(null)}>
+          <div style={{
+            background: 'var(--surface)', borderRadius: 16, padding: '24px 20px',
+            width: '100%', maxWidth: 360, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            textAlign: 'center',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+            <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: '0 0 8px 0' }}>
+              Delete User?
+            </h3>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24, lineHeight: 1.4 }}>
+              Are you sure you want to permanently delete <strong>{deleteModal.full_name || deleteModal.username}</strong>? This action cannot be undone.
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => setDeleteModal(null)}
+                style={{ flex: 1, padding: '10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
+                onMouseEnter={e => e.target.style.opacity = 0.8}
+                onMouseLeave={e => e.target.style.opacity = 1}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteUser}
+                style={{ flex: 1, padding: '10px', borderRadius: 8, border: 'none', background: '#e74c3c', color: '#fff', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
+                onMouseEnter={e => e.target.style.opacity = 0.8}
+                onMouseLeave={e => e.target.style.opacity = 1}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </DashboardLayout>
   )
 }

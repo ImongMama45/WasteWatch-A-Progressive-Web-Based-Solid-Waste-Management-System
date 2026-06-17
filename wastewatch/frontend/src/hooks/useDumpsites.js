@@ -15,7 +15,7 @@ export function useDumpsites() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await api.get('/api/driver/dumpsites/')
+      const res = await api.get('/api/dumpsite/dumpsites/')
       setSites(res.data)
       setError(null)
     } catch (err) {
@@ -29,11 +29,11 @@ export function useDumpsites() {
   const saveSite = async (id, data) => {
     try {
       if (id) {
-        const res = await api.patch(`/api/driver/dumpsites/${id}/`, data)
+        const res = await api.patch(`/api/dumpsite/dumpsites/${id}/`, data)
         setSites(prev => prev.map(s => s.id === id ? res.data : s))
         return { ok: true, data: res.data }
       } else {
-        const res = await api.post('/api/driver/dumpsites/', data)
+        const res = await api.post('/api/dumpsite/dumpsites/', data)
         setSites(prev => [...prev, res.data])
         return { ok: true, data: res.data }
       }
@@ -45,7 +45,7 @@ export function useDumpsites() {
 
   const deleteSite = async (id) => {
     try {
-      await api.delete(`/api/driver/dumpsites/${id}/`)
+      await api.delete(`/api/dumpsite/dumpsites/${id}/`)
       setSites(prev => prev.filter(s => s.id !== id))
       return { ok: true }
     } catch (err) {
@@ -56,7 +56,7 @@ export function useDumpsites() {
 
   const createAccount = async (siteId, accountData) => {
     try {
-      const res = await api.post(`/api/driver/dumpsites/${siteId}/create-account/`, accountData)
+      const res = await api.post(`/api/dumpsite/dumpsites/${siteId}/create-account/`, accountData)
       return { ok: true, data: res.data }
     } catch (err) {
       console.error(err)

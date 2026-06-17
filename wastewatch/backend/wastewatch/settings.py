@@ -38,9 +38,9 @@ INSTALLED_APPS = [
     'accounts',             # Custom user model + auth
     'watcher',              # Report submission, collection confirmation
     'driver',               # Driver management features
+    'dumpsite',             # Dumpsite operations
     'news',                 # News and announcements
     'analytics',            # Performance metrics and trends
-    'cloudinary_storage',   # Cloudinary storage backend
     'cloudinary',           # Cloudinary integration
     'notifications',
 ]
@@ -62,9 +62,9 @@ import os
 import cloudinary
 
 CLOUDINARY_STORAGE = {
-    'CLOUD_NAME': os.environ.get('CLOUDINARY_CLOUD_NAME', 'your_cloud_name'),
-    'API_KEY': os.environ.get('CLOUDINARY_API_KEY', 'your_api_key'),
-    'API_SECRET': os.environ.get('CLOUDINARY_API_SECRET', 'your_api_secret'),
+    'CLOUD_NAME': os.environ.get('CLOUDINARY_CLOUD_NAME', 'dr5ba1lmn'),
+    'API_KEY': os.environ.get('CLOUDINARY_API_KEY', '771269991353945'),
+    'API_SECRET': os.environ.get('CLOUDINARY_API_SECRET', '7ynzBQqgrGYNRiERvAsKfM0iqmY'),
 }
 
 cloudinary.config(
@@ -74,14 +74,7 @@ cloudinary.config(
     secure     = True
 )
 
-# Use Cloudinary only when real credentials are provided.
-# Falls back to local FileSystemStorage in development to avoid 500s.
-_cloudinary_configured = CLOUDINARY_STORAGE['API_KEY'] not in ('your_api_key', '', None)
-if _cloudinary_configured:
-    DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
-else:
-    DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
-
+# Cloudinary integration is now handled natively via CloudinaryField in models.
 ROOT_URLCONF = 'wastewatch.urls'
 
 TEMPLATES = [

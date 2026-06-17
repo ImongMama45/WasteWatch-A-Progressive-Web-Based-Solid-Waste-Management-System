@@ -1,7 +1,6 @@
 from django.contrib import admin
 from .models import (
     Truck,
-    Dumpsite,
     CollectionSchedule,
     RouteAssignment,
     PickupStatus,
@@ -10,7 +9,6 @@ from .models import (
 )
 
 admin.site.register(Truck)
-admin.site.register(Dumpsite)
 admin.site.register(CollectionSchedule)
 admin.site.register(RouteAssignment)
 admin.site.register(PickupStatus)

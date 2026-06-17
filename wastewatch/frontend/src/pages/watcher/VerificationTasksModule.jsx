@@ -11,7 +11,9 @@
  */
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import Navbar from '../../components/Navbar'
+import CelebrationScreen from '../../components/CelebrationScreen'
 import api from '../../api/client'
 import { useAuth } from '../../context/AuthContext'
 import {
@@ -263,6 +265,7 @@ function NoScheduleBanner({ barangayName }) {
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 export default function VerificationTasksModule() {
   const { user } = useAuth()
+  const navigate = useNavigate()
 
   // ── GPS state ──
   const [gpsPos, setGpsPos] = useState(null)
@@ -284,6 +287,7 @@ export default function VerificationTasksModule() {
   const stopMarkersRef = useRef(new Map())
   const routeLayerRef = useRef(null)
   const lastFetchPosRef = useRef(null)   // throttle ORS re-fetch — watcher walks, threshold 30m
+  const lastFetchStopRef = useRef(null)  // track target stop to force re-fetch when stop changes
 
   // ── Data state ──
   const [stops, setStops] = useState([])   // filtered stops
@@ -421,7 +425,23 @@ export default function VerificationTasksModule() {
     }).addTo(map)
     L.control.zoom({ position: 'topright' }).addTo(map)
     mapInstance.current = map
+    setTimeout(() => map.invalidateSize(), 250)
   }, [leafletReady])
+
+  // ── Map Resize Handler ──
+  useEffect(() => {
+    const onResize = () => {
+      if (mapInstance.current) mapInstance.current.invalidateSize()
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  useEffect(() => {
+    if (mapInstance.current) {
+      setTimeout(() => mapInstance.current.invalidateSize(), 150)
+    }
+  }, [selectedTask])
 
   // ── Draw stop markers ──
   useEffect(() => {
@@ -469,8 +489,8 @@ export default function VerificationTasksModule() {
   useEffect(() => {
     if (!gpsPos || !nearestStop?.lat || !nearestStop?.lng) { setOrsRoute(null); return }
 
-    // Movement throttle: skip if user hasn't moved 30m since last ORS fetch
-    if (lastFetchPosRef.current) {
+    // Movement throttle: skip if target stop is identical AND user hasn't moved 30m
+    if (lastFetchPosRef.current && lastFetchStopRef.current === nearestStop.id) {
       const moved = haversineDistance(
         lastFetchPosRef.current.lat, lastFetchPosRef.current.lng,
         gpsPos.lat, gpsPos.lng,
@@ -485,6 +505,7 @@ export default function VerificationTasksModule() {
     }
 
     lastFetchPosRef.current = { lat: gpsPos.lat, lng: gpsPos.lng }
+    lastFetchStopRef.current = nearestStop.id
 
     const ctrl = new AbortController()
     fetch(
@@ -494,21 +515,29 @@ export default function VerificationTasksModule() {
       const geometry = data?.features?.[0]?.geometry
       if (geometry?.coordinates) setOrsRoute(geometry.coordinates.map(([lng, lat]) => [lat, lng]))
       else setOrsRoute([[gpsPos.lat, gpsPos.lng], [nearestStop.lat, nearestStop.lng]])
-    }).catch(() => setOrsRoute(null))
+    }).catch(err => {
+      if (err.name === 'AbortError') return;
+      // Fallback to straight line on ORS errors
+      setOrsRoute([[gpsPos.lat, gpsPos.lng], [nearestStop.lat, nearestStop.lng]])
+    })
     return () => ctrl.abort()
   }, [gpsPos?.lat, gpsPos?.lng, nearestStop?.id])
 
   // ── Draw polyline ──
   useEffect(() => {
     const L = window.L
-    if (!L || !mapInstance.current) return
+    if (!L || !mapInstance.current || !gpsPos) return
     routeLayerRef.current?.remove(); routeLayerRef.current = null
     if (!orsRoute || orsRoute.length < 2) return
-    routeLayerRef.current = L.polyline(orsRoute, {
+
+    // Visually anchor the route start to current GPS so it auto-updates smoothly as user walks
+    const dynamicRoute = [[gpsPos.lat, gpsPos.lng], ...orsRoute.slice(1)]
+
+    routeLayerRef.current = L.polyline(dynamicRoute, {
       color: '#14b8a6', weight: 4, opacity: 0.85,
-      dashArray: orsRoute.length === 2 ? '8,6' : null,
+      dashArray: dynamicRoute.length === 2 ? '8,6' : null,
     }).addTo(mapInstance.current)
-  }, [orsRoute, leafletReady])
+  }, [orsRoute, leafletReady, gpsPos?.lat, gpsPos?.lng])
 
   // ── Dev teleport ──
   function teleportTo(stop) {
@@ -520,13 +549,43 @@ export default function VerificationTasksModule() {
   }
   function clearMock() { mockPosRef.current = null; setIsMock(false); setGpsPos(null); setIsTracking(false) }
 
+  const showCelebration = !loading && hasScheduleToday && stops.length > 0 && pendingCount === 0;
+
+  // ── Cleanup map when Celebration Screen is shown ──
+  useEffect(() => {
+    if (showCelebration) {
+      if (mapInstance.current) {
+        mapInstance.current.remove()
+        mapInstance.current = null
+      }
+    }
+  }, [showCelebration])
+
   const pendingStops = stops.filter(s => normalizeStopStatus(s.current_status) === 'PENDING_INSPECTION')
+
+  if (showCelebration) {
+    return (
+      <>
+        <Navbar />
+        <CelebrationScreen
+          title={`Great job, ${user?.full_name?.split(' ')[0] || 'Watcher'}! 🎉`}
+          subtitle="You've completed all pre-collection inspections for today."
+          stats={[
+            { icon: '📍', label: 'Inspections Completed', value: `${stops.length} / ${stops.length}` },
+            { icon: '✅', label: 'Completion', value: '100%' },
+            { icon: '📅', label: 'Date', value: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) }
+          ]}
+          onDone={() => navigate('/dashboard')}
+        />
+      </>
+    )
+  }
 
   return (
     <>
       <Navbar />
 
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+      <div style={{ height: 'calc(100vh - 64px)', marginTop: 64, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
 
         {/* MAP */}
         <div style={{ position: 'absolute', inset: 0, zIndex: 0, background: '#e8f0e8' }}>

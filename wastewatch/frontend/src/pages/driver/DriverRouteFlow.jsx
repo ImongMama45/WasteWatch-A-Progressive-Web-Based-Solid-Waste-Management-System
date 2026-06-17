@@ -27,9 +27,19 @@ export default function DriverRouteFlow() {
   const { user } = useAuth()
   const prevUserIdRef = useRef(user?.id)
 
-  const [routeState, setRouteState] = useState(
-    () => sessionStorage.getItem('ww_route_state') || 'assignment'
-  )
+  const [routeState, setRouteState] = useState(() => {
+    const sessionState = sessionStorage.getItem('ww_route_state')
+    if (sessionState) return sessionState
+    
+    // If the phone shut down or tab was closed, sessionStorage is empty.
+    // However, if a shift is actively running (we have a start time),
+    // jump straight to the route module so the driver doesn't have to restart.
+    if (localStorage.getItem('ww_shift_start_time')) {
+      return 'shiftroute'
+    }
+    
+    return 'assignment'
+  })
 
   // If a different driver logs in on the same tab, clear all route session data
   // and reset to assignment so they start fresh.

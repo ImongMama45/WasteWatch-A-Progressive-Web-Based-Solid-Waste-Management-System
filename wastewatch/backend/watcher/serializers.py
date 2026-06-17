@@ -84,12 +84,15 @@ class StopValidationSerializer(serializers.ModelSerializer):
     collection_photo_url = serializers.SerializerMethodField()
     pre_validation_photo_url = serializers.SerializerMethodField()
     post_validation_photo_url = serializers.SerializerMethodField()
+    barangay_id = serializers.IntegerField(source='barangay.id', read_only=True)
+    barangay_name = serializers.CharField(source='barangay.name', read_only=True)
 
     class Meta:
         model = StopValidation
         fields = [
             'id', 'schedule_id', 'route_id', 'stop_id', 'stop_order', 'collection_date',
             'current_status', 'label', 'lat', 'lng',
+            'barangay_id', 'barangay_name',
             'pre_validation_watcher', 'pre_validation_watcher_name',
             'pre_validation_timestamp', 'pre_validation_photo', 'pre_validation_photo_url',
             'pre_validation_latitude', 'pre_validation_longitude', 'pre_validation_remarks',

@@ -27,6 +27,8 @@ export default function Register() {
   })
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [showPassword2, setShowPassword2] = useState(false)
 
   function handleChange(e) {
     if (e.target.name === 'profile_pic') {
@@ -79,8 +81,12 @@ export default function Register() {
   }
 
   return (
-    <div className="auth-page">
-      <div className="auth-card">
+    <div className="auth-page" style={{
+      backgroundImage: `linear-gradient(rgba(10, 25, 15, 0.6), rgba(10, 25, 15, 0.8)), url('/lucena_cleaning_bg.png')`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+    }}>
+      <div className="auth-card" style={{ backdropFilter: 'blur(10px)', backgroundColor: 'rgba(255, 255, 255, 0.95)' }}>
 
         <div className="auth-logo">
           <div className="logo-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -162,23 +168,51 @@ export default function Register() {
 
           <div className="form-group">
             <label className="form-label">Password</label>
-            <input
-              className={`form-input ${errors.password ? 'error' : ''}`}
-              type="password" name="password"
-              value={form.password} onChange={handleChange}
-              placeholder="At least 8 characters"
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                className={`form-input ${errors.password ? 'error' : ''}`}
+                type={showPassword ? "text" : "password"} name="password"
+                value={form.password} onChange={handleChange}
+                placeholder="At least 8 characters"
+                style={{ paddingRight: '40px' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+                  background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}
+              >
+                {showPassword ? ICONS.eyeOff : ICONS.eye}
+              </button>
+            </div>
             {errors.password && <p className="form-error">{errors.password}</p>}
           </div>
 
           <div className="form-group">
             <label className="form-label">Confirm Password</label>
-            <input
-              className={`form-input ${errors.password2 ? 'error' : ''}`}
-              type="password" name="password2"
-              value={form.password2} onChange={handleChange}
-              placeholder="••••••••"
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                className={`form-input ${errors.password2 ? 'error' : ''}`}
+                type={showPassword2 ? "text" : "password"} name="password2"
+                value={form.password2} onChange={handleChange}
+                placeholder="••••••••"
+                style={{ paddingRight: '40px' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword2(!showPassword2)}
+                style={{
+                  position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+                  background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}
+              >
+                {showPassword2 ? ICONS.eyeOff : ICONS.eye}
+              </button>
+            </div>
             {errors.password2 && <p className="form-error">{errors.password2}</p>}
           </div>
 

@@ -7,6 +7,7 @@ class NotificationType(models.TextChoices):
     SCHEDULE_CHANGE = 'SCHEDULE_CHANGE', 'Schedule Change'
     TRUCK_NEAR      = 'TRUCK_NEAR',      'Truck Near'
     COLLECTION_DONE = 'COLLECTION_DONE', 'Collection Done'
+    DUMPSITE_INBOUND = 'DUMPSITE_INBOUND', 'Dumpsite Inbound'
 
 
 class Notification(models.Model):

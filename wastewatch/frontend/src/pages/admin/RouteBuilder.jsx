@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useTrucks } from '../../hooks/useTrucks'
 import { useUsers } from '../../hooks/useUsers'
 import { useDumpsites } from '../../hooks/useDumpsites'
 import api from '../../api/client'
+import { detectConflicts, formatTime12h } from '../../utils/scheduleConflicts'
 
 const LUCENA_CENTER = [13.9373, 121.617]
 const HOME_BASE = { lat: 13.9373, lng: 121.617, label: 'City Hall — Home Base' }
@@ -148,6 +149,18 @@ export default function RouteBuilder() {
   // Calendar truck filter — null = show all
   const [calTruckFilter, setCalTruckFilter] = useState(null)
 
+  // List filters
+  const [listSearch, setListSearch] = useState('')
+  const [listTruckFilter, setListTruckFilter] = useState('')
+  const [listDriverFilter, setListDriverFilter] = useState('')
+  const [listDayFilter, setListDayFilter] = useState('')
+  const [listStatusFilter, setListStatusFilter] = useState('')
+  const [listPage, setListPage] = useState(1)
+
+  useEffect(() => {
+    setListPage(1)
+  }, [listSearch, listTruckFilter, listDriverFilter, listDayFilter, listStatusFilter])
+
   const [orsData, setOrsData] = useState(null)
   const [orsFetching, setOrsFetching] = useState(false)
   const orsAbortRef = useRef(null)
@@ -188,8 +201,8 @@ export default function RouteBuilder() {
   useEffect(() => {
     if (!truck) return
     const t = trucks.find(t => String(t.id) === String(truck))
-    if (t?.driver_id) setDriver(String(t.driver_id))
-    else if (t?.driver) setDriver(String(t.driver))
+    if (t?.drivers?.length === 1) setDriver(String(t.drivers[0]))
+    else if (t?.drivers && !t.drivers.includes(parseInt(driver))) setDriver('') // reset if currently selected driver is not assigned to this truck
   }, [truck, trucks])
 
   // ── Auto-optimize stops by proximity ─────────────────────────────────────
@@ -427,9 +440,18 @@ export default function RouteBuilder() {
   useEffect(() => { if (!mapInst.current) return; mapInst.current.getContainer().style.cursor = addMode ? 'crosshair' : '' }, [addMode])
 
   function removeStop(i) { setStops(prev => prev.filter((_, idx) => idx !== i)) }
+
+  const scheduleConflicts = useMemo(() => {
+    if (step < 1) return []
+    return detectConflicts(
+      { truck, driver, days, start_time: time, end_time: endTime, editId },
+      schedules
+    )
+  }, [step, truck, driver, days, time, endTime, editId, schedules])
+
   function canNext() {
     if (step === 0) return truck && driver && selectedBarangays.length > 0
-    if (step === 1) return days.length > 0 && time && endTime
+    if (step === 1) return days.length > 0 && time && endTime && scheduleConflicts.length === 0
     if (step === 2) return stops.length > 0
     if (step === 3) return !!dumpsite
     return true
@@ -804,13 +826,12 @@ export default function RouteBuilder() {
     .rb-btn-del:hover { background:rgba(220,38,38,.12); }
 
     /* ── Table ── */
-    .rb-tbl-head { display:grid; grid-template-columns:1.8fr .85fr 1fr 1.3fr .9fr .45fr .9fr; padding:11px 20px; background:var(--surface-2); border-bottom:1px solid var(--border); font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); align-items:center; }
-    .rb-tbl-row  { display:grid; grid-template-columns:1.8fr .85fr 1fr 1.3fr .9fr .45fr .9fr; padding:13px 20px; align-items:center; border-bottom:1px solid var(--border); transition:background .12s; }
+    .rb-tbl-row  { display:flex; flex-direction:column; gap:14px; padding:18px 20px; border-bottom:1px solid var(--border); transition:background .12s; }
     .rb-tbl-row:last-child { border-bottom:none; }
     .rb-tbl-row:hover { background:var(--surface-2); }
 
     /* ── Badge tiny ── */
-    .rb-badge { font-size:9px; font-weight:700; background:var(--surface-3); color:var(--text-muted); border-radius:4px; padding:2px 6px; text-transform:uppercase; letter-spacing:.03em; }
+    .rb-badge { font-size:10px; font-weight:800; background:linear-gradient(135deg, #22c55e 0%, #15803d 100%); color:#fff; border-radius:6px; padding:3px 8px; box-shadow:0 2px 4px rgba(22,163,74,.15); text-shadow:0 1px 1px rgba(0,0,0,.15); }
 
     /* ── Dropdown ── */
     .rb-dropdown { position:absolute; top:calc(100% + 5px); left:0; right:0; z-index:800; background:var(--surface); border:1px solid var(--border); border-radius:10px; max-height:200px; overflow-y:auto; box-shadow:var(--shadow-lg); }
@@ -828,6 +849,11 @@ export default function RouteBuilder() {
 
     /* ── Info row ── */
     .rb-info-row { display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid var(--border); gap:8px; }
+
+    /* ── Alerts ── */
+    .rb-alert-badge { display:inline-flex; align-items:center; gap:5px; background:rgba(217,119,6,.08); color:#D97706; border:1px solid rgba(217,119,6,.25); border-radius:12px; padding:2px 8px; font-size:9px; font-weight:800; letter-spacing:.04em; }
+    .rb-alert-dot { width:5px; height:5px; border-radius:50%; background:#D97706; animation:rbPulseAlert 2s infinite ease-in-out; }
+    @keyframes rbPulseAlert { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.3); } }
     .rb-info-key { font-size:10px; color:var(--text-muted); font-weight:700; text-transform:uppercase; letter-spacing:.06em; flex-shrink:0; }
     .rb-info-val { font-size:12px; font-weight:600; color:var(--text); text-align:right; }
 
@@ -1064,9 +1090,18 @@ export default function RouteBuilder() {
                       </div>
                       <select className="rb-select" value={driver} onChange={e => setDriver(e.target.value)}>
                         <option value="">— Select driver —</option>
-                        {drivers.map(d => <option key={d.id} value={d.id}>{d.full_name}</option>)}
+                        {drivers
+                          .filter(d => {
+                            if (!truck) return true; // Show all if no truck selected
+                            const t = trucks.find(tObj => String(tObj.id) === String(truck));
+                            if (!t) return true;
+                            // Only allow the drivers assigned to the selected truck
+                            return t.drivers?.includes(d.id);
+                          })
+                          .map(d => <option key={d.id} value={d.id}>{d.full_name}</option>)
+                        }
                       </select>
-                      {truck && !selectedDriverObj && <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>No assigned driver — select manually.</p>}
+                      {truck && !selectedDriverObj && <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>No assigned driver — select manually or assign in Truck Management.</p>}
                     </div>
 
                     <div ref={barangayDropRef} style={{ position: 'relative' }}>
@@ -1139,10 +1174,26 @@ export default function RouteBuilder() {
                       <div><label className="rb-label">Start Time</label><input className="rb-input" type="time" value={time} onChange={e => setTime(e.target.value)} /></div>
                       <div><label className="rb-label">End Time</label><input className="rb-input" type="time" value={endTime} onChange={e => setEndTime(e.target.value)} /></div>
                     </div>
-                    {days.length > 0 && (
+                    {days.length > 0 && scheduleConflicts.length === 0 && (
                       <div style={{ marginTop: 12, padding: '9px 12px', background: 'rgba(22,163,74,.05)', border: '1px solid rgba(22,163,74,.15)', borderRadius: 9, fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 7 }}>
                         <IcoClock size={12} color="var(--accent)" />
-                        {days.map(d => d.slice(0, 3)).join(', ')} · {time} – {endTime}
+                        {days.map(d => d.slice(0, 3)).join(', ')} · {formatTime12h(time)} – {formatTime12h(endTime)}
+                      </div>
+                    )}
+                    
+                    {scheduleConflicts.length > 0 && (
+                      <div style={{ marginTop: 12, padding: '10px 14px', background: '#FEF2F2', border: '1px solid rgba(239,68,68,.3)', borderRadius: 9, fontSize: 12, color: '#991B1B' }}>
+                        <div style={{ fontWeight: 700, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ display: 'inline-block', width: 15, height: 15, borderRadius: '50%', background: '#EF4444', color: '#fff', textAlign: 'center', lineHeight: '15px', fontSize: 10 }}>!</span>
+                          Scheduling Conflict Detected
+                        </div>
+                        <ul style={{ margin: 0, paddingLeft: 22, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {scheduleConflicts.map((c, i) => (
+                            <li key={i}>
+                              {c.type === 'truck' ? `Truck ${c.truckPlate}` : c.type === 'driver' ? `Driver ${c.driverName}` : `Truck ${c.truckPlate} and Driver ${c.driverName}`} is already scheduled on <strong>{c.sharedDays.join(', ')}</strong> ({c.existingTime}).
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     )}
                   </div>
@@ -1319,69 +1370,143 @@ export default function RouteBuilder() {
         )}
 
         {/* ══ LIST ══════════════════════════════════════════════════════════ */}
-        {activeTab === 'list' && (
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
-            <div className="rb-list-desktop">
-              <div className="rb-tbl-head">
-                <span>Barangays</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}><IcoTruck size={10} /> Truck</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}><IcoUser size={10} /> Driver</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}><IcoCal size={10} /> Days</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}><IcoClock size={10} /> Time</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'center' }}><IcoPin size={10} /></div>
-                <span style={{ textAlign: 'right' }}>Actions</span>
+        {activeTab === 'list' && (() => {
+          const filteredSchedules = schedules.filter(s => {
+            if (listTruckFilter && String(s.truck) !== String(listTruckFilter)) return false
+            if (listDriverFilter && String(s.driver) !== String(listDriverFilter)) return false
+            if (listDayFilter && !s.days?.includes(listDayFilter)) return false
+            if (listStatusFilter) {
+              const t = trucks.find(x => String(x.id) === String(s.truck))
+              if (!t || String(t.status || 'active').toLowerCase() !== listStatusFilter.toLowerCase()) return false
+            }
+            if (listSearch) {
+              const q = listSearch.toLowerCase()
+              const matchText = [s.barangay_names, s.start_time, s.end_time].join(' ').toLowerCase()
+              if (!matchText.includes(q)) return false
+            }
+            return true
+          })
+
+          return (
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 190px)' }}>
+              
+              {/* Filter Bar */}
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', background: 'var(--surface-2)' }}>
+                <input className="rb-input" style={{ flex: 1, minWidth: 160, padding: '7px 12px', fontSize: 12, borderRadius: 8 }} placeholder="Search barangays or time..." value={listSearch} onChange={e => setListSearch(e.target.value)} />
+                <select className="rb-select" style={{ width: 'auto', padding: '7px 30px 7px 12px', fontSize: 12, borderRadius: 8 }} value={listTruckFilter} onChange={e => setListTruckFilter(e.target.value)}>
+                  <option value="">All Trucks</option>
+                  {trucks.map(t => <option key={t.id} value={t.id}>{t.plate_number}</option>)}
+                </select>
+                <select className="rb-select" style={{ width: 'auto', padding: '7px 30px 7px 12px', fontSize: 12, borderRadius: 8 }} value={listDriverFilter} onChange={e => setListDriverFilter(e.target.value)}>
+                  <option value="">All Drivers</option>
+                  {drivers.map(d => <option key={d.id} value={d.id}>{d.full_name}</option>)}
+                </select>
+                <select className="rb-select" style={{ width: 'auto', padding: '7px 30px 7px 12px', fontSize: 12, borderRadius: 8 }} value={listDayFilter} onChange={e => setListDayFilter(e.target.value)}>
+                  <option value="">All Days</option>
+                  {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+                <select className="rb-select" style={{ width: 'auto', padding: '7px 30px 7px 12px', fontSize: 12, borderRadius: 8 }} value={listStatusFilter} onChange={e => setListStatusFilter(e.target.value)}>
+                  <option value="">All Statuses</option>
+                  <option value="active">Active</option>
+                  <option value="maintenance">Maintenance</option>
+                  <option value="inactive">Inactive</option>
+                </select>
               </div>
-              {schedLoading ? (
-                <div className="rb-empty"><IcoRoute size={30} color="var(--text-light)" /><div className="rb-empty-title">Loading schedules…</div></div>
-              ) : schedules.length === 0 ? (
-                <div className="rb-empty"><IcoRoute size={30} color="var(--text-light)" /><div className="rb-empty-title">No scheduled routes yet</div><div className="rb-empty-sub">Create one in the Build Route tab.</div></div>
-              ) : schedules.map((s, idx) => {
+
+              <div className="rb-list-desktop" style={{ flex: 1, overflowY: 'auto' }}>
+                {schedLoading ? (
+                  <div className="rb-empty"><IcoRoute size={30} color="var(--text-light)" /><div className="rb-empty-title">Loading schedules…</div></div>
+                ) : schedules.length === 0 ? (
+                  <div className="rb-empty"><IcoRoute size={30} color="var(--text-light)" /><div className="rb-empty-title">No scheduled routes yet</div><div className="rb-empty-sub">Create one in the Build Route tab.</div></div>
+                ) : filteredSchedules.length === 0 ? (
+                  <div className="rb-empty"><IcoRoute size={30} color="var(--text-light)" /><div className="rb-empty-title">No matching routes</div><div className="rb-empty-sub">Try adjusting your filters.</div></div>
+                ) : filteredSchedules.slice((listPage - 1) * 10, listPage * 10).map((s, idx) => {
                 const tc = TRUCK_COLORS[getTruckColorIdx(s.truck)]
                 return (
-                  <div key={s.id} className="rb-tbl-row">
-                    <div><div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)', lineHeight: 1.35 }}>{s.barangay_names || '—'}</div></div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: tc.color, flexShrink: 0 }} />
-                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{s.truck_plate || '—'}</span>
+                  <div key={s.id} className="rb-tbl-row" style={(!s.driver_name || !s.truck) ? { background: '#FEF2F2', borderLeft: '3px solid #EF4444' } : {}}>
+                    
+                    {/* Top Section: Quick Stats & Actions */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {s.truck ? (
+                            <>
+                              <div style={{ width: 8, height: 8, borderRadius: '50%', background: tc.color, flexShrink: 0 }} />
+                              <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>{s.truck_plate || '—'}</span>
+                            </>
+                          ) : (
+                            <span style={{ fontSize: 13, fontWeight: 800, color: '#EF4444' }}>No Truck</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 12, color: s.driver_name ? 'var(--text)' : '#EF4444', fontWeight: s.driver_name ? 600 : 800, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <IcoUser size={12} color={s.driver_name ? "var(--text-muted)" : "#EF4444"} />
+                          {s.driver_name || 'No Driver'}
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <IcoClock size={12} color="var(--text-muted)" />
+                          {s.start_time ? `${formatTime12h(s.start_time)} – ${formatTime12h(s.end_time)}` : '—'}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: tc.bg, color: tc.color, borderRadius: 20, padding: '2px 8px', fontSize: 11, fontWeight: 800 }}>
+                          <IcoPin size={10} color={tc.color} /> {Array.isArray(s.waypoints) ? s.waypoints.length : 0} Stops
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                        <button className="rb-btn-edit" onClick={() => handleEdit(s)}><IcoEdit size={12} /> Edit</button>
+                        <button className="rb-btn-del" onClick={() => handleDelete(s)}><IcoTrash size={12} /> Delete</button>
+                      </div>
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{s.driver_name || '—'}</div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                      {(s.days || '').split(', ').filter(Boolean).map(day => <span key={day} className="rb-badge">{day.slice(0, 3)}</span>)}
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>{s.start_time?.slice(0, 5)}–{s.end_time?.slice(0, 5)}</div>
-                    <div style={{ textAlign: 'center' }}><span style={{ fontSize: 13, fontWeight: 800, color: 'var(--accent)' }}>{Array.isArray(s.waypoints) ? s.waypoints.length : 0}</span></div>
-                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                      <button className="rb-btn-edit" onClick={() => handleEdit(s)}><IcoEdit size={10} /> Edit</button>
-                      <button className="rb-btn-del" onClick={() => handleDelete(s)}><IcoTrash size={10} /> Del</button>
+
+                    {/* Bottom Section: Barangays and Days */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 2 }}>
+                      <div>
+                        <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.06em', display: 'block', marginBottom: 5 }}>Routed Barangays</span>
+                        <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text)', lineHeight: 1.45 }}>
+                          {s.barangay_names || '—'}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                        {(s.days || '').split(', ').filter(Boolean).map(day => <span key={day} className="rb-badge">{{ 'Sunday':'Su', 'Monday':'M', 'Tuesday':'T', 'Wednesday':'W', 'Thursday':'Th', 'Friday':'F', 'Saturday':'S' }[day] || day}</span>)}
+                      </div>
                     </div>
                   </div>
                 )
               })}
+              {filteredSchedules.length > 10 && (
+                <div style={{ padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', borderTop: '1px solid var(--border)', position: 'sticky', bottom: 0, zIndex: 10 }}>
+                  <button className="rb-btn-ghost rb-btn-sm" disabled={listPage === 1} onClick={() => setListPage(p => p - 1)}>← Previous</button>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Page {listPage} of {Math.ceil(filteredSchedules.length / 10)}</span>
+                  <button className="rb-btn-ghost rb-btn-sm" disabled={listPage >= Math.ceil(filteredSchedules.length / 10)} onClick={() => setListPage(p => p + 1)}>Next →</button>
+                </div>
+              )}
             </div>
 
             {/* Mobile list */}
-            <div className="rb-list-mobile" style={{ flexDirection: 'column' }}>
+            <div className="rb-list-mobile" style={{ flexDirection: 'column', flex: 1, overflowY: 'auto' }}>
               {schedLoading ? (
                 <div className="rb-empty">Loading…</div>
               ) : schedules.length === 0 ? (
                 <div className="rb-empty"><div className="rb-empty-title">No routes yet.</div><div className="rb-empty-sub">Build one first.</div></div>
-              ) : schedules.map((s, idx) => {
+              ) : filteredSchedules.length === 0 ? (
+                <div className="rb-empty"><div className="rb-empty-title">No matches.</div><div className="rb-empty-sub">Try adjusting your filters.</div></div>
+              ) : filteredSchedules.slice((listPage - 1) * 10, listPage * 10).map((s, idx) => {
                 const tc = TRUCK_COLORS[getTruckColorIdx(s.truck)]
                 return (
-                  <div key={s.id} style={{ padding: 16, borderBottom: idx < schedules.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                  <div key={s.id} style={{ padding: 16, borderBottom: idx < filteredSchedules.length - 1 ? '1px solid var(--border)' : 'none', background: (!s.driver_name || !s.truck) ? '#FEF2F2' : 'transparent', borderLeft: (!s.driver_name || !s.truck) ? '3px solid #EF4444' : 'none' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 9, gap: 8 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)', lineHeight: 1.35, flex: 1 }}>{s.barangay_names || '—'}</div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)', lineHeight: 1.35, flex: 1, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                        {s.barangay_names || '—'}
+                      </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: tc.bg, color: tc.color, borderRadius: 20, padding: '3px 10px', fontSize: 11, fontWeight: 800, flexShrink: 0, border: `1px solid ${tc.color}33` }}>
                         <IcoPin size={10} color={tc.color} />{Array.isArray(s.waypoints) ? s.waypoints.length : 0}
                       </div>
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 11 }}>
-                      {[{ Icon: IcoTruck, val: s.truck_plate }, { Icon: IcoUser, val: s.driver_name }, { Icon: IcoClock, val: s.start_time?.slice(0, 5) && `${s.start_time.slice(0, 5)}–${s.end_time?.slice(0, 5)}` }].filter(m => m.val).map(({ Icon: I, val }, mi) => (
-                        <span key={mi} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 20, padding: '4px 10px', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>
-                          <I size={10} color="var(--text-muted)" />{val}
+                      {[{ Icon: IcoTruck, val: s.truck_plate || 'No Truck', missing: !s.truck }, { Icon: IcoUser, val: s.driver_name || 'No Driver', missing: !s.driver_name }, { Icon: IcoClock, val: s.start_time && `${formatTime12h(s.start_time)} – ${formatTime12h(s.end_time)}` }].filter(m => m.val).map(({ Icon: I, val, missing }, mi) => (
+                        <span key={mi} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: missing ? 'rgba(239,68,68,0.1)' : 'var(--surface-2)', border: missing ? '1px solid rgba(239,68,68,0.3)' : '1px solid var(--border)', borderRadius: 20, padding: '4px 10px', fontSize: 11, color: missing ? '#EF4444' : 'var(--text-muted)', fontWeight: missing ? 800 : 600 }}>
+                          <I size={10} color={missing ? '#EF4444' : 'var(--text-muted)'} />{val}
                         </span>
                       ))}
-                      {(s.days || '').split(', ').filter(Boolean).map(day => <span key={day} className="rb-badge" style={{ padding: '4px 9px' }}>{day.slice(0, 3)}</span>)}
+                      {(s.days || '').split(', ').filter(Boolean).map(day => <span key={day} className="rb-badge" style={{ padding: '4px 9px' }}>{{ 'Sunday':'Su', 'Monday':'M', 'Tuesday':'T', 'Wednesday':'W', 'Thursday':'Th', 'Friday':'F', 'Saturday':'S' }[day] || day}</span>)}
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button className="rb-btn-edit" style={{ flex: 1, justifyContent: 'center', padding: 9, fontSize: 12, borderRadius: 9 }} onClick={() => handleEdit(s)}><IcoEdit size={12} /> Edit</button>
@@ -1390,9 +1515,17 @@ export default function RouteBuilder() {
                   </div>
                 )
               })}
+              {filteredSchedules.length > 10 && (
+                <div style={{ padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', borderTop: '1px solid var(--border)', position: 'sticky', bottom: 0, zIndex: 10 }}>
+                  <button className="rb-btn-ghost rb-btn-sm" disabled={listPage === 1} onClick={() => setListPage(p => p - 1)}>← Previous</button>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Page {listPage} of {Math.ceil(filteredSchedules.length / 10)}</span>
+                  <button className="rb-btn-ghost rb-btn-sm" disabled={listPage >= Math.ceil(filteredSchedules.length / 10)} onClick={() => setListPage(p => p + 1)}>Next →</button>
+                </div>
+              )}
             </div>
           </div>
-        )}
+          )
+        })()}
 
         {/* ══ CALENDAR ══════════════════════════════════════════════════════ */}
         {activeTab === 'calendar' && renderCalendar()}

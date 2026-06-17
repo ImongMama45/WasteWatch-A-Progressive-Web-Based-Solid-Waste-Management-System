@@ -25,6 +25,8 @@ import useShiftTimer from '../../../hooks/useShiftTimer'
 import useGpsTracking from '../../../hooks/useGpsTracking'
 import api from '../../../api/client'
 import Navbar from '../../../components/Navbar'
+import NavigateToDumpsiteModule from './NavigateToDumpsiteModule'
+import CalibrationCelebrationModule from './CalibrationCelebrationModule'
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -156,7 +158,7 @@ function StatCell({ value, label }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
-export default function EndShiftModule({ setRouteState }) {
+export default function EndShiftModule({ setRouteState, schedule, stopStatuses, currentStopIndex }) {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { notify } = useNotification()
@@ -171,11 +173,7 @@ export default function EndShiftModule({ setRouteState }) {
   // 'returning' → driver navigates back to base
   // 'at_base'   → driver can proceed to end-shift form
   const [phase, setPhase] = useState('loading')
-  const dumpMapRef = useRef(null)
-  const dumpMapInstance = useRef(null)
-  const dumpDriverMarker = useRef(null)
-  const dumpRouteLayer = useRef(null)
-  const [dumpOrsData, setDumpOrsData] = useState(null)
+  const [calibrationData, setCalibrationData] = useState(null)
 
   // ── GPS ───────────────────────────────────────────────────────────────────
   const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } =
@@ -203,8 +201,11 @@ export default function EndShiftModule({ setRouteState }) {
           setDumpSiteLocation(match.dumpsite_detail)
           setDumpSiteName(match.dumpsite_detail?.name || 'Dump Site')
           setPhase('dump_site')
+          api.post('/api/driver/shift/status/', { status: 'heading_to_dumpsite' }).catch(() => { })
         } else {
-          setPhase('returning')
+          setCalibrationData(match)
+          setPhase('calibration_complete')
+          api.post('/api/driver/shift/status/', { status: 'returning_to_base' }).catch(() => { })
         }
       })
       .catch((err) => {
@@ -313,76 +314,6 @@ export default function EndShiftModule({ setRouteState }) {
       .catch(console.error)
   }, [baseLocation, gpsPos?.lat, gpsPos?.lng, phase])
 
-  // ── Init dump site map ────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!leafletReady || !dumpMapRef.current || dumpMapInstance.current || phase !== 'dump_site') return
-    if (!dumpSiteLocation) return
-    const L = window.L
-    const center = gpsPos
-      ? [gpsPos.lat, gpsPos.lng]
-      : [Number(dumpSiteLocation.latitude), Number(dumpSiteLocation.longitude)]
-    const map = L.map(dumpMapRef.current, { center, zoom: 15, zoomControl: false })
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(map)
-    dumpMapInstance.current = map
-    setTimeout(() => map.invalidateSize(), 0)
-
-    const driverIcon = L.divIcon({ /* ...existing icon html... */ })
-    dumpDriverMarker.current = L.marker(center, { icon: driverIcon, zIndexOffset: 1000 }).addTo(map)
-
-    const dumpIcon = L.divIcon({ /* ...existing icon html... */ })
-    L.marker(
-      [Number(dumpSiteLocation.latitude), Number(dumpSiteLocation.longitude)],
-      { icon: dumpIcon }
-    ).addTo(map).bindPopup(`<b>${dumpSiteName}</b><br/><span style="font-size:11px;color:#f59e0b;font-weight:700;">DUMP SITE</span>`)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leafletReady, dumpSiteLocation, phase])
-
-  // ── ORS route: GPS → dump site ────────────────────────────────────────────────
-  useEffect(() => {
-    if (!dumpSiteLocation || !gpsPos || phase !== 'dump_site') return
-    const orsApiKey = import.meta.env.VITE_ORS_API_KEY
-    if (!orsApiKey) return
-    fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: orsApiKey },
-      body: JSON.stringify({
-        coordinates: [
-          [gpsPos.lng, gpsPos.lat],
-          [Number(dumpSiteLocation.longitude), Number(dumpSiteLocation.latitude)],
-        ],
-        instructions: true,
-      }),
-    })
-      .then(r => r.json())
-      .then(data => {
-        if (!data.routes?.length) return
-        setDumpOrsData(data.routes[0])
-        if (dumpMapInstance.current && window.L) {
-          if (dumpRouteLayer.current) dumpMapInstance.current.removeLayer(dumpRouteLayer.current)
-          const pts = decodePolyline(data.routes[0].geometry)
-          dumpRouteLayer.current = window.L.polyline(pts, { color: '#f59e0b', weight: 6, opacity: 0.85 })
-            .addTo(dumpMapInstance.current)
-        }
-      })
-      .catch(console.error)
-  }, [dumpSiteLocation, gpsPos?.lat, gpsPos?.lng, phase])
-
-  // ── Move dump driver marker on GPS update ────────────────────────────────────
-  useEffect(() => {
-    if (!gpsPos || !dumpDriverMarker.current || !dumpMapInstance.current) return
-    dumpDriverMarker.current.setLatLng([gpsPos.lat, gpsPos.lng])
-    dumpMapInstance.current.panTo([gpsPos.lat, gpsPos.lng])
-  }, [gpsPos, phase])
-
-  // ── Destroy dump map when leaving dump_site phase ────────────────────────────
-  useEffect(() => {
-    if (phase !== 'dump_site' && dumpMapInstance.current) {
-      dumpMapInstance.current.remove()
-      dumpMapInstance.current = null
-    }
-  }, [phase])
-
   // ── Move driver marker as GPS updates ─────────────────────────────────────
   useEffect(() => {
     if (!gpsPos || !driverMarker.current || !mapInstance.current) return
@@ -401,7 +332,6 @@ export default function EndShiftModule({ setRouteState }) {
   // ── Full cleanup on unmount ───────────────────────────────────────────────
   useEffect(() => () => {
     if (mapInstance.current) { mapInstance.current.remove(); mapInstance.current = null }
-    if (dumpMapInstance.current) { dumpMapInstance.current.remove(); dumpMapInstance.current = null }
   }, [])
 
   // ── ORS-derived display values ────────────────────────────────────────────
@@ -427,6 +357,35 @@ export default function EndShiftModule({ setRouteState }) {
   useEffect(() => {
     sessionStorage.removeItem('ww_route_state')
   }, [])
+
+  // ── Poll for dumpsite confirmation ──────────────────────────────────────────
+  useEffect(() => {
+    if (phase !== 'waiting_dump_confirmation' || !dumpSiteLocation) return
+
+    const checkDelivery = async () => {
+      try {
+        const res = await api.get('/api/dumpsite/waste-deliveries/')
+        const deliveries = res.data?.results || res.data || []
+        const match = deliveries.find(d => {
+          if (String(d.driver) !== String(user?.id)) return false
+          if (!startTime) return true // fallback
+          return new Date(d.created_at) > new Date(startTime)
+        })
+        if (match) {
+          // Delivery found! Dumpsite operator has calibrated/logged the truck.
+          setCalibrationData(match)
+          setPhase('calibration_complete')
+          api.post('/api/driver/shift/status/', { status: 'returning_to_base' }).catch(() => { })
+        }
+      } catch (err) {
+        console.error('Error checking dump confirmation:', err)
+      }
+    }
+
+    checkDelivery()
+    const interval = setInterval(checkDelivery, 5000)
+    return () => clearInterval(interval)
+  }, [phase, dumpSiteLocation, user?.id])
 
   // ── Early termination state ───────────────────────────────────────────────
   const [reason, setReason] = useState('')
@@ -744,6 +703,120 @@ export default function EndShiftModule({ setRouteState }) {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
+  // PHASE 3 — DUMP SITE NAVIGATION
+  // ══════════════════════════════════════════════════════════════════════════
+
+  if (phase === 'dump_site') {
+    return (
+      <NavigateToDumpsiteModule
+        gpsPos={gpsPos} gpsError={gpsError} isTracking={isTracking} gpsAccuracy={gpsAccuracy}
+        isMock={isMock} setMockGps={setMockGps}
+        dumpSiteLocation={dumpSiteLocation} dumpSiteName={dumpSiteName}
+        distanceToDump={distanceToDump} isAtDump={isAtDump}
+        formattedTime={formattedTime} setPhase={setPhase}
+        leafletReady={leafletReady}
+      />
+    )
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PHASE 3b — WAITING FOR DUMPSITE CONFIRMATION
+  // ══════════════════════════════════════════════════════════════════════════
+
+  if (phase === 'waiting_dump_confirmation') {
+    return (
+      <>
+        <Navbar />
+        <style>{`
+          @keyframes pulseIcon {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+            100% { transform: scale(1); opacity: 1; }
+          }
+          @keyframes slideUpFade {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+        `}</style>
+        <div style={{
+          height: '100dvh', display: 'flex', flexDirection: 'column',
+          background: '#f8fafc', fontFamily: 'var(--font-body)',
+        }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 24px', textAlign: 'center' }}>
+            <div style={{
+              width: 100, height: 100, borderRadius: '50%', background: '#f59e0b15',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              border: '2px solid #f59e0b40', marginBottom: 32,
+              animation: 'pulseIcon 2s infinite ease-in-out',
+            }}>
+              <span style={{ fontSize: 44 }}>⚖️</span>
+            </div>
+
+            <h2 style={{
+              fontFamily: 'var(--font-head)', fontSize: 24, fontWeight: 900,
+              color: '#0f172a', marginBottom: 12, letterSpacing: '.02em',
+              animation: 'slideUpFade 0.4s ease-out'
+            }}>
+              Waiting for Calibration
+            </h2>
+
+            <p style={{
+              fontSize: 15, color: '#64748b', lineHeight: 1.5, maxWidth: 280,
+              animation: 'slideUpFade 0.4s ease-out 0.1s both'
+            }}>
+              Please hold while the dumpsite operator verifies and logs your truck's weight.
+            </p>
+
+            <div style={{
+              marginTop: 40, padding: '12px 20px', background: '#fff',
+              borderRadius: 12, border: '1px solid #e2e8f0',
+              display: 'flex', alignItems: 'center', gap: 12,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
+              animation: 'slideUpFade 0.4s ease-out 0.2s both'
+            }}>
+              <div style={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid #e2e8f0', borderTopColor: '#f59e0b', animation: 'spin 1s linear infinite' }} />
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#475569' }}>Auto-checking status...</span>
+            </div>
+
+            {import.meta.env.DEV && (
+              <button
+                onClick={() => {
+                  setCalibrationData({ estimated_kg: '250', net_weight: '250', volume_m3: '4.5' })
+                  setPhase('calibration_complete')
+                }}
+                style={{
+                  marginTop: 40, padding: '12px 24px', borderRadius: 20,
+                  background: 'none', border: '1px dashed #cbd5e1',
+                  color: '#94a3b8', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  animation: 'slideUpFade 0.4s ease-out 0.3s both'
+                }}
+              >
+                DEV: Skip to Calibration Summary
+              </button>
+            )}
+          </div>
+        </div>
+      </>
+    )
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PHASE 3c — CALIBRATION CELEBRATION
+  // ══════════════════════════════════════════════════════════════════════════
+
+  if (phase === 'calibration_complete') {
+    return (
+      <CalibrationCelebrationModule
+        calibrationData={calibrationData}
+        schedule={schedule}
+        stopStatuses={stopStatuses}
+        currentStopIndex={currentStopIndex}
+        onContinue={() => setPhase('returning')}
+      />
+    )
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   // PHASE 2a — EARLY TERMINATION
   // ══════════════════════════════════════════════════════════════════════════
 
@@ -902,143 +975,6 @@ export default function EndShiftModule({ setRouteState }) {
       </>
     )
   }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // PHASE 3 — DUMP SITE NAVIGATION
-  // ══════════════════════════════════════════════════════════════════════════
-
-  if (phase === 'dump_site') {
-    const gpsColor = gpsError ? '#ef4444' : (!isTracking) ? '#f59e0b'
-      : (gpsAccuracy != null && gpsAccuracy >= 50) ? '#f59e0b' : '#2ecc71'
-    const gpsLabel = gpsError ? 'GPS Lost' : !isTracking ? 'GPS…'
-      : gpsAccuracy != null ? `GPS ±${Math.round(gpsAccuracy)}m` : 'GPS Active'
-
-    let dumpInstruction = `Head to ${dumpSiteName}`
-    let dumpEta = '--', dumpArrival = '--:--', dumpKm = '--'
-    if (dumpOrsData) {
-      const seg = dumpOrsData.segments?.[0]
-      if (seg?.steps?.length) dumpInstruction = seg.steps[0].instruction || dumpInstruction
-      if (seg) {
-        dumpEta = Math.ceil(seg.duration / 60)
-        dumpArrival = new Date(Date.now() + seg.duration * 1000)
-          .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        dumpKm = (seg.distance / 1000).toFixed(1)
-      }
-    }
-    const dumpDistLabel = distanceToDump == null ? 'Calculating…'
-      : distanceToDump > 1000 ? `${(distanceToDump / 1000).toFixed(1)} km to dump site`
-        : `${Math.round(distanceToDump)} m to dump site`
-
-    return (
-      <>
-        <Navbar />
-        <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-body)', overflow: 'hidden', position: 'relative' }}>
-          {/* MAP */}
-          <div style={{ position: 'absolute', inset: 0, zIndex: 0, background: '#2a3441' }}>
-            <div ref={dumpMapRef} style={{ width: '100%', height: '100%' }} />
-            {import.meta.env.DEV && (
-              <div style={{ position: 'absolute', top: '50%', right: 14, marginTop: 54, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button
-                  onClick={() => {
-                    if (!dumpSiteLocation) return
-                    const lat = Number(dumpSiteLocation.latitude), lng = Number(dumpSiteLocation.longitude)
-                    setMockGps({ lat, lng })
-                    dumpMapInstance.current?.panTo([lat, lng])
-                  }}
-                  title="DEV: Teleport to Dump Site"
-                  style={{ width: 44, height: 44, borderRadius: '50%', background: '#f59e0b', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 20 }}
-                >🗑️</button>
-                {isMock && (
-                  <button onClick={() => setMockGps(null)} title="Clear Mock GPS"
-                    style={{ width: 44, height: 44, borderRadius: '50%', background: '#ef4444', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 16, fontWeight: 800, color: '#fff' }}>✕</button>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* HEADER */}
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(15,23,42,0.93)', backdropFilter: 'blur(8px)', padding: '16px 18px 18px', color: '#fff', boxShadow: '0 4px 20px rgba(0,0,0,.2)' }}>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: `${gpsColor}18`, border: `1px solid ${gpsColor}44`, borderRadius: 20, padding: '3px 10px' }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: gpsColor, display: 'inline-block', animation: isTracking && !gpsError ? 'esMapPulse 2s ease infinite' : 'none' }} />
-                <span style={{ fontSize: 10, fontWeight: 700, color: gpsColor, letterSpacing: '.04em' }}>{gpsLabel}</span>
-              </div>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.5)', borderRadius: 20, padding: '3px 10px' }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: '.04em' }}>NAVIGATING TO DUMP SITE</span>
-              </div>
-              <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: '3px 10px' }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.65)', letterSpacing: '.04em' }}>⏱ {formattedTime}</span>
-              </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-              <span style={{ fontSize: 22, marginTop: 1 }}>🗑️</span>
-              <div>
-                <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, marginBottom: 2 }}>{dumpSiteName}</div>
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>Dispose collected waste before returning · {dumpDistLabel}</div>
-              </div>
-            </div>
-          </div>
-
-          {/* TURN CARD */}
-          <div style={{ position: 'absolute', top: 122, left: 14, right: 14, zIndex: 10, background: 'rgba(255,255,255,0.97)', borderRadius: 16, overflow: 'hidden', display: 'flex', alignItems: 'stretch', boxShadow: '0 6px 28px rgba(0,0,0,.18)', animation: 'esNavFadeUp .25s ease' }}>
-            <div style={{ width: 76, flexShrink: 0, background: '#f59e0b12', borderRight: '3px solid #f59e0b28', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
-              <span style={{ fontSize: 30 }}>🗑️</span>
-            </div>
-            <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <div style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 900, color: '#0f172a', lineHeight: 1.2, marginBottom: 4 }}>{dumpInstruction}</div>
-              <div style={{ fontSize: 13, color: '#f59e0b', fontWeight: 700 }}>{dumpDistLabel}</div>
-            </div>
-          </div>
-
-          {/* BOTTOM PANEL */}
-          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(12px)', borderTopLeftRadius: 24, borderTopRightRadius: 24, boxShadow: '0 -4px 24px rgba(0,0,0,.1)', display: 'flex', flexDirection: 'column', paddingBottom: 'env(safe-area-inset-bottom, 24px)' }}>
-            <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2, margin: '12px auto' }} />
-            <div style={{ padding: '4px 12px 16px', display: 'flex', alignItems: 'center', borderBottom: '1px solid rgba(0,0,0,.06)' }}>
-              <StatCell value={dumpArrival} label="arrival" />
-              <div style={{ width: 1, height: 32, background: '#e2e8f0' }} />
-              <StatCell value={dumpEta} label="min" />
-              <div style={{ width: 1, height: 32, background: '#e2e8f0' }} />
-              <StatCell value={dumpKm} label="km" />
-            </div>
-            <div style={{ padding: '20px 20px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <p style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, textAlign: 'center', color: isAtDump ? '#f59e0b' : '#64748b', marginBottom: 6, transition: 'color .3s' }}>
-                {isAtDump ? "You've reached the dump site!" : 'Head to the dump site'}
-              </p>
-              {!isAtDump && distanceToDump != null && (
-                <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12 }}>
-                  {distanceToDump > 1000 ? `${(distanceToDump / 1000).toFixed(1)} km remaining` : `${Math.round(distanceToDump)} m remaining`}
-                </p>
-              )}
-              {!isAtDump && distanceToDump == null && (
-                <p style={{ fontSize: 12, color: '#f59e0b', marginBottom: 12 }}>📡 Waiting for GPS signal…</p>
-              )}
-              <button
-                disabled={!isAtDump}
-                onClick={() => setPhase('returning')}
-                style={{
-                  width: '100%', maxWidth: 320, padding: '18px', borderRadius: 30, border: 'none',
-                  fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, letterSpacing: '.06em',
-                  transition: 'all .35s ease',
-                  cursor: isAtDump ? 'pointer' : 'not-allowed',
-                  background: isAtDump ? '#f59e0b' : '#e2e8f0',
-                  color: isAtDump ? '#fff' : '#94a3b8',
-                  boxShadow: isAtDump ? '0 6px 20px rgba(245,158,11,0.35)' : 'none',
-                }}
-              >
-                {isAtDump ? '✓ Confirm Arrival at Dump Site' : 'Confirm on Arrival'}
-              </button>
-              {import.meta.env.DEV && (
-                <button onClick={() => setPhase('returning')} style={{ width: '100%', maxWidth: 320, marginTop: 8, padding: '10px', borderRadius: 20, background: 'none', border: '1px dashed #cbd5e1', color: '#94a3b8', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
-                  DEV: Skip to Return Home
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </>
-    )
-  }
-
 
   // ══════════════════════════════════════════════════════════════════════════
   // PHASE 2b — ROUTE COMPLETED — celebration screen

@@ -187,6 +187,40 @@ def notify_truck_near(shift, schedule, stop_order, stop_lat, stop_lng,
         )
 
 
+# ── 5. DUMPSITE_INBOUND ────────────────────────────────────────────────────────
+
+def notify_dumpsite_inbound(shift, dumpsite):
+    """
+    Called when a truck finishes its route and heads to the dumpsite.
+    Notifies all Dumpsite Operator accounts assigned to that dumpsite.
+    """
+    try:
+        if not dumpsite:
+            return
+
+        from accounts.models import User
+        from django.db.models import Q
+        operators = User.objects.filter(Q(dumpsite=dumpsite) | Q(operated_dumpsite=dumpsite)).distinct()
+        if not operators.exists():
+            return
+
+        truck_str = f"Truck {shift.truck.plate_number}" if shift.truck else "A truck"
+        
+        for op in operators:
+            Notification.objects.create(
+                user=op,
+                barangay=None,
+                title='Incoming Truck',
+                message=(
+                    f'{truck_str} has finished its collection route and is heading to the dumpsite. '
+                    f'Driver: {shift.driver.full_name}'
+                ),
+                type=NotificationType.DUMPSITE_INBOUND,
+            )
+    except Exception:
+        logger.exception('notify_dumpsite_inbound failed for shift pk=%s', getattr(shift, 'pk', None))
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _truncate(text, max_len):

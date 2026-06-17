@@ -2,6 +2,8 @@ from django.db import models
 from django.db.models import Q
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 from cloudinary.models import CloudinaryField
 
 User = get_user_model()
@@ -15,36 +17,62 @@ class Truck(models.Model):
     plate_number = models.CharField(max_length=20, unique=True)
     model = models.CharField(max_length=100)
     status = models.CharField(max_length=20, choices=TruckStatus.choices, default=TruckStatus.ACTIVE)
-    driver = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_truck')
+    drivers = models.ManyToManyField(User, related_name='assigned_trucks', blank=True)
     crew = models.ManyToManyField(User, related_name='crew_trucks', blank=True)
     zone = models.CharField(max_length=100, blank=True)
     current_capacity = models.IntegerField(default=0) # 0-100%
     last_service = models.DateField(null=True, blank=True)
+    maintenance_start = models.DateTimeField(null=True, blank=True)
+    status_reason = models.TextField(blank=True, null=True, help_text="Reason for maintenance or inactive status")
+    past_crew_names = models.TextField(blank=True, null=True, help_text="Stores the names of the last assigned crew when the truck becomes inactive.")
+    max_capacity_kg = models.DecimalField(
+        max_digits=8, decimal_places=2, default=1000.00,
+        help_text="Rated maximum payload in kg. Used by dumpsite fill slider."
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.plate_number} ({self.model})"
 
-class DumpsiteType(models.TextChoices):
-    LANDFILL = 'landfill', 'Landfill'
-    DUMPSITE = 'dumpsite', 'Open Dumpsite'
-    TRANSFER = 'transfer', 'Transfer Station'
-    COMPOSTING = 'composting', 'Composting Area'
+    def save(self, *args, **kwargs):
+        from django.utils import timezone
+        if self.pk:
+            try:
+                orig = Truck.objects.get(pk=self.pk)
+                if orig.status != TruckStatus.MAINTENANCE and self.status == TruckStatus.MAINTENANCE:
+                    self.maintenance_start = timezone.now()
+                if orig.status == TruckStatus.MAINTENANCE and self.status != TruckStatus.MAINTENANCE:
+                    self.maintenance_start = None
+                
+                if orig.status == TruckStatus.ACTIVE and self.status == TruckStatus.INACTIVE:
+                    # Capture past crew names before they are cleared
+                    past_names = [f"{c.first_name} {c.last_name}".strip() for c in self.crew.all()]
+                    past_names = [n for n in past_names if n]
+                    if not past_names:
+                        past_names = [c.username for c in self.crew.all()]
+                    if past_names:
+                        self.past_crew_names = ", ".join(past_names)
 
-class Dumpsite(models.Model):
-    name = models.CharField(max_length=100)
-    type = models.CharField(max_length=20, choices=DumpsiteType.choices, default=DumpsiteType.DUMPSITE)
-    barangay = models.ForeignKey('accounts.Barangay', on_delete=models.CASCADE, related_name='dumpsites')
-    capacity_used = models.IntegerField(default=0) # 0-100%
-    notes = models.TextField(blank=True)
-    latitude = models.DecimalField(max_digits=9, decimal_places=6)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+                if orig.status != TruckStatus.INACTIVE and self.status == TruckStatus.INACTIVE:
+                    self.schedules.update(driver=None, truck=None)
 
-    def __str__(self):
-        return self.name
+            except Truck.DoesNotExist:
+                if self.status == TruckStatus.MAINTENANCE:
+                    self.maintenance_start = timezone.now()
+        else:
+            if self.status == TruckStatus.MAINTENANCE:
+                self.maintenance_start = timezone.now()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        # Force schedules to drop their driver before deleting the truck
+        self.schedules.update(driver=None)
+        super().delete(*args, **kwargs)
+
 
 class CollectionSchedule(models.Model):
     truck = models.ForeignKey(Truck, on_delete=models.SET_NULL, null=True, blank=True, related_name='schedules')
-    driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='collection_schedules')
+    driver = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='collection_schedules')
     barangays = models.ManyToManyField('accounts.Barangay', related_name='collection_schedules', blank=True)
     area = models.CharField(max_length=255, blank=True)
     start_time = models.TimeField()
@@ -54,7 +82,7 @@ class CollectionSchedule(models.Model):
     
     # Route specifics
     waypoints = models.JSONField(default=list, blank=True)
-    dumpsite = models.ForeignKey('driver.Dumpsite', on_delete=models.SET_NULL, null=True, blank=True, related_name='collection_schedules')
+    dumpsite = models.ForeignKey('dumpsite.Dumpsite', on_delete=models.SET_NULL, null=True, blank=True, related_name='collection_schedules')
 
     # Specific date if it's a one-time thing, otherwise can be null for recurring
     date = models.DateField(null=True, blank=True)
@@ -159,7 +187,7 @@ class PickupStatus(models.Model):
     stop_order  = models.PositiveIntegerField(default=0, help_text='Order of this stop in the route')
     address     = models.CharField(max_length=255, blank=True)
     note        = models.TextField(blank=True)
-    photo_url   = CloudinaryField('collection proof', folder='pickup-proofs/', null=True, blank=True)
+    photo_url   = CloudinaryField('image', null=True, blank=True)
     collected_at = models.DateTimeField(null=True, blank=True, help_text='When the driver marked this stop collected')
     updated_at  = models.DateTimeField(auto_now=True)
 
@@ -244,68 +272,7 @@ class TruckCrewAssignment(models.Model):
         return f"{self.truck} — {self.date} (Driver: {self.driver})"
 
 
-# ---------------------------------------------------------------------------
-# Waste Delivery
-# Records each truck trip to a dumpsite.
-# net_weight is auto-computed: gross_weight - tare_weight.
-# Shift context comes from the linked CollectionSchedule (no separate field).
-# No waste_type — system only handles solid waste.
-# ---------------------------------------------------------------------------
-class WasteDelivery(models.Model):
-    # Core actors
-    truck             = models.ForeignKey(Truck,    on_delete=models.PROTECT, related_name='deliveries')
-    driver            = models.ForeignKey(
-        User, on_delete=models.PROTECT, related_name='deliveries_as_driver',
-        limit_choices_to={'role': 'driver'},
-    )
-    dumpsite          = models.ForeignKey(Dumpsite, on_delete=models.PROTECT, related_name='deliveries')
-    dumpsite_operator = models.ForeignKey(
-        User, on_delete=models.SET_NULL, null=True, blank=True,
-        related_name='deliveries_received',
-        limit_choices_to={'role': 'dumpsite'},
-    )
 
-    # Shift context — reuse CollectionSchedule (has start_time, end_time, days, barangay)
-    schedule        = models.ForeignKey(
-        CollectionSchedule, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='deliveries',
-    )
-    crew_assignment = models.ForeignKey(
-        TruckCrewAssignment, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='deliveries',
-    )
-
-    # Timing
-    date         = models.DateField()
-    arrival_time = models.TimeField(null=True, blank=True)
-
-    # Weight — all in kilograms; net auto-computed on save
-    gross_weight = models.DecimalField(max_digits=10, decimal_places=2)
-    tare_weight  = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    net_weight   = models.DecimalField(max_digits=10, decimal_places=2, editable=False, default=0)
-
-    # Barangay served (for per-barangay analytics)
-    barangay = models.ForeignKey(
-        'accounts.Barangay', on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='waste_deliveries',
-    )
-
-    # Metadata
-    remarks      = models.TextField(blank=True)
-    is_validated = models.BooleanField(default=False, help_text='Dumpsite operator confirmed this record')
-    created_at   = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering        = ['-date', '-arrival_time']
-        verbose_name    = 'Waste Delivery'
-        verbose_name_plural = 'Waste Deliveries'
-
-    def save(self, *args, **kwargs):
-        self.net_weight = self.gross_weight - self.tare_weight
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return f"{self.truck} → {self.dumpsite} | {self.date} | {self.net_weight} kg"
 
 class DriverShift(models.Model):
     driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='shifts')

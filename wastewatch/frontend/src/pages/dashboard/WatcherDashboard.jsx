@@ -16,11 +16,8 @@ export default function Dashboard() {
   const [activeTab1, setActiveTab1] = useState('reports')
 
   useEffect(() => {
-    Promise.all([
-      api.get('/api/watcher/reports/'),
-      api.get('/api/watcher/stats/'),
-    ])
-      .then(([r, s]) => { setReports(r.data); setStats(s.data) })
+    api.get('/api/watcher/reports/')
+      .then((r) => { setReports(r.data); setStats({ total: r.data.length, pending_approval: 0, resolved: 0, rejected: 0 }) })
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [])

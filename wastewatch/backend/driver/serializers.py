@@ -1,82 +1,92 @@
 from rest_framework import serializers
 from .models import (
     Truck,
-    Dumpsite,
     CollectionSchedule,
     RouteAssignment,
     PickupStatus,
     TruckLocation,
     CompletionReport,
     TruckCrewAssignment,
-    WasteDelivery,
     CalendarEvent,
     DriverShift,
 )
+from dumpsite.serializers import TruckFillEstimateSerializer
+
 
 class TruckSerializer(serializers.ModelSerializer):
-    driver_name = serializers.CharField(source='driver.full_name', read_only=True)
+    driver_details = serializers.SerializerMethodField()
     crew_names = serializers.SlugRelatedField(
         many=True,
         read_only=True,
         slug_field='full_name',
         source='crew'
     )
-    
+    fill_estimates = TruckFillEstimateSerializer(many=True, read_only=True)
+
     class Meta:
         model = Truck
         fields = '__all__'
 
-class DumpsiteSerializer(serializers.ModelSerializer):
-    barangay_name  = serializers.CharField(source='barangay.name', read_only=True)
-    staff_accounts = serializers.SerializerMethodField()
-
-    def get_staff_accounts(self, obj):
-        from accounts.models import User
-        users = User.objects.filter(dumpsite=obj).select_related('barangay')
-        return [
-            {
-                'id':         u.id,
-                'full_name':  u.full_name,
-                'email':      u.email,
-                'role':       u.role,
-                'barangay':   u.barangay.name if u.barangay else None,
-                'is_active':  u.is_active,
-                'created_at': u.created_at.strftime('%b %d, %Y') if u.created_at else None,
-            }
-            for u in users
-        ]
-
-    def to_internal_value(self, data):
-        # Remap frontend short aliases → real model field names before DRF validates
-        data = data.copy()
-        if 'lat' in data:
-            data['latitude']  = round(float(data.pop('lat')), 6)
-        if 'lng' in data:
-            data['longitude'] = round(float(data.pop('lng')), 6)
-        if 'capacity' in data:
-            data['capacity_used'] = data.pop('capacity')
-        return super().to_internal_value(data)
-
-    class Meta:
-        model  = Dumpsite
-        fields = [
-            'id', 'name', 'type', 'barangay', 'barangay_name',
-            'capacity_used', 'notes', 'latitude', 'longitude',
-            'staff_accounts',
-        ]
-
-
+    def get_driver_details(self, obj):
+        details = []
+        # Pre-fetch might be needed here, but since it's a small app, this is fine.
+        for d in obj.drivers.all():
+            # last service
+            last_shift = obj.shifts.filter(driver=d, is_active=False, ended_at__isnull=False).order_by('-ended_at').first()
+            last_service = last_shift.ended_at.strftime('%Y-%m-%d') if last_shift else None
+            
+            # barangays
+            barangays = set()
+            for schedule in obj.schedules.filter(driver=d):
+                for b in schedule.barangays.all():
+                    barangays.add(b.name)
+            assigned_barangays = ", ".join(sorted(list(barangays))) if barangays else "No routes assigned"
+            
+            # schedules
+            descs = []
+            for s in obj.schedules.filter(driver=d):
+                days = s.days or "Daily"
+                start = s.start_time.strftime('%I:%M %p') if s.start_time else ''
+                end = s.end_time.strftime('%I:%M %p') if s.end_time else ''
+                if start and end:
+                    descs.append(f"{days} | {start} - {end}")
+                else:
+                    descs.append(f"{days} | OFF")
+            
+            details.append({
+                'id': d.id,
+                'full_name': d.full_name,
+                'last_service': last_service,
+                'assigned_barangays': assigned_barangays,
+                'schedule_description': descs
+            })
+        return details
 
 class CollectionScheduleSerializer(serializers.ModelSerializer):
     truck_plate    = serializers.CharField(source='truck.plate_number', read_only=True)
     driver_name    = serializers.CharField(source='driver.full_name',   read_only=True)
     dumpsite_name  = serializers.CharField(source='dumpsite.name',      read_only=True)
+    dumpsite_detail = serializers.SerializerMethodField()
     barangay_names = serializers.SerializerMethodField()
     waypoints_display = serializers.SerializerMethodField()  # renamed — read-only enriched version
 
     class Meta:
         model  = CollectionSchedule
         fields = '__all__'  # 'waypoints' (the raw JSONField) is now included automatically
+
+    def get_dumpsite_detail(self, obj):
+        ds = obj.dumpsite
+        if not ds:
+            from dumpsite.models import Dumpsite
+            ds = Dumpsite.objects.first()
+        if ds:
+            return {
+                'id': ds.id,
+                'name': ds.name,
+                'latitude': ds.latitude,
+                'longitude': ds.longitude,
+            }
+        return None
 
     def get_barangay_names(self, obj):
         return ", ".join([b.name for b in obj.barangays.all()])
@@ -162,29 +172,7 @@ class TruckCrewAssignmentSerializer(serializers.ModelSerializer):
         ]
 
 
-class WasteDeliverySerializer(serializers.ModelSerializer):
-    truck_plate       = serializers.CharField(source='truck.plate_number',       read_only=True)
-    driver_name       = serializers.CharField(source='driver.full_name',         read_only=True)
-    dumpsite_name     = serializers.CharField(source='dumpsite.name',            read_only=True)
-    operator_name     = serializers.CharField(source='dumpsite_operator.full_name', read_only=True)
-    barangay_name     = serializers.CharField(source='barangay.name',            read_only=True)
-    schedule_area     = serializers.CharField(source='schedule.area',            read_only=True)
 
-    class Meta:
-        model  = WasteDelivery
-        fields = [
-            'id', 'truck', 'truck_plate',
-            'driver', 'driver_name',
-            'dumpsite', 'dumpsite_name',
-            'dumpsite_operator', 'operator_name',
-            'schedule', 'schedule_area',
-            'crew_assignment',
-            'date', 'arrival_time',
-            'gross_weight', 'tare_weight', 'net_weight',
-            'barangay', 'barangay_name',
-            'remarks', 'is_validated', 'created_at',
-        ]
-        read_only_fields = ['net_weight', 'created_at']
 
 class CalendarEventSerializer(serializers.ModelSerializer):
     assigned_to_name = serializers.CharField(source='assigned_to.full_name', read_only=True)

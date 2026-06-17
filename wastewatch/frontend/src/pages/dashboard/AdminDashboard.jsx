@@ -7,8 +7,8 @@ import { useAuth } from "../../context/AuthContext";
 
 const PRIORITY = {
   critical: { label: "Critical", barColor: "var(--danger)", bgColor: "rgba(231,76,60,0.07)", borderColor: "rgba(231,76,60,0.28)", textColor: "var(--danger)" },
-  high:     { label: "High",     barColor: "var(--warning)", bgColor: "rgba(243,156,18,0.07)", borderColor: "rgba(243,156,18,0.28)", textColor: "var(--warning)" },
-  medium:   { label: "Medium",   barColor: "var(--accent)",  bgColor: "rgba(46,204,113,0.07)", borderColor: "rgba(46,204,113,0.28)", textColor: "var(--accent)" },
+  high: { label: "High", barColor: "var(--warning)", bgColor: "rgba(243,156,18,0.07)", borderColor: "rgba(243,156,18,0.28)", textColor: "var(--warning)" },
+  medium: { label: "Medium", barColor: "var(--accent)", bgColor: "rgba(46,204,113,0.07)", borderColor: "rgba(46,204,113,0.28)", textColor: "var(--accent)" },
 };
 
 const FEED_DOT = { danger: "var(--danger)", warning: "var(--warning)", success: "var(--accent)", info: "#378ADD" };
@@ -87,6 +87,26 @@ function BarChart({ data }) {
   );
 }
 
+const FILL_LABELS = {
+  nearly_empty: { label: 'Nearly Empty', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
+  quarter: { label: 'Quarter', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
+  half: { label: 'Half', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
+  three_quarters: { label: 'Three Quarters', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
+  full: { label: 'Full', color: '#a16207', bg: 'rgba(161,98,7,0.12)' },
+  overflowing: { label: 'Overflowing', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
+};
+
+function FillBadge({ level }) {
+  const f = FILL_LABELS[level];
+  if (!f) return <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>;
+  return (
+    <span style={{
+      background: f.bg, color: f.color, border: `1px solid ${f.color}44`,
+      borderRadius: 20, padding: '2px 10px', fontSize: 11, fontWeight: 700,
+    }}>{f.label}</span>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function AdminDashboard() {
@@ -96,11 +116,12 @@ export default function AdminDashboard() {
   const [hotspotFilter, setHotspotFilter] = useState("all");
   const [expandedDriver, setExpandedDriver] = useState(null);
   const [expandedEsc, setExpandedEsc] = useState(null);
-  
+
   const [stats, setStats] = useState({ total_waste: 0, waste_change: 0, active_trucks: 0, hotspots: 0, completed_routes: 0, total_routes: 0, pending_reports: 0, barangays_covered: 0 });
   const [escalations, setEscalations] = useState([]);
   const [hotspots, setHotspots] = useState([]);
   const [drivers, setDrivers] = useState([]);
+  const [logs, setLogs] = useState([]);
   const [feed, setFeed] = useState([]);
   const [brgyWaste, setBrgyWaste] = useState([]);
   const [schedule, setSchedule] = useState([]);
@@ -122,7 +143,8 @@ export default function AdminDashboard() {
       api.get('/api/analytics/barangay-performance/').catch(() => ({ data: [] })),
       api.get('/api/driver/collection-schedules/').catch(() => ({ data: [] })),
       api.get('/api/driver/calendar-events/').catch(() => ({ data: [] })),
-    ]).then(([st, esc, hs, dr, fd, bw, sc, ce]) => {
+      api.get('/api/dumpsite/waste-deliveries/').catch(() => ({ data: [] })),
+    ]).then(([st, esc, hs, dr, fd, bw, sc, ce, wd]) => {
       if (st.data) setStats(prev => ({ ...prev, ...st.data }))
       if (esc.data) setEscalations(esc.data)
       if (hs.data) setHotspots(hs.data)
@@ -131,6 +153,7 @@ export default function AdminDashboard() {
       if (bw.data) setBrgyWaste(bw.data.map(b => ({ name: b.barangay_name, kg: b.waste_collected_kg, status: b.resolved >= b.reports ? 'completed' : 'in-progress' })))
       if (sc.data) setSchedule(sc.data)
       if (ce.data) setCalendarEvents(ce.data)
+      if (wd.data) setLogs(wd.data.results || wd.data || [])
     }).finally(() => setLoading(false))
   }, []);
 
@@ -367,9 +390,18 @@ export default function AdminDashboard() {
               )}
             </div>
 
-            <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-              {["drivers", "hotspots", "chart"].map(t => (
-                <button key={t} onClick={() => setMainTab(t)} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: mainTab === t ? "var(--surface-3)" : "var(--surface-2)", color: mainTab === t ? "#fff" : "var(--text-muted)", cursor: "pointer" }}>{t.toUpperCase()}</button>
+            <div style={{ display: "flex", gap: 8, marginBottom: 20, background: "#F1F5F9", padding: "6px", borderRadius: 12, overflowX: "auto" }}>
+              {["drivers", "hotspots", "chart", "logs"].map(t => (
+                <button key={t} onClick={() => setMainTab(t)} style={{
+                  flex: 1, padding: "10px 16px", borderRadius: 8, border: "none",
+                  background: mainTab === t ? "#ffffff" : "transparent",
+                  color: mainTab === t ? "#1E40AF" : "#64748B",
+                  fontWeight: mainTab === t ? 800 : 600,
+                  boxShadow: mainTab === t ? "0 2px 4px rgba(0,0,0,0.04)" : "none",
+                  cursor: "pointer", fontSize: 12, letterSpacing: ".05em", transition: "all 0.2s"
+                }}>
+                  {t.toUpperCase()}
+                </button>
               ))}
             </div>
 
@@ -378,7 +410,7 @@ export default function AdminDashboard() {
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <div>
                     <div style={{ fontWeight: 700 }}>{d.plate_number}</div>
-                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{d.driver_name || 'No driver'} · {d.zone}</div>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{d.driver_details?.length ? d.driver_details.map(x => x.full_name).join(', ') : 'No driver'} · {d.zone}</div>
                   </div>
                   <StatusBadge status={d.status} />
                 </div>
@@ -393,6 +425,24 @@ export default function AdminDashboard() {
             ))}
 
             {mainTab === "chart" && <BarChart data={brgyWaste} />}
+
+            {mainTab === "logs" && (logs.length === 0 ? (
+              <div className="bcard" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, marginBottom: 8, padding: 32, textAlign: "center", color: "var(--text-muted)" }}>
+                No delivery logs available.
+              </div>
+            ) : logs.map(l => (
+              <div key={l.id} className="bcard" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, marginBottom: 8, padding: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{l.truck_plate} — {l.dumpsite_name}</div>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+                      {l.driver_name} · <span style={{ fontWeight: 700, color: "var(--text)" }}>{l.estimated_kg} kg</span> · {new Date(l.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                    </div>
+                  </div>
+                  <FillBadge level={l.fill_level} />
+                </div>
+              </div>
+            )))}
 
             <div style={{ marginTop: 24 }}>
               <h3 className="section-title">Activity Feed</h3>

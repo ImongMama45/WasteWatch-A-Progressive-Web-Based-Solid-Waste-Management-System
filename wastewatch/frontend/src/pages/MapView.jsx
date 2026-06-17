@@ -336,6 +336,8 @@ export default function MapView() {
   const [activeFilters, setActiveFilters] = useState({
     residential: true, commercial: true, industrial: true, agricultural: true,
     routes: true, trucks: true, dumpSites: true, reports: true,
+    allBarangays: false,
+    inactiveRoutes: false,
   })
   const [barangayGeo, setBarangayGeo] = useState(null)
   const [barangays, setBarangays] = useState([])  // Django Barangay list (for pk lookups)
@@ -398,7 +400,7 @@ export default function MapView() {
       .then(r => setBarangays(r.data))
       .catch(err => console.error('[MapView] Failed to fetch barangays:', err))
 
-    api.get('/api/driver/dumpsites/')
+    api.get('/api/dumpsite/dumpsites/')
       .then(r => setDumpsites(r.data))
       .catch(err => console.error('[MapView] Failed to fetch dumpsites:', err))
 
@@ -867,9 +869,9 @@ export default function MapView() {
   }, [mapReady, selectedZone?.name, stopStatusMap, stopDetailsMap])
 
   // ── Draw stop markers for the selected barangay's active drivers ──────────
-  // Only called when a zone IS selected; mirrors ShiftRouteModule stop colours.
+  // Only called when a zone IS selected (or if 'All Barangays' is enabled); mirrors ShiftRouteModule stop colours.
   // Does NOT draw polylines, ORS routes, or navigation paths — driver-only.
-  function drawGlobalStops(map, allowedShiftIds = null) {
+  function drawGlobalStops(map, allowedShiftIds = null, showAll = false, showInactive = false) {
     if (!map || !window.L) return
     const L = window.L
 
@@ -881,7 +883,15 @@ export default function MapView() {
 
     const pendingSchedules = schedulesRef.current.filter(s => {
       const st = String(s.status || '').toUpperCase()
-      if (['COMPLETED', 'CANCELLED'].includes(st)) return false
+      const isCompletedOrCancelled = ['COMPLETED', 'CANCELLED'].includes(st)
+      
+      if (isCompletedOrCancelled && !showInactive) return false
+
+      if (showInactive) {
+        if (showAll) return true
+        return scheduleMatchesZone(s, selectedZoneRef.current)
+      }
+
       if (allowedShiftIds === null) return true
       // Match by shift id first, then fall back to driver id
       const schedShiftId = s.shift_id ?? s.shift ?? s.id
@@ -911,7 +921,7 @@ export default function MapView() {
 
         const currentZone = selectedZoneRef.current
         // Compare as strings — barangay_id may be int or string from API
-        if (currentZone && currentZone.id != null && String(wp.barangay_id) !== String(currentZone.id)) return
+        if (!showAll && currentZone && currentZone.id != null && String(wp.barangay_id) !== String(currentZone.id)) return
 
         const statusKey = `${schedule.id}:${stopOrder}`
         if (!stopStatusMapRef.current.has(statusKey)) return
@@ -1041,9 +1051,56 @@ export default function MapView() {
     const routeColor = getRouteColor(sched)
     const pts = (sched.waypoints || []).filter(wp => wp.lat && wp.lng).map(wp => [Number(wp.lat), Number(wp.lng)])
     if (pts.length < 2) return
-    const line = L.polyline(pts, { color: routeColor, weight: 5, opacity: 0.85, dashArray: '10,6', lineCap: 'round' }).addTo(mapInstanceRef.current)
-    layersRef.current['ondemand-route'] = line
-    mapInstanceRef.current.fitBounds(line.getBounds().pad(0.2))
+    const paintFallback = () => {
+      if (layersRef.current['ondemand-route']) return
+      const line = L.polyline(pts, { color: routeColor, weight: 5, opacity: 0.85, dashArray: '10,6', lineCap: 'round' }).addTo(mapInstanceRef.current)
+      layersRef.current['ondemand-route'] = line
+      mapInstanceRef.current.fitBounds(line.getBounds().pad(0.2))
+    }
+
+    const orsApiKey = import.meta.env.VITE_ORS_API_KEY
+    if (!orsApiKey) {
+      paintFallback()
+      return
+    }
+
+    // Attempt ORS fetch for real route
+    fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json, application/geo+json, application/gpx+xml, img/png; charset=utf-8',
+        'Content-Type': 'application/json',
+        Authorization: orsApiKey,
+      },
+      body: JSON.stringify({
+        coordinates: pts.map(pt => [pt[1], pt[0]]),
+        instructions: false,
+      }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (!data.routes?.length) {
+          paintFallback()
+          return
+        }
+
+        const decoded = decodePolyline(data.routes[0].geometry)
+        if (layersRef.current['ondemand-route']) {
+          try { mapInstanceRef.current.removeLayer(layersRef.current['ondemand-route']) } catch { }
+        }
+
+        const line = L.polyline(decoded, {
+          color: routeColor,
+          weight: 6,
+          opacity: 0.9,
+          lineCap: "round",
+          lineJoin: "round",
+        }).addTo(mapInstanceRef.current)
+
+        layersRef.current['ondemand-route'] = line
+        mapInstanceRef.current.fitBounds(line.getBounds().pad(0.2))
+      })
+      .catch(() => paintFallback())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showRouteScheduleId])
 
@@ -1347,16 +1404,16 @@ export default function MapView() {
       })
     }
 
-    // ── Live truck markers — only visible when a barangay zone is selected ──
-    // Trucks and stop markers are hidden on the default overview. When a zone is
-    // selected the driver markers and stop pins for that barangay appear, giving
-    // a focused per-barangay view instead of a cluttered city-wide one.
-    if (activeFilters.trucks && zoneFocusActive) {
+    // ── Live truck markers — only visible when a barangay zone is selected (unless 'All Barangays' is enabled) ──
+    const showAll = activeFiltersRef.current.allBarangays
+    const showInactive = activeFiltersRef.current.inactiveRoutes
+
+    if (activeFilters.trucks && (zoneFocusActive || showAll || showInactive)) {
       const barangayTrucks = barangayDataRef.current.trucks
-      const allowedShiftIds = new Set(barangayTrucks.map(t => t.id))
+      const allowedShiftIds = showAll ? null : new Set(barangayTrucks.map(t => t.id))
 
       activeTrucksRef.current.forEach(truck => {
-        if (!allowedShiftIds.has(truck.id)) return
+        if (allowedShiftIds && !allowedShiftIds.has(truck.id)) return
 
         const truckColor = STATUS_COLORS[truck.status] || '#14b8a6'
         const icon = L.divIcon({
@@ -1413,12 +1470,12 @@ export default function MapView() {
         layersRef.current[`live-truck-${truck.id}`] = m
       })
 
-      // Draw stop markers scoped to this barangay's active schedules only
-      drawGlobalStops(map, allowedShiftIds)
+      // Draw stop markers scoped to this barangay's active schedules only (or all if showAll/showInactive)
+      drawGlobalStops(map, allowedShiftIds, showAll, showInactive)
     }
 
-    // ── Dump sites (hidden when barangay focus is active) ──
-    if (activeFiltersRef.current.dumpSites && !zoneFocusActive) {
+    // ── Dump sites (hidden when barangay focus is active, unless showAll) ──
+    if (activeFiltersRef.current.dumpSites && (!zoneFocusActive || showAll)) {
       dumpsites.forEach(site => {
         if (!site.latitude || !site.longitude) return
         const t = dumpsiteTypeMap[site.type] || DUMPSITE_TYPES[1]
@@ -1429,15 +1486,15 @@ export default function MapView() {
           <strong style="color:${t.color};display:flex;align-items:center;gap:4px;"><div style="width:16px;height:16px;display:flex;">${ReactDOMServer.renderToString(t.icon)}</div> ${site.name}</strong>
           <div style="margin-top:2px;">
             <span style="color:#64748b;font-size:11px;">${t.label} · ${bName}</span><br/>
-            <span style="color:#64748b;font-size:11px;">Capacity: ${site.capacity_used ?? site.capacity ?? 0}% full</span>
+            <span style="color:#64748b;font-size:11px;">Capacity: ${site.fill_percent ?? site.capacity_used ?? site.capacity ?? 0}% full</span>
           </div>
         </div>`)
         layersRef.current[`dump-${site.id}`] = m
       })
     }
 
-    // ── Garbage reports (hidden when barangay focus is active) ──
-    if (activeFiltersRef.current.reports && !zoneFocusActive) {
+    // ── Garbage reports (hidden when barangay focus is active, unless showAll) ──
+    if (activeFiltersRef.current.reports && (!zoneFocusActive || showAll)) {
       if (heatmapModeRef.current && window.L.heatLayer) {
         const heatData = reports
           .filter(r => (r.latitude || r.lat) && (r.longitude || r.lng))
@@ -1698,6 +1755,8 @@ export default function MapView() {
               { key: "trucks", label: "Truck Markers", icon: ICONS.truck },
               { key: "dumpSites", label: "Dump Sites", icon: ICONS.dumpsite },
               { key: "reports", label: "Garbage Reports", icon: ICONS.warning },
+              { key: "allBarangays", label: "Show All Barangays", icon: <div style={{width: 14, height: 14, border: '2px solid currentColor', borderRadius: 2}}></div> },
+              { key: "inactiveRoutes", label: "Show Inactive/Completed Routes", icon: <div style={{width: 14, height: 14, border: '2px solid currentColor', borderRadius: 2, borderStyle: 'dashed'}}></div> },
             ].map(f => (
               <div key={f.key} className="filter-chip" onClick={() => toggleFilter(f.key)}
                 style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
