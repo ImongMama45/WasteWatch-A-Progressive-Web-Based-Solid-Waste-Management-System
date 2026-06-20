@@ -4,6 +4,7 @@ from . import api_views
 
 router = DefaultRouter()
 router.register(r'users', api_views.UserViewSet, basename='user')
+router.register(r'barangay-management', api_views.BarangayManagementViewSet, basename='barangay-management')
 
 urlpatterns = [
     path('', include(router.urls)),       # ← ViewSet: GET list, POST create, PATCH, DELETE
@@ -12,4 +13,6 @@ urlpatterns = [
     path('logout/',    api_views.api_logout_view,     name='auth-logout'),
     path('me/',        api_views.me_view,             name='auth-me'),
     path('barangays/', api_views.barangay_list_view,  name='auth-barangays'),
+    path('heartbeat/', api_views.heartbeat_view,      name='heartbeat'),
+    path('online/',    api_views.online_users_view,   name='online-users'),
 ]

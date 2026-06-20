@@ -13,7 +13,7 @@ import { useAuth } from '../../../context/AuthContext'
 import api from '../../../api/client'
 import Navbar from '../../../components/Navbar'
 
-export default function ConfirmStartModule({ setRouteState }) {
+export default function ConfirmStartModule({ onAdvance, shift }) {
   const { user } = useAuth()
   const firstName = user?.full_name?.split(' ')[0] || 'Driver'
 
@@ -35,10 +35,10 @@ export default function ConfirmStartModule({ setRouteState }) {
   }, [user?.id])
 
   const stopCount = schedule ? (schedule.waypoints?.length || 1) - 1 : 0
-  const routeName = profile?.route || schedule?.barangay_names || 'Your Route'
-  const truckLabel = profile?.truck || '—'
-  const plateLabel = profile?.plateNumber || '—'
-  const barangayLabel = profile?.barangay || schedule?.barangay_names || '—'
+  const routeName = shift?.barangay_names || schedule?.barangay_names || 'Your Route'
+  const truckLabel = shift?.truck_model || '—'
+  const plateLabel = shift?.truck_plate || '—'
+  const barangayLabel = shift?.barangay_names || schedule?.barangay_names || '—'
   const daysLabel = schedule?.days || '—'
   const timeLabel = schedule?.start_time
     ? `${schedule.start_time.slice(0, 5)} – ${schedule.end_time?.slice(0, 5) || ''}`
@@ -141,7 +141,7 @@ export default function ConfirmStartModule({ setRouteState }) {
             id="confirm-start-shift-btn"
             onClick={() => {
               sessionStorage.setItem('ww_duty_type', 'normal')
-              setRouteState('checkin')
+              onAdvance('checkin')
             }}
             style={{
               width: '100%', padding: '20px', borderRadius: 30, border: 'none',

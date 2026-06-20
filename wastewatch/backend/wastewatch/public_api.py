@@ -49,8 +49,12 @@ def public_stats_view(request):
     from watcher.models import GarbageReport, ReportStatus, GarbageHotspot
     from driver.models import Truck, TruckStatus
     from dumpsite.models import WasteDelivery
+    from django.contrib.auth import get_user_model
     from django.utils import timezone
-    from django.db.models import Sum
+    from datetime import timedelta
+    from django.db.models import Sum, Count
+    
+    User = get_user_model()
 
     today = timezone.localdate()
 
@@ -59,8 +63,34 @@ def public_stats_view(request):
         total_reports    = verified_reports.count()
         resolved_reports = verified_reports.filter(status=ReportStatus.RESOLVED).count()
         pending_reports  = GarbageReport.objects.filter(status=ReportStatus.PENDING).count()
+        total_trucks     = Truck.objects.count()
         active_trucks    = Truck.objects.filter(status=TruckStatus.ACTIVE).count()
         hotspots         = GarbageHotspot.objects.count()
+
+        now = timezone.now()
+        cutoff = now - timedelta(minutes=5)
+        online_trucks = Truck.objects.filter(
+            shifts__ended_at__isnull=True,
+            shifts__started_at__lte=now,
+            shifts__driver__role='driver',
+            shifts__driver__last_activity__gte=cutoff,
+        ).distinct().count()
+
+        online_counts = (
+            User.objects
+            .filter(
+                role__in=('watcher', 'brgy_official', 'driver'),
+                last_activity__gte=cutoff,
+            )
+            .values('role')
+            .annotate(count=Count('id'))
+        )
+        role_counts = {row['role']: row['count'] for row in online_counts}
+
+        active_watchers  = role_counts.get('watcher', 0)
+        total_watchers   = User.objects.filter(role='watcher').count()
+        active_officials = role_counts.get('brgy_official', 0)
+        total_officials  = User.objects.filter(role='brgy_official').count()
 
         deliveries_today = WasteDelivery.objects.filter(date=today)
         completed_routes = deliveries_today.count()
@@ -70,8 +100,14 @@ def public_stats_view(request):
         total_reports    = 0
         resolved_reports = 0
         pending_reports  = 0
+        total_trucks     = 0
         active_trucks    = 0
+        online_trucks    = 0
         hotspots         = 0
+        active_watchers  = 0
+        total_watchers   = 0
+        active_officials = 0
+        total_officials  = 0
         completed_routes = 0
         total_waste      = 0
         barangays_covered = 0
@@ -81,6 +117,12 @@ def public_stats_view(request):
         'resolved_reports': resolved_reports,
         'pending_reports':  pending_reports,
         'active_trucks':    active_trucks,
+        'online_trucks':    online_trucks,
+        'total_trucks':     total_trucks,
+        'active_watchers':  active_watchers,
+        'total_watchers':   total_watchers,
+        'active_officials': active_officials,
+        'total_officials':  total_officials,
         'hotspots':         hotspots,
         'completed_routes': completed_routes,
         'total_waste':      total_waste,

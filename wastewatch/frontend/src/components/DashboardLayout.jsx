@@ -12,12 +12,14 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useHeartbeat } from '../hooks/useHeartbeat'
 import Navbar from './Navbar'
 import { useOnline } from '../hooks/useOnline'
 import BottomNav from './BottomNav'
 import { ICONS, getRoleNavItems } from '../api/navConfig'
 import { DriverGpsProvider } from '../context/DriverGpsContext'
 import { useNotifications } from '../hooks/useNotifications'
+import DumpsiteArrivalAlert from '../pages/dumpsite/components/DumpsiteArrivalAlert'
 
 
 // ─── NavGroup: collapsible sidebar section ────────────────────────────────────
@@ -536,8 +538,11 @@ export default function DashboardLayout({ children }) {
   const isOnline = useOnline()
   const { notifications, unreadCount, markRead } = useNotifications()
 
+  useHeartbeat();
+
   const [isPinned, setIsPinned] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
+  const [logoutWarning, setLogoutWarning] = useState(false)
 
   const isCollapsed = !(isPinned || isHovered)
   const [notifOpen, setNotifOpen] = useState(false)
@@ -548,8 +553,27 @@ export default function DashboardLayout({ children }) {
   const navItems = getRoleNavItems(role)
 
   async function handleLogout() {
+    setLogoutWarning(true)
+  }
+
+  async function confirmLogout() {
     await logout()
     navigate('/login')
+  }
+
+  const getPreviewMessage = (n) => {
+    try {
+      if (n.type && n.type.startsWith('WATCHER_')) {
+        const data = JSON.parse(n.message)
+        if (n.type === 'WATCHER_STOP_VERIFIED') return `Watcher (${data.watcher_name}): ${data.text}`
+        if (n.type === 'WATCHER_ROUTE_SUMMARY') {
+          return n.title === 'Route Confirmation Complete' 
+            ? `Route finished. Driver: ${data.truck_name}`
+            : `Live updates from Watcher (${data.watcher_name})`
+        }
+      }
+    } catch (e) {}
+    return n.message
   }
 
   return (
@@ -561,6 +585,7 @@ export default function DashboardLayout({ children }) {
         if (isPinned) setIsPinned(false);
       }}
     >
+      <DumpsiteArrivalAlert />
       {/* ── MOBILE: top navbar only ── */}
       <div className="layout-mobile">
         <Navbar />
@@ -713,7 +738,7 @@ export default function DashboardLayout({ children }) {
                     fontSize: 11, color: 'rgba(0,0,0,0.4)', marginTop: 2,
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}>
-                    {n.message}
+                    {getPreviewMessage(n)}
                   </div>
                   <div style={{ fontSize: 11, color: 'rgba(0,0,0,0.4)', marginTop: 2 }}>
                     {new Date(n.created_at).toLocaleString('en-PH', {
@@ -757,6 +782,45 @@ export default function DashboardLayout({ children }) {
 
       {notifOpen && (
         <div className="nav-backdrop" onClick={() => setNotifOpen(false)} aria-hidden="true" />
+      )}
+
+      {logoutWarning && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+          zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }} onClick={() => setLogoutWarning(false)}>
+          <div style={{
+            background: '#ffffff', borderRadius: 16, padding: '24px 20px',
+            width: '100%', maxWidth: 360, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            textAlign: 'center',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+            <h3 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 8px 0', color: '#1a2e1a' }}>
+              Sign Out?
+            </h3>
+            <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.6)', marginBottom: 24, lineHeight: 1.4 }}>
+              Are you sure you want to sign out of WasteWatch?
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => setLogoutWarning(false)}
+                style={{ flex: 1, padding: '10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.1)', background: '#f8fdf8', color: '#1a2e1a', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
+                onMouseEnter={e => e.target.style.opacity = 0.8}
+                onMouseLeave={e => e.target.style.opacity = 1}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmLogout}
+                style={{ flex: 1, padding: '10px', borderRadius: 8, border: 'none', background: '#e74c3c', color: '#fff', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
+                onMouseEnter={e => e.target.style.opacity = 0.8}
+                onMouseLeave={e => e.target.style.opacity = 1}
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

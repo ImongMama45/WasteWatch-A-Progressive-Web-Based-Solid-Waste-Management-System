@@ -8,6 +8,7 @@ export const STOP_VALIDATION_STATUSES = [
   'COLLECTION_REPORTED',
   'VERIFIED_COLLECTED',
   'COLLECTION_DISPUTED',
+  'DRIVER_MISSED',
 ]
 
 const ALLOWED_STATUSES = new Set(STOP_VALIDATION_STATUSES)
@@ -19,6 +20,7 @@ export const STOP_STATUS_COLORS = {
   COLLECTION_REPORTED: { bg: '#eab308', border: '#fff', shadow: 'rgba(234,179,8,0.45)', label: '#fff' },
   VERIFIED_COLLECTED: { bg: '#16a34a', border: '#fff', shadow: 'rgba(22,163,74,0.5)', label: '#fff' },
   COLLECTION_DISPUTED: { bg: '#ef4444', border: '#fff', shadow: 'rgba(239,68,68,0.5)', label: '#fff' },
+  DRIVER_MISSED: { bg: '#ef4444', border: '#fff', shadow: 'rgba(239,68,68,0.5)', label: '#fff' },
 }
 
 export const STOP_STATUS_LABELS = {
@@ -27,7 +29,10 @@ export const STOP_STATUS_LABELS = {
   EMPTY_STOP: 'Empty Stop',
   COLLECTION_REPORTED: 'Collection Reported',
   VERIFIED_COLLECTED: 'Verified Collected',
-  COLLECTION_DISPUTED: 'Collection Disputed',
+  // NOTE: DB constant kept as COLLECTION_DISPUTED to avoid migrations.
+  // Only the display label is changed to 'Missed'. See backend/watcher/models.py.
+  COLLECTION_DISPUTED: 'Missed',
+  DRIVER_MISSED: 'Driver Missed',
 }
 
 export const normalizeStopStatus = (status) => {
@@ -65,6 +70,27 @@ export const resolveStopVisualStatus = (stop, fallback = 'PENDING_INSPECTION') =
 
 export const isRoutableStopStatus = (status) =>
   normalizeStopStatus(status) === 'READY_FOR_COLLECTION'
+
+// COLLECTION_REPORTED is included because the driver has submitted proof.
+// If a watcher later disputes it → COLLECTION_DISPUTED, which is also
+// in this set, so there is no double-count risk on the progress bar.
+export const COMPLETED_STOP_STATUSES = new Set([
+  'VERIFIED_COLLECTED',
+  'EMPTY_STOP',
+  'COLLECTION_REPORTED',
+  'COLLECTION_DISPUTED',
+])
+
+export const isCompletedStopStatus = (status) =>
+  COMPLETED_STOP_STATUSES.has(normalizeStopStatus(status))
+
+export const MISSED_STOP_STATUSES = new Set([
+  'PENDING_INSPECTION',
+  'READY_FOR_COLLECTION',
+])
+
+export const isMissedStopStatus = (status) =>
+  MISSED_STOP_STATUSES.has(normalizeStopStatus(status))
 
 /** Shared stop marker HTML — used by MapView and ShiftRouteModule */
 export function buildStopMarkerHtml(stopNumber, status, details = null, isActive = false) {

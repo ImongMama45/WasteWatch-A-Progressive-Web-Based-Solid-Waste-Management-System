@@ -25,7 +25,10 @@ import {
   subscribePickupStatusSync,
 } from '../../utils/pickupStatusSync'
 import PreInspectionOverlay from './components/PreInspectionOverlay'
+import StopCompletedOverlay from './components/StopCompletedOverlay'
+import OfflineQueueBadge from '../../components/OfflineQueueBadge'
 import { ICONS } from '../../api/navConfig'
+import { compressImage } from '../../utils/imageCompressor'
 
 const ARRIVAL_RADIUS_M = 30
 const LUCENA_CENTER = [13.9373, 121.617]
@@ -154,10 +157,11 @@ function MapLegend() {
 
 // ─── MULTI-PHOTO PICKER ───────────────────────────────────────────────────────
 function MultiPhotoPicker({ photos, onChange }) {
-  function handleAdd(e) {
+  async function handleAdd(e) {
     const files = Array.from(e.target.files || [])
     if (!files.length) return
-    const next = [...photos, ...files].slice(0, MAX_PHOTOS)
+    const compressedFiles = await Promise.all(files.map(f => compressImage(f)))
+    const next = [...photos, ...compressedFiles].slice(0, MAX_PHOTOS)
     onChange(next)
     e.target.value = ''
   }
@@ -295,6 +299,7 @@ export default function VerificationTasksModule() {
   const [loading, setLoading] = useState(true)
   const [hasScheduleToday, setHasScheduleToday] = useState(true)
   const [selectedTask, setSelectedTask] = useState(null)
+  const [completedTask, setCompletedTask] = useState(null)
   const [orsRoute, setOrsRoute] = useState(null)
 
   useEffect(() => { injectStopMarkerStyles() }, [])
@@ -635,6 +640,7 @@ export default function VerificationTasksModule() {
           <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
             <GpsStatusPill isTracking={isTracking} error={gpsError} accuracy={gpsAccuracy} />
             <ConnPill />
+            <OfflineQueueBadge />
             {isMock && (
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(245,158,11,.15)', border: '1px solid rgba(245,158,11,.5)', borderRadius: 20, padding: '3px 10px' }}>
                 <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: '.04em', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -727,9 +733,21 @@ export default function VerificationTasksModule() {
         }
         task={selectedTask}
         gpsPos={gpsPos}
-        onComplete={() => { setSelectedTask(null); loadStops() }}
+        onComplete={() => { 
+          setCompletedTask(selectedTask);
+          setSelectedTask(null); 
+          loadStops() 
+        }}
         onBack={() => setSelectedTask(null)}
         MultiPhotoPicker={MultiPhotoPicker}
+      />
+
+      <StopCompletedOverlay 
+        task={completedTask} 
+        onNext={() => setCompletedTask(null)} 
+        totalStops={stops.length}
+        pendingCount={pendingCount} 
+        type="pre" 
       />
     </>
   )

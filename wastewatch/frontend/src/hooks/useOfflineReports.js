@@ -31,7 +31,7 @@ import api from '../api/client'
 // ─── IndexedDB helpers ─────────────────────────────────────────────────────────
 
 const DB_NAME = 'wastewatch_db'
-const DB_VERSION = 3
+const DB_VERSION = 5
 const STORE_NAME = 'reports'
 
 const MAX_RETRY = 3

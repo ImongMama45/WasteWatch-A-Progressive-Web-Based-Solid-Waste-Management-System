@@ -1,3 +1,9 @@
+
+from django.db.models import Count, Q, Case, When, BooleanField
+from rest_framework.decorators import action
+from rest_framework import viewsets
+from .serializers import BarangayListSerializer, BarangayDetailSerializer
+
 """
 accounts/api_views.py
 ---------------------
@@ -18,7 +24,7 @@ from django.views.decorators.http   import require_http_methods
 from django.views.decorators.csrf   import ensure_csrf_cookie
 from django.contrib.auth            import authenticate, login, logout
 
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, serializers
 from .models import User, Barangay
 from .serializers import UserSerializer, BarangaySerializer, RegisterSerializer, AdminUserSerializer
 
@@ -80,6 +86,7 @@ def _json_body(request):
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework import status
 
 # ── GET  /api/auth/me/ ────────────────────────────────────────────────────────
 @api_view(['GET', 'PATCH'])
@@ -165,3 +172,130 @@ def user_list_view(request):
     
     data = [user_to_dict(u) for u in users]
     return JsonResponse(data, safe=False)
+
+from django.utils import timezone
+from datetime import timedelta
+from django.http import HttpResponse
+from django.views.decorators.http import require_POST
+from django.contrib.auth.decorators import login_required
+
+PERSONNEL_ROLES = ('watcher', 'brgy_official', 'driver')
+
+@login_required
+@require_POST
+def heartbeat_view(request):
+    user = request.user
+    if getattr(user, 'role', None) not in PERSONNEL_ROLES:
+        return HttpResponse(status=204)
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    User.objects.filter(pk=user.pk).update(
+        last_activity=timezone.now()
+    )
+    return HttpResponse(status=204)
+
+@login_required
+def online_users_view(request):
+    cutoff = timezone.now() - timedelta(minutes=5)
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+
+    personnel = (
+        User.objects
+        .filter(
+            role__in=PERSONNEL_ROLES,
+            last_activity__gte=cutoff,
+        )
+        .exclude(pk=request.user.pk)
+        .order_by('-last_activity')
+        .values('id', 'full_name', 'role', 'last_activity')
+    )
+
+    now = timezone.now()
+    result = []
+    for u in personnel:
+        delta = now - u['last_activity']
+        if delta <= timedelta(minutes=2):
+            status = 'online'
+        else:
+            status = 'idle'
+        result.append({
+            'id':            u['id'],
+            'full_name':     u['full_name'],
+            'role':          u['role'],
+            'last_activity': u['last_activity'].isoformat(),
+            'status':        status,
+        })
+
+    return JsonResponse({'users': result})
+
+class BarangayManagementViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+
+    def get_queryset(self):
+        if self.action == 'list':
+            return Barangay.objects.annotate(
+                official_count=Count('residents', filter=Q(residents__role='brgy_official'), distinct=True),
+                watcher_count=Count('residents', filter=Q(residents__role='watcher'), distinct=True),
+                driver_count=Count('residents', filter=Q(residents__role='driver'), distinct=True),
+                pending_concerns=Count(
+                    'reports', filter=Q(reports__status='PENDING'), distinct=True
+                ),
+                active_hotspots=Count(
+                    'hotspots', distinct=True # Or filter by something if hotspot has is_active
+                ),
+                open_escalations=Count(
+                    'escalations', filter=Q(escalations__status='pending'), distinct=True
+                ),
+                has_unassigned_roles=Case(
+                    When(Q(official_count=0) | Q(watcher_count=0) | Q(driver_count=0),
+                         then=True),
+                    default=False,
+                    output_field=BooleanField(),
+                ),
+            )
+        return Barangay.objects.prefetch_related(
+            'residents', 'hotspots', 'escalations', 'reports',
+        )
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return BarangayDetailSerializer
+        return BarangayListSerializer
+
+    @action(detail=True, methods=['patch'], url_path='assign-personnel')
+    def assign_personnel(self, request, pk=None):
+        barangay = self.get_object()
+        user_id = request.data.get('user_id')
+        role = request.data.get('role')
+        
+        if not user_id or not role:
+            return Response({"error": "user_id and role are required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            user = User.objects.get(pk=user_id)
+            user.role = role
+            user.barangay = barangay
+            user.save()
+            return Response({"status": "assigned successfully", "user_id": user_id, "role": role})
+        except User.DoesNotExist:
+            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=False, methods=['get'], url_path='unassigned-users')
+    def unassigned_users(self, request):
+        role = request.query_params.get('role')
+        qs = User.objects.filter(role=role)
+        
+        class UnassignedUserSerializer(serializers.ModelSerializer):
+            current_barangay = serializers.SerializerMethodField()
+            
+            def get_current_barangay(self, obj):
+                return obj.barangay.name if obj.barangay else None
+
+            class Meta:
+                model = User
+                fields = ['id', 'full_name', 'email', 'current_barangay']
+                
+        serializer = UnassignedUserSerializer(qs, many=True)
+        return Response(serializer.data)
+

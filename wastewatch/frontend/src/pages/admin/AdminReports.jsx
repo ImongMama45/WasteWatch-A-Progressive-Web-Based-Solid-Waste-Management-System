@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo } from 'react'
-import DashboardLayout from '../../components/DashboardLayout'
 import api from '../../api/client'
 import BarangaySelect from '../../components/BarangaySelect'
 
@@ -85,9 +84,9 @@ export default function AdminReports() {
   }
 
   return (
-    <DashboardLayout title="Waste Reports">
-      <div className="page">
-        
+    <div style={{ background: '#fff', borderRadius: 12, padding: 24 }}>
+      <div className="page" style={{ padding: 0 }}>
+
         {/* Filter Controls */}
         <div style={{
           display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap',
@@ -96,8 +95,8 @@ export default function AdminReports() {
         }}>
           <div style={{ flex: '1 1 180px' }}>
             <label className="text-xs font-bold text-muted mb-1 block">BARANGAY</label>
-            <BarangaySelect 
-              value={filters.barangay} 
+            <BarangaySelect
+              value={filters.barangay}
               onChange={val => handleFilterChange('barangay', val)}
               showAllOption={true}
             />
@@ -105,7 +104,7 @@ export default function AdminReports() {
 
           <div style={{ flex: '1 1 120px' }}>
             <label className="text-xs font-bold text-muted mb-1 block">STATUS</label>
-            <select 
+            <select
               className="form-input"
               value={filters.status}
               onChange={e => handleFilterChange('status', e.target.value)}
@@ -119,7 +118,7 @@ export default function AdminReports() {
 
           <div style={{ flex: '1 1 120px' }}>
             <label className="text-xs font-bold text-muted mb-1 block">TAG</label>
-            <select 
+            <select
               className="form-input"
               value={filters.tag}
               onChange={e => handleFilterChange('tag', e.target.value)}
@@ -133,7 +132,7 @@ export default function AdminReports() {
 
           <div style={{ flex: '1 1 120px' }}>
             <label className="text-xs font-bold text-muted mb-1 block">SEVERITY</label>
-            <select 
+            <select
               className="form-input"
               value={filters.severity}
               onChange={e => handleFilterChange('severity', e.target.value)}
@@ -181,10 +180,10 @@ export default function AdminReports() {
                       <div style={{ fontWeight: 600 }}>{ISSUE_TYPE_LABELS[r.issue_type] || r.issue_type}</div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
                         {r.tags?.split(',').map(tag => (
-                          <span key={tag} style={{ 
-                            fontSize: 10, background: tag === 'Misconduct' ? '#e74c3c' : 'var(--surface-2)', 
-                            color: tag === 'Misconduct' ? 'white' : 'var(--text)', 
-                            padding: '1px 6px', borderRadius: 4 
+                          <span key={tag} style={{
+                            fontSize: 10, background: tag === 'Misconduct' ? '#e74c3c' : 'var(--surface-2)',
+                            color: tag === 'Misconduct' ? 'white' : 'var(--text)',
+                            padding: '1px 6px', borderRadius: 4
                           }}>{tag}</span>
                         ))}
                       </div>
@@ -209,6 +208,6 @@ export default function AdminReports() {
           </table>
         </div>
       </div>
-    </DashboardLayout>
+    </div>
   )
 }

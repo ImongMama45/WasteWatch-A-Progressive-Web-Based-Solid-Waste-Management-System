@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useMemo } from 'react'
 import Navbar from '../../../components/Navbar'
+import RouteCompletionMiniMap from './RouteCompletionMiniMap'
 
 const CheckIcon = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -52,63 +53,7 @@ export default function CalibrationCelebrationModule({ calibrationData, schedule
     })
   }, [schedule, stopStatuses])
 
-  useEffect(() => {
-    if (!mapRef.current || !window.L || missedStops.length === 0 || mapInstance.current) return
-
-    const L = window.L
-
-    let minLat = 999, maxLat = -999, minLng = 999, maxLng = -999
-    missedStops.forEach(wp => {
-      const lat = Number(wp.lat || wp.latitude)
-      const lng = Number(wp.lng || wp.longitude)
-      if (lat < minLat) minLat = lat
-      if (lat > maxLat) maxLat = lat
-      if (lng < minLng) minLng = lng
-      if (lng > maxLng) maxLng = lng
-    })
-
-    let bounds
-    if (minLat === maxLat && minLng === maxLng) {
-      bounds = L.latLngBounds([minLat - 0.005, minLng - 0.005], [maxLat + 0.005, maxLng + 0.005])
-    } else {
-      bounds = L.latLngBounds([minLat, minLng], [maxLat, maxLng]).pad(0.2)
-    }
-
-    const map = L.map(mapRef.current, { zoomControl: false, scrollWheelZoom: false, dragging: false }).fitBounds(bounds)
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map)
-    mapInstance.current = map
-
-    const resizeObserver = new ResizeObserver(() => {
-      if (mapInstance.current) {
-        mapInstance.current.invalidateSize()
-      }
-    })
-    if (mapRef.current) {
-      resizeObserver.observe(mapRef.current)
-    }
-
-    const missedIconHtml = `
-      <div style="width:24px;height:24px;background:#ef4444;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 2px 5px rgba(0,0,0,0.2);">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-      </div>`
-    const missedIcon = L.divIcon({ html: missedIconHtml, className: '', iconSize: [24, 24], iconAnchor: [12, 12] })
-
-    missedStops.forEach(wp => {
-      const lat = Number(wp.lat || wp.latitude)
-      const lng = Number(wp.lng || wp.longitude)
-      L.marker([lat, lng], { icon: missedIcon }).addTo(map)
-    })
-
-    return () => {
-      if (mapRef.current) {
-        resizeObserver.unobserve(mapRef.current)
-      }
-      if (mapInstance.current) {
-        mapInstance.current.remove()
-        mapInstance.current = null
-      }
-    }
-  }, [missedStops])
+  
 
   const kgCollected = calibrationData?.net_weight || calibrationData?.estimated_kg || '0.00'
 
@@ -216,7 +161,7 @@ export default function CalibrationCelebrationModule({ calibrationData, schedule
             </div>
           )}
 
-          {missedStops.length > 0 && (
+          {schedule?.waypoints && (
             <div style={{
               background: 'rgba(255, 255, 255, 0.85)', backdropFilter: 'blur(12px)',
               borderRadius: 20, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.5)',
@@ -224,14 +169,16 @@ export default function CalibrationCelebrationModule({ calibrationData, schedule
               animation: 'slideUpCard 0.5s ease-out 0.4s both'
             }}>
               <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ width: 28, height: 28, borderRadius: 8, background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}>
+                <div style={{ width: 28, height: 28, borderRadius: 8, background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#334155' }}>
                   <MapPinIcon />
                 </div>
                 <div style={{ fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 800, color: '#0f172a' }}>
-                  Uncollected Areas
+                  Route Receipt
                 </div>
               </div>
-              <div ref={mapRef} style={{ width: '100%', height: 160, background: '#e2e8f0' }} />
+              <div style={{ padding: 12 }}>
+                <RouteCompletionMiniMap schedule={schedule} stopStatuses={stopStatuses} />
+              </div>
             </div>
           )}
 

@@ -44,6 +44,7 @@ import { ICONS } from '../../../api/navConfig'
 import { useOnline } from '../../../hooks/useOnline'
 import { getQueue } from '../../../hooks/useOfflineQueue'
 import { useAuth } from '../../../context/AuthContext'
+import { blobToBase64, estimateQueueStorageMB, isNearStorageLimit } from '../../../utils/photoStorage'
 
 export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete, onBack, MultiPhotoPicker }) {
   const [outcome, setOutcome] = useState('')     // 'present' | 'empty'
@@ -56,7 +57,7 @@ export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete
   const { user } = useAuth()
 
   useEffect(() => {
-    if (visible) { setOutcome(''); setNotes(''); setPhotos([]); setError('') }
+    if (visible) { setOutcome(''); setNotes(''); setPhotos([]); setError(''); setSubmitting(false); }
   }, [visible, task?.id])
 
   async function handleSubmit() {
@@ -98,24 +99,45 @@ export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete
         broadcastPickupStatusSync()
         onComplete()
         return
-      } catch (netErr) {
-        const isNetworkErr = !netErr?.response
-        if (!isNetworkErr) {
-          setError(netErr.response?.data?.error || 'Submission failed.')
+      } catch (err) {
+        if (err.response?.status === 400) {
+          setError(err.response?.data?.error || 'Stop already submitted')
+          setTimeout(() => onComplete(), 2500)
+          return
+        } else if (!err.response) {
+          // Network blip → fall through to queue
+        } else {
+          setError('Server error. Please try again.')
           setSubmitting(false)
           return
         }
-        // Network blip → fall through to queue
       }
     }
 
     // ── OFFLINE PATH ──────────────────────────────────────────────────────
     try {
-      await inspectQueue.enqueue(payload, 1 /* high priority */)
+      const estimatedMB = await estimateQueueStorageMB(inspectQueue)
+      if (isNearStorageLimit(estimatedMB)) {
+        setError(`Offline storage is getting full (${estimatedMB.toFixed(1)}MB used). Please reconnect to sync your pending inspections before continuing.`)
+        setSubmitting(false)
+        return
+      }
+
+      // Convert photos to base64 before enqueuing
+      const serializedPhotos = await Promise.all(
+        photos.map(file => blobToBase64(file))
+      )
+
+      const offlinePayload = {
+        ...payload,
+        photos: serializedPhotos
+      }
+
+      await inspectQueue.enqueue(offlinePayload, 1 /* high priority */)
       broadcastPickupStatusSync()
       onComplete()   // let watcher proceed immediately
     } catch (qErr) {
-      setError('Failed to save offline. Please try again.')
+      setError('Failed to save offline. Storage may be full.')
       setSubmitting(false)
     }
   }

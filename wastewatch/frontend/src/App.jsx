@@ -45,6 +45,10 @@ import HotspotDetection from './pages/admin/HotspotDetection'
 import NotificationCenter from './pages/admin/NotificationCenter'
 import ActivityLog from './pages/admin/ActivityLog'
 import AdminReports from './pages/admin/AdminReports'
+import ReportDetail from './pages/admin/ReportDetail'
+import BarangayManagement from './pages/admin/BarangayManagement'
+import BarangayDetail from './pages/admin/BarangayDetail'
+import EscalationDetail from './pages/admin/EscalationDetail'
 
 import RouteOverview from './pages/driver/RouteOverview'
 import DriverAnalytics from './pages/driver/DriverAnalytics'
@@ -132,6 +136,14 @@ export default function App() {
           } />
 
           {/* ADMIN PAGE */}
+          <Route path="/admin/barangays" element={
+            <PrivateRoute><BarangayManagement /></PrivateRoute>
+          } />
+
+          <Route path="/admin/barangays/:barangayId" element={
+            <PrivateRoute><BarangayDetail /></PrivateRoute>
+          } />
+
           <Route path="/admin/trucks" element={
             <PrivateRoute><TruckManagement /></PrivateRoute>
           } />
@@ -152,6 +164,18 @@ export default function App() {
             <PrivateRoute><EscalationManagement /></PrivateRoute>
           } />
 
+          <Route path="/admin/escalations/:id" element={
+            <PrivateRoute><EscalationDetail /></PrivateRoute>
+          } />
+
+          <Route path="/admin/reports/:id" element={
+            <PrivateRoute><ReportDetail /></PrivateRoute>
+          } />
+
+          <Route path="/admin/reports" element={
+            <PrivateRoute><AdminReports /></PrivateRoute>
+          } />
+
           <Route path="/admin/analytics" element={
             <PrivateRoute><PerformanceAnalytics /></PrivateRoute>
           } />
@@ -168,9 +192,6 @@ export default function App() {
             <PrivateRoute><ActivityLog /></PrivateRoute>
           } />
 
-          <Route path="/admin/reports" element={
-            <PrivateRoute roles={['admin']}><AdminReports /></PrivateRoute>
-          } />
 
           {/* ── DRIVER MODULE ── */}
           <Route path="/driver/flow" element={

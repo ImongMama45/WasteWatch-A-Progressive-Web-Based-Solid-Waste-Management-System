@@ -69,6 +69,9 @@ class CollectionScheduleSerializer(serializers.ModelSerializer):
     dumpsite_detail = serializers.SerializerMethodField()
     barangay_names = serializers.SerializerMethodField()
     waypoints_display = serializers.SerializerMethodField()  # renamed — read-only enriched version
+    completed_stops = serializers.SerializerMethodField()
+    total_stops = serializers.SerializerMethodField()
+    truck_status = serializers.SerializerMethodField()
 
     class Meta:
         model  = CollectionSchedule
@@ -87,6 +90,40 @@ class CollectionScheduleSerializer(serializers.ModelSerializer):
                 'longitude': ds.longitude,
             }
         return None
+
+    def get_completed_stops(self, obj):
+        from django.utils import timezone
+        today = timezone.localdate()
+        return obj.pickups.filter(status='COMPLETED', collected_at__date=today).count()
+
+    def get_total_stops(self, obj):
+        count = obj.pickups.count()
+        return count if count > 0 else max(0, len(obj.waypoints or []) - 1)
+
+    def get_truck_status(self, obj):
+        from driver.models import DriverShift
+        from django.utils import timezone
+        today = timezone.localdate()
+        
+        # Check for active shift today
+        active_shift = DriverShift.objects.filter(driver=obj.driver, is_active=True).first()
+        if active_shift:
+            # Only consider it active if it was started today
+            if active_shift.started_at and active_shift.started_at.date() == today:
+                return active_shift.op_status
+            
+        # Check for ended shift today
+        ended_shift = DriverShift.objects.filter(driver=obj.driver, is_active=False, started_at__date=today).order_by('-ended_at').first()
+        if ended_shift:
+            count = obj.pickups.count()
+            total_stops = count if count > 0 else max(0, len(obj.waypoints or []) - 1)
+            completed_stops = obj.pickups.filter(status='COMPLETED', collected_at__date=today).count()
+            if total_stops > 0 and completed_stops >= total_stops:
+                return 'completed'
+            else:
+                return 'returning_unfinished'
+                
+        return 'unassigned'
 
     def get_barangay_names(self, obj):
         return ", ".join([b.name for b in obj.barangays.all()])
@@ -182,6 +219,40 @@ class CalendarEventSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class DriverShiftSerializer(serializers.ModelSerializer):
+    truck_plate     = serializers.CharField(
+                        source='truck.plate_number', read_only=True)
+    truck_model     = serializers.CharField(
+                        source='truck.model', read_only=True)
+    route_id        = serializers.SerializerMethodField()
+    barangay_names  = serializers.SerializerMethodField()
+
     class Meta:
         model = DriverShift
-        fields = '__all__'
+        fields = [
+            'id', 'status', 'started_at', 'ended_at', 'truck', 'truck_plate',
+            'truck_model', 'route_id', 'barangay_names', 'driver', 'is_active', 'op_status'
+        ]
+
+    def _get_active_schedule(self, obj):
+        from .models import TruckCrewAssignment, CollectionSchedule
+        from django.utils import timezone
+        today = timezone.localdate()
+        assignment = TruckCrewAssignment.objects.filter(
+            driver=obj.driver, date=today, is_active=True
+        ).select_related('schedule').first()
+        schedule = assignment.schedule if assignment else None
+        if not schedule:
+            schedule = CollectionSchedule.objects.filter(driver=obj.driver, date=today).first()
+        if not schedule:
+            schedule = CollectionSchedule.objects.filter(driver=obj.driver).first()
+        return schedule
+
+    def get_route_id(self, obj):
+        schedule = self._get_active_schedule(obj)
+        return schedule.id if schedule else None
+
+    def get_barangay_names(self, obj):
+        schedule = self._get_active_schedule(obj)
+        if schedule:
+            return ", ".join([b.name for b in schedule.barangays.all()])
+        return ''

@@ -21,7 +21,7 @@ function decodePolyline(encoded) {
   return pts
 }
 
-export default function AssignmentModule({ setRouteState }) {
+export default function AssignmentModule({ onAdvance, setActiveShift }) {
   const navigate = useNavigate()
   const { user } = useAuth()
   const [profile, setProfile] = useState(null)
@@ -257,9 +257,15 @@ export default function AssignmentModule({ setRouteState }) {
           </div>
 
           {/* Start button */}
-          <button id="start-duty-btn" onClick={() => {
-            sessionStorage.setItem('ww_duty_type', 'normal')
-            setRouteState('navigate_to_base')
+          <button id="start-duty-btn" onClick={async () => {
+            try {
+              sessionStorage.setItem('ww_duty_type', 'normal')
+              const res = await api.post('/api/driver/shift/pre_start/', { duty_type: 'normal' })
+              if (setActiveShift) setActiveShift(res.data)
+              onAdvance('navigate_to_base')
+            } catch (err) {
+              console.error('Failed to pre-start shift:', err)
+            }
           }}
             style={{ width: '100%', padding: '16px', borderRadius: 30, background: '#10b981', color: '#fff', border: 'none', fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 800, letterSpacing: '.08em', cursor: 'pointer', boxShadow: '0 4px 14px rgba(16,185,129,0.3)', marginBottom: 32 }}>
             START NORMAL DUTY

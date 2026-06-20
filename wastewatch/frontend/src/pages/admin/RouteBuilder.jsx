@@ -143,6 +143,7 @@ export default function RouteBuilder() {
   const [showEventModal, setShowEventModal] = useState(false)
   const [newEvent, setNewEvent] = useState({ title: '', date: '', location: '', assigned_to: '' })
   const [calDayModal, setCalDayModal] = useState(null)
+  const [calDayExpanded, setCalDayExpanded] = useState(null)
   const [calMonth, setCalMonth] = useState(() => new Date().getMonth())
   const [calYear, setCalYear] = useState(() => new Date().getFullYear())
 
@@ -615,9 +616,6 @@ export default function RouteBuilder() {
               <input type="checkbox" checked={showSchedulesOnCalendar} onChange={e => setShowSchedulesOnCalendar(e.target.checked)} style={{ accentColor: 'var(--accent)', width: 13, height: 13 }} />
               Show routes
             </label>
-            <button className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 5 }} onClick={() => setShowEventModal(true)}>
-              <IcoPlus size={12} color="#fff" /> Add Event
-            </button>
           </div>
         </div>
 
@@ -648,10 +646,13 @@ export default function RouteBuilder() {
             const dayEvts = calendarEvents.filter(e => e.date === dateStr)
             const total = daySched.length + dayEvts.length
 
+            const cellStyle = dayEvts.length > 0 ? { background: '#FFFBEB', borderColor: '#FDE68A' } : {}
+
             return (
               <div
                 key={cellIdx}
                 className={`cal-cell${isToday ? ' today' : ''}`}
+                style={cellStyle}
                 onClick={() => openCalDayModal(d, dateStr, cellDayName, daySched, dayEvts)}
               >
                 {/* Date row */}
@@ -1180,7 +1181,7 @@ export default function RouteBuilder() {
                         {days.map(d => d.slice(0, 3)).join(', ')} · {formatTime12h(time)} – {formatTime12h(endTime)}
                       </div>
                     )}
-                    
+
                     {scheduleConflicts.length > 0 && (
                       <div style={{ marginTop: 12, padding: '10px 14px', background: '#FEF2F2', border: '1px solid rgba(239,68,68,.3)', borderRadius: 9, fontSize: 12, color: '#991B1B' }}>
                         <div style={{ fontWeight: 700, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1277,26 +1278,72 @@ export default function RouteBuilder() {
                 )}
 
                 {/* Step 3 — Dumpsite */}
-                {step === 3 && (
-                  <div className="rb-panel">
-                    <p className="rb-panel-title">Select Dumpsite</p>
-                    <p className="rb-panel-sub">Where does the truck unload after collection?</p>
-                    {dumpsites.map(ds => (
-                      <div key={ds.id} className={`rb-ds-card${String(dumpsite) === String(ds.id) ? ' sel' : ''}`} onClick={() => setDumpsite(ds.id)}>
-                        <div style={{ width: 38, height: 38, borderRadius: 9, background: String(dumpsite) === String(ds.id) ? 'rgba(220,38,38,.12)' : 'var(--surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 19, flexShrink: 0 }}>🏭</div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)', marginBottom: 1 }}>{ds.name}</div>
-                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{(+ds.latitude).toFixed(4)}, {(+ds.longitude).toFixed(4)}</div>
-                        </div>
-                        {String(dumpsite) === String(ds.id) && (
-                          <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#DC2626', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                            <IcoCheck size={11} color="#fff" sw={3} />
+                {step === 3 && (() => {
+                  const lastStop = stops.length > 0 ? stops[stops.length - 1] : startPoint;
+                  const recommended = [...dumpsites]
+                    .filter(d => (d.fill_percent || 0) < 100)
+                    .sort((a, b) => {
+                      const distA = Math.hypot(Number(a.latitude) - lastStop.lat, Number(a.longitude) - lastStop.lng);
+                      const distB = Math.hypot(Number(b.latitude) - lastStop.lat, Number(b.longitude) - lastStop.lng);
+                      if (distA === distB) return (a.fill_percent || 0) - (b.fill_percent || 0);
+                      return distA - distB;
+                    })[0] || dumpsites[0];
+
+                  const availableDumpsites = dumpsites.filter(d => String(d.id) !== String(recommended?.id));
+
+                  return (
+                    <div className="rb-panel">
+                      <p className="rb-panel-title">Select Dumpsite</p>
+                      <p className="rb-panel-sub">Where does the truck unload after collection?</p>
+
+                      {recommended && (
+                        <div style={{ marginBottom: 16 }}>
+                          <p style={{ fontSize: 11, fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <span style={{ fontSize: 13 }}>⭐</span> Recommended (Nearest)
+                          </p>
+                          <div className={`rb-ds-card${String(dumpsite) === String(recommended.id) ? ' sel' : ''}`} onClick={() => setDumpsite(recommended.id)} style={{ marginBottom: 0, borderColor: String(dumpsite) === String(recommended.id) ? '#DC2626' : 'rgba(22,163,74,.4)', background: String(dumpsite) === String(recommended.id) ? 'rgba(220,38,38,.06)' : 'rgba(22,163,74,.03)' }}>
+                            <div style={{ width: 38, height: 38, borderRadius: 9, background: String(dumpsite) === String(recommended.id) ? 'rgba(220,38,38,.12)' : 'var(--surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 19, flexShrink: 0 }}>🏭</div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)', marginBottom: 1 }}>{recommended.name}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                {(+recommended.latitude).toFixed(4)}, {(+recommended.longitude).toFixed(4)} • {recommended.fill_percent || 0}% full
+                              </div>
+                            </div>
+                            {String(dumpsite) === String(recommended.id) && (
+                              <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#DC2626', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                <IcoCheck size={11} color="#fff" sw={3} />
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                        </div>
+                      )}
+
+                      {availableDumpsites.length > 0 && (
+                        <>
+                          <p style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
+                            Other Dumpsites
+                          </p>
+                          {availableDumpsites.map(ds => (
+                            <div key={ds.id} className={`rb-ds-card${String(dumpsite) === String(ds.id) ? ' sel' : ''}`} onClick={() => setDumpsite(ds.id)}>
+                              <div style={{ width: 38, height: 38, borderRadius: 9, background: String(dumpsite) === String(ds.id) ? 'rgba(220,38,38,.12)' : 'var(--surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 19, flexShrink: 0 }}>🏭</div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)', marginBottom: 1 }}>{ds.name}</div>
+                                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                  {(+ds.latitude).toFixed(4)}, {(+ds.longitude).toFixed(4)} • {ds.fill_percent || 0}% full
+                                </div>
+                              </div>
+                              {String(dumpsite) === String(ds.id) && (
+                                <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#DC2626', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                  <IcoCheck size={11} color="#fff" sw={3} />
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 {/* Step 4 — Review */}
                 {step === 4 && (
@@ -1389,7 +1436,7 @@ export default function RouteBuilder() {
 
           return (
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 190px)' }}>
-              
+
               {/* Filter Bar */}
               <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', background: 'var(--surface-2)' }}>
                 <input className="rb-input" style={{ flex: 1, minWidth: 160, padding: '7px 12px', fontSize: 12, borderRadius: 8 }} placeholder="Search barangays or time..." value={listSearch} onChange={e => setListSearch(e.target.value)} />
@@ -1421,109 +1468,109 @@ export default function RouteBuilder() {
                 ) : filteredSchedules.length === 0 ? (
                   <div className="rb-empty"><IcoRoute size={30} color="var(--text-light)" /><div className="rb-empty-title">No matching routes</div><div className="rb-empty-sub">Try adjusting your filters.</div></div>
                 ) : filteredSchedules.slice((listPage - 1) * 10, listPage * 10).map((s, idx) => {
-                const tc = TRUCK_COLORS[getTruckColorIdx(s.truck)]
-                return (
-                  <div key={s.id} className="rb-tbl-row" style={(!s.driver_name || !s.truck) ? { background: '#FEF2F2', borderLeft: '3px solid #EF4444' } : {}}>
-                    
-                    {/* Top Section: Quick Stats & Actions */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          {s.truck ? (
-                            <>
-                              <div style={{ width: 8, height: 8, borderRadius: '50%', background: tc.color, flexShrink: 0 }} />
-                              <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>{s.truck_plate || '—'}</span>
-                            </>
-                          ) : (
-                            <span style={{ fontSize: 13, fontWeight: 800, color: '#EF4444' }}>No Truck</span>
-                          )}
+                  const tc = TRUCK_COLORS[getTruckColorIdx(s.truck)]
+                  return (
+                    <div key={s.id} className="rb-tbl-row" style={(!s.driver_name || !s.truck) ? { background: '#FEF2F2', borderLeft: '3px solid #EF4444' } : {}}>
+
+                      {/* Top Section: Quick Stats & Actions */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {s.truck ? (
+                              <>
+                                <div style={{ width: 8, height: 8, borderRadius: '50%', background: tc.color, flexShrink: 0 }} />
+                                <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>{s.truck_plate || '—'}</span>
+                              </>
+                            ) : (
+                              <span style={{ fontSize: 13, fontWeight: 800, color: '#EF4444' }}>No Truck</span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 12, color: s.driver_name ? 'var(--text)' : '#EF4444', fontWeight: s.driver_name ? 600 : 800, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <IcoUser size={12} color={s.driver_name ? "var(--text-muted)" : "#EF4444"} />
+                            {s.driver_name || 'No Driver'}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <IcoClock size={12} color="var(--text-muted)" />
+                            {s.start_time ? `${formatTime12h(s.start_time)} – ${formatTime12h(s.end_time)}` : '—'}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: tc.bg, color: tc.color, borderRadius: 20, padding: '2px 8px', fontSize: 11, fontWeight: 800 }}>
+                            <IcoPin size={10} color={tc.color} /> {Array.isArray(s.waypoints) ? s.waypoints.length : 0} Stops
+                          </div>
                         </div>
-                        <div style={{ fontSize: 12, color: s.driver_name ? 'var(--text)' : '#EF4444', fontWeight: s.driver_name ? 600 : 800, display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <IcoUser size={12} color={s.driver_name ? "var(--text-muted)" : "#EF4444"} />
-                          {s.driver_name || 'No Driver'}
-                        </div>
-                        <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <IcoClock size={12} color="var(--text-muted)" />
-                          {s.start_time ? `${formatTime12h(s.start_time)} – ${formatTime12h(s.end_time)}` : '—'}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: tc.bg, color: tc.color, borderRadius: 20, padding: '2px 8px', fontSize: 11, fontWeight: 800 }}>
-                          <IcoPin size={10} color={tc.color} /> {Array.isArray(s.waypoints) ? s.waypoints.length : 0} Stops
+                        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                          <button className="rb-btn-edit" onClick={() => handleEdit(s)}><IcoEdit size={12} /> Edit</button>
+                          <button className="rb-btn-del" onClick={() => handleDelete(s)}><IcoTrash size={12} /> Delete</button>
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                        <button className="rb-btn-edit" onClick={() => handleEdit(s)}><IcoEdit size={12} /> Edit</button>
-                        <button className="rb-btn-del" onClick={() => handleDelete(s)}><IcoTrash size={12} /> Delete</button>
+
+                      {/* Bottom Section: Barangays and Days */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 2 }}>
+                        <div>
+                          <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.06em', display: 'block', marginBottom: 5 }}>Routed Barangays</span>
+                          <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text)', lineHeight: 1.45 }}>
+                            {s.barangay_names || '—'}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                          {(s.days || '').split(', ').filter(Boolean).map(day => <span key={day} className="rb-badge">{{ 'Sunday': 'Su', 'Monday': 'M', 'Tuesday': 'T', 'Wednesday': 'W', 'Thursday': 'Th', 'Friday': 'F', 'Saturday': 'S' }[day] || day}</span>)}
+                        </div>
                       </div>
                     </div>
+                  )
+                })}
+                {filteredSchedules.length > 10 && (
+                  <div style={{ padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', borderTop: '1px solid var(--border)', position: 'sticky', bottom: 0, zIndex: 10 }}>
+                    <button className="rb-btn-ghost rb-btn-sm" disabled={listPage === 1} onClick={() => setListPage(p => p - 1)}>← Previous</button>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Page {listPage} of {Math.ceil(filteredSchedules.length / 10)}</span>
+                    <button className="rb-btn-ghost rb-btn-sm" disabled={listPage >= Math.ceil(filteredSchedules.length / 10)} onClick={() => setListPage(p => p + 1)}>Next →</button>
+                  </div>
+                )}
+              </div>
 
-                    {/* Bottom Section: Barangays and Days */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 2 }}>
-                      <div>
-                        <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.06em', display: 'block', marginBottom: 5 }}>Routed Barangays</span>
-                        <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text)', lineHeight: 1.45 }}>
+              {/* Mobile list */}
+              <div className="rb-list-mobile" style={{ flexDirection: 'column', flex: 1, overflowY: 'auto' }}>
+                {schedLoading ? (
+                  <div className="rb-empty">Loading…</div>
+                ) : schedules.length === 0 ? (
+                  <div className="rb-empty"><div className="rb-empty-title">No routes yet.</div><div className="rb-empty-sub">Build one first.</div></div>
+                ) : filteredSchedules.length === 0 ? (
+                  <div className="rb-empty"><div className="rb-empty-title">No matches.</div><div className="rb-empty-sub">Try adjusting your filters.</div></div>
+                ) : filteredSchedules.slice((listPage - 1) * 10, listPage * 10).map((s, idx) => {
+                  const tc = TRUCK_COLORS[getTruckColorIdx(s.truck)]
+                  return (
+                    <div key={s.id} style={{ padding: 16, borderBottom: idx < filteredSchedules.length - 1 ? '1px solid var(--border)' : 'none', background: (!s.driver_name || !s.truck) ? '#FEF2F2' : 'transparent', borderLeft: (!s.driver_name || !s.truck) ? '3px solid #EF4444' : 'none' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 9, gap: 8 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)', lineHeight: 1.35, flex: 1, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
                           {s.barangay_names || '—'}
                         </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: tc.bg, color: tc.color, borderRadius: 20, padding: '3px 10px', fontSize: 11, fontWeight: 800, flexShrink: 0, border: `1px solid ${tc.color}33` }}>
+                          <IcoPin size={10} color={tc.color} />{Array.isArray(s.waypoints) ? s.waypoints.length : 0}
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                        {(s.days || '').split(', ').filter(Boolean).map(day => <span key={day} className="rb-badge">{{ 'Sunday':'Su', 'Monday':'M', 'Tuesday':'T', 'Wednesday':'W', 'Thursday':'Th', 'Friday':'F', 'Saturday':'S' }[day] || day}</span>)}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 11 }}>
+                        {[{ Icon: IcoTruck, val: s.truck_plate || 'No Truck', missing: !s.truck }, { Icon: IcoUser, val: s.driver_name || 'No Driver', missing: !s.driver_name }, { Icon: IcoClock, val: s.start_time && `${formatTime12h(s.start_time)} – ${formatTime12h(s.end_time)}` }].filter(m => m.val).map(({ Icon: I, val, missing }, mi) => (
+                          <span key={mi} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: missing ? 'rgba(239,68,68,0.1)' : 'var(--surface-2)', border: missing ? '1px solid rgba(239,68,68,0.3)' : '1px solid var(--border)', borderRadius: 20, padding: '4px 10px', fontSize: 11, color: missing ? '#EF4444' : 'var(--text-muted)', fontWeight: missing ? 800 : 600 }}>
+                            <I size={10} color={missing ? '#EF4444' : 'var(--text-muted)'} />{val}
+                          </span>
+                        ))}
+                        {(s.days || '').split(', ').filter(Boolean).map(day => <span key={day} className="rb-badge" style={{ padding: '4px 9px' }}>{{ 'Sunday': 'Su', 'Monday': 'M', 'Tuesday': 'T', 'Wednesday': 'W', 'Thursday': 'Th', 'Friday': 'F', 'Saturday': 'S' }[day] || day}</span>)}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button className="rb-btn-edit" style={{ flex: 1, justifyContent: 'center', padding: 9, fontSize: 12, borderRadius: 9 }} onClick={() => handleEdit(s)}><IcoEdit size={12} /> Edit</button>
+                        <button className="rb-btn-del" style={{ flex: 1, justifyContent: 'center', padding: 9, fontSize: 12, borderRadius: 9 }} onClick={() => handleDelete(s)}><IcoTrash size={12} /> Delete</button>
                       </div>
                     </div>
+                  )
+                })}
+                {filteredSchedules.length > 10 && (
+                  <div style={{ padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', borderTop: '1px solid var(--border)', position: 'sticky', bottom: 0, zIndex: 10 }}>
+                    <button className="rb-btn-ghost rb-btn-sm" disabled={listPage === 1} onClick={() => setListPage(p => p - 1)}>← Previous</button>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Page {listPage} of {Math.ceil(filteredSchedules.length / 10)}</span>
+                    <button className="rb-btn-ghost rb-btn-sm" disabled={listPage >= Math.ceil(filteredSchedules.length / 10)} onClick={() => setListPage(p => p + 1)}>Next →</button>
                   </div>
-                )
-              })}
-              {filteredSchedules.length > 10 && (
-                <div style={{ padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', borderTop: '1px solid var(--border)', position: 'sticky', bottom: 0, zIndex: 10 }}>
-                  <button className="rb-btn-ghost rb-btn-sm" disabled={listPage === 1} onClick={() => setListPage(p => p - 1)}>← Previous</button>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Page {listPage} of {Math.ceil(filteredSchedules.length / 10)}</span>
-                  <button className="rb-btn-ghost rb-btn-sm" disabled={listPage >= Math.ceil(filteredSchedules.length / 10)} onClick={() => setListPage(p => p + 1)}>Next →</button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
-
-            {/* Mobile list */}
-            <div className="rb-list-mobile" style={{ flexDirection: 'column', flex: 1, overflowY: 'auto' }}>
-              {schedLoading ? (
-                <div className="rb-empty">Loading…</div>
-              ) : schedules.length === 0 ? (
-                <div className="rb-empty"><div className="rb-empty-title">No routes yet.</div><div className="rb-empty-sub">Build one first.</div></div>
-              ) : filteredSchedules.length === 0 ? (
-                <div className="rb-empty"><div className="rb-empty-title">No matches.</div><div className="rb-empty-sub">Try adjusting your filters.</div></div>
-              ) : filteredSchedules.slice((listPage - 1) * 10, listPage * 10).map((s, idx) => {
-                const tc = TRUCK_COLORS[getTruckColorIdx(s.truck)]
-                return (
-                  <div key={s.id} style={{ padding: 16, borderBottom: idx < filteredSchedules.length - 1 ? '1px solid var(--border)' : 'none', background: (!s.driver_name || !s.truck) ? '#FEF2F2' : 'transparent', borderLeft: (!s.driver_name || !s.truck) ? '3px solid #EF4444' : 'none' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 9, gap: 8 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)', lineHeight: 1.35, flex: 1, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                        {s.barangay_names || '—'}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: tc.bg, color: tc.color, borderRadius: 20, padding: '3px 10px', fontSize: 11, fontWeight: 800, flexShrink: 0, border: `1px solid ${tc.color}33` }}>
-                        <IcoPin size={10} color={tc.color} />{Array.isArray(s.waypoints) ? s.waypoints.length : 0}
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 11 }}>
-                      {[{ Icon: IcoTruck, val: s.truck_plate || 'No Truck', missing: !s.truck }, { Icon: IcoUser, val: s.driver_name || 'No Driver', missing: !s.driver_name }, { Icon: IcoClock, val: s.start_time && `${formatTime12h(s.start_time)} – ${formatTime12h(s.end_time)}` }].filter(m => m.val).map(({ Icon: I, val, missing }, mi) => (
-                        <span key={mi} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: missing ? 'rgba(239,68,68,0.1)' : 'var(--surface-2)', border: missing ? '1px solid rgba(239,68,68,0.3)' : '1px solid var(--border)', borderRadius: 20, padding: '4px 10px', fontSize: 11, color: missing ? '#EF4444' : 'var(--text-muted)', fontWeight: missing ? 800 : 600 }}>
-                          <I size={10} color={missing ? '#EF4444' : 'var(--text-muted)'} />{val}
-                        </span>
-                      ))}
-                      {(s.days || '').split(', ').filter(Boolean).map(day => <span key={day} className="rb-badge" style={{ padding: '4px 9px' }}>{{ 'Sunday':'Su', 'Monday':'M', 'Tuesday':'T', 'Wednesday':'W', 'Thursday':'Th', 'Friday':'F', 'Saturday':'S' }[day] || day}</span>)}
-                    </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button className="rb-btn-edit" style={{ flex: 1, justifyContent: 'center', padding: 9, fontSize: 12, borderRadius: 9 }} onClick={() => handleEdit(s)}><IcoEdit size={12} /> Edit</button>
-                      <button className="rb-btn-del" style={{ flex: 1, justifyContent: 'center', padding: 9, fontSize: 12, borderRadius: 9 }} onClick={() => handleDelete(s)}><IcoTrash size={12} /> Delete</button>
-                    </div>
-                  </div>
-                )
-              })}
-              {filteredSchedules.length > 10 && (
-                <div style={{ padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', borderTop: '1px solid var(--border)', position: 'sticky', bottom: 0, zIndex: 10 }}>
-                  <button className="rb-btn-ghost rb-btn-sm" disabled={listPage === 1} onClick={() => setListPage(p => p - 1)}>← Previous</button>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Page {listPage} of {Math.ceil(filteredSchedules.length / 10)}</span>
-                  <button className="rb-btn-ghost rb-btn-sm" disabled={listPage >= Math.ceil(filteredSchedules.length / 10)} onClick={() => setListPage(p => p + 1)}>Next →</button>
-                </div>
-              )}
-            </div>
-          </div>
           )
         })()}
 
@@ -1562,85 +1609,202 @@ export default function RouteBuilder() {
 
       {/* ── CALENDAR DAY DETAIL MODAL ── */}
       {calDayModal && (
-        <div className="rb-modal-ov" onClick={e => { if (e.target === e.currentTarget) setCalDayModal(null) }}>
-          <div className="rb-modal">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+        <div className="rb-modal-ov" onClick={e => { if (e.target === e.currentTarget) setCalDayModal(null) }} style={{ alignItems: 'flex-end', padding: '0', background: 'rgba(0,0,0,0.4)' }}>
+          <style>{`
+            @keyframes sheetUp { from { transform: translateY(100%); opacity: 0.5 } to { transform: translateY(0); opacity: 1 } }
+            .sheet-modal { background: #fff; width: 100%; max-width: 600px; border-radius: 24px 24px 0 0; padding: 12px 0 0 0; animation: sheetUp 0.25s cubic-bezier(0.1, 0.9, 0.2, 1); box-shadow: 0 -4px 24px rgba(0,0,0,0.1); max-height: 90vh; display: flex; flex-direction: column; margin: 0 auto; overflow: hidden; }
+            .sheet-grid-container { flex: 1; overflow-y: auto; overflow-x: hidden; position: relative; background: #fff; }
+            .sheet-vl { position: absolute; top: 0; bottom: 0; left: 64px; width: 1px; background: #E5E7EB; z-index: 1; }
+            .sheet-hour { position: absolute; left: 0; right: 0; height: 1px; z-index: 1; }
+            .sheet-hour-line { position: absolute; left: 64px; right: 0; top: 0; height: 1px; background: #E5E7EB; }
+            .sheet-hour-label { position: absolute; top: -7px; left: 12px; font-size: 11px; color: #6B7280; width: 40px; text-align: right; background: #fff; padding-right: 4px; }
+          `}</style>
+          <div className="sheet-modal" onClick={e => e.stopPropagation()}>
+            {/* Drag Handle */}
+            <div style={{ width: 36, height: 4, background: '#E5E7EB', borderRadius: 4, margin: '0 auto 16px' }} />
+
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0 24px 16px' }}>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text-muted)', marginBottom: 3 }}>{calDayModal.cellDayName}</div>
-                <h3 style={{ margin: 0, fontSize: 19, fontWeight: 800, color: 'var(--text)', fontFamily: 'var(--font-head)' }}>{calDayModal.label}</h3>
+                <h3 style={{ margin: '0 0 4px', fontSize: 24, fontWeight: 400, color: '#111827', fontFamily: 'var(--font-head)' }}>
+                  {calDayModal.label.split(',')[0]}
+                </h3>
+                <div style={{ fontSize: 14, color: '#4B5563' }}>
+                  {calDayModal.cellDayName.substring(0, 3)}, {calDayModal.label}
+                </div>
               </div>
-              <button onClick={() => setCalDayModal(null)} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '5px 7px', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}><IcoX size={13} /></button>
+              <button onClick={() => { setCalDayModal(null); setCalDayExpanded(null); }} style={{ background: '#F3F4F6', border: 'none', padding: 8, borderRadius: '50%', cursor: 'pointer', color: '#4B5563', display: 'flex', alignItems: 'center' }}>
+                <IcoX size={18} sw={2} />
+              </button>
             </div>
 
-            {/* Routes */}
-            {calDayModal.routes.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--accent)', marginBottom: 9, display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <IcoTruck size={11} color="var(--accent)" /> Route Schedules ({calDayModal.routes.length})
-                </div>
-                {calDayModal.routes.map(s => {
-                  const tc = TRUCK_COLORS[getTruckColorIdx(s.truck)]
-                  return (
-                    <div key={s.id} style={{ background: tc.bg, border: `1.5px solid ${tc.color}33`, borderRadius: 10, padding: '11px 13px', marginBottom: 7 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 7 }}>
-                        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)', flex: 1, paddingRight: 8 }}>{s.barangay_names || 'No barangays'}</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#fff', color: tc.color, borderRadius: 20, padding: '2px 9px', fontSize: 11, fontWeight: 800, flexShrink: 0, border: `1px solid ${tc.color}44` }}>
-                          <IcoPin size={9} color={tc.color} />{Array.isArray(s.waypoints) ? s.waypoints.length : 0} stops
-                        </div>
-                      </div>
+            {(() => {
+              const timeToMins = (t) => {
+                if (!t) return 0;
+                const [h, m] = t.split(':');
+                return parseInt(h, 10) * 60 + parseInt(m, 10);
+              };
+              const hours = Array.from({ length: 24 }, (_, i) => i); // 12 AM to 11 PM
+
+              // Group routes by start time (in minutes) to render them in horizontal rows
+              const routesByTime = {};
+              calDayModal.routes.forEach(r => {
+                const startMins = Math.max(0, timeToMins(r.start_time));
+                const endMins = timeToMins(r.end_time || r.start_time);
+
+                if (endMins <= startMins) {
+                  if (!routesByTime[startMins]) routesByTime[startMins] = [];
+                  routesByTime[startMins].push(r);
+                } else {
+                  // Repeat the route pill for every hour slot it covers
+                  for (let m = startMins; m < endMins; m += 60) {
+                    if (!routesByTime[m]) routesByTime[m] = [];
+                    routesByTime[m].push(r);
+                  }
+                }
+              });
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                  {/* All Day Events Section */}
+                  {calDayModal.events.length > 0 && (
+                    <div style={{ padding: '12px 16px 12px 72px', display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px solid #E5E7EB', borderBottom: '1px solid #E5E7EB', position: 'relative', background: '#F9FAFB' }}>
+                      <div style={{ position: 'absolute', left: 16, top: 16, fontSize: 11, color: '#6B7280', fontWeight: 600 }}>All-day</div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                        {s.truck_plate && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: tc.color, background: '#fff', borderRadius: 20, padding: '3px 9px', fontWeight: 600, border: `1px solid ${tc.color}30` }}><IcoTruck size={10} color={tc.color} />{s.truck_plate}</span>}
-                        {s.driver_name && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)', background: '#fff', borderRadius: 20, padding: '3px 9px', fontWeight: 600, border: '1px solid var(--border)' }}><IcoUser size={10} color="var(--text-muted)" />{s.driver_name}</span>}
-                        {s.start_time && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)', background: '#fff', borderRadius: 20, padding: '3px 9px', fontWeight: 600, border: '1px solid var(--border)' }}><IcoClock size={10} color="var(--text-muted)" />{s.start_time.slice(0, 5)}–{s.end_time?.slice(0, 5)}</span>}
+                        {calDayModal.events.map(ev => (
+                          <div key={ev.id} style={{ position: 'relative' }}>
+                            <span
+                              style={{ background: '#FDE68A', color: '#92400E', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600, borderLeft: '3px solid #D97706', cursor: 'pointer', display: 'inline-block' }}
+                              onClick={(e) => { e.stopPropagation(); setCalDayExpanded(calDayExpanded === ev.id ? null : ev.id); }}
+                            >
+                              {ev.title}
+                            </span>
+
+                            {calDayExpanded === ev.id && (
+                              <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: 24, left: 0, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', minWidth: 200, zIndex: 11 }}>
+                                <div style={{ fontWeight: 600, fontSize: 14, color: '#111827', marginBottom: 4 }}>{ev.title}</div>
+                                {ev.location && <div style={{ fontSize: 12, color: '#4B5563', marginBottom: 2 }}>📍 {ev.location}</div>}
+                                {ev.assigned_to_name && <div style={{ fontSize: 12, color: '#4B5563' }}>👤 {ev.assigned_to_name}</div>}
+                              </div>
+                            )}
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  )
-                })}
-              </div>
-            )}
+                  )}
+                  {calDayModal.events.length === 0 && calDayModal.routes.length > 0 && (
+                    <div style={{ borderTop: '1px solid #E5E7EB' }} />
+                  )}
 
-            {/* Events */}
-            {calDayModal.events.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: '#D97706', marginBottom: 9, display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <IcoCal size={11} color="#D97706" /> Events ({calDayModal.events.length})
-                </div>
-                {calDayModal.events.map(ev => (
-                  <div key={ev.id} style={{ background: '#FFFBEB', border: '1.5px solid #FDE68A', borderRadius: 10, padding: '11px 13px', marginBottom: 7 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)', marginBottom: 6 }}>{ev.title}</div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      {ev.location && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)', background: '#fff', borderRadius: 20, padding: '3px 9px', fontWeight: 600, border: '1px solid var(--border)' }}><IcoPin size={10} color="var(--text-muted)" />{ev.location}</span>}
-                      {ev.assigned_to_name && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)', background: '#fff', borderRadius: 20, padding: '3px 9px', fontWeight: 600, border: '1px solid var(--border)' }}><IcoUser size={10} color="var(--text-muted)" />{ev.assigned_to_name}</span>}
-                    </div>
+                  {/* Scrollable Timeline Grid */}
+                  <div className="sheet-grid-container" onClick={() => setCalDayExpanded(null)} style={{ background: '#F9FAFB' }}>
+                    {calDayModal.routes.length === 0 && calDayModal.events.length === 0 ? (
+                      <div style={{ padding: '40px 0', textAlign: 'center', color: '#6B7280' }}>
+                        <IcoCal size={32} color="#D1D5DB" />
+                        <div style={{ marginTop: 12, fontWeight: 600 }}>Nothing scheduled for this day.</div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, background: '#fff' }}>
+                        {(() => {
+                          const hourBuckets = Array.from({ length: 24 }, () => []);
+                          calDayModal.routes.forEach(r => {
+                            const startMins = Math.max(0, timeToMins(r.start_time));
+                            const endMins = timeToMins(r.end_time || r.start_time);
+
+                            if (endMins <= startMins) {
+                              const bucket = Math.floor(startMins / 60);
+                              if (bucket >= 0 && bucket < 24) {
+                                hourBuckets[bucket].push(r);
+                              }
+                            } else {
+                              const startBucket = Math.floor(startMins / 60);
+                              const endBucket = Math.floor(endMins / 60);
+                              for (let b = startBucket; b <= endBucket; b++) {
+                                if (b >= 0 && b < 24) {
+                                  if (!hourBuckets[b].some(existing => existing.id === r.id)) {
+                                    hourBuckets[b].push(r);
+                                  }
+                                }
+                              }
+                            }
+                          });
+
+                          return hours.map(h => {
+                            const routes = hourBuckets[h];
+                            return (
+                              <div key={h} style={{ display: 'flex', minHeight: 64, borderBottom: '1px solid #E5E7EB', position: 'relative' }}>
+                                {/* Hour Label */}
+                                <div style={{ width: 72, flexShrink: 0, borderRight: '1px solid #E5E7EB', padding: '12px 12px 12px 0', textAlign: 'right', fontSize: 11, color: '#6B7280', background: '#F9FAFB' }}>
+                                  {h === 0 ? '12 AM' : h === 12 ? '12 PM' : h > 12 ? `${h - 12} PM` : `${h} AM`}
+                                </div>
+
+                                {/* Routes Container */}
+                                <div style={{ flex: 1, padding: '12px', display: 'flex', flexWrap: 'wrap', gap: '6px 8px', alignContent: 'flex-start' }}>
+                                  {routes.map(s => {
+                                    const tc = TRUCK_COLORS[getTruckColorIdx(s.truck)];
+                                    return (
+                                      <div
+                                        key={s.id}
+                                        style={{ display: 'flex', cursor: 'pointer', transition: 'transform 0.1s' }}
+                                        onClick={(e) => { e.stopPropagation(); setCalDayExpanded(calDayExpanded === h ? null : h); }}
+                                        onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.02)'}
+                                        onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+                                      >
+                                        <span style={{ background: tc.color, color: '#fff', padding: '4px 10px', borderRadius: 12, fontSize: 11, fontWeight: 600, boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>
+                                          {formatTime12h(s.start_time)} - {s.end_time ? formatTime12h(s.end_time) : ''} | {s.truck_plate || 'Truck'} • {s.driver_name || 'Driver'}
+                                        </span>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+
+                                {/* Expanded Popover */}
+                                {calDayExpanded === h && (
+                                  <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: 40, left: 84, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, padding: 16, boxShadow: '0 10px 40px rgba(0,0,0,0.2)', minWidth: 320, zIndex: 100, cursor: 'default' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #E5E7EB', paddingBottom: 12, marginBottom: 16 }}>
+                                      <h4 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#111827' }}>
+                                        {h === 0 ? '12:00 AM' : h === 12 ? '12:00 PM' : h > 12 ? `${h - 12}:00 PM` : `${h}:00 AM`}
+                                      </h4>
+                                      <button onClick={() => setCalDayExpanded(null)} style={{ background: '#F3F4F6', border: 'none', padding: 6, borderRadius: '50%', cursor: 'pointer', color: '#4B5563', display: 'flex', alignItems: 'center' }}>
+                                        <IcoX size={16} sw={2} />
+                                      </button>
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxHeight: '50vh', overflowY: 'auto', paddingRight: 4 }}>
+                                      {routes.map(s => {
+                                        const tc = TRUCK_COLORS[getTruckColorIdx(s.truck)];
+                                        return (
+                                          <div key={s.id}>
+                                            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4, color: '#111827' }}>{s.barangay_names || 'Route Assignment'}</div>
+                                            <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                              <IcoCal size={12} /> {formatTime12h(s.start_time)} – {s.end_time ? formatTime12h(s.end_time) : ''}
+                                            </div>
+                                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                              <span style={{ background: tc.bg, color: tc.color, padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{s.truck_plate}</span>
+                                              <span style={{ background: '#EFF6FF', color: '#2563EB', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{s.driver_name}</span>
+                                              <span style={{ background: '#F3F4F6', color: '#4B5563', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{Array.isArray(s.waypoints) ? s.waypoints.length : 0} stops</span>
+                                            </div>
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          });
+                        })()}
+                      </div>
+                    )}
                   </div>
-                ))}
-              </div>
-            )}
+                </div>
+              )
+            })()}
 
-            {/* Empty state */}
-            {calDayModal.routes.length === 0 && calDayModal.events.length === 0 && (
-              <div style={{ textAlign: 'center', padding: '28px 0' }}>
-                <IcoCal size={34} color="var(--text-light)" />
-                <div style={{ marginTop: 12, fontWeight: 700, fontSize: 14, color: 'var(--text-muted)' }}>Nothing scheduled</div>
-                <div style={{ fontSize: 12, color: 'var(--text-light)', marginTop: 4 }}>No routes or events for this day.</div>
-                <button className="rb-btn-primary" style={{ marginTop: 16, fontSize: 12 }} onClick={() => { setCalDayModal(null); setNewEvent(n => ({ ...n, date: calDayModal.dateStr })); setShowEventModal(true) }}>
-                  <IcoPlus size={12} color="#fff" /> Add Event
-                </button>
-              </div>
-            )}
-
-            {(calDayModal.routes.length > 0 || calDayModal.events.length > 0) && (
-              <div style={{ display: 'flex', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 14, marginTop: 4 }}>
-                <button className="rb-btn-ghost rb-btn-sm" style={{ color: '#D97706', borderColor: 'rgba(217,119,6,.2)', background: '#FFFBEB', display: 'flex', alignItems: 'center', gap: 5 }}
-                  onClick={() => { setCalDayModal(null); setNewEvent(n => ({ ...n, date: calDayModal.dateStr })); setShowEventModal(true) }}>
-                  <IcoPlus size={11} /> Add Event
-                </button>
-                <button className="rb-btn-ghost rb-btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setCalDayModal(null)}>Close</button>
-              </div>
-            )}
+            <div style={{ height: 10 }} />
           </div>
         </div>
       )}
+
 
     </DashboardLayout>
   )

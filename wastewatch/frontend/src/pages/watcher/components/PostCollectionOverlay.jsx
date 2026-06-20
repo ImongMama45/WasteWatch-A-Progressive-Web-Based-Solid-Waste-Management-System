@@ -1,46 +1,23 @@
 /**
- * components/PreInspectionOverlay — PATCH NOTES
+ * components/PostCollectionOverlay — PATCH NOTES
  * ------------------------------------------------
- * This file shows only what needs to change from your existing
- * PreInspectionOverlay to support mandatory multi-photo capture.
- *
- * The overlay now receives a `MultiPhotoPicker` component prop
- * from VerificationTasksModule (same shared component, passed down
- * to avoid duplicating the camera logic).
- *
- * KEY CHANGES TO YOUR EXISTING PreInspectionOverlay:
- *
- * 1. Accept `MultiPhotoPicker` as a prop:
- *    export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete, onBack, MultiPhotoPicker })
- *
- * 2. Add photos state:
- *    const [photos, setPhotos] = useState([])
- *
- * 3. Reset photos when overlay opens:
- *    useEffect(() => { if (visible) { ... setPhotos([]) } }, [visible, task?.id])
- *
- * 4. Replace the single photo upload section with:
- *    {MultiPhotoPicker && <MultiPhotoPicker photos={photos} onChange={setPhotos} />}
- *
- * 5. Block submission if no photos:
- *    if (photos.length === 0) { setError('At least one photo is required.'); return }
- *
- * 6. Append all photos to FormData:
- *    photos.forEach((file, i) => form.append(i === 0 ? 'photo' : `photo_${i+1}`, file))
- *
- * 7. Disable/style the submit button when photos are missing:
- *    const canSubmit = outcome && gpsPos && photos.length > 0 && !submitting
- *
- * ─────────────────────────────────────────────────────────────────────────────
- * Full drop-in replacement below (adapt field names to match your existing
- * PreInspectionOverlay form shape — outcome values, API endpoint, etc.)
- * ─────────────────────────────────────────────────────────────────────────────
+ * Mirrors PreInspectionOverlay with post-collection
+ * specific changes:
+ * - Endpoint: /api/watcher/stop-validations/post-verify/
+ * - Outcome options: 'success' | 'failed'
+ * - Header label: POST-COLLECTION VERIFICATION
+ * - Submit button: green (#16a34a) instead of dark
+ * - payload.type = 'post_verify' for sync manager routing
  */
 
 import { useState, useEffect } from 'react'
 import api from '../../../api/client'
 import { broadcastPickupStatusSync } from '../../../utils/pickupStatusSync'
 import { ICONS } from '../../../api/navConfig'
+import { useOnline } from '../../../hooks/useOnline'
+import { getQueue } from '../../../hooks/useOfflineQueue'
+import { useAuth } from '../../../context/AuthContext'
+import { blobToBase64, estimateQueueStorageMB, isNearStorageLimit } from '../../../utils/photoStorage'
 
 export default function PostCollectionOverlay({ visible, task, gpsPos, onComplete, onBack, MultiPhotoPicker }) {
   const [outcome, setOutcome] = useState('')     // 'present' | 'empty'
@@ -48,32 +25,90 @@ export default function PostCollectionOverlay({ visible, task, gpsPos, onComplet
   const [photos, setPhotos] = useState([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const isOnline = useOnline()
+  const inspectQueue = getQueue('inspection_submissions')
+  const { user } = useAuth()
 
   useEffect(() => {
-    if (visible) { setOutcome(''); setNotes(''); setPhotos([]); setError('') }
+    if (visible) { setOutcome(''); setNotes(''); setPhotos([]); setError(''); setSubmitting(false); }
   }, [visible, task?.id])
 
   async function handleSubmit() {
+    if (!user?.id) {
+      setError('You must be logged in to submit a verification.')
+      return
+    }
     if (!outcome) { setError('Please select an inspection outcome.'); return }
     if (photos.length === 0) { setError('At least one photo is required.'); return }
     if (!gpsPos) { setError('GPS location required.'); return }
 
     setSubmitting(true); setError('')
+
+    const payload = {
+      ownerId: String(user.id),
+      schedule_id: task.schedule_id,
+      stop_order: task.stop_order,
+      lat: gpsPos.lat,
+      lng: gpsPos.lng,
+      outcome,
+      notes: notes.trim(),
+      photos,
+      type: 'post_verify'
+    }
+
+    if (isOnline) {
+      try {
+        const form = new FormData()
+        form.append('schedule_id', payload.schedule_id)
+        form.append('stop_order', payload.stop_order)
+        form.append('lat', payload.lat)
+        form.append('lng', payload.lng)
+        form.append('outcome', payload.outcome)
+        form.append('notes', payload.notes)
+        photos.forEach((file, i) => form.append(i === 0 ? 'photo' : `photo_${i + 1}`, file))
+        await api.post('/api/watcher/stop-validations/post-verify/', form)
+        broadcastPickupStatusSync()
+        onComplete()
+        return
+      } catch (err) {
+        if (err.response?.status === 400) {
+          setError(err.response?.data?.error || 'Stop already verified')
+          setTimeout(() => onComplete(), 2500)
+          return
+        } else if (!err.response) {
+          // Network blip → fall through to queue
+        } else {
+          setError('Server error. Please try again.')
+          setSubmitting(false)
+          return
+        }
+      }
+    }
+
+    // ── OFFLINE / FALLBACK PATH ─────────────────────────────────────────────
     try {
-      const form = new FormData()
-      form.append('schedule_id', task.schedule_id)
-      form.append('stop_order', task.stop_order)
-      form.append('lat', gpsPos.lat)
-      form.append('lng', gpsPos.lng)
-      form.append('outcome', outcome)
-      form.append('notes', notes.trim())
-      photos.forEach((file, i) => form.append(i === 0 ? 'photo' : `photo_${i + 1}`, file))
-      await api.post('/api/watcher/stop-validations/post-verify/', form)
+      const estimatedMB = await estimateQueueStorageMB(inspectQueue)
+      if (isNearStorageLimit(estimatedMB)) {
+        setError(`Offline storage is getting full (${estimatedMB.toFixed(1)}MB used). Please reconnect to sync your pending inspections before continuing.`)
+        setSubmitting(false)
+        return
+      }
+
+      // Convert photos to base64 before enqueuing
+      const serializedPhotos = await Promise.all(
+        photos.map(file => blobToBase64(file))
+      )
+
+      const offlinePayload = {
+        ...payload,
+        photos: serializedPhotos
+      }
+
+      await inspectQueue.enqueue(offlinePayload, 1)
       broadcastPickupStatusSync()
       onComplete()
-    } catch (err) {
-      setError(err.response?.data?.error || 'Submission failed.')
-    } finally {
+    } catch (e) {
+      setError('Failed to save offline. Storage may be full.')
       setSubmitting(false)
     }
   }

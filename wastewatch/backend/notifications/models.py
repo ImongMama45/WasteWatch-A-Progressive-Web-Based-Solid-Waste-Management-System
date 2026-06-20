@@ -8,6 +8,8 @@ class NotificationType(models.TextChoices):
     TRUCK_NEAR      = 'TRUCK_NEAR',      'Truck Near'
     COLLECTION_DONE = 'COLLECTION_DONE', 'Collection Done'
     DUMPSITE_INBOUND = 'DUMPSITE_INBOUND', 'Dumpsite Inbound'
+    WATCHER_STOP_VERIFIED = 'WATCHER_STOP_VERIFIED', 'Watcher Stop Verified'
+    WATCHER_ROUTE_SUMMARY = 'WATCHER_ROUTE_SUMMARY', 'Watcher Route Summary'
 
 
 class Notification(models.Model):
@@ -31,7 +33,7 @@ class Notification(models.Model):
     title   = models.CharField(max_length=200)
     message = models.TextField()
     type    = models.CharField(
-        max_length=20,
+        max_length=50,
         choices=NotificationType.choices,
         default=NotificationType.ANNOUNCEMENT,
     )

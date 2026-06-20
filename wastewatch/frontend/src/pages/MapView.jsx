@@ -1414,6 +1414,7 @@ export default function MapView() {
 
       activeTrucksRef.current.forEach(truck => {
         if (allowedShiftIds && !allowedShiftIds.has(truck.id)) return
+        if (truck.lat == null || truck.lng == null) return
 
         const truckColor = STATUS_COLORS[truck.status] || '#14b8a6'
         const icon = L.divIcon({
@@ -1453,7 +1454,7 @@ export default function MapView() {
             truckModel: truck.truckModel || '—',
             driver: truck.driver,
             plateNumber: truck.truckId,
-            opStatus: truck.op_status,
+            opStatus: truck.phase_status || truck.op_status,
             barangay: 'Live Tracking',
             status: truck.status,
             lastUpdate,
@@ -1906,6 +1907,11 @@ const CONN_STATUS_META = {
 
 // Operational status (op_status from shift) → human label
 const OP_STATUS_LABELS = {
+  navigate_to_base: 'Navigating to Base',
+  confirm_start: 'At Base (Preparing)',
+  checkin: 'Checking In',
+  shiftroute: 'On Route',
+  end_shift: 'Ending Shift',
   on_duty: 'On Duty',
   on_route: 'On Route',
   delayed: 'Delayed',

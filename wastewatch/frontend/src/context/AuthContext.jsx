@@ -56,7 +56,7 @@ export function AuthProvider({ children }) {
         saveUserCache(res.data)
       })
       .catch(err => {
-        if (err.response?.status === 401) {
+        if (err.response?.status === 401 || err.response?.status === 403) {
           // Server says not logged in — clear stale cache
           setUser(null)
           saveUserCache(null)

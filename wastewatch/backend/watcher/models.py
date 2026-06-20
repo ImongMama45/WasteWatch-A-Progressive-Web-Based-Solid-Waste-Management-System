@@ -226,7 +226,10 @@ class StopValidationStatus(models.TextChoices):
     EMPTY_STOP = 'EMPTY_STOP', 'Empty Stop'
     COLLECTION_REPORTED = 'COLLECTION_REPORTED', 'Collection Reported'
     VERIFIED_COLLECTED = 'VERIFIED_COLLECTED', 'Verified Collected'
-    COLLECTION_DISPUTED = 'COLLECTION_DISPUTED', 'Collection Disputed'
+    # NOTE: The DB constant is intentionally named COLLECTION_DISPUTED to avoid
+    # a data migration. Only the human-readable label is changed to 'Missed'.
+    # Do NOT rename the constant without a matching RunPython data migration.
+    COLLECTION_DISPUTED = 'COLLECTION_DISPUTED', 'Missed'
 
 
 class StopValidation(models.Model):

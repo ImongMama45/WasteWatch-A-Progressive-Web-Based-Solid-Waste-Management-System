@@ -285,7 +285,7 @@ export const ROLE_NAV_CONFIG = {
     {
       type: 'group', label: 'Monitoring', icon: 'hotspot',
       items: [
-        { path: '/admin/reports',      label: 'Waste Reports',     icon: 'report' },
+
         { path: '/admin/hotspots',     label: 'Reported Hotspots', icon: 'hotspot' },
         { path: '/admin/escalations',  label: 'Escalations',       icon: 'escalation' },
         { path: '/admin/activity-log', label: 'Activity Logs',     icon: 'activity' },
@@ -301,6 +301,7 @@ export const ROLE_NAV_CONFIG = {
       type: 'group', label: 'Administration', icon: 'users',
       items: [
         { path: '/admin/users', label: 'User Management', icon: 'users' },
+        { path: '/admin/barangays', label: 'Barangay Management', icon: 'map' },
       ],
     },
     { type: 'item', path: '/announcements', label: 'News & Alerts', icon: 'news' },
@@ -422,9 +423,10 @@ export const SIDEBAR_NAV = {
     { path: '/announcements', label: 'News & Alerts', icon: '📰' },
     { path: '/schedule', label: 'Schedule', icon: '📅' },
     { path: '/map', label: 'Live Map', icon: '🗺️' },
-    { path: '/admin/reports', label: 'Waste Reports', icon: '📋' },
+
     { path: '/admin/trucks', label: 'Trucks & Drivers', icon: '🚛' },
     { path: '/admin/users', label: 'User Management', icon: '👥' },
+    { path: '/admin/barangays', label: 'Barangay Management', icon: '🗺️' },
     { path: '/admin/dumpsites', label: 'Dumpsites', icon: '🏔️' },
     { path: '/admin/routes', label: 'Routes', icon: '🗺️' },
     { path: '/admin/escalations', label: 'Escalations', icon: '⚠️' },

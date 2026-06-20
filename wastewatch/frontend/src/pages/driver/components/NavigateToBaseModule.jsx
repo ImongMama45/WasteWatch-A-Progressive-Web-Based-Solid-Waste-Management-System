@@ -42,7 +42,7 @@ function decodePolyline(encoded) {
   return pts
 }
 
-export default function NavigateToBaseModule({ setRouteState }) {
+export default function NavigateToBaseModule({ onAdvance, shift }) {
   const { user } = useAuth()
   const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } =
     useGpsTracking({ enabled: true, intervalMs: 4000, syncEnabled: false })
@@ -95,9 +95,9 @@ export default function NavigateToBaseModule({ setRouteState }) {
     const dist = haversineDistance(gpsPos.lat, gpsPos.lng, Number(baseLocation.lat), Number(baseLocation.lng))
     if (dist <= BASE_ARRIVAL_RADIUS_M) {
       setSkipped(true)
-      setRouteState('confirm_start')
+      onAdvance('confirm_start')
     }
-  }, [gpsPos, baseLocation, skipped, setRouteState])
+  }, [gpsPos, baseLocation, skipped, onAdvance])
 
   // ── Distance & arrival ────────────────────────────────────────────────────
   const distanceToBase = gpsPos && baseLocation
@@ -342,7 +342,7 @@ export default function NavigateToBaseModule({ setRouteState }) {
 
             <button
               disabled={!isAtBase}
-              onClick={() => setRouteState('confirm_start')}
+              onClick={() => onAdvance('confirm_start')}
               style={{
                 width: '100%', maxWidth: 340, padding: '18px', borderRadius: 30, border: 'none',
                 fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900, letterSpacing: '.06em',
@@ -357,7 +357,7 @@ export default function NavigateToBaseModule({ setRouteState }) {
             </button>
 
             {import.meta.env.DEV && (
-              <button onClick={() => setRouteState('confirm_start')} style={{ width: '100%', maxWidth: 340, padding: '10px', borderRadius: 20, background: 'none', border: '1px dashed #cbd5e1', color: '#94a3b8', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+              <button onClick={() => onAdvance('confirm_start')} style={{ width: '100%', maxWidth: 340, padding: '10px', borderRadius: 20, background: 'none', border: '1px dashed #cbd5e1', color: '#94a3b8', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
                 DEV: Skip to Confirm Start
               </button>
             )}

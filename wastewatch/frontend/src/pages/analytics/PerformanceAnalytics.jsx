@@ -8,6 +8,7 @@
  */
 
 import { useState } from 'react'
+import { Trophy, Scale, Route, ClipboardCheck, Truck, Droplet, CheckCircle2, XCircle, TrendingUp, BarChart3, PieChart, Clock, ShieldCheck, ThumbsUp, AlertTriangle, AlertCircle } from 'lucide-react'
 
 // ── Mock Data ─────────────────────────────────────────────────────────────────
 
@@ -196,7 +197,7 @@ function PaCard({ icon, iconVariant, title, subtitle, children }) {
         <div className="ac-card-left">
           {icon && (
             <div className={`ac-card-icon${iconVariant ? ` ac-card-icon--${iconVariant}` : ''}`}>
-              <span className="msi" style={{ fontSize: 18 }}>{icon}</span>
+              {icon}
             </div>
           )}
           <div className="ac-card-titles">
@@ -238,7 +239,7 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
             value: fleetScore,
             unit: '/100',
             sub: `${fleetScore >= 80 ? 'Excellent' : fleetScore >= 60 ? 'Good' : 'Needs Attention'} overall`,
-            icon: 'emoji_events',
+            icon: Trophy,
             variant: scoreVariant,
             ring: fleetScore,
           },
@@ -248,7 +249,7 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
             value: `${(kpi.collected / 1000).toFixed(1)}`,
             unit: 't',
             sub: `${kpi.collected.toLocaleString()} kg this period`,
-            icon: 'scale',
+            icon: Scale,
             variant: 'blue',
           },
           {
@@ -257,7 +258,7 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
             value: completionRate,
             unit: '%',
             sub: `${kpi.completed} of ${kpi.routes} routes done`,
-            icon: 'route',
+            icon: Route,
             variant: completionRate >= 85 ? 'green' : completionRate >= 65 ? 'amber' : 'red',
             bar: completionRate,
           },
@@ -267,7 +268,7 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
             value: resolutionRate,
             unit: '%',
             sub: `${kpi.resolved} of ${kpi.reports} reports resolved`,
-            icon: 'task_alt',
+            icon: ClipboardCheck,
             variant: resolutionRate >= 80 ? 'green' : resolutionRate >= 60 ? 'amber' : 'red',
             bar: resolutionRate,
           },
@@ -277,19 +278,21 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
             value: fleetUtil,
             unit: '%',
             sub: `avg bin fill across ${trucks.length} trucks`,
-            icon: 'local_shipping',
+            icon: Truck,
             variant: utilVariant,
             bar: fleetUtil,
           },
         ]
         return (
           <div className="ac-kpi-grid ac-kpi-grid--5" style={{ marginBottom: 20 }}>
-            {cards.map(c => (
+            {cards.map(c => {
+              const Icon = c.icon;
+              return (
               <div key={c.id} className={`ac-kpi-card ac-kpi-card--${c.variant} ac-kpi-card--v2`}>
                 <div className="ac-kpi-v2-glow" />
                 <div className="ac-kpi-v2-head">
                   <div className="ac-kpi-icon">
-                    <span className="msi" style={{ fontSize: 18 }}>{c.icon}</span>
+                    <Icon size={18} />
                   </div>
                   <span className="ac-kpi-label">{c.label}</span>
                 </div>
@@ -305,9 +308,10 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                     />
                   </div>
                 )}
-                <div className="ac-kpi-v2-sub">{c.sub}</div>
+                {c.sub && <div className="ac-kpi-v2-sub">{c.sub}</div>}
               </div>
-            ))}
+              )
+            })}
           </div>
         )
       })()}
@@ -336,7 +340,7 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
             { bg: 'var(--border)', color: 'var(--text-muted)', label: '' },
           ]
           return (
-            <PaCard icon="emoji_events" iconVariant="blue" title="Fleet Performance Leaderboard" subtitle="Per-vehicle score · routes, stops & utilisation">
+            <PaCard icon={<Trophy size={18} />} iconVariant="blue" title="Fleet Performance Leaderboard" subtitle="Per-vehicle score · routes, stops & utilisation">
               <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
                 {Object.entries(STATUS_META).map(([k, m]) => (
                   <span key={k} style={{
@@ -401,21 +405,24 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                       </div>
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         {[
-                          { icon: 'check_circle', val: `${t.completed}/${t.routes}`, label: 'routes', color: 'var(--accent)' },
-                          { icon: 'cancel', val: t.missed, label: 'missed', color: t.missed > 0 ? 'var(--danger)' : 'var(--text-muted)' },
-                          { icon: 'water_drop', val: `${t.fill}%`, label: 'fill', color: t.fill > 80 ? 'var(--warning)' : 'var(--info)' },
-                          { icon: 'route', val: `${t.km} km`, label: 'driven', color: 'var(--text-muted)' },
-                        ].map(p => (
-                          <div key={p.label} style={{
+                          { icon: CheckCircle2, val: `${t.completed}/${t.routes}`, label: 'routes', color: 'var(--accent)' },
+                          { icon: XCircle, val: t.missed, label: 'missed', color: t.missed > 0 ? 'var(--danger)' : 'var(--text-muted)' },
+                          { icon: Droplet, val: `${t.fill}%`, label: 'fill', color: t.fill > 80 ? 'var(--warning)' : 'var(--info)' },
+                          { icon: Route, val: `${t.km} km`, label: 'driven', color: 'var(--text-muted)' },
+                        ].map((p, idx) => {
+                          const Icon = p.icon;
+                          return (
+                          <div key={p.label || idx} style={{
                             display: 'flex', alignItems: 'center', gap: 3,
                             background: 'var(--surface)', border: '1px solid var(--border)',
                             borderRadius: 20, padding: '2px 7px',
                           }}>
-                            <span className="msi" style={{ fontSize: 11, color: p.color }}>{p.icon}</span>
+                            <Icon size={11} color={p.color} />
                             <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text)' }}>{p.val}</span>
                             <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{p.label}</span>
                           </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     </div>
                   )
@@ -424,7 +431,7 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
             </PaCard>
           )
         })()}
-        <PaCard icon="trending_up" iconVariant="amber" title="Daily Issue Trend" subtitle="Reported incidents per day">
+        <PaCard icon={<TrendingUp size={18} />} iconVariant="amber" title="Daily Issue Trend" subtitle="Reported incidents per day">
           <div style={{ display: 'flex', gap: 20, marginBottom: 16 }}>
             {[
               { label: 'Peak Day', value: TREND_LABELS[trend.indexOf(Math.max(...trend))], color: 'var(--danger)' },
@@ -472,7 +479,7 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
           }
           const MEDALS = ['🥇', '🥈', '🥉']
           return (
-            <PaCard icon="leaderboard" iconVariant="red" title="Barangay Performance Leaderboard" subtitle="Service score · resolution efficiency · activity">
+            <PaCard icon={<BarChart3 size={18} />} iconVariant="red" title="Barangay Performance Leaderboard" subtitle="Service score · resolution efficiency · activity">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
                 {ranked.map((b, i) => {
                   const tm = TIER[b.tier]
@@ -531,7 +538,7 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                           display: 'flex', alignItems: 'center', gap: 3,
                           background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 20, padding: '2px 7px',
                         }}>
-                          <span className="msi" style={{ fontSize: 11, color: tm.color }}>pie_chart</span>
+                          <PieChart size={11} color={tm.color} />
                           <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text)' }}>{b.resRate}%</span>
                           <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>resolution</span>
                         </div>
@@ -539,7 +546,7 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                           display: 'flex', alignItems: 'center', gap: 3,
                           background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 20, padding: '2px 7px',
                         }}>
-                          <span className="msi" style={{ fontSize: 11, color: 'var(--info)' }}>check_circle</span>
+                          <CheckCircle2 size={11} color="var(--info)" />
                           <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text)' }}>{b.resolved}</span>
                           <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>resolved</span>
                         </div>
@@ -547,7 +554,7 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                           display: 'flex', alignItems: 'center', gap: 3,
                           background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 20, padding: '2px 7px',
                         }}>
-                          <span className="msi" style={{ fontSize: 11, color: b.reports - b.resolved > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>pending</span>
+                          <Clock size={11} color={b.reports - b.resolved > 0 ? 'var(--danger)' : 'var(--text-muted)'} />
                           <span style={{ fontSize: 10, fontWeight: 700, color: b.reports - b.resolved > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>{b.reports - b.resolved}</span>
                           <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>pending</span>
                         </div>
@@ -559,7 +566,7 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
             </PaCard>
           )
         })()}
-        <PaCard icon="scale" iconVariant="blue" title="Waste Collected (kg)" subtitle="Per barangay, current period">
+        <PaCard icon={<Scale size={18} />} iconVariant="blue" title="Waste Collected (kg)" subtitle="Per barangay, current period">
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 100, marginBottom: 8 }}>
             {brgy.map(b => <Bar key={b.name} value={b.kg} max={maxKg} color="var(--info)" height={100} />)}
           </div>
@@ -597,16 +604,16 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
         })
         const fleetAvg = Math.round(enriched.reduce((s, t) => s + t.reliability, 0) / enriched.length)
         const CAT = {
-          excellent: { label: 'Excellent', color: 'var(--accent)', bg: 'rgba(46,204,113,.1)', border: 'rgba(46,204,113,.3)', icon: 'verified' },
-          good: { label: 'Good', color: 'var(--info)', bg: 'rgba(93,173,226,.1)', border: 'rgba(93,173,226,.3)', icon: 'thumb_up' },
-          'needs-work': { label: 'Needs Work', color: 'var(--warning)', bg: 'rgba(243,156,18,.1)', border: 'rgba(243,156,18,.3)', icon: 'warning' },
-          critical: { label: 'Critical', color: 'var(--danger)', bg: 'rgba(231,76,60,.1)', border: 'rgba(231,76,60,.3)', icon: 'error' },
+          excellent: { label: 'Excellent', color: 'var(--accent)', bg: 'rgba(46,204,113,.1)', border: 'rgba(46,204,113,.3)', icon: ShieldCheck },
+          good: { label: 'Good', color: 'var(--info)', bg: 'rgba(93,173,226,.1)', border: 'rgba(93,173,226,.3)', icon: ThumbsUp },
+          'needs-work': { label: 'Needs Work', color: 'var(--warning)', bg: 'rgba(243,156,18,.1)', border: 'rgba(243,156,18,.3)', icon: AlertTriangle },
+          critical: { label: 'Critical', color: 'var(--danger)', bg: 'rgba(231,76,60,.1)', border: 'rgba(231,76,60,.3)', icon: AlertCircle },
         }
         const catCounts = Object.keys(CAT).map(k => ({
           key: k, ...CAT[k], count: enriched.filter(t => t.category === k).length,
         }))
         return (
-          <PaCard icon="verified_user" iconVariant="green" title="Route Reliability Analysis" subtitle="Per-vehicle reliability score · completion rate · fleet average">
+          <PaCard icon={<ShieldCheck size={18} />} iconVariant="green" title="Route Reliability Analysis" subtitle="Per-vehicle reliability score · completion rate · fleet average">
             <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 16, alignItems: 'center', marginBottom: 20 }}>
               <div style={{ position: 'relative', width: 80, height: 80, flexShrink: 0 }}>
                 <svg width="80" height="80" viewBox="0 0 80 80">
@@ -627,19 +634,22 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                {catCounts.map(c => (
+                {catCounts.map(c => {
+                  const Icon = c.icon;
+                  return (
                   <div key={c.key} style={{
                     display: 'flex', alignItems: 'center', gap: 7,
                     background: c.bg, border: `1px solid ${c.border}`,
                     borderRadius: 10, padding: '7px 10px',
                   }}>
-                    <span className="msi" style={{ fontSize: 15, color: c.color }}>{c.icon}</span>
+                    <Icon size={15} color={c.color} />
                     <div>
                       <div style={{ fontSize: 11, fontWeight: 700, color: c.color }}>{c.label}</div>
                       <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{c.count} truck{c.count !== 1 ? 's' : ''}</div>
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 2 }}>Fleet avg</div>
@@ -693,12 +703,12 @@ export default function PerformanceAnalytics({ selectedBarangay, selectedPeriod,
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span className="msi" style={{ fontSize: 12, color: 'var(--accent)' }}>check_circle</span>
+                        <CheckCircle2 size={12} color="var(--accent)" />
                         <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text)' }}>{t.completion}%</span>
                         <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>completion</span>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span className="msi" style={{ fontSize: 12, color: t.missed > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>cancel</span>
+                        <XCircle size={12} color={t.missed > 0 ? 'var(--danger)' : 'var(--text-muted)'} />
                         <span style={{ fontSize: 10, fontWeight: 700, color: t.missed > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>{t.missed}</span>
                         <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>missed</span>
                       </div>

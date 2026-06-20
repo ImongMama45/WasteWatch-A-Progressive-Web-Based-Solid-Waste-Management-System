@@ -25,7 +25,9 @@ import {
     subscribePickupStatusSync,
 } from '../../utils/pickupStatusSync'
 import PostCollectionOverlay from './components/PostCollectionOverlay'
+import StopCompletedOverlay from './components/StopCompletedOverlay'
 import { ICONS } from '../../api/navConfig'
+import { compressImage } from '../../utils/imageCompressor'
 
 const ARRIVAL_RADIUS_M = 30
 const LUCENA_CENTER = [13.9373, 121.617]
@@ -154,10 +156,11 @@ function MapLegend() {
 
 // ─── MULTI-PHOTO PICKER ───────────────────────────────────────────────────────
 function MultiPhotoPicker({ photos, onChange }) {
-    function handleAdd(e) {
+    async function handleAdd(e) {
         const files = Array.from(e.target.files || [])
         if (!files.length) return
-        const next = [...photos, ...files].slice(0, MAX_PHOTOS)
+        const compressedFiles = await Promise.all(files.map(f => compressImage(f)))
+        const next = [...photos, ...compressedFiles].slice(0, MAX_PHOTOS)
         onChange(next)
         e.target.value = ''
     }
@@ -293,6 +296,7 @@ export default function ConfirmCollectionModule() {
     const [loading, setLoading] = useState(true)
     const [hasScheduleToday, setHasScheduleToday] = useState(true)
     const [selectedTask, setSelectedTask] = useState(null)
+    const [completedTask, setCompletedTask] = useState(null)
     const [orsRoute, setOrsRoute] = useState(null)
 
     useEffect(() => { injectStopMarkerStyles() }, [])
@@ -692,9 +696,21 @@ export default function ConfirmCollectionModule() {
                 }
                 task={selectedTask}
                 gpsPos={gpsPos}
-                onComplete={() => { setSelectedTask(null); loadStops() }}
+                onComplete={() => { 
+                    setCompletedTask(selectedTask);
+                    setSelectedTask(null); 
+                    loadStops() 
+                }}
                 onBack={() => setSelectedTask(null)}
                 MultiPhotoPicker={MultiPhotoPicker}
+            />
+
+            <StopCompletedOverlay 
+                task={completedTask} 
+                onNext={() => setCompletedTask(null)} 
+                totalStops={stops.length}
+                pendingCount={pendingCount} 
+                type="post" 
             />
         </>
     )

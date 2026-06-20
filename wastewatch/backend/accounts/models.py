@@ -17,6 +17,8 @@ Why AbstractUser instead of AbstractBaseUser?
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from cloudinary.models import CloudinaryField
+from django.utils import timezone
+from datetime import timedelta
 
 
 # ---------------------------------------------------------------------------
@@ -26,6 +28,11 @@ from cloudinary.models import CloudinaryField
 class Barangay(models.Model):
     name       = models.CharField(max_length=100, unique=True)
     population = models.PositiveIntegerField(default=0)
+    
+    # Geographic data for map rendering
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+    boundary_geojson = models.JSONField(null=True, blank=True, help_text="GeoJSON representation of the barangay boundary")
 
     class Meta:
         verbose_name_plural = 'Barangays'
@@ -149,6 +156,8 @@ class User(AbstractUser):
         help_text="User's profile picture."
     )
 
+    last_activity = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     # Tell Django to use email as the login field
@@ -197,6 +206,23 @@ class User(AbstractUser):
     def is_admin_role(self):
         """Separate from Django's is_staff/is_superuser — app-level admin."""
         return self.role == UserRole.ADMIN
+
+    # -----------------------------------------------------------------------
+    # Presence status tracking
+    # -----------------------------------------------------------------------
+    ONLINE_THRESHOLD  = timedelta(minutes=2)
+    IDLE_THRESHOLD    = timedelta(minutes=5)
+
+    @property
+    def presence_status(self):
+        if not self.last_activity:
+            return 'offline'
+        delta = timezone.now() - self.last_activity
+        if delta <= self.ONLINE_THRESHOLD:
+            return 'online'
+        if delta <= self.IDLE_THRESHOLD:
+            return 'idle'
+        return 'offline'
 
     # -----------------------------------------------------------------------
     # Override save() to auto-generate a username from email so AbstractUser

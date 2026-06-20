@@ -60,11 +60,15 @@ import {
   broadcastPickupStatusSync,
   buildStopValidationSnapshot,
   isRoutableStopStatus,
+  isCompletedStopStatus,
+  isMissedStopStatus,
   normalizeStopStatus,
   STOP_STATUS_COLORS,
   STOP_STATUS_LABELS,
   subscribePickupStatusSync,
 } from '../../../utils/pickupStatusSync'
+import useReassignedStops from '../../../hooks/useReassignedStops'
+import TruckNotFull from './TruckNotFull'
 
 const STOP_COLORS = STOP_STATUS_COLORS
 
@@ -498,7 +502,7 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
 
 // ─── STOP COMPLETED OVERLAY ───────────────────────────────────────────────────
 
-function StopCompletedOverlay({ visible, schedule, currentStopIndex, stopStatuses, gpsPos, onNextStop, onEndShift, onExtendedMode }) {
+function StopCompletedOverlay({ visible, schedule, currentStopIndex, stopStatuses, gpsPos, onNextStop, onEndShift, onExtendedMode, onShowTruckNotFull }) {
   const { user } = useAuth()
   const firstName = user?.full_name?.split(' ')[0] || 'Driver'
   const [showRouteList, setShowRouteList] = useState(false)
@@ -512,10 +516,12 @@ function StopCompletedOverlay({ visible, schedule, currentStopIndex, stopStatuse
 
   const stops = (schedule?.waypoints || []).slice(1).map((wp, i) => {
     const wpIndex = i + 1
-    const isCompleted = wpIndex <= currentStopIndex
+    const status = normalizeStopStatus(stopStatuses.get(wpIndex))
+    const isCompleted = isCompletedStopStatus(status)
     return {
       id: wpIndex,
       name: wp.name || wp.label || `Stop ${wpIndex}`,
+      rawStatus: status,
       status: isCompleted ? 'completed' : 'pending',
     }
   })
@@ -640,22 +646,18 @@ function StopCompletedOverlay({ visible, schedule, currentStopIndex, stopStatuse
           </p>
           {isRouteComplete ? (
             <>
-              <button onClick={onEndShift} style={{
+              <button onClick={() => {
+                // Persist snapshot so TruckNotFull can read it even after re-render
+                try { sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...stopStatuses])) } catch { }
+                sessionStorage.setItem('ww_route_complete', 'true')
+                if (onShowTruckNotFull) onShowTruckNotFull()
+              }} style={{
                 width: '100%', padding: '16px', borderRadius: 14,
                 background: '#0f172a', color: '#fff', border: 'none',
                 fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900,
-                cursor: 'pointer', marginBottom: 8,
+                cursor: 'pointer',
                 boxShadow: '0 6px 20px rgba(15,23,42,0.25)', letterSpacing: '.04em',
-              }}>Done</button>
-              <p style={{ textAlign: 'center', fontSize: 11, color: '#94a3b8', margin: '0 0 8px' }}>
-                Accept Unclaimed dump site
-              </p>
-              <button onClick={onExtendedMode} style={{
-                width: '100%', padding: '16px', borderRadius: 14,
-                background: '#0f172a', color: '#fff', border: 'none',
-                fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900,
-                cursor: 'pointer', boxShadow: '0 6px 20px rgba(15,23,42,0.25)', letterSpacing: '.04em',
-              }}>My Truck is still not full</button>
+              }}>View Route Summary →</button>
             </>
           ) : (
             <>
@@ -684,259 +686,16 @@ function StopCompletedOverlay({ visible, schedule, currentStopIndex, stopStatuse
   )
 }
 
-// ─── END SHIFT OVERLAY ────────────────────────────────────────────────────────
-
-const EARLY_REASONS = [
-  'Truck breakdown / mechanical issue',
-  'Medical emergency',
-  'Road is blocked / inaccessible',
-  'Insufficient fuel',
-  'Weather conditions',
-  'End of scheduled shift hours',
-  'Other',
-]
-
-const BASE_ARRIVAL_RADIUS_M = 150
-
-function SummaryRow({ icon, label, value }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 0', borderBottom: '1px solid #f1f5f9' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ fontSize: 16 }}>{icon}</span>
-        <span style={{ fontSize: 13, color: '#64748b', fontWeight: 600 }}>{label}</span>
-      </div>
-      <span style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>{value}</span>
-    </div>
-  )
-}
-
-function Fireworks() {
-  const particles = Array.from({ length: 24 }, (_, i) => {
-    const angle = (i / 24) * 360
-    const dist = 70 + Math.random() * 50
-    const colors = ['#2ecc71', '#3b82f6', '#f59e0b', '#ec4899', '#22d3ee', '#a78bfa', '#fff']
-    return { x: Math.cos((angle * Math.PI) / 180) * dist, y: Math.sin((angle * Math.PI) / 180) * dist, color: colors[i % colors.length], delay: Math.random() * 0.4, size: 5 + Math.random() * 7 }
-  })
-  return (
-    <div style={{ position: 'relative', width: 180, height: 180, margin: '0 auto' }}>
-      {particles.map((p, i) => (
-        <div key={i} style={{ position: 'absolute', top: '50%', left: '50%', width: p.size, height: p.size, borderRadius: i % 3 === 0 ? '50%' : '2px', background: p.color, animation: `fwBurst 1.2s cubic-bezier(.22,.61,.36,1) ${p.delay}s both`, '--tx': `${p.x}px`, '--ty': `${p.y}px` }} />
-      ))}
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'fwCheck .5s cubic-bezier(.36,.07,.19,.97) .2s both' }}>
-        <div style={{ width: 70, height: 70, borderRadius: '50%', background: '#1e2a3a', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 32px rgba(15,23,42,0.3)' }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" width="32" height="32">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function EndShiftOverlay({ visible, gpsPos, schedule, onClose }) {
-  const navigate = useNavigate()
-  const { user } = useAuth()
-  const { formattedTime, startTime, endShift } = useShiftTimer()
-  const firstName = user?.full_name?.split(' ')[0] || 'Driver'
-
-  const isRouteComplete = sessionStorage.getItem('ww_route_complete') === 'true'
-  const completedStops = parseInt(sessionStorage.getItem('ww_completed_stops') || '0', 10)
-  const totalStops = parseInt(sessionStorage.getItem('ww_total_stops') || '0', 10)
-
-  const [phase, setPhase] = useState('returning')
-  const baseLocation = schedule?.waypoints?.[0] || null
-  const baseName = baseLocation?.label || 'Home Base'
-
-  const distanceToBase = gpsPos && baseLocation
-    ? haversineDistance(gpsPos.lat, gpsPos.lng, Number(baseLocation.lat), Number(baseLocation.lng))
-    : null
-  const isAtBase = distanceToBase != null && distanceToBase <= BASE_ARRIVAL_RADIUS_M
-
-  const [reason, setReason] = useState('')
-  const [customNote, setCustomNote] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [submitted, setSubmitted] = useState(false)
-
-  useEffect(() => {
-    if (!visible) return
-    setPhase('returning'); setReason(''); setCustomNote(''); setSubmitted(false)
-  }, [visible])
-
-  const ROUTE_SESSION_KEYS = ['ww_route_state', 'ww_current_stop_index', 'ww_stop_statuses', 'ww_current_stop', 'ww_route_complete', 'ww_extended_mode', 'ww_completed_stops', 'ww_total_stops']
-  function clearRouteSession() { ROUTE_SESSION_KEYS.forEach(k => sessionStorage.removeItem(k)) }
-
-  async function handleEarlySubmit() {
-    if (!reason || submitting) return
-    setSubmitting(true)
-    try {
-      const endTime = new Date()
-      const durationMs = startTime ? (endTime - new Date(startTime)) : 0
-      await api.post('/api/driver/shift/end/', { ended_early: true, reason, notes: customNote.trim() || null, started_at: startTime ? new Date(startTime).toISOString() : null, ended_at: endTime.toISOString(), duration_ms: durationMs })
-      endShift(); clearRouteSession(); setSubmitted(true)
-    } catch (err) {
-      notify({ variant: 'error-dark', message: err.response?.data?.error || 'Failed to end shift. Please try again.' })
-    } finally { setSubmitting(false) }
-  }
-
-  async function handleDone() {
-    if (submitting) return
-    setSubmitting(true)
-    try {
-      const endTime = new Date()
-      const durationMs = startTime ? (endTime - new Date(startTime)) : 0
-      await api.post('/api/driver/shift/end/', { ended_early: false, started_at: startTime ? new Date(startTime).toISOString() : null, ended_at: endTime.toISOString(), duration_ms: durationMs })
-      endShift(); clearRouteSession()
-      navigate('/dashboard', { replace: true })
-    } catch (err) {
-      notify({ variant: 'error-dark', message: err.response?.data?.error || 'Failed to end shift. Please try again.' })
-    } finally { setSubmitting(false) }
-  }
-
-  const distLabel = distanceToBase == null ? 'Calculating…'
-    : distanceToBase > 1000 ? `${(distanceToBase / 1000).toFixed(1)} km to base`
-      : `${Math.round(distanceToBase)} m to base`
-
-  return (
-    <RouteOverlay visible={visible}>
-      <style>{`
-        @keyframes fwBurst { 0%{transform:translate(-50%,-50%) scale(1);opacity:1} 100%{transform:translate(calc(-50% + var(--tx)),calc(-50% + var(--ty))) scale(0);opacity:0} }
-        @keyframes fwCheck { 0%{transform:scale(0);opacity:0} 60%{transform:scale(1.12)} 80%{transform:scale(0.96)} 100%{transform:scale(1);opacity:1} }
-        @keyframes esFadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
-        .es-fade1 { animation: esFadeUp .3s ease .1s both; }
-        .es-fade2 { animation: esFadeUp .3s ease .4s both; }
-        .es-fade3 { animation: esFadeUp .3s ease .6s both; }
-        @keyframes esSlideUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
-      `}</style>
-
-      {phase === 'returning' && (
-        <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
-          <div style={{ background: 'rgba(15,23,42,0.97)', padding: '24px 20px 20px', color: '#fff', borderRadius: '18px 18px 0 0' }}>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(22,163,74,0.15)', border: '1px solid rgba(22,163,74,0.5)', borderRadius: 20, padding: '3px 10px' }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: '#16a34a', letterSpacing: '.04em' }}>RETURNING TO BASE</span>
-              </div>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: '3px 10px' }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.65)', letterSpacing: '.04em' }}>⏱ {formattedTime}</span>
-              </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-              <span style={{ fontSize: 22, marginTop: 1 }}>🏠</span>
-              <div>
-                <div style={{ fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900, marginBottom: 2 }}>{baseName}</div>
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>Return to base before ending your shift · {distLabel}</div>
-              </div>
-            </div>
-          </div>
-
-          <div style={{ margin: '16px 16px 0', padding: '12px 16px', background: 'rgba(22,163,74,0.06)', border: '1px solid rgba(22,163,74,0.2)', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 18 }}>🗺️</span>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#16a34a' }}>Map active behind</div>
-              <div style={{ fontSize: 11, color: '#64748b' }}>GPS is still tracking your route</div>
-            </div>
-          </div>
-
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px 20px' }}>
-            <div style={{ width: 100, height: 100, borderRadius: '50%', background: isAtBase ? '#16a34a' : '#1e2a3a', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 8px 28px ${isAtBase ? 'rgba(22,163,74,0.35)' : 'rgba(15,23,42,0.25)'}`, transition: 'all .4s ease', marginBottom: 16 }}>
-              <span style={{ fontSize: 32 }}>🏠</span>
-            </div>
-            <p style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 800, textAlign: 'center', color: isAtBase ? '#16a34a' : '#64748b', marginBottom: 4, transition: 'color .3s' }}>
-              {isAtBase ? "You've reached home base!" : 'Make your way back to base'}
-            </p>
-            <p style={{ fontSize: 12, color: '#94a3b8', textAlign: 'center', marginBottom: 0 }}>{distLabel}</p>
-          </div>
-
-          <div style={{ padding: '0 20px 28px' }}>
-            <button disabled={!isAtBase} onClick={() => setPhase('at_base')} style={{ width: '100%', padding: '16px', borderRadius: 30, border: 'none', background: isAtBase ? '#16a34a' : '#e2e8f0', color: isAtBase ? '#fff' : '#94a3b8', fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900, cursor: isAtBase ? 'pointer' : 'not-allowed', boxShadow: isAtBase ? '0 6px 20px rgba(22,163,74,0.35)' : 'none', transition: 'all .35s ease', letterSpacing: '.04em' }}>
-              {isAtBase ? '✓ Confirm Return to Base' : 'Confirm on Arrival'}
-            </button>
-            {import.meta.env.DEV && (
-              <button onClick={() => setPhase('at_base')} style={{ width: '100%', marginTop: 8, padding: '10px', borderRadius: 20, background: 'none', border: '1px dashed #cbd5e1', color: '#94a3b8', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
-                DEV: Skip to end-shift form
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {phase === 'at_base' && !isRouteComplete && (
-        submitted ? (
-          <div style={{ minHeight: 400, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 24px', textAlign: 'center' }}>
-            <div style={{ fontSize: 48, marginBottom: 14 }}>📋</div>
-            <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 20, fontWeight: 900, color: '#0f172a', marginBottom: 8 }}>Report Submitted</h2>
-            <p style={{ color: '#64748b', fontSize: 13, marginBottom: 28, lineHeight: 1.6 }}>Your early shift end has been reported to the admin.<br />Stay safe, {firstName}.</p>
-            <button onClick={() => navigate('/dashboard', { replace: true })} style={{ width: '100%', maxWidth: 300, padding: '14px', borderRadius: 30, background: '#0f172a', color: '#fff', border: 'none', fontFamily: 'var(--font-head)', fontSize: 14, fontWeight: 800, cursor: 'pointer', boxShadow: '0 6px 20px rgba(15,23,42,0.25)' }}>
-              Back to Dashboard
-            </button>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', animation: 'esSlideUp .25s ease both' }}>
-            <div style={{ background: '#0f172a', padding: '24px 20px 20px', color: '#fff', borderRadius: '18px 18px 0 0' }}>
-              <div style={{ fontSize: 24, marginBottom: 8 }}>⚠️</div>
-              <h1 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 900, margin: '0 0 4px' }}>Ending Shift Early</h1>
-              <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12, margin: 0 }}>Please let us know why you're stopping before completing your route.</p>
-            </div>
-            <div style={{ flex: 1, padding: '20px', overflowY: 'auto' }}>
-              <div style={{ background: '#fff', borderRadius: 12, padding: '12px 14px', border: '1px solid #e2e8f0', marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Shift duration so far</span>
-                <span style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 800, color: '#0f172a' }}>{formattedTime}</span>
-              </div>
-              <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.06em', marginBottom: 8 }}>REASON FOR EARLY END *</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 16 }}>
-                {EARLY_REASONS.map(r => (
-                  <button key={r} onClick={() => setReason(r)} style={{ padding: '11px 14px', borderRadius: 10, textAlign: 'left', border: `1.5px solid ${reason === r ? '#0f172a' : '#e2e8f0'}`, background: reason === r ? '#0f172a' : '#fff', color: reason === r ? '#fff' : '#475569', fontWeight: 600, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, transition: 'all .15s' }}>
-                    <span style={{ width: 16, height: 16, borderRadius: '50%', flexShrink: 0, border: `2px solid ${reason === r ? '#fff' : '#cbd5e1'}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {reason === r && <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#fff', display: 'block' }} />}
-                    </span>
-                    {r}
-                  </button>
-                ))}
-              </div>
-              <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.06em', marginBottom: 7 }}>ADDITIONAL NOTES <span style={{ fontWeight: 400, textTransform: 'none' }}>(optional)</span></div>
-              <textarea rows={2} maxLength={300} placeholder="e.g. Engine warning light appeared at Purok 3…" value={customNote} onChange={e => setCustomNote(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e2e8f0', background: '#fff', fontSize: 13, color: '#0f172a', resize: 'none', fontFamily: 'var(--font-body)', marginBottom: 20 }} />
-              <button onClick={handleEarlySubmit} disabled={!reason || submitting} style={{ width: '100%', padding: '15px', borderRadius: 30, background: reason && !submitting ? '#ef4444' : '#e2e8f0', color: reason && !submitting ? '#fff' : '#94a3b8', border: 'none', fontFamily: 'var(--font-head)', fontSize: 14, fontWeight: 900, letterSpacing: '.04em', cursor: reason && !submitting ? 'pointer' : 'not-allowed', boxShadow: reason ? '0 6px 18px rgba(239,68,68,0.28)' : 'none', transition: 'all .2s' }}>
-                {submitting ? 'Submitting report…' : '⏹ Submit & End Shift'}
-              </button>
-              {!reason && <p style={{ textAlign: 'center', fontSize: 11, color: '#94a3b8', marginTop: 8 }}>Please select a reason above</p>}
-            </div>
-          </div>
-        )
-      )}
-
-      {phase === 'at_base' && isRouteComplete && (
-        <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
-          <div style={{ padding: '28px 20px 0', textAlign: 'center' }}>
-            <h1 className="es-fade1" style={{ fontFamily: 'var(--font-head)', fontSize: 24, fontWeight: 900, color: '#0f172a', marginBottom: 4 }}>Route Complete, {firstName}! 🎉</h1>
-            <p className="es-fade1" style={{ color: '#64748b', fontSize: 13, marginBottom: 0 }}>You've completed all {totalStops} stops on your route today.</p>
-          </div>
-          <div style={{ padding: '20px', textAlign: 'center' }}><Fireworks /></div>
-          <div className="es-fade2" style={{ padding: '0 20px', marginBottom: 20 }}>
-            <div style={{ background: '#fff', borderRadius: 14, padding: '4px 16px', border: '1px solid #e2e8f0', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
-              <SummaryRow icon="⏱" label="Shift Duration" value={formattedTime} />
-              <SummaryRow icon="📍" label="Stops Completed" value={`${completedStops} / ${totalStops}`} />
-              <SummaryRow icon="✅" label="Completion" value="100%" />
-              <SummaryRow icon="📅" label="Date" value={new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} />
-            </div>
-          </div>
-          <div className="es-fade3" style={{ padding: '0 20px 28px', marginTop: 'auto' }}>
-            <button onClick={handleDone} style={{ width: '100%', padding: '15px', borderRadius: 14, background: '#0f172a', color: '#fff', border: 'none', fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900, cursor: 'pointer', marginBottom: 8, boxShadow: '0 6px 20px rgba(15,23,42,0.25)', letterSpacing: '.04em' }}>Done</button>
-            <p style={{ textAlign: 'center', fontSize: 11, color: '#94a3b8', margin: '0 0 8px' }}>Accept Unclaimed dump site</p>
-            <button onClick={() => { sessionStorage.setItem('ww_extended_mode', 'true'); onClose('navigating') }} style={{ width: '100%', padding: '15px', borderRadius: 14, background: '#0f172a', color: '#fff', border: 'none', fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900, cursor: 'pointer', boxShadow: '0 6px 20px rgba(15,23,42,0.25)', letterSpacing: '.04em' }}>My Truck is still not full</button>
-          </div>
-        </div>
-      )}
-    </RouteOverlay>
-  )
-}
-
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
-export default function ShiftRouteModule({ routeState: externalRouteState, setRouteState: externalSetRouteState }) {
+export default function ShiftRouteModule({ onAdvance, shift }) {
   const { user } = useAuth()
   const navigate = useNavigate()
   const { notify } = useNotification()
   const { formattedTime, shiftActive } = useShiftTimer()
   const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } = useDriverGps()
+
+  const [hasNewStops, setHasNewStops] = useState(false)
 
   // ── Guard: redirect if no active shift ──────────────────────────────────────
   const hasRedirected = useRef(false)
@@ -947,22 +706,14 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
     }
   }, [shiftActive, navigate])
 
-  const [routeState, setRouteStateLocal] = useState(() => {
-    const saved = sessionStorage.getItem('ww_route_state')
-    return saved || externalRouteState || 'navigating'
+  const [routeState, setRouteState] = useState(() => {
+    return sessionStorage.getItem('ww_route_state') || 'navigating'
   })
 
-  useEffect(() => {
-    if (externalRouteState && externalRouteState !== routeState) setRouteStateLocal(externalRouteState)
-  }, [externalRouteState])
-
-  function setRouteState(next) {
-    setRouteStateLocal(next)
-    sessionStorage.setItem('ww_route_state', next)
-    if (externalSetRouteState) externalSetRouteState(next)
-  }
-
   const [showFullConfirm, setShowFullConfirm] = useState(false)
+  const [showTruckNotFull, setShowTruckNotFull] = useState(() => {
+    return sessionStorage.getItem('ww_route_complete') === 'true'
+  })
 
   const isExtendedMode = sessionStorage.getItem('ww_extended_mode') === 'true'
   useEffect(() => { injectStopMarkerStyles() }, [])
@@ -1008,7 +759,47 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
   const [orsFetchKey, setOrsFetchKey] = useState(0)
   const lastOrsGpsPosRef = useRef(null)
 
-  const waypoints = schedule?.waypoints || []
+  const [localWaypoints, setLocalWaypoints] = useState([])
+  // Missed stops from OTHER drivers' routes — shown as floating markers,
+  // NOT inserted into the navigation sequence
+  const [floatingMissedStops, setFloatingMissedStops] = useState([])
+  const floatingMarkersRef = useRef(new Map()) // key: pickup_status_id → L.Marker
+
+  useEffect(() => {
+    if (schedule?.waypoints) setLocalWaypoints(schedule.waypoints)
+  }, [schedule])
+
+  function insertNearestNeighbor(waypoints, newStops, gpsPos) {
+    if (!newStops.length) return waypoints
+    const insertAfter = waypoints.findIndex((_, i) => i === currentStopIndex)
+    const sortedNew = [...newStops].sort((a, b) => {
+      if (!gpsPos) return 0
+      const dA = haversineDistance(gpsPos.lat, gpsPos.lng, Number(a.lat), Number(a.lng))
+      const dB = haversineDistance(gpsPos.lat, gpsPos.lng, Number(b.lat), Number(b.lng))
+      return dA - dB
+    })
+    const result = [...waypoints]
+    result.splice(insertAfter + 1, 0, ...sortedNew)
+    return result
+  }
+
+  useReassignedStops({
+    enabled: isExtendedMode,
+    scheduleId: schedule?.id,
+    onNewStops: (newStops) => {
+      // Store as floating markers — NOT part of the route sequence
+      setFloatingMissedStops(prev => {
+        const existingIds = new Set(prev.map(s => s.pickup_status_id ?? s.stop_order))
+        const truly_new = newStops.filter(s => !existingIds.has(s.pickup_status_id ?? s.stop_order))
+        if (!truly_new.length) return prev
+        return [...prev, ...truly_new]
+      })
+      setHasNewStops(true)
+    }
+  })
+
+  const waypoints = localWaypoints
+
   const currentTarget = waypoints[currentStopIndex] || null
   const nextTarget = waypoints[currentStopIndex + 1] || null
 
@@ -1048,6 +839,16 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
     }
     const rows = validationRes.data?.results ?? validationRes.data ?? []
     const snapshot = buildStopValidationSnapshot(rows)
+
+    schedule?.waypoints?.forEach((wp, i) => {
+      if (i === 0) return // skip depot
+      const wpIndex = i
+      if (!wp.watcher_names && !snapshot.statusMap.has(`${schedule.id}:${wpIndex}`)) {
+        // No watcher assigned and no validation exists -> auto-mark as empty
+        snapshot.statusMap.set(`${schedule.id}:${wpIndex}`, 'EMPTY_STOP')
+      }
+    })
+
     setStopDetailsMap(snapshot.detailsMap)
     stopDetailsMapRef.current = snapshot.detailsMap
     setStopStatuses(prev => {
@@ -1127,6 +928,16 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
           const valRes = await api.get(`/api/watcher/stop-validations/?schedule_id=${encodeURIComponent(match?.id || '')}`)
           const rows = valRes.data?.results ?? valRes.data ?? []
           const snapshot = buildStopValidationSnapshot(rows)
+
+          match?.waypoints?.forEach((wp, i) => {
+            if (i === 0) return // skip depot
+            const wpIndex = i
+            if (!wp.watcher_names && !snapshot.statusMap.has(`${match.id}:${wpIndex}`)) {
+              // No watcher assigned and no validation exists -> auto-mark as empty
+              snapshot.statusMap.set(`${match.id}:${wpIndex}`, 'EMPTY_STOP')
+            }
+          })
+
           setStopDetailsMap(snapshot.detailsMap)
           stopDetailsMapRef.current = snapshot.detailsMap
           const statusMap = new Map()
@@ -1290,6 +1101,48 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schedule, mapReady])
 
+  // 3c. Floating missed-stop markers (reassigned from other routes)
+  useEffect(() => {
+    if (!mapReady || !mapInstance.current || !window.L) return
+    const L = window.L
+
+    // Clean up old floating markers before re-rendering
+    floatingMarkersRef.current.forEach(m => { try { mapInstance.current.removeLayer(m) } catch { } })
+    floatingMarkersRef.current.clear()
+
+    floatingMissedStops.forEach(wp => {
+      if (!wp.lat || !wp.lng) return
+      const id = wp.pickup_status_id ?? wp.stop_order
+      const html = `
+        <div style="position:relative;width:28px;height:28px;">
+          <div style="position:absolute;inset:-6px;border-radius:50%;
+            border:2.5px solid #ef4444;animation:wwMarkerPulse 1.6s ease infinite;pointer-events:none;"></div>
+          <div style="position:absolute;inset:0;background:#ef4444;border:2px solid #fff;
+            border-radius:50%;display:flex;align-items:center;justify-content:center;
+            font-size:13px;font-weight:900;color:#fff;box-shadow:0 2px 10px rgba(239,68,68,0.5);">
+            ×
+          </div>
+        </div>`
+
+      const marker = L.marker([Number(wp.lat), Number(wp.lng)], {
+        icon: L.divIcon({ html, className: 'ww-floating-missed-icon', iconSize: [28, 28], iconAnchor: [14, 14] }),
+        zIndexOffset: 800,
+      })
+        .addTo(mapInstance.current)
+        .bindPopup(`
+          <div style="font-family:sans-serif;min-width:180px;">
+            <b style="font-size:13px;">⚠ Missed Stop</b><br/>
+            <span style="font-size:12px;color:#64748b;">${wp.label || 'Unlabelled stop'}</span><br/>
+            <span style="font-size:11px;color:#ef4444;font-weight:700;">Available for collection</span>
+            <div style="margin-top:6px;font-size:10px;color:#94a3b8;">
+              This stop was missed by another driver.<br/>Collect it if you are nearby.
+            </div>
+          </div>`)
+
+      floatingMarkersRef.current.set(id, marker)
+    })
+  }, [floatingMissedStops, mapReady])
+
   // 4. ORS directions
   useEffect(() => {
     if (!currentTarget || !mapReady) return
@@ -1397,6 +1250,12 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
   function handleCollectionConfirmed() {
     setStopStatuses(prev => {
       const next = new Map(prev)
+      try {
+        const saved = sessionStorage.getItem('ww_stop_statuses')
+        const parsed = saved ? new Map(JSON.parse(saved)) : new Map()
+        parsed.set(currentStopIndex, 'COLLECTION_REPORTED')
+        sessionStorage.setItem('ww_stop_statuses', JSON.stringify([...parsed]))
+      } catch { }
       next.set(currentStopIndex, 'COLLECTION_REPORTED')
       return next
     })
@@ -1423,23 +1282,55 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
   }
 
   function handleEndShift() {
-    const total = (schedule?.waypoints || []).length - 1
-    sessionStorage.setItem('ww_completed_stops', String(currentStopIndex))
-    sessionStorage.setItem('ww_total_stops', String(total))
-    sessionStorage.setItem('ww_route_complete', total > 0 && currentStopIndex >= total ? 'true' : 'false')
-    setRouteState('end_shift')
+    // Only locally flag missed stops when ending early (route incomplete).
+    // On route complete, EndShiftModule handles submission via extended_mode or shift/end.
+    const routeComplete = sessionStorage.getItem('ww_route_complete') === 'true'
+    if (!routeComplete) {
+      setStopStatuses(prev => {
+        const next = new Map(prev)
+        getRoutableIndices()
+          .filter(idx => idx >= currentStopIndex)
+          .forEach(idx => {
+            if (isMissedStopStatus(normalizeStopStatus(prev.get(idx)))) {
+              next.set(idx, 'DRIVER_MISSED')
+              repaintMarker(idx, 'DRIVER_MISSED')
+            }
+          })
+        // Persist the final snapshot for EndShiftModule to read
+        try {
+          sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...next]))
+        } catch { }
+        return next
+      })
+    } else {
+      // Route complete — persist current statuses so EndShiftModule can show the mini-map
+      try {
+        sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...stopStatuses]))
+      } catch { }
+    }
+    onAdvance('end_shift')
   }
 
-  function handleExtendedMode() {
-    const nextIndex = currentStopIndex + 1
-    setCurrentStopIndex(nextIndex)
-    sessionStorage.setItem('ww_current_stop_index', String(nextIndex))
+  // Called by TruckNotFull when extended_mode API succeeds (TruckNotFull makes the API call itself)
+  function handleExtendedModeActivated() {
+    setShowTruckNotFull(false)
+    sessionStorage.setItem('ww_extended_mode', 'true')
+    sessionStorage.removeItem('ww_route_complete')
     sessionStorage.removeItem('ww_pending_collection_note')
     sessionStorage.removeItem('ww_pending_collection_stop_id')
     sessionStorage.removeItem('ww_pending_collection_at')
-    sessionStorage.setItem('ww_extended_mode', 'true')
     setOrsFetchKey(k => k + 1)
     setRouteState('navigating')
+  }
+
+  // Legacy: called from StopCompletedOverlay "I'm done" (non-route-complete path)
+  async function handleExtendedMode() {
+    try {
+      await api.post(`/api/driver/shift/${shift.id}/extended_mode/`)
+      handleExtendedModeActivated()
+    } catch {
+      notify({ variant: 'error-dark', message: 'Failed to activate extended mode. Please try again.' })
+    }
   }
 
   let instructionText = 'Follow the road', instructionDist = '', stepType = 6, stepBearing = null
@@ -1537,6 +1428,23 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
             </div>
           </div>
         </div>
+
+        {hasNewStops && (
+          <div style={{
+            position: 'absolute', top: 130, left: 14, right: 14, zIndex: 20,
+            background: '#0f172a', borderRadius: 12, padding: '12px 16px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+          }}>
+            <span style={{ color: '#fff', fontSize: 13, fontWeight: 700 }}>
+              📦 New stops assigned to your route
+            </span>
+            <button onClick={() => setHasNewStops(false)} style={{
+              background: 'none', border: 'none', color: 'rgba(255,255,255,0.6)',
+              fontSize: 18, cursor: 'pointer', padding: 0
+            }}>✕</button>
+          </div>
+        )}
 
         {/* TURN INSTRUCTION CARD */}
         <div key={stepType} style={{ position: 'absolute', top: 122, left: 14, right: 14, zIndex: 10, background: 'rgba(255,255,255,0.97)', borderRadius: 16, overflow: 'hidden', display: 'flex', alignItems: 'stretch', boxShadow: '0 6px 28px rgba(0,0,0,.18)', backdropFilter: 'blur(6px)', animation: 'navFadeUp .25s ease' }}>
@@ -1648,15 +1556,17 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
         onNextStop={handleNextStop}
         onEndShift={handleEndShift}
         onExtendedMode={handleExtendedMode}
+        onShowTruckNotFull={() => setShowTruckNotFull(true)}
       />
 
       {routeState === 'end_shift' && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 3000 }}>
-          <EndShiftModule 
+          <EndShiftModule
             setRouteState={setRouteState}
             schedule={schedule}
             stopStatuses={stopStatuses}
             currentStopIndex={currentStopIndex}
+            shift={shift}
           />
         </div>
       )}
@@ -1706,6 +1616,19 @@ export default function ShiftRouteModule({ routeState: externalRouteState, setRo
           </div>
         </div>
       )}
+
+      {/* TruckNotFull — standalone route-complete decision overlay */}
+      <TruckNotFull
+        visible={showTruckNotFull}
+        shift={shift}
+        schedule={schedule}
+        stopStatuses={stopStatuses}
+        onEndShift={() => {
+          setShowTruckNotFull(false)
+          handleEndShift()
+        }}
+        onExtendedMode={handleExtendedModeActivated}
+      />
     </>
   )
 }

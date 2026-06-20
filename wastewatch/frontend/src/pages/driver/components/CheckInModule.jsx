@@ -54,7 +54,7 @@ const STEPS = [
   { key: 'ready', label: 'All systems ready!' },
 ]
 
-export default function CheckInModule({ setRouteState }) {
+export default function CheckInModule({ onAdvance, shift }) {
   const { user } = useAuth()
   const { startShift } = useShiftTimer()
 
@@ -292,7 +292,7 @@ export default function CheckInModule({ setRouteState }) {
       setCompleted(c => [...c, 'ready'])
       await delay(600)
       if (cancelled) return
-      setRouteState('shiftroute')
+      onAdvance('shiftroute')
     }
 
     runInit()
@@ -541,7 +541,7 @@ export default function CheckInModule({ setRouteState }) {
                 </button>
                 <button
                   id="back-to-assignment-btn"
-                  onClick={() => setRouteState('assignment')}
+                  onClick={() => onAdvance('assignment')}
                   style={{
                     padding: '12px 16px', borderRadius: 20,
                     background: '#fff', color: '#475569', border: '1px solid #cbd5e1',
@@ -562,7 +562,7 @@ export default function CheckInModule({ setRouteState }) {
                         new Date().toISOString()
                       )
                       setCompleted(['session', 'gps', 'ready'])
-                      setRouteState('shiftroute')
+                      onAdvance('shiftroute')
                     }}
                     style={{
                       padding: '12px 14px',

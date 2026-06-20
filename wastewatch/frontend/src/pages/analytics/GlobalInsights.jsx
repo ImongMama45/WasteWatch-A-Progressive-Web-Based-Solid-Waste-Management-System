@@ -11,6 +11,7 @@ import { useState, useEffect } from 'react'
 import BarangayRankingCard from './BarangayRankingCard'
 import HotspotMap from './HotspotMap'
 import api from '../../api/client'
+import { Trash2, CheckCircle2, Truck, Flame, AlertTriangle, Building2, BarChart2, LineChart, ClipboardCheck, Clock, XCircle, TrendingUp, MapPin, PieChart, BarChart3, Flag, Hourglass, Users, Trophy, Map } from 'lucide-react'
 
 // ─── Reusable primitives ──────────────────────────────────────────────────────
 
@@ -27,7 +28,7 @@ function SHead({ icon, title, subtitle, right }) {
     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--accent)', marginBottom: 3 }}>
-          <span className="msi" style={{ fontSize: 16 }}>{icon}</span>
+          {icon}
           {title}
         </div>
         {subtitle && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{subtitle}</div>}
@@ -223,34 +224,37 @@ const PLACEHOLDER = {
 // ─── Overview KPIs ────────────────────────────────────────────────────────────
 function OverviewKPIs({ kpi }) {
   const CARDS = [
-    { label: 'Waste Collected Today', value: `${kpi.collected_kg?.toLocaleString() ?? '—'} kg`, delta: kpi.collected_kg_delta, icon: 'delete_sweep', color: 'var(--accent)' },
-    { label: 'Collection Rate', value: `${kpi.collection_rate ?? '—'}%`, delta: kpi.collection_rate_delta, icon: 'check_circle', color: 'var(--accent)' },
-    { label: 'Active Trucks', value: kpi.active_trucks ?? '—', delta: null, icon: 'local_shipping', color: 'var(--info)' },
-    { label: 'Open Hotspots', value: kpi.open_hotspots ?? '—', delta: kpi.hotspots_delta, icon: 'local_fire_department', color: 'var(--danger)' },
-    { label: 'Escalations', value: kpi.escalations ?? '—', delta: null, icon: 'warning', color: 'var(--warning)' },
-    { label: 'Barangays Served', value: kpi.barangays_served ?? '—', delta: null, icon: 'location_city', color: 'var(--accent)' },
+    { label: 'Waste Collected Today', value: `${kpi.collected_kg?.toLocaleString() ?? '—'} kg`, delta: kpi.collected_kg_delta, icon: Trash2, color: 'var(--accent)' },
+    { label: 'Collection Rate', value: `${kpi.collection_rate ?? '—'}%`, delta: kpi.collection_rate_delta, icon: CheckCircle2, color: 'var(--accent)' },
+    { label: 'Active Trucks', value: kpi.active_trucks ?? '—', delta: null, icon: Truck, color: 'var(--info)' },
+    { label: 'Open Hotspots', value: kpi.open_hotspots ?? '—', delta: kpi.hotspots_delta, icon: Flame, color: 'var(--danger)' },
+    { label: 'Escalations', value: kpi.escalations ?? '—', delta: null, icon: AlertTriangle, color: 'var(--warning)' },
+    { label: 'Barangays Served', value: kpi.barangays_served ?? '—', delta: null, icon: Building2, color: 'var(--accent)' },
   ]
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, marginBottom: 16 }}>
-      {CARDS.map(c => (
-        <div key={c.label} style={{
-          background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 'var(--radius)', padding: '14px 12px',
-        }}>
-          <span className="msi" style={{ fontSize: 20, color: c.color, display: 'block', marginBottom: 8 }}>{c.icon}</span>
-          <div style={{ fontWeight: 700, fontSize: 20, color: 'var(--text)', lineHeight: 1 }}>{c.value}</div>
-          {c.delta && (
-            <div style={{
-              fontSize: 10, fontWeight: 700, marginTop: 4,
-              color: c.delta.startsWith('+') ? 'var(--accent)' : c.delta.startsWith('-') ? 'var(--danger)' : 'var(--text-muted)',
-            }}>{c.delta} vs yesterday</div>
-          )}
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '.04em', marginTop: 4 }}>
-            {c.label.toUpperCase()}
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 140px), 1fr))', gap: 10, marginBottom: 16 }}>
+      {CARDS.map(c => {
+        const Icon = c.icon;
+        return (
+          <div key={c.label} style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius)', padding: '14px 12px',
+          }}>
+            <Icon size={20} color={c.color} style={{ display: 'block', marginBottom: 8 }} />
+            <div style={{ fontWeight: 700, fontSize: 20, color: 'var(--text)', lineHeight: 1 }}>{c.value}</div>
+            {c.delta && (
+              <div style={{
+                fontSize: 10, fontWeight: 700, marginTop: 4,
+                color: c.delta.startsWith('+') ? 'var(--accent)' : c.delta.startsWith('-') ? 'var(--danger)' : 'var(--text-muted)',
+              }}>{c.delta} vs yesterday</div>
+            )}
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '.04em', marginTop: 4 }}>
+              {c.label.toUpperCase()}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -263,7 +267,7 @@ function WasteCollectionChart({ data }) {
   return (
     <GCard>
       <SHead
-        icon="delete_sweep"
+        icon={<Trash2 size={16} />}
         title="Waste Collected per Barangay"
         subtitle="Daily totals tracked from dumpsite weighing"
         right={
@@ -274,21 +278,24 @@ function WasteCollectionChart({ data }) {
         }
       />
 
-      <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 12 }}>
         {[
-          { key: 'bar', icon: 'bar_chart', label: 'Bar' },
-          { key: 'line', icon: 'show_chart', label: 'Trend' },
-        ].map(t => (
-          <button key={t.key} onClick={() => setChartType(t.key)} style={{
-            display: 'flex', alignItems: 'center', gap: 4,
-            padding: '4px 10px', borderRadius: 20, border: `1px solid ${chartType === t.key ? 'var(--accent)' : 'var(--border)'}`,
-            fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
-            color: chartType === t.key ? 'var(--accent)' : 'var(--text-muted)', background: 'transparent',
-          }}>
-            <span className="msi" style={{ fontSize: 13 }}>{t.icon}</span>
-            {t.label}
-          </button>
-        ))}
+          { key: 'bar', icon: BarChart2, label: 'Bar' },
+          { key: 'line', icon: LineChart, label: 'Trend' },
+        ].map((t, idx) => {
+          const Icon = t.icon;
+          return (
+            <button key={t.key || idx} onClick={() => setChartType(t.key)} style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '4px 10px', borderRadius: 20, border: `1px solid ${chartType === t.key ? 'var(--accent)' : 'var(--border)'}`,
+              fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              color: chartType === t.key ? 'var(--accent)' : 'var(--text-muted)', background: 'transparent',
+            }}>
+              <Icon size={13} />
+              {t.label}
+            </button>
+          )
+        })}
       </div>
 
       {chartType === 'bar' && <MiniBar data={data} valueKey="value" color="var(--accent)" height={100} />}
@@ -316,7 +323,7 @@ function CollectionEfficiency({ kpi }) {
 
   return (
     <GCard>
-      <SHead icon="fact_check" title="Collection Efficiency" subtitle="Scheduled vs. completed routes this week" />
+      <SHead icon={<ClipboardCheck size={16} />} title="Collection Efficiency" subtitle="Scheduled vs. completed routes this week" />
 
       {/* Big efficiency number */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
@@ -340,19 +347,22 @@ function CollectionEfficiency({ kpi }) {
 
         <div style={{ flex: 1 }}>
           {[
-            { label: 'Scheduled', value: scheduled, color: 'var(--text-muted)', icon: 'schedule' },
-            { label: 'Completed', value: completed, color: 'var(--accent)', icon: 'check_circle' },
-            { label: 'Missed', value: missed, color: missed > 0 ? 'var(--danger)' : 'var(--text-muted)', icon: 'cancel' },
-          ].map(r => (
-            <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <span className="msi" style={{ fontSize: 14, color: r.color, flexShrink: 0 }}>{r.icon}</span>
-              <div style={{ flex: 1, height: 4, borderRadius: 20, background: 'var(--border)', overflow: 'hidden' }}>
-                <div style={{ width: `${(r.value / scheduled) * 100}%`, height: '100%', background: r.color, borderRadius: 20 }} />
+            { label: 'Scheduled', value: scheduled, color: 'var(--text-muted)', icon: Clock },
+            { label: 'Completed', value: completed, color: 'var(--accent)', icon: CheckCircle2 },
+            { label: 'Missed', value: missed, color: missed > 0 ? 'var(--danger)' : 'var(--text-muted)', icon: XCircle },
+          ].map((r, idx) => {
+            const Icon = r.icon;
+            return (
+              <div key={r.label || idx} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <Icon size={14} color={r.color} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, height: 4, borderRadius: 20, background: 'var(--border)', overflow: 'hidden' }}>
+                  <div style={{ width: `${(r.value / scheduled) * 100}%`, height: '100%', background: r.color, borderRadius: 20 }} />
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: r.color, width: 22, textAlign: 'right' }}>{r.value}</span>
+                <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 54 }}>{r.label.toUpperCase()}</span>
               </div>
-              <span style={{ fontSize: 11, fontWeight: 700, color: r.color, width: 22, textAlign: 'right' }}>{r.value}</span>
-              <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 54 }}>{r.label.toUpperCase()}</span>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
     </GCard>
@@ -367,7 +377,7 @@ function TruckPerformanceSection({ trucks }) {
   return (
     <GCard>
       <SHead
-        icon="local_shipping"
+        icon={<Truck size={16} />}
         title="Truck & Driver Performance"
         subtitle="Routes completed · Efficiency rankings"
         right={
@@ -395,7 +405,7 @@ function TruckPerformanceSection({ trucks }) {
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
                 {isTop
-                  ? <span className="msi" style={{ fontSize: 18, color: '#f59e0b' }}>emoji_events</span>
+                  ? <Trophy size={18} color="#f59e0b" />
                   : <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)' }}>#{i + 1}</span>
                 }
               </div>
@@ -433,7 +443,7 @@ function IssueTrendsSection({ trends, hotspots }) {
   const topToday = hotspots[0]
   return (
     <GCard>
-      <SHead icon="trending_up" title="Daily Issue Trends" subtitle="Reports filed per day · Most reported barangay today" />
+      <SHead icon={<TrendingUp size={16} />} title="Daily Issue Trends" subtitle="Reports filed per day · Most reported barangay today" />
 
       {topToday && (
         <div style={{
@@ -441,7 +451,7 @@ function IssueTrendsSection({ trends, hotspots }) {
           borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: 14,
           display: 'flex', alignItems: 'center', gap: 10,
         }}>
-          <span className="msi" style={{ fontSize: 22, color: 'var(--danger)', flexShrink: 0 }}>location_on</span>
+          <MapPin size={22} color="var(--danger)" style={{ flexShrink: 0 }} />
           <div>
             <div style={{ fontWeight: 700, fontSize: 12, color: 'var(--danger)', marginBottom: 2 }}>Most Reported Today</div>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{topToday.location}</div>
@@ -468,9 +478,9 @@ function HotspotsSection({ hotspots, stats }) {
 
   return (
     <GCard>
-      <SHead icon="local_fire_department" title="Hotspot Monitoring" subtitle="Illegal dumping & recurring violation areas" />
+      <SHead icon={<Flame size={16} />} title="Hotspot Monitoring" subtitle="Illegal dumping & recurring violation areas" />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 90px), 1fr))', gap: 8, marginBottom: 14 }}>
         {[
           { label: 'This Week', value: stats.reportsThisWeek, color: 'var(--danger)' },
           { label: 'Resolved', value: `${stats.resolutionRate}%`, color: 'var(--accent)' },
@@ -529,10 +539,10 @@ function WasteComposition({ segments }) {
   const total = segments.reduce((s, c) => s + c.value, 0) || 1
   return (
     <GCard>
-      <SHead icon="pie_chart" title="Waste Composition" subtitle="Classification breakdown from dumpsite data" />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+      <SHead icon={<PieChart size={16} />} title="Waste Composition" subtitle="Classification breakdown from dumpsite data" />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 20 }}>
         <Donut segments={segments} size={90} />
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: '1 1 200px' }}>
           {segments.map(s => (
             <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
               <div style={{ width: 10, height: 10, borderRadius: 2, background: s.color, flexShrink: 0 }} />
@@ -554,24 +564,27 @@ function RankingsSection({ rankings, problematic, userBarangay }) {
   const [showProb, setShowProb] = useState(false)
   return (
     <GCard>
-      <SHead icon="leaderboard" title="Barangay Cleanliness Rankings" subtitle="Ranked by compliance ratio · Updated daily" />
-      <div style={{ display: 'flex', gap: 3, background: 'var(--bg)', borderRadius: 8, padding: 3, width: 'fit-content', marginBottom: 14 }}>
+      <SHead icon={<BarChart3 size={16} />} title="Barangay Cleanliness Rankings" subtitle="Ranked by compliance ratio · Updated daily" />
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, background: 'var(--bg)', borderRadius: 8, padding: 3, width: 'fit-content', marginBottom: 14 }}>
         {[
-          { key: false, label: 'Top Cleanest', icon: 'emoji_events' },
-          { key: true, label: 'Problematic Areas', icon: 'warning' },
-        ].map(t => (
-          <button key={String(t.key)} onClick={() => setShowProb(t.key)} style={{
-            display: 'flex', alignItems: 'center', gap: 5,
-            padding: '5px 11px', borderRadius: 6, border: 'none', cursor: 'pointer',
-            fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)',
-            background: showProb === t.key ? 'var(--surface)' : 'transparent',
-            color: showProb === t.key ? 'var(--text)' : 'var(--text-muted)',
-            borderBottom: showProb === t.key ? '2px solid var(--accent)' : '2px solid transparent',
-          }}>
-            <span className="msi" style={{ fontSize: 13 }}>{t.icon}</span>
-            {t.label}
-          </button>
-        ))}
+          { key: false, label: 'Top Cleanest', icon: Trophy },
+          { key: true, label: 'Problematic Areas', icon: AlertTriangle },
+        ].map(t => {
+          const Icon = t.icon;
+          return (
+            <button key={String(t.key)} onClick={() => setShowProb(t.key)} style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              padding: '5px 11px', borderRadius: 6, border: 'none', cursor: 'pointer',
+              fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)',
+              background: showProb === t.key ? 'var(--surface)' : 'transparent',
+              color: showProb === t.key ? 'var(--text)' : 'var(--text-muted)',
+              borderBottom: showProb === t.key ? '2px solid var(--accent)' : '2px solid transparent',
+            }}>
+              <Icon size={13} />
+              {t.label}
+            </button>
+          )
+        })}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {(showProb ? problematic : rankings).map((b, i) => (
@@ -643,55 +656,55 @@ export default function GlobalInsights({ userBarangay, selectedBarangay, selecte
         }
         const mappedTrucks = selectedTruckRows.length
           ? selectedTruckRows.map(row => ({
-              id: row.truck_id,
-              driver: row.driver_name,
-              routes: Number(row.routes || 0),
-              completed: Number(row.completed || 0),
-              missed: Number(row.missed || 0),
-              fill: Number(row.avg_fill || 0),
-              km: Number(row.total_km || 0),
-            }))
+            id: row.truck_id,
+            driver: row.driver_name,
+            routes: Number(row.routes || 0),
+            completed: Number(row.completed || 0),
+            missed: Number(row.missed || 0),
+            fill: Number(row.avg_fill || 0),
+            km: Number(row.total_km || 0),
+          }))
           : prev.trucks
 
         const mappedRankings = selectedBrgyRows.length
           ? selectedBrgyRows
-              .map(row => {
-                const reports = Number(row.reports || 0)
-                const resolved = Number(row.resolved || 0)
-                const score = Math.max(0, Math.min(100, Math.round(((resolved / Math.max(reports, 1)) * 100) * 0.7 + Math.min(Number(row.waste_collected_kg || 0) / 100, 30))))
-                const trend = resolved >= reports ? 'up' : resolved >= reports * 0.6 ? 'same' : 'down'
-                return {
-                  name: row.barangay_name,
-                  score,
-                  compliance: Math.round((resolved / Math.max(reports, 1)) * 100),
-                  trend,
-                  population: row.population || null,
-                  hotspots: row.hotspots || 0,
-                  reports,
-                }
-              })
-              .sort((a, b) => b.score - a.score)
+            .map(row => {
+              const reports = Number(row.reports || 0)
+              const resolved = Number(row.resolved || 0)
+              const score = Math.max(0, Math.min(100, Math.round(((resolved / Math.max(reports, 1)) * 100) * 0.7 + Math.min(Number(row.waste_collected_kg || 0) / 100, 30))))
+              const trend = resolved >= reports ? 'up' : resolved >= reports * 0.6 ? 'same' : 'down'
+              return {
+                name: row.barangay_name,
+                score,
+                compliance: Math.round((resolved / Math.max(reports, 1)) * 100),
+                trend,
+                population: row.population || null,
+                hotspots: row.hotspots || 0,
+                reports,
+              }
+            })
+            .sort((a, b) => b.score - a.score)
           : prev.rankings
 
         const mappedProblematic = selectedBrgyRows.length
           ? [...selectedBrgyRows]
-              .map(row => {
-                const reports = Number(row.reports || 0)
-                const resolved = Number(row.resolved || 0)
-                const score = Math.max(0, Math.min(100, Math.round(((resolved / Math.max(reports, 1)) * 100) * 0.7 + Math.min(Number(row.waste_collected_kg || 0) / 100, 30))))
-                const trend = resolved >= reports ? 'up' : resolved >= reports * 0.6 ? 'same' : 'down'
-                return {
-                  name: row.barangay_name,
-                  score,
-                  compliance: Math.round((resolved / Math.max(reports, 1)) * 100),
-                  trend,
-                  population: row.population || null,
-                  hotspots: row.hotspots || 0,
-                  reports,
-                }
-              })
-              .filter(row => row.score < 60)
-              .sort((a, b) => a.score - b.score)
+            .map(row => {
+              const reports = Number(row.reports || 0)
+              const resolved = Number(row.resolved || 0)
+              const score = Math.max(0, Math.min(100, Math.round(((resolved / Math.max(reports, 1)) * 100) * 0.7 + Math.min(Number(row.waste_collected_kg || 0) / 100, 30))))
+              const trend = resolved >= reports ? 'up' : resolved >= reports * 0.6 ? 'same' : 'down'
+              return {
+                name: row.barangay_name,
+                score,
+                compliance: Math.round((resolved / Math.max(reports, 1)) * 100),
+                trend,
+                population: row.population || null,
+                hotspots: row.hotspots || 0,
+                reports,
+              }
+            })
+            .filter(row => row.score < 60)
+            .sort((a, b) => a.score - b.score)
           : prev.problematic
 
         setData(prev => ({
@@ -702,9 +715,9 @@ export default function GlobalInsights({ userBarangay, selectedBarangay, selecte
           problematic: mappedProblematic,
           issueTrends: trendRows.length
             ? trendRows.map(t => ({
-                label: t.date,
-                value: t.report_count,
-              }))
+              label: t.date,
+              value: t.report_count,
+            }))
             : prev.issueTrends,
         }))
       } catch { /* stay on placeholder */ }
@@ -726,7 +739,7 @@ export default function GlobalInsights({ userBarangay, selectedBarangay, selecte
       <OverviewKPIs kpi={data.kpi} />
 
       {/* ── Two-column mid section ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 16, alignItems: 'start' }}>
         <div>
           <WasteCollectionChart data={data.wasteDaily} />
           <CollectionEfficiency kpi={data.kpi} />
@@ -744,7 +757,7 @@ export default function GlobalInsights({ userBarangay, selectedBarangay, selecte
 
       {/* ── Map ── */}
       <GCard>
-        <SHead icon="map" title="Barangay Cleanliness Map" subtitle="Color-coded by compliance score · Red = active hotspots" />
+        <SHead icon={<Map size={16} />} title="Barangay Cleanliness Map" subtitle="Color-coded by compliance score · Red = active hotspots" />
         <HotspotMap userBarangay={userBarangay} />
       </GCard>
     </>

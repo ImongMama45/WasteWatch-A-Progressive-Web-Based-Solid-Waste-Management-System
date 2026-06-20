@@ -17,15 +17,17 @@ import GlobalInsights from './GlobalInsights'
 import PerformanceAnalytics from './PerformanceAnalytics'
 import '../../styles/pages/AnalyticsCenter.css'
 
+import { Zap, LayoutDashboard, LineChart, Download, Globe, Gauge, Shield, Flame, RefreshCw, Calendar, Users, Building2, Flag, CheckCircle2, Truck } from 'lucide-react'
+
 function TabSpinner() {
   return <div className="spinner" style={{ margin: '40px auto' }} />
 }
 
 // ─── Tab registry ─────────────────────────────────────────────────────────────
 const ALL_TABS = [
-  { key: 'global', label: 'Global Insights', icon: 'public', roles: ['citizen', 'watcher', 'driver', 'brgy_official', 'admin'] },
-  { key: 'perf', label: 'Performance', icon: 'speed', roles: ['driver', 'admin'] },
-  { key: 'admin', label: 'Admin Controls', icon: 'admin_panel_settings', roles: ['admin'] },
+  { key: 'global', label: 'Global Insights', icon: Globe, roles: ['citizen', 'watcher', 'driver', 'brgy_official', 'admin'] },
+  { key: 'perf', label: 'Performance', icon: Gauge, roles: ['driver', 'admin'] },
+  { key: 'admin', label: 'Admin Controls', icon: Shield, roles: ['admin'] },
 ]
 
 function buildTabs(role) {
@@ -51,19 +53,19 @@ function AdminControls() {
   function show(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
   const ACTIONS = [
-    { label: 'Flag Hotspot', icon: 'local_fire_department', color: 'var(--danger)', bg: 'rgba(231,76,60,.08)', border: 'rgba(231,76,60,.25)', onClick: () => show('Hotspot flagging coming soon.') },
-    { label: 'Refresh Rankings', icon: 'refresh', color: 'var(--accent)', bg: 'rgba(46,204,113,.08)', border: 'rgba(46,204,113,.25)', onClick: () => show('Rankings refreshed.') },
-    { label: 'Export CSV', icon: 'download', color: 'var(--info)', bg: 'rgba(93,173,226,.08)', border: 'rgba(93,173,226,.25)', onClick: () => show('Export queued — CSV downloading.') },
-    { label: 'Schedule Collection', icon: 'calendar_month', color: 'var(--warning)', bg: 'rgba(243,156,18,.08)', border: 'rgba(243,156,18,.25)', onClick: () => navigate('/schedule') },
+    { label: 'Flag Hotspot', icon: Flame, color: 'var(--danger)', bg: 'rgba(231,76,60,.08)', border: 'rgba(231,76,60,.25)', onClick: () => show('Hotspot flagging coming soon.') },
+    { label: 'Refresh Rankings', icon: RefreshCw, color: 'var(--accent)', bg: 'rgba(46,204,113,.08)', border: 'rgba(46,204,113,.25)', onClick: () => show('Rankings refreshed.') },
+    { label: 'Export CSV', icon: Download, color: 'var(--info)', bg: 'rgba(93,173,226,.08)', border: 'rgba(93,173,226,.25)', onClick: () => show('Export queued — CSV downloading.') },
+    { label: 'Schedule Collection', icon: Calendar, color: 'var(--warning)', bg: 'rgba(243,156,18,.08)', border: 'rgba(243,156,18,.25)', onClick: () => navigate('/schedule') },
   ]
 
   const SYS = [
-    { label: 'Registered Users', value: '1,243', icon: 'group', color: 'var(--info)' },
-    { label: 'Active Barangays', value: '33', icon: 'location_city', color: 'var(--accent)' },
-    { label: 'Reports Filed', value: '4,781', icon: 'flag', color: 'var(--warning)' },
-    { label: 'Resolved Issues', value: '4,102', icon: 'check_circle', color: 'var(--accent)' },
-    { label: 'Active Trucks', value: '7', icon: 'local_shipping', color: 'var(--info)' },
-    { label: 'Open Hotspots', value: '14', icon: 'local_fire_department', color: 'var(--danger)' },
+    { label: 'Registered Users', value: '1,243', icon: Users, color: 'var(--info)' },
+    { label: 'Active Barangays', value: '33', icon: Building2, color: 'var(--accent)' },
+    { label: 'Reports Filed', value: '4,781', icon: Flag, color: 'var(--warning)' },
+    { label: 'Resolved Issues', value: '4,102', icon: CheckCircle2, color: 'var(--accent)' },
+    { label: 'Active Trucks', value: '7', icon: Truck, color: 'var(--info)' },
+    { label: 'Open Hotspots', value: '14', icon: Flame, color: 'var(--danger)' },
   ]
 
   return (
@@ -83,7 +85,7 @@ function AdminControls() {
       <div className="ac-card">
         <div className="ac-card-head" style={{ marginBottom: 14 }}>
           <div className="ac-card-left">
-            <div className="ac-card-icon"><span className="msi" style={{ fontSize: 18 }}>bolt</span></div>
+            <div className="ac-card-icon"><Zap size={18} /></div>
             <div className="ac-card-titles">
               <div className="ac-card-title">Quick Admin Actions</div>
               <div className="ac-card-sub">Common operations at a glance</div>
@@ -91,13 +93,16 @@ function AdminControls() {
           </div>
         </div>
         <div className="ac-admin-grid">
-          {ACTIONS.map(a => (
-            <button key={a.label} onClick={a.onClick} className="ac-admin-action"
-              style={{ background: a.bg, border: `1px solid ${a.border}`, color: a.color }}>
-              <span className="msi" style={{ fontSize: 22 }}>{a.icon}</span>
-              <span style={{ fontWeight: 700, fontSize: 13 }}>{a.label}</span>
-            </button>
-          ))}
+          {ACTIONS.map((a, idx) => {
+            const Icon = a.icon;
+            return (
+              <button key={a.label || idx} onClick={a.onClick} className="ac-admin-action"
+                style={{ background: a.bg, border: `1px solid ${a.border}`, color: a.color }}>
+                <Icon size={22} />
+                <span style={{ fontWeight: 700, fontSize: 13 }}>{a.label}</span>
+              </button>
+            )
+          })}
         </div>
       </div>
 
@@ -105,7 +110,7 @@ function AdminControls() {
       <div className="ac-card">
         <div className="ac-card-head" style={{ marginBottom: 14 }}>
           <div className="ac-card-left">
-            <div className="ac-card-icon ac-card-icon--blue"><span className="msi" style={{ fontSize: 18 }}>dashboard</span></div>
+            <div className="ac-card-icon ac-card-icon--blue"><LayoutDashboard size={18} /></div>
             <div className="ac-card-titles">
               <div className="ac-card-title">System Overview</div>
               <div className="ac-card-sub">Platform-wide metrics</div>
@@ -113,13 +118,16 @@ function AdminControls() {
           </div>
         </div>
         <div className="ac-sys-grid">
-          {SYS.map(s => (
-            <div key={s.label} className="ac-sys-card">
-              <span className="msi" style={{ fontSize: 20, color: s.color }}>{s.icon}</span>
-              <div className="ac-sys-val">{s.value}</div>
-              <div className="ac-sys-label">{s.label}</div>
-            </div>
-          ))}
+          {SYS.map((s, idx) => {
+            const Icon = s.icon;
+            return (
+              <div key={s.label || idx} className="ac-sys-card">
+                <Icon size={20} color={s.color} />
+                <div className="ac-sys-val">{s.value}</div>
+                <div className="ac-sys-label">{s.label}</div>
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
@@ -194,7 +202,7 @@ export default function AnalyticsTabs() {
               {/* Left: title */}
               <div style={{ flex: '1 1 0', minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
-                  <span className="msi" style={{ fontSize: 26, color: '#4ade80', flexShrink: 0 }}>analytics</span>
+                  <LineChart size={26} color="#4ade80" style={{ flexShrink: 0 }} />
                   <h1 className="ac-display-title">Analytics Command Center</h1>
                 </div>
                 <p className="ac-display-sub">
@@ -256,7 +264,7 @@ export default function AnalyticsTabs() {
 
                 {/* Export */}
                 <button className="ac-export-btn" onClick={handleExport} aria-label="Export analytics data">
-                  <span className="msi" style={{ fontSize: 16 }}>download</span>
+                  <Download size={16} />
                   Export
                 </button>
               </div>
@@ -264,19 +272,22 @@ export default function AnalyticsTabs() {
 
             {/* Tab bar */}
             <div className="ac-tabs" role="tablist">
-              {tabs.map(t => (
-                <button
-                  key={t.key}
-                  className={`ac-tab${active === t.key ? ' ac-tab--active' : ''}`}
-                  onClick={() => setActive(t.key)}
-                  role="tab"
-                  aria-selected={active === t.key}
-                  aria-label={t.label}
-                >
-                  <span className="msi" style={{ fontSize: 16 }}>{t.icon}</span>
-                  {t.label}
-                </button>
-              ))}
+              {tabs.map(t => {
+                const Icon = t.icon;
+                return (
+                  <button
+                    key={t.key}
+                    className={`ac-tab${active === t.key ? ' ac-tab--active' : ''}`}
+                    onClick={() => setActive(t.key)}
+                    role="tab"
+                    aria-selected={active === t.key}
+                    aria-label={t.label}
+                  >
+                    <Icon size={16} />
+                    {t.label}
+                  </button>
+                )
+              })}
             </div>
 
           </div>

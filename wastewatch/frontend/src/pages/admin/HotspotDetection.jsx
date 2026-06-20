@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useHotspots } from '../../hooks/useHotspots'
+import AdminReports from './AdminReports'
 
 const LUCENA_CENTER = [13.9373, 121.617]
 
@@ -55,6 +56,7 @@ export default function HotspotDetection() {
   const [selected,  setSelected]  = useState(null)
   const [filter,    setFilter]    = useState('all')
   const [typeFilter,setTypeFilter]= useState('all')
+  const [showReports, setShowReports] = useState(false)
 
   // Load Leaflet
   useEffect(() => {
@@ -167,18 +169,45 @@ export default function HotspotDetection() {
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 3 }}>
-              <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 22, fontWeight: 800, margin: 0 }}>Hotspot Detection</h2>
-              {counts.critical > 0 && (
+              <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 22, fontWeight: 800, margin: 0 }}>
+                {showReports ? 'Waste Reports' : 'Hotspot Detection'}
+              </h2>
+              {!showReports && counts.critical > 0 && (
                 <span style={{ background: 'rgba(231,76,60,0.1)', color: '#e74c3c', border: '1px solid rgba(231,76,60,0.3)', fontSize: 9, fontWeight: 800, padding: '3px 10px', borderRadius: 20 }}>
                   {counts.critical} CRITICAL
                 </span>
               )}
             </div>
-            <p className="text-muted text-sm">Areas with repeated waste reports — sized and colored by frequency.</p>
+            <p className="text-muted text-sm">
+              {showReports ? 'Comprehensive list of all submitted waste and incident reports.' : 'Areas with repeated waste reports — sized and colored by frequency.'}
+            </p>
+          </div>
+          <div>
+            <button
+              onClick={() => setShowReports(!showReports)}
+              style={{
+                background: showReports ? 'var(--surface-2)' : 'var(--accent)',
+                color: showReports ? 'var(--text)' : '#fff',
+                border: showReports ? '1px solid var(--border)' : 'none',
+                padding: '8px 16px',
+                borderRadius: 8,
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: 'pointer',
+                fontFamily: 'var(--font-body)',
+                boxShadow: showReports ? 'none' : '0 4px 12px rgba(46,204,113,0.3)'
+              }}
+            >
+              {showReports ? '← Back to Map' : 'View All Reports 📋'}
+            </button>
           </div>
         </div>
 
-        {/* KPI strip */}
+        {showReports ? (
+          <AdminReports />
+        ) : (
+          <>
+            {/* KPI strip */}
         <div className="stat-grid" style={{ marginBottom: 20 }}>
           {[
             { label: 'Total Hotspots', value: hotspots.length,    color: 'var(--text)' },
@@ -373,6 +402,8 @@ export default function HotspotDetection() {
             })}
           </div>
         </div>
+        </>
+        )}
 
       </div>
     </DashboardLayout>

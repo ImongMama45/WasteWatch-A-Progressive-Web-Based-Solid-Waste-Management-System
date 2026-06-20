@@ -9,7 +9,7 @@
  */
 
 const DB_NAME = 'wastewatch_db'
-const DB_VERSION = 4   // v4: added proof_submissions + inspection_submissions
+const DB_VERSION = 5   // v5: sync version across offline modules
 
 const STORES = ['reports', 'analytics_queue', 'events_queue', 'sync_log', 'proof_submissions', 'inspection_submissions']
 

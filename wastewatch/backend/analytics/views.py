@@ -15,7 +15,8 @@ from .serializers import (
 )
 
 from watcher.models import GarbageReport, ReportStatus, IssueType, GarbageHotspot, Escalation
-from driver.models import WasteDelivery, CollectionSchedule, PickupStatus, Truck, DriverShift
+from driver.models import CollectionSchedule, PickupStatus, Truck, DriverShift
+from dumpsite.models import WasteDelivery
 from accounts.models import Barangay
 
 from django.http import HttpResponse

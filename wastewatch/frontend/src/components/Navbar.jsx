@@ -481,6 +481,7 @@ export default function Navbar() {
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
+  const [logoutWarning, setLogoutWarning] = useState(false)
 
 
   useEffect(() => { injectStyles() }, [])
@@ -495,9 +496,14 @@ export default function Navbar() {
   }, [menuOpen])
 
   async function handleLogout() {
+    setLogoutWarning(true)
+  }
+
+  async function confirmLogout() {
     await logout()
     navigate('/')
     setMenuOpen(false)
+    setLogoutWarning(false)
   }
 
   const isActive = (path) => location.pathname === path ? 'active' : ''
@@ -780,6 +786,45 @@ export default function Navbar() {
           onClick={() => { setMenuOpen(false) }}
           aria-hidden="true"
         />
+      )}
+
+      {logoutWarning && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+          zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }} onClick={() => setLogoutWarning(false)}>
+          <div style={{
+            background: '#ffffff', borderRadius: 16, padding: '24px 20px',
+            width: '100%', maxWidth: 360, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            textAlign: 'center',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+            <h3 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 8px 0', color: '#1a2e1a' }}>
+              Sign Out?
+            </h3>
+            <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.6)', marginBottom: 24, lineHeight: 1.4 }}>
+              Are you sure you want to sign out of WasteWatch?
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => setLogoutWarning(false)}
+                style={{ flex: 1, padding: '10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.1)', background: '#f8fdf8', color: '#1a2e1a', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
+                onMouseEnter={e => e.target.style.opacity = 0.8}
+                onMouseLeave={e => e.target.style.opacity = 1}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmLogout}
+                style={{ flex: 1, padding: '10px', borderRadius: 8, border: 'none', background: '#e74c3c', color: '#fff', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
+                onMouseEnter={e => e.target.style.opacity = 0.8}
+                onMouseLeave={e => e.target.style.opacity = 1}
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   )

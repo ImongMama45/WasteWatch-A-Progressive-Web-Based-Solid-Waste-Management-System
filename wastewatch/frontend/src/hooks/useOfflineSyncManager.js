@@ -15,6 +15,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useOnline } from './useOnline'
 import { getQueue } from './useOfflineQueue'
 import { useAuth } from '../context/AuthContext'
+import { base64ToBlob } from '../utils/photoStorage'
 import api from '../api/client'
 
 // ─── Priority map ─────────────────────────────────────────────────────────────
@@ -68,7 +69,10 @@ const ENDPOINTS = {
   },
 
   inspection_submissions: {
-    url: '/api/watcher/stop-validations/pre-inspect/',
+    url: (r) => r.type === 'post_verify' 
+      ? '/api/watcher/stop-validations/post-verify/' 
+      : '/api/watcher/stop-validations/pre-inspect/',
+    isDynamic: true,
     transform: (r) => {
       const form = new FormData()
       form.append('schedule_id', r.schedule_id)
@@ -77,10 +81,18 @@ const ENDPOINTS = {
       form.append('lng', r.lng)
       form.append('outcome', r.outcome)
       form.append('notes', r.notes || '')
-        // photos stored as array of Blobs
-        ; (r.photos || []).forEach((blob, i) =>
-          form.append(i === 0 ? 'photo' : `photo_${i + 1}`, blob, `inspect-${i}.jpg`)
+      
+      // Photos may be base64 strings (offline path) or Blobs (future direct path)
+      ;(r.photos || []).forEach((photo, i) => {
+        const blob = typeof photo === 'string'
+          ? base64ToBlob(photo)
+          : photo
+        form.append(
+          i === 0 ? 'photo' : `photo_${i + 1}`,
+          blob,
+          `inspect-${i}.jpg`
         )
+      })
       return form
     },
   },
@@ -122,7 +134,17 @@ export function useOfflineSyncManager() {
       }
       await queue.updateItem(item.id, { status: 'synced', syncedAt: new Date().toISOString() })
       return { ok: true, id: item.id }
-    } catch {
+    } catch (err) {
+      if (err.response?.status === 400) {
+        console.warn('[SyncManager] Dropping queued item — already processed by server:', {
+          stopOrder: item.stop_order,
+          scheduleId: item.schedule_id,
+          serverResponse: err.response?.data,
+        })
+        await queue.updateItem(item.id, { status: 'synced', syncedAt: new Date().toISOString() })
+        return { ok: true, id: item.id }
+      }
+      
       const retryCount = (item.retryCount || 0) + 1
       const status = retryCount >= MAX_RETRY ? 'failed' : 'pending'
       await queue.updateItem(item.id, { status, retryCount })

@@ -12,6 +12,9 @@ from .models import (
     StopValidation,
     StopValidationStatus,
 )
+from notifications.models import Notification, NotificationType
+from django.db import transaction
+import json
 from .serializers import (
     GarbageReportSerializer,
     CollectionConfirmationSerializer,
@@ -332,13 +335,110 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
     def _get_validation(self, schedule_id, stop_order):
         today = timezone.localdate()
         try:
-            return StopValidation.objects.select_related('schedule').get(
+            return StopValidation.objects.select_related('schedule', 'schedule__truck', 'schedule__driver').get(
                 schedule_id=schedule_id,
                 stop_order=stop_order,
                 collection_date=today,
             )
         except StopValidation.DoesNotExist:
             return None
+
+    def _update_driver_timeline(self, validation):
+        driver = validation.schedule.driver
+        if not driver:
+            return
+
+        # Check if all stops in schedule are completed
+        all_stops = StopValidation.objects.filter(schedule=validation.schedule, collection_date=validation.collection_date)
+        pending = all_stops.exclude(current_status__in=[
+            StopValidationStatus.VERIFIED_COLLECTED, 
+            StopValidationStatus.COLLECTION_DISPUTED,
+            StopValidationStatus.EMPTY_STOP
+        ])
+        
+        is_completed = not pending.exists() and all_stops.exists()
+
+        # Build full timeline
+        timeline = []
+        for stop in all_stops.order_by('stop_order'):
+            if stop.current_status == StopValidationStatus.PENDING_INSPECTION:
+                continue
+                
+            # Formulate the string based on status
+            st = stop.current_status
+            val_text = "Verified"
+            if st == StopValidationStatus.EMPTY_STOP:
+                val_text = "Empty"
+            elif st == StopValidationStatus.VERIFIED_COLLECTED:
+                if stop.pre_validation_remarks or stop.dispute_reason:
+                    val_text = "Present"
+                else:
+                    val_text = "Collected"
+            elif st == StopValidationStatus.COLLECTION_DISPUTED:
+                val_text = "Missed"
+            elif st == StopValidationStatus.READY_FOR_COLLECTION:
+                if stop.pre_validation_remarks or stop.pre_validation_photo:
+                    val_text = "Present"
+                else:
+                    val_text = "Inspected"
+                    
+            # Get image
+            img_url = None
+            if stop.post_validation_photo:
+                img_url = stop.post_validation_photo.url
+            elif stop.pre_validation_photo:
+                img_url = stop.pre_validation_photo.url
+                
+            # Get timestamp
+            ts = stop.post_validation_timestamp or stop.pre_validation_timestamp or timezone.now()
+                
+            timeline.append({
+                "stop_order": stop.stop_order,
+                "status": val_text,
+                "image": img_url,
+                "timestamp": ts.isoformat()
+            })
+            
+        if not timeline:
+            return
+
+        today = timezone.localdate()
+        notif = Notification.objects.filter(
+            user=driver,
+            type=NotificationType.WATCHER_ROUTE_SUMMARY,
+            created_at__date=today
+        ).first()
+        
+        msg_data = {
+            "type": "summary",
+            "watcher_name": self.request.user.full_name,
+            "truck_name": validation.schedule.truck.plate_number if validation.schedule.truck else "Truck",
+            "timeline": timeline,
+        }
+        
+        title = "Route Confirmation Complete" if is_completed else "Watcher Route updates"
+        
+        if notif:
+            notif.title = title
+            notif.message = json.dumps(msg_data)
+            notif.created_at = timezone.now()
+            notif.is_read = False
+            notif.save()
+        else:
+            Notification.objects.create(
+                user=driver,
+                title=title,
+                message=json.dumps(msg_data),
+                type=NotificationType.WATCHER_ROUTE_SUMMARY
+            )
+            
+        self._send_driver_notification(driver, title, msg_data)
+
+    def _send_driver_notification(self, driver, title, msg_data):
+        # External calls like WebSockets or Push Notifications go here.
+        # This executes outside the atomic block in the views.
+        pass
+
 
     @action(detail=False, methods=['post'], url_path='pre-inspect')
     def pre_inspect(self, request):
@@ -380,6 +480,13 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         validation = self._get_validation(schedule_id, stop_order)
         if not validation:
             return Response({'error': 'Stop validation not found for today.'}, status=status.HTTP_404_NOT_FOUND)
+            
+        if validation.current_status == StopValidationStatus.READY_FOR_COLLECTION:
+            return Response(
+                StopValidationSerializer(validation, context={'request': request}).data,
+                status=status.HTTP_200_OK
+            )
+            
         if validation.current_status != StopValidationStatus.PENDING_INSPECTION:
             return Response({'error': 'Stop is not pending inspection.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -390,21 +497,25 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         if not ok:
             return Response({'error': err}, status=status.HTTP_403_FORBIDDEN)
 
-        validation.pre_validation_watcher = request.user
-        validation.pre_validation_timestamp = timezone.now()
-        validation.pre_validation_latitude = lat
-        validation.pre_validation_longitude = lng
-        validation.pre_validation_remarks = remarks
-        if photo: validation.pre_validation_photo = photo
-        if photo_2: validation.pre_validation_photo_2 = photo_2
-        if photo_3: validation.pre_validation_photo_3 = photo_3
-        if photo_4: validation.pre_validation_photo_4 = photo_4
-        validation.current_status = (
-            StopValidationStatus.READY_FOR_COLLECTION
-            if outcome == 'garbage_present'
-            else StopValidationStatus.EMPTY_STOP
-        )
-        validation.save()
+        with transaction.atomic():
+            validation.pre_validation_watcher = request.user
+            validation.pre_validation_timestamp = timezone.now()
+            validation.pre_validation_latitude = lat
+            validation.pre_validation_longitude = lng
+            validation.pre_validation_remarks = remarks
+            if photo: validation.pre_validation_photo = photo
+            if photo_2: validation.pre_validation_photo_2 = photo_2
+            if photo_3: validation.pre_validation_photo_3 = photo_3
+            if photo_4: validation.pre_validation_photo_4 = photo_4
+            validation.current_status = (
+                StopValidationStatus.READY_FOR_COLLECTION
+                if outcome == 'garbage_present'
+                else StopValidationStatus.EMPTY_STOP
+            )
+            validation.save()
+
+            # Update the driver timeline inside atomic
+            self._update_driver_timeline(validation)
 
         return Response(
             StopValidationSerializer(validation, context={'request': request}).data,
@@ -441,13 +552,24 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         if outcome not in ('success', 'failed'):
             return Response({'error': 'outcome must be success or failed.'}, status=status.HTTP_400_BAD_REQUEST)
         if outcome == 'failed' and not dispute_reason:
-            return Response({'error': 'dispute_reason is required when collection failed.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'A reason is required when collection is marked as missed.'}, status=status.HTTP_400_BAD_REQUEST)
 
         validation = self._get_validation(schedule_id, stop_order)
         if not validation:
             return Response({'error': 'Stop validation not found for today.'}, status=status.HTTP_404_NOT_FOUND)
-        if validation.current_status != StopValidationStatus.COLLECTION_REPORTED:
-            return Response({'error': 'Stop does not have a reported collection.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if validation.current_status in (StopValidationStatus.VERIFIED_COLLECTED, StopValidationStatus.COLLECTION_DISPUTED):
+            return Response(
+                StopValidationSerializer(validation, context={'request': request}).data,
+                status=status.HTTP_200_OK
+            )
+            
+        if validation.current_status not in (
+            StopValidationStatus.COLLECTION_REPORTED, 
+            StopValidationStatus.READY_FOR_COLLECTION, 
+            StopValidationStatus.PENDING_INSPECTION,
+        ):
+            return Response({'error': 'Stop cannot be verified.'}, status=status.HTTP_400_BAD_REQUEST)
 
         coords = get_stop_coordinates(validation.schedule, stop_order)
         if not coords:
@@ -456,21 +578,24 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         if not ok:
             return Response({'error': err}, status=status.HTTP_403_FORBIDDEN)
 
-        validation.post_validation_watcher = request.user
-        validation.post_validation_timestamp = timezone.now()
-        validation.post_validation_latitude = lat
-        validation.post_validation_longitude = lng
-        validation.dispute_reason = dispute_reason if outcome == 'failed' else ''
-        if photo: validation.post_validation_photo = photo
-        if photo_2: validation.post_validation_photo_2 = photo_2
-        if photo_3: validation.post_validation_photo_3 = photo_3
-        if photo_4: validation.post_validation_photo_4 = photo_4
-        validation.current_status = (
-            StopValidationStatus.VERIFIED_COLLECTED
-            if outcome == 'success'
-            else StopValidationStatus.COLLECTION_DISPUTED
-        )
-        validation.save()
+        with transaction.atomic():
+            validation.post_validation_watcher = request.user
+            validation.post_validation_timestamp = timezone.now()
+            validation.post_validation_latitude = lat
+            validation.post_validation_longitude = lng
+            validation.dispute_reason = dispute_reason if outcome == 'failed' else ''
+            if photo: validation.post_validation_photo = photo
+            if photo_2: validation.post_validation_photo_2 = photo_2
+            if photo_3: validation.post_validation_photo_3 = photo_3
+            if photo_4: validation.post_validation_photo_4 = photo_4
+            validation.current_status = (
+                StopValidationStatus.VERIFIED_COLLECTED
+                if outcome == 'success'
+                else StopValidationStatus.COLLECTION_DISPUTED
+            )
+            validation.save()
+
+            self._update_driver_timeline(validation)
 
         return Response(
             StopValidationSerializer(validation, context={'request': request}).data,

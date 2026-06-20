@@ -17,7 +17,7 @@
  *    Celebration screen: fireworks + shift summary → Done or extended mode.
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useNotification } from '../../../context/NotificationContext'
@@ -27,6 +27,9 @@ import api from '../../../api/client'
 import Navbar from '../../../components/Navbar'
 import NavigateToDumpsiteModule from './NavigateToDumpsiteModule'
 import CalibrationCelebrationModule from './CalibrationCelebrationModule'
+import RouteCompletionMiniMap from './RouteCompletionMiniMap'
+import { buildStopValidationSnapshot, isMissedStopStatus, isCompletedStopStatus, normalizeStopStatus } from '../../../utils/pickupStatusSync'
+
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -158,7 +161,11 @@ function StatCell({ value, label }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
-export default function EndShiftModule({ setRouteState, schedule, stopStatuses, currentStopIndex }) {
+
+
+
+export default function EndShiftModule({ onAdvance, shift, schedule: scheduleProp, stopStatuses: stopStatusesProp, currentStopIndex: currentStopIndexProp }) {
+
   const navigate = useNavigate()
   const { user } = useAuth()
   const { notify } = useNotification()
@@ -172,8 +179,32 @@ export default function EndShiftModule({ setRouteState, schedule, stopStatuses, 
   // 'dump_site' → driver navigates to dump site (if exists)
   // 'returning' → driver navigates back to base
   // 'at_base'   → driver can proceed to end-shift form
+  
   const [phase, setPhase] = useState('loading')
   const [calibrationData, setCalibrationData] = useState(null)
+
+  // Seed from ShiftRouteModule props so missedStopOrders is immediately correct
+  const [schedule, setSchedule] = useState(scheduleProp || null)
+
+  // Initialise from the snapshot persisted by ShiftRouteModule just before
+  // advancing phase. This is the source of truth for which stops are missed.
+  const [stopStatuses, setStopStatuses] = useState(() => {
+    if (stopStatusesProp && stopStatusesProp.size > 0) return stopStatusesProp
+    try {
+      const raw = sessionStorage.getItem('ww_stop_statuses_snapshot')
+      if (raw) return new Map(JSON.parse(raw))
+    } catch { }
+    return new Map()
+  })
+
+  // Keep in sync if props update (e.g. rendered inside ShiftRouteModule)
+  useEffect(() => {
+    if (stopStatusesProp && stopStatusesProp.size > 0) setStopStatuses(stopStatusesProp)
+  }, [stopStatusesProp])
+  useEffect(() => {
+    if (scheduleProp) setSchedule(scheduleProp)
+  }, [scheduleProp])
+
 
   // ── GPS ───────────────────────────────────────────────────────────────────
   const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } =
@@ -191,8 +222,43 @@ export default function EndShiftModule({ setRouteState, schedule, stopStatuses, 
   useEffect(() => {
     if (!user?.id) return
     api.get('/api/driver/collection-schedules/')
-      .then(res => {
+      .then(async res => {
         const match = res.data.find(s => String(s.driver) === String(user.id))
+        if (match) {
+          setSchedule(match)
+          try {
+            const valRes = await api.get(`/api/watcher/stop-validations/?schedule_id=${encodeURIComponent(match.id)}`)
+            const snapshot = buildStopValidationSnapshot(valRes.data?.results || valRes.data || [])
+            const statusMap = new Map()
+            snapshot.statusMap.forEach((status, key) => {
+              const stopOrder = Number(String(key).split(':')[1])
+              if (!Number.isNaN(stopOrder)) statusMap.set(stopOrder, status)
+            })
+
+            // Layer 2: merge sessionStorage snapshot for locally-flagged stops
+            // (e.g. COLLECTION_REPORTED or DRIVER_MISSED that aren't yet in the API)
+            try {
+              const raw = sessionStorage.getItem('ww_stop_statuses_snapshot')
+              if (raw) {
+                const localMap = new Map(JSON.parse(raw))
+                localMap.forEach((localStatus, idx) => {
+                  if (!statusMap.has(idx)) statusMap.set(idx, localStatus)
+                })
+              }
+            } catch { }
+
+            // Layer 3: fill every waypoint index with PENDING_INSPECTION if still missing
+            // so the mini-map renders ALL stops, not just watcher-logged ones
+            if (match.waypoints?.length > 1) {
+              for (let i = 1; i < match.waypoints.length; i++) {
+                if (!statusMap.has(i)) statusMap.set(i, 'PENDING_INSPECTION')
+              }
+            }
+
+            setStopStatuses(statusMap)
+          } catch (e) { console.error('Failed to fetch validations snapshot:', e) }
+        }
+        
         if (match?.waypoints?.length > 0) {
           setBaseLocation(match.waypoints[0])
           setBaseName(match.waypoints[0]?.label || 'Home Base')
@@ -201,11 +267,11 @@ export default function EndShiftModule({ setRouteState, schedule, stopStatuses, 
           setDumpSiteLocation(match.dumpsite_detail)
           setDumpSiteName(match.dumpsite_detail?.name || 'Dump Site')
           setPhase('dump_site')
-          api.post('/api/driver/shift/status/', { status: 'heading_to_dumpsite' }).catch(() => { })
+          api.patch(`/api/driver/shift/${shift.id}/update-status/`, { status: 'end_shift' }).catch(() => { })
         } else {
           setCalibrationData(match)
           setPhase('calibration_complete')
-          api.post('/api/driver/shift/status/', { status: 'returning_to_base' }).catch(() => { })
+          api.patch(`/api/driver/shift/${shift.id}/update-status/`, { status: 'end_shift' }).catch(() => { })
         }
       })
       .catch((err) => {
@@ -375,7 +441,6 @@ export default function EndShiftModule({ setRouteState, schedule, stopStatuses, 
           // Delivery found! Dumpsite operator has calibrated/logged the truck.
           setCalibrationData(match)
           setPhase('calibration_complete')
-          api.post('/api/driver/shift/status/', { status: 'returning_to_base' }).catch(() => { })
         }
       } catch (err) {
         console.error('Error checking dump confirmation:', err)
@@ -393,7 +458,26 @@ export default function EndShiftModule({ setRouteState, schedule, stopStatuses, 
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
 
+  // Compute missed stops: only truly unvisited stops.
+  // Excluded: EMPTY_STOP (legitimately empty, driver did visit),
+  //           COLLECTION_DISPUTED (watcher challenge on a collection that happened),
+  //           VERIFIED_COLLECTED / COLLECTION_REPORTED (completed).
+  // This definition aligns with MISSED_STOP_STATUSES in pickupStatusSync.js.
+  const missedStopOrders = useMemo(() => {
+    if (!schedule?.waypoints) return []
+    return schedule.waypoints
+      .slice(1)
+      .map((_, i) => i + 1)
+      .filter(idx => {
+        const s = normalizeStopStatus(stopStatuses?.get(idx))
+        return s === 'DRIVER_MISSED' || s === 'PENDING_INSPECTION' || s === 'READY_FOR_COLLECTION'
+      })
+  }, [schedule, stopStatuses])
+
+  const [extendedModeLoading, setExtendedModeLoading] = useState(false)
+  
   async function handleEarlySubmit() {
+
     if (!reason || submitting) return
     setSubmitting(true)
     try {
@@ -406,6 +490,8 @@ export default function EndShiftModule({ setRouteState, schedule, stopStatuses, 
         started_at: startTime ? new Date(startTime).toISOString() : null,
         ended_at: endTime.toISOString(),
         duration_ms: durationMs,
+        missed_stop_orders: missedStopOrders,
+        schedule_id: schedule?.id,
       })
       endShift()
       clearRouteSession()
@@ -429,6 +515,8 @@ export default function EndShiftModule({ setRouteState, schedule, stopStatuses, 
         started_at: startTime ? new Date(startTime).toISOString() : null,
         ended_at: endTime.toISOString(),
         duration_ms: durationMs,
+        missed_stop_orders: missedStopOrders,
+        schedule_id: schedule?.id,
       })
       endShift()
       // Clear all route-specific session keys so DriverFlow restarts
@@ -442,10 +530,25 @@ export default function EndShiftModule({ setRouteState, schedule, stopStatuses, 
     }
   }
 
-  function handleExtendedMode() {
-    sessionStorage.setItem('ww_extended_mode', 'true')
-    sessionStorage.setItem('ww_route_state', 'navigating')
-    setRouteState('navigating')
+  async function handleExtendedMode() {
+    if (extendedModeLoading) return
+    setExtendedModeLoading(true)
+    try {
+      await api.post(`/api/driver/shift/${shift?.id}/extended_mode/`, {
+        missed_stop_orders: missedStopOrders,
+        schedule_id: schedule?.id,
+      })
+      // Only set session flag after confirmed server acknowledgment
+      sessionStorage.setItem('ww_extended_mode', 'true')
+      onAdvance('shiftroute')
+    } catch (err) {
+      notify({
+        variant: 'error-dark',
+        message: err.response?.data?.error || 'Failed to activate extended mode. Please try again.',
+      })
+    } finally {
+      setExtendedModeLoading(false)
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -810,7 +913,7 @@ export default function EndShiftModule({ setRouteState, schedule, stopStatuses, 
         calibrationData={calibrationData}
         schedule={schedule}
         stopStatuses={stopStatuses}
-        currentStopIndex={currentStopIndex}
+        currentStopIndex={1}
         onContinue={() => setPhase('returning')}
       />
     )
@@ -927,6 +1030,30 @@ export default function EndShiftModule({ setRouteState, schedule, stopStatuses, 
               </div>
             </div>
 
+            {missedStopOrders.length > 0 && (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{
+                  background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                  borderRadius: 12, padding: '12px 16px', display: 'flex', gap: 12,
+                  alignItems: 'flex-start', marginBottom: 16
+                }}>
+                  <span style={{ fontSize: 18 }}>⚠️</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: '#ef4444', marginBottom: 2 }}>
+                      {missedStopOrders.length} stop{missedStopOrders.length > 1 ? 's' : ''} will be marked missed
+                    </div>
+                    <div style={{ fontSize: 12, color: '#7f1d1d', lineHeight: 1.4 }}>
+                      These uncollected stops will be offered to nearby active drivers.
+                    </div>
+                  </div>
+                </div>
+                
+                <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+                  <RouteCompletionMiniMap schedule={schedule} stopStatuses={stopStatuses} />
+                </div>
+              </div>
+            )}
+
             <div style={{ marginBottom: 28 }}>
               <div style={{
                 fontSize: 11, fontWeight: 800, color: '#94a3b8',
@@ -1038,43 +1165,58 @@ export default function EndShiftModule({ setRouteState, schedule, stopStatuses, 
           </div>
         </div>
 
+        {schedule && (
+          <div className="es-fade2" style={{ padding: '0 20px', marginBottom: 20 }}>
+            <div style={{
+              fontSize: 11, fontWeight: 800, color: '#94a3b8',
+              letterSpacing: '.06em', marginBottom: 10,
+            }}>ROUTE RECEIPT</div>
+            <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+              <RouteCompletionMiniMap schedule={schedule} stopStatuses={stopStatuses} />
+            </div>
+          </div>
+        )}
+
         <div className="es-fade3" style={{ padding: '0 20px 32px', marginTop: 'auto' }}>
           <button
             id="end-shift-done-btn"
+            disabled={submitting}
             onClick={() => {
               if (dumpSiteLocation) {
                 setPhase('dump_site')
               } else {
-                // No dump site configured — go straight to done
                 handleDone()
               }
             }}
             style={{
               width: '100%', padding: '17px', borderRadius: 14,
-              background: '#0f172a', color: '#fff', border: 'none',
+              background: submitting ? '#e2e8f0' : '#0f172a',
+              color: submitting ? '#94a3b8' : '#fff', border: 'none',
               fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900,
-              cursor: 'pointer', marginBottom: 10,
+              cursor: submitting ? 'not-allowed' : 'pointer', marginBottom: 10,
               boxShadow: '0 6px 20px rgba(15,23,42,0.25)', letterSpacing: '.04em',
             }}
           >
-            Done
+            {submitting ? 'Ending shift…' : '✓ End Shift'}
           </button>
 
           <p style={{ textAlign: 'center', fontSize: 12, color: '#94a3b8', margin: '0 0 8px' }}>
-            Accept Unclaimed dump site
+            Truck not full? Help collect unclaimed stops nearby.
           </p>
           <button
             id="extended-mode-btn"
+            disabled={extendedModeLoading}
             onClick={handleExtendedMode}
             style={{
               width: '100%', padding: '17px', borderRadius: 14,
-              background: '#0f172a', color: '#fff', border: 'none',
+              background: extendedModeLoading ? '#e2e8f0' : '#0f172a',
+              color: extendedModeLoading ? '#94a3b8' : '#fff', border: 'none',
               fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900,
-              cursor: 'pointer', boxShadow: '0 6px 20px rgba(15,23,42,0.25)',
-              letterSpacing: '.04em',
+              cursor: extendedModeLoading ? 'not-allowed' : 'pointer',
+              boxShadow: '0 6px 20px rgba(15,23,42,0.25)', letterSpacing: '.04em',
             }}
           >
-            My Truck is still not full
+            {extendedModeLoading ? 'Activating…' : '📦 My Truck is still not full'}
           </button>
         </div>
 

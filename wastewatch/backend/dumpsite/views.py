@@ -115,8 +115,12 @@ class DumpsiteViewSet(viewsets.ModelViewSet):
     def inbound_queue(self, request, pk=None):
         """Trucks with op_status in ('heading_to_dumpsite', 'at_dumpsite') — the incoming queue."""
         self.get_object()  # permission check
+        from datetime import timedelta
+        cutoff = timezone.now() - timedelta(minutes=5)
         shifts = DriverShift.objects.filter(
-            is_active=True, op_status__in=['heading_to_dumpsite', 'at_dumpsite']
+            is_active=True,
+            op_status__in=['heading_to_dumpsite', 'at_dumpsite'],
+            driver__last_activity__gte=cutoff
         ).select_related('driver', 'truck')
 
         data = []
@@ -218,6 +222,12 @@ class DumpsiteViewSet(viewsets.ModelViewSet):
             Dumpsite.objects.filter(pk=site.pk).update(
                 current_fill_kg=models.F('current_fill_kg') + delivery.estimated_kg
             )
+            # Clear the driver's dumpsite op_status so they drop off the queue
+            from driver.models import DriverShift
+            shift = DriverShift.objects.filter(driver=delivery.driver, is_active=True).first()
+            if shift and shift.op_status in ['heading_to_dumpsite', 'at_dumpsite']:
+                shift.op_status = 'returning_to_base'
+                shift.save(update_fields=['op_status'])
         return Response(WasteDeliverySerializer(delivery).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'], url_path='barangay_breakdown')
@@ -277,6 +287,14 @@ class WasteDeliveryViewSet(viewsets.ModelViewSet):
         elif user.role == 'driver':
             qs = qs.filter(driver=user)
         return qs.order_by('-created_at')
+
+    def perform_create(self, serializer):
+        delivery = serializer.save()
+        from driver.models import DriverShift
+        shift = DriverShift.objects.filter(driver=delivery.driver, is_active=True).first()
+        if shift and shift.op_status in ['heading_to_dumpsite', 'at_dumpsite']:
+            shift.op_status = 'returning_to_base'
+            shift.save(update_fields=['op_status'])
 
     @action(detail=False, methods=['get'], url_path='analytics')
     def analytics(self, request):

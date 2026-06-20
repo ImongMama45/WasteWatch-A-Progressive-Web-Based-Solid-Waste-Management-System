@@ -277,7 +277,7 @@ function ReportPanel({ report, canModerate, onAction, onClose }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
-export default function MiniMap({ height = 260 }) {
+export default function MiniMap({ height = 260, focusCoordinate = null }) {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { notify } = useNotification()
@@ -483,6 +483,8 @@ export default function MiniMap({ height = 260 }) {
 
     // ── 1. Truck markers ──
     activeTrucksRef.current.forEach(truck => {
+      if (truck.lat == null || truck.lng == null) return
+
       const color = STATUS_COLORS[truck.status] || '#14b8a6'
       const icon = L.divIcon({
         html: makeTruckIconHtml(color, truck.truckId, truck.status),
@@ -526,9 +528,9 @@ export default function MiniMap({ height = 260 }) {
           if (!wp.lat || !wp.lng) return
           const stopOrder = i + 1
           const statusKey = `${schedule.id}:${stopOrder}`
-          if (!stopStatusMapRef.current.has(statusKey)) return
-
-          const stopStatus = normalizeStopStatus(stopStatusMapRef.current.get(statusKey))
+          // Fall back to PENDING_INSPECTION if no record exists yet
+          const rawStatus = stopStatusMapRef.current.get(statusKey)
+          const stopStatus = normalizeStopStatus(rawStatus ?? 'PENDING_INSPECTION')
           const details = stopDetailsMapRef.current.get(statusKey)
           const existing = stopMarkersRef.current.get(statusKey)
 
@@ -560,6 +562,7 @@ export default function MiniMap({ height = 260 }) {
                 ${STOP_STATUS_LABELS[stopStatus] || stopStatus}
               </span><br/>
               ${details?.collectedAt ? `<div style="font-size:10px;color:#10b981;margin-top:4px;">✓ ${details.collectedAt}</div>` : ''}
+              ${!rawStatus ? `<div style="font-size:10px;color:#94a3b8;margin-top:4px;">No watcher data yet</div>` : ''}
             </div>`)
 
           stopMarkersRef.current.set(statusKey, { marker, status: stopStatus })
@@ -615,6 +618,13 @@ export default function MiniMap({ height = 260 }) {
   }
 
   function closePanel() { setPanelType(null); setSelectedTruck(null); setSelectedReport(null) }
+
+  useEffect(() => {
+    if (focusCoordinate && focusCoordinate.lat && focusCoordinate.lng && mapInstanceRef.current) {
+      mapInstanceRef.current.setView([focusCoordinate.lat, focusCoordinate.lng], focusCoordinate.zoom || 16)
+    }
+  }, [focusCoordinate])
+
 
   // ─── RENDER ───────────────────────────────────────────────────────────────
 

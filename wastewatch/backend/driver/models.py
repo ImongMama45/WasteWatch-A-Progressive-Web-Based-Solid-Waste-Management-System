@@ -174,8 +174,9 @@ class PickupStatus(models.Model):
         ('ARRIVED', 'Arrived'),
         ('COMPLETED', 'Completed'),
         ('FAILED', 'Failed'),
+        ('DRIVER_MISSED', 'Driver Missed'),
     ]
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='EN_ROUTE')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='EN_ROUTE')
     barangay = models.ForeignKey(
         'accounts.Barangay',
         on_delete=models.SET_NULL,
@@ -275,8 +276,17 @@ class TruckCrewAssignment(models.Model):
 
 
 class DriverShift(models.Model):
+    PHASE_CHOICES = [
+        ('navigate_to_base', 'Navigating to base'),
+        ('confirm_start',    'Confirming start'),
+        ('checkin',          'Check-in'),
+        ('shiftroute',       'On route'),
+        ('end_shift',        'Ending shift'),
+    ]
+
     driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='shifts')
     truck = models.ForeignKey(Truck, on_delete=models.SET_NULL, null=True, blank=True, related_name='shifts')
+    status = models.CharField(max_length=32, choices=PHASE_CHOICES, default='navigate_to_base')
     duty_type = models.CharField(max_length=50, default='normal')
     started_at = models.DateTimeField(auto_now_add=True)
     ended_at = models.DateTimeField(null=True, blank=True)
@@ -285,8 +295,9 @@ class DriverShift(models.Model):
     op_status = models.CharField(
         max_length=20,
         default='on_duty',
-        help_text="Operational status: on_duty | on_route | delayed"
+        help_text="Operational status: on_duty | on_route | heading_to_dumpsite | at_dumpsite | returning_to_base | delayed"
     )
+    is_extended_mode = models.BooleanField(default=False, help_text="True if driver opted to take missed stops")
     current_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     current_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     last_location_update = models.DateTimeField(null=True, blank=True)

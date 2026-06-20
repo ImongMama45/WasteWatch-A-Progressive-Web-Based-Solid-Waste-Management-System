@@ -274,6 +274,46 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
             })
         return Response(data)
 
+    @action(detail=False, methods=['get'], url_path='reassigned')
+    def reassigned_stops(self, request):
+        """Returns only stops explicitly flagged DRIVER_MISSED that were
+        reassigned to this driver (extended mode only).
+        Non-extended drivers always get an empty list."""
+        from driver.models import DriverShift, CollectionSchedule, PickupStatus
+
+        shift = DriverShift.objects.filter(driver=request.user, is_active=True).first()
+        if not shift or not shift.is_extended_mode:
+            return Response({'stops': []})
+
+        schedule = CollectionSchedule.objects.filter(driver=request.user).first()
+        if not schedule:
+            return Response({'stops': []})
+
+        # Only rows explicitly marked DRIVER_MISSED on this driver's schedule
+        missed_records = PickupStatus.objects.filter(
+            schedule=schedule,
+            status='DRIVER_MISSED',
+        ).order_by('stop_order')
+
+        # Build waypoint lookup by stop_order for geometry data
+        wp_by_order = {}
+        for i, wp in enumerate(schedule.waypoints or []):
+            order = wp.get('stopOrder') or wp.get('stop_order') or i
+            wp_by_order[int(order)] = wp
+
+        stops = []
+        for record in missed_records:
+            wp = wp_by_order.get(record.stop_order)
+            if wp:
+                stops.append({
+                    **wp,
+                    'pickup_status_id': record.id,
+                    'stop_order': record.stop_order,
+                    'status': 'DRIVER_MISSED',
+                })
+
+        return Response({'stops': stops})
+
     @action(detail=False, methods=['post'], url_path='collect')
     def collect(self, request):
         """
@@ -606,6 +646,150 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
     serializer_class = DriverShiftSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    @action(detail=False, methods=['get'], url_path='current')
+    def current(self, request):
+        from datetime import timedelta
+        now = timezone.now()
+        staleness_cutoff = now - timedelta(hours=24)
+
+        # Auto-close any shifts abandoned for more than 24 hours
+        DriverShift.objects.filter(
+            driver=request.user,
+            ended_at__isnull=True,
+            started_at__lt=staleness_cutoff,
+        ).update(
+            ended_at=now,
+            status='end_shift',
+            is_active=False
+        )
+
+        # Now look for a genuinely active shift
+        shift = DriverShift.objects.filter(
+            driver=request.user,
+            ended_at__isnull=True,
+            started_at__gte=staleness_cutoff,
+            is_active=True
+        ).order_by('-started_at').first()
+
+        if not shift:
+            return Response({'active_shift': None})
+
+        return Response({
+            'active_shift': DriverShiftSerializer(shift).data
+        })
+
+    @action(detail=True, methods=['patch'], url_path='update-status')
+    def update_status(self, request, pk=None):
+        shift = self.get_object()
+
+        VALID_TRANSITIONS = {
+            'navigate_to_base': ['confirm_start', 'end_shift'],
+            'confirm_start':    ['checkin', 'end_shift'],
+            'checkin':          ['shiftroute', 'end_shift'],
+            'shiftroute':       ['end_shift'],
+            'end_shift':        ['end_shift', 'shiftroute'],  # allow re-entry for Extended Mode
+            # DEV-only: allow jumping to any phase
+            'assignment':       ['navigate_to_base', 'confirm_start', 'checkin', 'shiftroute', 'end_shift'],
+        }
+
+        # Map each phase → op_status so the live map always shows a meaningful label
+        PHASE_OP_STATUS = {
+            'assignment':       'off_duty',
+            'navigate_to_base': 'heading_to_start',
+            'confirm_start':    'at_base',
+            'checkin':          'checking_in',
+            'shiftroute':       'on_route',
+            'end_shift':        'heading_to_dumpsite',
+        }
+
+        new_status = request.data.get('status')
+        current = shift.status
+
+        if new_status == current:
+            return Response({'status': current, 'op_status': shift.op_status})
+
+        # Allow any transition in DEV (detected by a flag in the request)
+        is_dev_skip = request.data.get('dev_skip', False)
+        if not is_dev_skip and new_status not in VALID_TRANSITIONS.get(current, []):
+            return Response(
+                {'error': f'Invalid transition: {current} → {new_status}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        new_op = PHASE_OP_STATUS.get(new_status, shift.op_status)
+        shift.status = new_status
+        shift.op_status = new_op
+        shift.save(update_fields=['status', 'op_status'])
+        return Response({'status': new_status, 'op_status': new_op})
+
+    @action(detail=True, methods=['post'], url_path='extended_mode')
+    def extended_mode(self, request, pk=None):
+        shift = self.get_object()
+        if not shift.is_active:
+            return Response({'error': 'Cannot activate extended mode on an inactive shift.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Set status back to shiftroute so a page refresh returns to the map,
+        # not EndShiftModule / dump_site. is_extended_mode distinguishes this from
+        # a normal collection run so reassignment logic can target this driver.
+        shift.is_extended_mode = True
+        shift.status = 'shiftroute'
+        shift.save(update_fields=['is_extended_mode', 'status'])
+
+        # Process missed stops — same logic as end_shift
+        missed_stop_orders = request.data.get('missed_stop_orders', [])
+        schedule_id = request.data.get('schedule_id')
+        if schedule_id and missed_stop_orders:
+            from driver.models import PickupStatus
+            PickupStatus.objects.filter(
+                schedule_id=schedule_id,
+                stop_order__in=missed_stop_orders,
+            ).update(status='DRIVER_MISSED')
+
+            from driver.reassignment import trigger_reassignment
+            trigger_reassignment(schedule_id, missed_stop_orders)
+
+        return Response({'status': 'extended_mode_activated'})
+
+    @action(detail=False, methods=['post'], url_path='pre_start')
+    def pre_start_shift(self, request):
+        driver = request.user
+        duty_type = request.data.get('duty_type', 'normal')
+        
+        today = timezone.localdate()
+        assignment = TruckCrewAssignment.objects.filter(
+            driver=driver, date=today, is_active=True
+        ).select_related('schedule').first()
+        schedule = assignment.schedule if assignment else None
+        if not schedule:
+            schedule = CollectionSchedule.objects.filter(driver=driver, date=today).first()
+            if not schedule:
+                schedule = CollectionSchedule.objects.filter(driver=driver).first()
+        truck = assignment.truck if assignment else (schedule.truck if schedule else None)
+
+        with transaction.atomic():
+            shift = DriverShift.objects.select_for_update().filter(driver=driver, is_active=True).first()
+            if shift:
+                # Already active, we just return it
+                return Response(DriverShiftSerializer(shift).data, status=status.HTTP_200_OK)
+
+            if truck and truck.status == 'maintenance':
+                return Response({'error': 'This truck is currently under maintenance and cannot be used.'}, status=status.HTTP_400_BAD_REQUEST)
+            if truck and DriverShift.objects.select_for_update().filter(truck=truck, is_active=True).exists():
+                return Response({'error': 'Truck is currently being used in another active shift.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            shift = DriverShift.objects.create(
+                driver=driver,
+                truck=truck,
+                duty_type=duty_type,
+                started_at=timezone.now(),  # Temporary start time
+                is_active=True,
+                op_status='heading_to_start',
+                current_latitude=None,
+                current_longitude=None,
+                last_location_update=None
+            )
+        return Response(DriverShiftSerializer(shift).data, status=status.HTTP_201_CREATED)
+
     @action(detail=False, methods=['post'], url_path='start')
     def start_shift(self, request):
         driver = request.user
@@ -648,9 +832,17 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
         
 
         with transaction.atomic():
-            # Check for existing active shifts
-            if DriverShift.objects.select_for_update().filter(driver=driver, is_active=True).exists():
-                return Response({'error': 'Driver already has an active shift.'}, status=status.HTTP_400_BAD_REQUEST)
+            shift = DriverShift.objects.select_for_update().filter(driver=driver, is_active=True).first()
+            if shift:
+                # Update existing shift from pre_start
+                shift.started_at = timezone.now()
+                shift.current_latitude = driver_lat
+                shift.current_longitude = driver_lng
+                shift.last_location_update = timezone.now()
+                shift.op_status = 'on_duty'
+                shift.save()
+                return Response(DriverShiftSerializer(shift).data, status=status.HTTP_200_OK)
+            
             if truck and truck.status == 'maintenance':
                 return Response({'error': 'This truck is currently under maintenance and cannot be used.'}, status=status.HTTP_400_BAD_REQUEST)
             if truck and DriverShift.objects.select_for_update().filter(truck=truck, is_active=True).exists():
@@ -660,11 +852,12 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
                 driver=driver,
                 truck=truck,
                 duty_type=duty_type,
-                started_at=timezone.now(),  # always server-side — never trust client clock
+                started_at=timezone.now(),
                 is_active=True,
-                current_latitude=driver_lat,    # ← add this
-                current_longitude=driver_lng,   # ← add this
-                last_location_update=timezone.now()  # ← and this
+                op_status='on_duty',
+                current_latitude=driver_lat,
+                current_longitude=driver_lng,
+                last_location_update=timezone.now()
             )
         return Response(DriverShiftSerializer(shift).data, status=status.HTTP_201_CREATED)
 
@@ -672,6 +865,9 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path='end')
     def end_shift(self, request):
         driver = request.user
+        missed_stop_orders = request.data.get('missed_stop_orders', [])
+        schedule_id = request.data.get('schedule_id')
+
         with transaction.atomic():
             shift = DriverShift.objects.select_for_update().filter(driver=driver, is_active=True).first()
             if not shift:
@@ -685,6 +881,16 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
             shift.current_longitude   = None
             shift.last_location_update = None
             shift.save()
+            
+            if schedule_id and missed_stop_orders:
+                from driver.models import PickupStatus
+                PickupStatus.objects.filter(
+                    schedule_id=schedule_id,
+                    stop_order__in=missed_stop_orders
+                ).update(status='DRIVER_MISSED')
+                
+                from driver.reassignment import trigger_reassignment
+                trigger_reassignment(schedule_id, missed_stop_orders)
         # ── Thin out this shift's location history outside the transaction ──
         # Keep one ping every 2 minutes (retain every 24th row at 5s intervals).
         # This preserves a usable trail for replay without storing 5,760 rows/shift.
@@ -705,8 +911,6 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
     def active_shifts(self, request):
         shifts = DriverShift.objects.filter(
             is_active=True,
-            current_latitude__isnull=False,
-            current_longitude__isnull=False,
         ).select_related('driver', 'truck')
         data = []
         now = timezone.now()
@@ -724,25 +928,34 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
                         conn_status = 'offline'
                 else:
                     conn_status = 'offline'
+            else:
+                # If no location yet, determine status by driver's last activity
+                if shift.driver.last_activity:
+                    age_seconds = (now - shift.driver.last_activity).total_seconds()
+                    conn_status = 'active' if age_seconds <= 300 else 'offline'
+                else:
+                    conn_status = 'offline'
 
-                truck = shift.truck
-                if not truck:
-                    schedule = CollectionSchedule.objects.filter(driver=shift.driver, date=timezone.localdate()).first()
-                    if not schedule:
-                        schedule = CollectionSchedule.objects.filter(driver=shift.driver).first()
-                    truck = schedule.truck if schedule else None
+            truck = shift.truck
+            if not truck:
+                schedule = CollectionSchedule.objects.filter(driver=shift.driver, date=timezone.localdate()).first()
+                if not schedule:
+                    schedule = CollectionSchedule.objects.filter(driver=shift.driver).first()
+                truck = schedule.truck if schedule else None
 
-                data.append({
-                    'id': shift.id,
-                    'driver': shift.driver.full_name or shift.driver.username,
-                    'truckId': truck.plate_number if truck else 'Unknown',
-                    'truckModel': truck.model if truck else 'Unknown',
-                    'lat': float(shift.current_latitude),
-                    'lng': float(shift.current_longitude),
-                    'last_update': shift.last_location_update,
-                    'duty_type': shift.duty_type,
-                    'op_status': shift.op_status,
-                    'status': conn_status,
+            data.append({
+                'id': shift.id,
+                'driver': shift.driver.full_name or shift.driver.username,
+                'truck': truck.id if truck else None,
+                'truckId': truck.plate_number if truck else 'Unknown',
+                'truckModel': truck.model if truck else 'Unknown',
+                'lat': float(shift.current_latitude) if shift.current_latitude else None,
+                'lng': float(shift.current_longitude) if shift.current_longitude else None,
+                'last_update': shift.last_location_update,
+                'duty_type': shift.duty_type,
+                'op_status': shift.op_status,
+                'phase_status': shift.status,
+                'status': conn_status,
                 })
         return Response(data)
 
@@ -826,7 +1039,7 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
         shift = DriverShift.objects.filter(driver=request.user, is_active=True).first()
         if request.method == 'POST':
             new_status = request.data.get('status')
-            valid_statuses = ('on_duty', 'on_route', 'delayed', 'heading_to_dumpsite', 'at_dumpsite', 'returning_to_base')
+            valid_statuses = ('heading_to_start', 'on_duty', 'on_route', 'delayed', 'heading_to_dumpsite', 'at_dumpsite', 'returning_to_base')
             if shift and new_status in valid_statuses:
                 # Trigger dumpsite notification if transitioning to heading_to_dumpsite
                 if new_status == 'heading_to_dumpsite':
