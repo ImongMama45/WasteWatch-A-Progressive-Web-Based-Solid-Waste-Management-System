@@ -194,6 +194,7 @@ from django.contrib.auth.decorators import login_required
 
 PERSONNEL_ROLES = ('watcher', 'brgy_official', 'driver')
 
+@csrf_exempt
 @login_required
 @require_POST
 def heartbeat_view(request):

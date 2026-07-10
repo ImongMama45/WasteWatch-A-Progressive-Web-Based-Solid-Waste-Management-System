@@ -4,6 +4,23 @@ from datetime import timedelta
 SKIP_PATHS = ('/static/', '/admin/media/', '/favicon')
 PERSONNEL_ROLES = ('watcher', 'brgy_official', 'driver')
 
+
+class DisableApiCsrfMiddleware:
+    """
+    Disables CSRF enforcement for all /api/* routes.
+    This is required for cross-domain deployments (e.g. Vercel frontend + Render backend)
+    where the CSRF cookie cannot be reliably shared across origins.
+    CORS + Session auth still protect these endpoints.
+    """
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        if request.path.startswith('/api/'):
+            setattr(request, '_dont_enforce_csrf_checks', True)
+        return self.get_response(request)
+
+
 class UpdateLastActivityMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
