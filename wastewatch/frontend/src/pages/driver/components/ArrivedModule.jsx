@@ -2,7 +2,7 @@
  * ArrivedModule.jsx
  * ------------------
  * Rendered when routeState === "arrived".
- * Driver confirms collection at the stop by capturing a proof photo and
+ * Driver confirms collection at the stop by capturing proof photos and
  * optionally adding a note. Transitions to "completed" only after the
  * photo is successfully uploaded.
  *
@@ -14,13 +14,14 @@
  *  - setRouteState: fn
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import api from '../../../api/client'
 import Navbar from '../../../components/Navbar'
 import { broadcastPickupStatusSync } from '../../../utils/pickupStatusSync'
 import { useOnline } from '../../../hooks/useOnline'
 import { getQueue } from '../../../hooks/useOfflineQueue'
 import { useAuth } from '../../../context/AuthContext'
+import MultiPhotoPicker from '../../../components/MultiPhotoPicker'
 
 // ─── QUICK NOTE PRESETS ───────────────────────────────────────────────────────
 
@@ -55,19 +56,14 @@ export default function ArrivedModule({ setRouteState }) {
   const [schedule, setSchedule] = useState(null)
   const [loading, setLoading] = useState(true)
   const { user } = useAuth()
+
   // ── Connectivity ───────────────────────────────────────────────────────────
   const isOnline = useOnline()
-  const queue = getQueue('proof_submissions')
-  // Camera state
-  const [cameraReady, setCameraReady] = useState(false)
-  const [cameraError, setCameraError] = useState('')
-  const [photoPreview, setPhotoPreview] = useState('')
-  const [photoUploaded, setPhotoUploaded] = useState(false)
-  const [uploadingProof, setUploadingProof] = useState(false)
+  const proofQueue = getQueue('proof_submissions')
 
-  const videoRef = useRef(null)
-  const canvasRef = useRef(null)
-  const streamRef = useRef(null)
+  // Camera state
+  const [cameraError, setCameraError] = useState('')
+  const [photos, setPhotos] = useState([])
 
   const currentStopIndex = parseInt(
     sessionStorage.getItem('ww_current_stop_index') || '1',
@@ -91,46 +87,6 @@ export default function ArrivedModule({ setRouteState }) {
       .finally(() => setLoading(false))
   }, [])
 
-  // ── Camera initialisation ─────────────────────────────────────────────────
-
-  useEffect(() => {
-    let active = true
-
-    const startCamera = async () => {
-      try {
-        if (!navigator.mediaDevices?.getUserMedia) {
-          throw new Error('Camera access is not supported on this device.')
-        }
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' } },
-          audio: false,
-        })
-        if (!active) {
-          stream.getTracks().forEach(t => t.stop())
-          return
-        }
-        streamRef.current = stream
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          await videoRef.current.play().catch(() => { })
-        }
-        setCameraReady(true)
-        setCameraError('')
-      } catch (err) {
-        setCameraError(err?.message || 'Camera access is required to confirm collection.')
-        setCameraReady(false)
-      }
-    }
-
-    startCamera()
-
-    return () => {
-      active = false
-      streamRef.current?.getTracks().forEach(t => t.stop())
-      streamRef.current = null
-    }
-  }, [])
-
   // ── Derived ───────────────────────────────────────────────────────────────
 
   const stopName =
@@ -149,106 +105,79 @@ export default function ArrivedModule({ setRouteState }) {
     setNote(prev => (prev ? `${prev}, ${preset}` : preset))
   }
 
-  // ── Camera helpers ────────────────────────────────────────────────────────
+  // ── Confirm → transition ───────────────────────────────────────────────────
 
-  function restartCamera() {
-    streamRef.current?.getTracks().forEach(t => t.stop())
-    setCameraError('')
-    setCameraReady(false)
-    setPhotoPreview('')
-    setPhotoUploaded(false)
+  async function handleConfirm() {
+    if (photos.length === 0) {
+      setCameraError('You must take at least one photo to confirm.')
+      return
+    }
 
-    navigator.mediaDevices
-      ?.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
-      .then(stream => {
-        streamRef.current = stream
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          videoRef.current.play().catch(() => { })
-        }
-        setCameraReady(true)
-      })
-      .catch(err => setCameraError(err?.message || 'Camera access is required.'))
-  }
-
-  async function captureBlob() {
-    const video = videoRef.current
-    const canvas = canvasRef.current
-    if (!video || !canvas) throw new Error('Camera is not ready yet.')
-    if (!video.videoWidth || !video.videoHeight)
-      throw new Error('Camera preview has not loaded yet.')
-
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height)
-
-    return new Promise((resolve, reject) => {
-      canvas.toBlob(
-        blob => (blob ? resolve(blob) : reject(new Error('Could not capture a photo.'))),
-        'image/jpeg',
-        0.92,
-      )
-    })
-  }
-
-  async function handleCaptureProof() {
     if (!user?.id) {
       setCameraError('You must be logged in to submit proof.')
       return
     }
+
     if (!currentStopId) {
       setCameraError('Unable to find the current stop.')
       return
     }
 
+    setSubmitting(true)
+    setCameraError('')
+
     try {
-      const photo = await captureBlob()
-      setUploadingProof(true)
+      const safeStopIndex = parseInt(sessionStorage.getItem('ww_current_stop_index') || '1', 10)
+      
+      const photoRes = await fetch(photos[0])
+      const photoBlob = await photoRes.blob()
 
       const note_ = note.trim()
       const collected_at = new Date().toISOString()
-      const lat = sessionStorage.getItem('ww_gps_lat')
-      const lng = sessionStorage.getItem('ww_gps_lng')
-      const photoName = `pickup-${currentStopIndex}-${Date.now()}.jpg`
+      const lat = sessionStorage.getItem('ww_gps_lat') || ''
+      const lng = sessionStorage.getItem('ww_gps_lng') || ''
+      const photoName = `pickup-${safeStopIndex}-${Date.now()}.jpg`
 
       if (isOnline) {
-        // ── ONLINE PATH ─────────────────────────────────────────────────────
         try {
           const formData = new FormData()
-          formData.append('photo', photo, photoName)
+          formData.append('photo', photoBlob, photoName)
           formData.append('note', note_)
           formData.append('collected_at', collected_at)
           if (lat) formData.append('lat', lat)
           if (lng) formData.append('lng', lng)
+          formData.append('schedule_id', schedule?.id || '')
+          formData.append('stop_order', String(safeStopIndex))
 
-          const res = await api.post(`/api/driver/stops/${currentStopId}/collect/`, formData)
+          const res = await api.post(`/api/driver/stops/collect/`, formData)
 
-          setPhotoUploaded(true)
-          setPhotoPreview(canvasRef.current.toDataURL('image/jpeg', 0.9))
-          setPersistedStopStatus(currentStopIndex, 'collected')
+          setPersistedStopStatus(safeStopIndex, 'collected')
           sessionStorage.setItem('ww_pending_collection_photo_url', res.data?.photo_url || '')
           broadcastPickupStatusSync({
             scheduleId: schedule?.id || null,
-            stopOrder: currentStopIndex,
+            stopOrder: safeStopIndex,
             status: 'COMPLETED',
             source: 'arrived-module',
           })
+
+          sessionStorage.setItem('ww_pending_collection_note', note_)
+          sessionStorage.setItem('ww_pending_collection_stop_id', String(currentStopId))
+          sessionStorage.setItem('ww_pending_collection_at', collected_at)
+          sessionStorage.setItem('ww_route_state', 'completed')
+          setRouteState('completed')
           return
         } catch (netErr) {
-          // Network failed despite being "online" → fall through to queue
           const isNetworkErr = !netErr?.response
-          if (!isNetworkErr) throw netErr   // real server error, surface it
-          // else fall through ↓
+          if (!isNetworkErr) throw netErr
         }
       }
 
-      // ── OFFLINE PATH (or network blip fallback) ─────────────────────────
       await proofQueue.enqueue({
         ownerId: String(user.id),
         stopId: currentStopId,
-        stopOrder: currentStopIndex,
+        stopOrder: safeStopIndex,
         scheduleId: schedule?.id || null,
-        photo,
+        photo: photoBlob,
         photoName,
         note: note_,
         collected_at,
@@ -256,40 +185,26 @@ export default function ArrivedModule({ setRouteState }) {
         lng,
       }, 1)
 
-      // Let the driver continue — mark as saved offline
-      setPhotoUploaded(true)
-      setPhotoPreview(canvasRef.current.toDataURL('image/jpeg', 0.9))
-      setPersistedStopStatus(currentStopIndex, 'collected')
+      setPersistedStopStatus(safeStopIndex, 'collected')
       sessionStorage.setItem('ww_pending_collection_photo_url', '')
       broadcastPickupStatusSync({
         scheduleId: schedule?.id || null,
-        stopOrder: currentStopIndex,
+        stopOrder: safeStopIndex,
         status: 'COMPLETED',
         source: 'arrived-module-offline',
       })
-      // Surface a soft notice (not an error)
-      setCameraError('📶 Saved offline — will sync when connected.')
 
+      sessionStorage.setItem('ww_pending_collection_note', note_)
+      sessionStorage.setItem('ww_pending_collection_stop_id', String(currentStopId))
+      sessionStorage.setItem('ww_pending_collection_at', collected_at)
+      sessionStorage.setItem('ww_route_state', 'completed')
+      setRouteState('completed')
     } catch (err) {
       setCameraError(
         err?.response?.data?.error || err?.message || 'Proof photo upload failed.',
       )
-    } finally {
-      setUploadingProof(false)
+      setSubmitting(false)
     }
-  }
-
-  // ── Confirm → transition ───────────────────────────────────────────────────
-
-  async function handleConfirm() {
-    if (!photoUploaded) return
-    setSubmitting(true)
-    sessionStorage.setItem('ww_pending_collection_note', note.trim())
-    sessionStorage.setItem('ww_pending_collection_stop_id', String(currentStopId))
-    sessionStorage.setItem('ww_pending_collection_at', new Date().toISOString())
-    sessionStorage.setItem('ww_route_state', 'completed')
-    setSubmitting(false)
-    setRouteState('completed')
   }
 
   // ── Loading screen ─────────────────────────────────────────────────────────
@@ -342,7 +257,17 @@ export default function ArrivedModule({ setRouteState }) {
           textAlign: 'center',
           color: '#fff',
         }}>
-          <div style={{ fontSize: 52, marginBottom: 14 }}>📍</div>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
+            <div style={{
+              width: 72, height: 72, borderRadius: '50%', background: 'rgba(255,255,255,0.1)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.2)'
+            }}>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                <circle cx="12" cy="10" r="3"></circle>
+              </svg>
+            </div>
+          </div>
           <h1 style={{
             fontFamily: 'var(--font-head)',
             fontSize: 26, fontWeight: 900,
@@ -422,121 +347,36 @@ export default function ArrivedModule({ setRouteState }) {
           />
         </div>
 
-        {/* ── PHOTO PROOF ── */}
+        {/* ── MULTI PHOTO PICKER ── */}
         <div style={{ padding: '0 16px', marginBottom: 28 }}>
           <div style={{
             background: '#fff',
-            border: `1.5px solid ${cameraError ? '#ef4444' : '#e2e8f0'}`,
+            border: `1.5px dashed ${cameraError ? '#ef4444' : '#cbd5e1'}`,
             borderRadius: 16,
-            overflow: 'hidden',
+            padding: '16px',
           }}>
-            {/* Header */}
-            <div style={{
-              padding: '14px 16px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              borderBottom: '1px solid #f1f5f9',
-            }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', letterSpacing: '.06em' }}>
-                  PHOTO PROOF
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
-                  Required before confirming
-                </div>
+                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: '#0f172a' }}>Take Proof Photo</h3>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>Required &middot; GPS location will be verified</p>
               </div>
-              <span style={{
-                fontSize: 10, fontWeight: 800, letterSpacing: '.05em',
-                padding: '4px 10px', borderRadius: 999,
-                background: photoUploaded ? 'rgba(46,204,113,0.12)' : 'rgba(245,158,11,0.12)',
-                color: photoUploaded ? '#16a34a' : '#f59e0b',
-              }}>
-                {photoUploaded ? 'UPLOADED' : 'REQUIRED'}
-              </span>
-            </div>
-
-            {/* Viewfinder */}
-            <div style={{
-              background: '#0f172a',
-              minHeight: 220,
-              position: 'relative',
-            }}>
-              {!photoPreview ? (
-                <video
-                  ref={videoRef}
-                  muted
-                  playsInline
-                  autoPlay
-                  style={{ width: '100%', height: 220, objectFit: 'cover', display: 'block' }}
-                />
-              ) : (
-                <img
-                  src={photoPreview}
-                  alt="Captured proof"
-                  style={{ width: '100%', height: 220, objectFit: 'cover', display: 'block' }}
-                />
-              )}
-              <canvas ref={canvasRef} style={{ display: 'none' }} />
-              {!cameraReady && !cameraError && !photoPreview && (
-                <div style={{
-                  position: 'absolute', inset: 0,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: '#cbd5e1', fontSize: 12, background: 'rgba(15,23,42,0.35)',
+              {photos.length === 0 && (
+                <span style={{
+                  fontSize: 10, fontWeight: 800, letterSpacing: '.05em',
+                  padding: '4px 10px', borderRadius: 999,
+                  background: 'rgba(245,158,11,0.12)',
+                  color: '#f59e0b',
                 }}>
-                  Starting camera...
-                </div>
+                  REQUIRED
+                </span>
               )}
             </div>
 
-            {/* Error */}
-            {/* Replace the existing cameraError block with: */}
-            {cameraError && (
-              <div style={{
-                margin: '12px 16px 0',
-                padding: '10px 12px', borderRadius: 10,
-                background: cameraError.startsWith('📶')
-                  ? 'rgba(20,184,166,0.08)'
-                  : 'rgba(239,68,68,0.08)',
-                border: cameraError.startsWith('📶')
-                  ? '1px solid rgba(20,184,166,0.25)'
-                  : '1px solid rgba(239,68,68,0.18)',
-                color: cameraError.startsWith('📶') ? '#0d9488' : '#b91c1c',
-                fontSize: 12,
-              }}>
-                {cameraError}
-              </div>
-            )}
-
-            {/* Controls */}
-            <div style={{ display: 'flex', gap: 10, padding: '12px 16px 16px' }}>
-              <button
-                onClick={handleCaptureProof}
-                disabled={uploadingProof || photoUploaded || !!cameraError || !cameraReady}
-                style={{
-                  flex: 1, padding: '14px 12px', borderRadius: 12, border: 'none',
-                  background: uploadingProof ? '#cbd5e1' : '#0f172a', color: '#fff',
-                  fontFamily: 'var(--font-head)', fontSize: 14, fontWeight: 900,
-                  letterSpacing: '.04em',
-                  cursor: uploadingProof || photoUploaded || !!cameraError || !cameraReady
-                    ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {uploadingProof ? 'Uploading...' : photoUploaded ? '✓ Photo Uploaded' : '📷 Take Photo'}
-              </button>
-              <button
-                onClick={restartCamera}
-                style={{
-                  width: 100, padding: '14px 12px', borderRadius: 12,
-                  border: '1px solid #e2e8f0',
-                  background: '#fff', color: '#0f172a',
-                  fontFamily: 'var(--font-head)', fontSize: 13, fontWeight: 800,
-                  cursor: 'pointer',
-                }}
-              >
-                Retake
-              </button>
-            </div>
+            <MultiPhotoPicker
+              photos={photos}
+              onChange={setPhotos}
+              error={cameraError}
+            />
           </div>
         </div>
 
@@ -545,20 +385,20 @@ export default function ArrivedModule({ setRouteState }) {
           <button
             id="confirm-collection-btn"
             onClick={handleConfirm}
-            disabled={submitting || !photoUploaded}
+            disabled={submitting || photos.length === 0}
             style={{
               width: '100%', padding: '18px', borderRadius: 30,
-              background: submitting || !photoUploaded ? '#e2e8f0' : '#0f172a',
-              color: submitting || !photoUploaded ? '#94a3b8' : '#fff',
+              background: submitting || photos.length === 0 ? '#e2e8f0' : '#0f172a',
+              color: submitting || photos.length === 0 ? '#94a3b8' : '#fff',
               border: 'none',
               fontFamily: 'var(--font-head)',
               fontSize: 16, fontWeight: 900, letterSpacing: '.06em',
-              cursor: submitting || !photoUploaded ? 'not-allowed' : 'pointer',
-              boxShadow: submitting || !photoUploaded ? 'none' : '0 6px 20px rgba(15,23,42,0.3)',
+              cursor: submitting || photos.length === 0 ? 'not-allowed' : 'pointer',
+              boxShadow: submitting || photos.length === 0 ? 'none' : '0 6px 20px rgba(15,23,42,0.3)',
               transition: 'all .2s',
             }}
           >
-            {submitting ? 'Saving…' : photoUploaded ? '✓ Confirm Collection' : 'Take a photo to confirm'}
+            {submitting ? 'Saving…' : photos.length > 0 ? '✓ Confirm Collection' : 'Take a photo to confirm'}
           </button>
         </div>
 

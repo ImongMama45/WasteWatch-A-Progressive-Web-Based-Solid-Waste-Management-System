@@ -48,22 +48,25 @@ export function AuthProvider({ children }) {
   const [barangays, setBarangays] = useState(readBrgyCache)
 
   // ── Session check ─────────────────────────────────────────────────────────
-  // Replace just this useEffect in AuthProvider:
   useEffect(() => {
-    api.get('/api/auth/me/')
-      .then(res => {
-        setUser(res.data)
-        saveUserCache(res.data)
+    // 1. Always fetch CSRF token first to fix Ngrok/PWA mobile caching issues
+    api.get('/api/auth/csrf/')
+      .catch(() => { /* offline or failed */ })
+      .finally(() => {
+        // 2. Then fetch user session
+        api.get('/api/auth/me/')
+          .then(res => {
+            setUser(res.data)
+            saveUserCache(res.data)
+          })
+          .catch(err => {
+            if (err.response?.status === 401 || err.response?.status === 403) {
+              setUser(null)
+              saveUserCache(null)
+            }
+          })
+          .finally(() => setLoading(false))
       })
-      .catch(err => {
-        if (err.response?.status === 401 || err.response?.status === 403) {
-          // Server says not logged in — clear stale cache
-          setUser(null)
-          saveUserCache(null)
-        }
-        // Network error (offline) → keep cached user
-      })
-      .finally(() => setLoading(false))
   }, [])
 
   // ── Barangay list (once, cached) ──────────────────────────────────────────

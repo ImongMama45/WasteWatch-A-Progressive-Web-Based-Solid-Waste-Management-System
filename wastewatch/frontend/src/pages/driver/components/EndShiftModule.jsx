@@ -44,6 +44,7 @@ const ROUTE_SESSION_KEYS = [
   'ww_extended_mode',
   'ww_completed_stops',
   'ww_total_stops',
+  'ww_endshift_phase',   // ← EndShiftModule sub-phase persistence
 ]
 
 function clearRouteSession() {
@@ -148,6 +149,36 @@ function SummaryRow({ icon, label, value }) {
   )
 }
 
+// ─── SVG ICONS ────────────────────────────────────────────────────────────────
+
+const TimerIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: -1 }}>
+    <circle cx="12" cy="12" r="10"></circle>
+    <polyline points="12 6 12 12 16 14"></polyline>
+  </svg>
+)
+
+const HomeIcon = ({ size = 22, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+    <polyline points="9 22 9 12 15 12 15 22"></polyline>
+  </svg>
+)
+
+const RadarIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: -2 }}>
+    <path d="M12 2v2"></path>
+    <path d="M12 20v2"></path>
+    <path d="M4.93 4.93l1.41 1.41"></path>
+    <path d="M17.66 17.66l1.41 1.41"></path>
+    <path d="M2 12h2"></path>
+    <path d="M20 12h2"></path>
+    <path d="M6.34 17.66l-1.41 1.41"></path>
+    <path d="M19.07 4.93l-1.41 1.41"></path>
+    <circle cx="12" cy="12" r="4"></circle>
+  </svg>
+)
+
 // ─── STAT CELL ────────────────────────────────────────────────────────────────
 
 function StatCell({ value, label }) {
@@ -175,12 +206,29 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
   const firstName = user?.full_name?.split(' ')[0] || 'Driver'
 
   // ── Phase gate ────────────────────────────────────────────────────────────
-  // 'loading'   → fetching schedule data
-  // 'dump_site' → driver navigates to dump site (if exists)
-  // 'returning' → driver navigates back to base
-  // 'at_base'   → driver can proceed to end-shift form
-  
-  const [phase, setPhase] = useState('loading')
+  // 'loading'               → fetching schedule data
+  // 'dump_site'             → driver navigates to dump site (if exists)
+  // 'waiting_dump_confirmation' → waiting for dumpsite operator calibration
+  // 'returning'             → driver navigates back to base
+  // 'at_base'               → driver can proceed to end-shift form
+
+  // Persist sub-phase to the backend on every transition so any device
+  // can resume correctly (sessionStorage is device-local; backend is canonical).
+  const [phase, setPhaseRaw] = useState('loading')
+  function setPhase(p) {
+    if (p !== 'loading') {
+      // Fire-and-forget — non-blocking, won't block UI transition
+      if (shift?.id) {
+        api.patch(`/api/driver/shift/${shift.id}/update-status/`, {
+          status: 'end_shift',
+          end_shift_phase: p,
+        }).catch(() => { /* best-effort */ })
+      }
+      // Also keep sessionStorage as a fast-path fallback (same device, offline)
+      sessionStorage.setItem('ww_endshift_phase', p)
+    }
+    setPhaseRaw(p)
+  }
   const [calibrationData, setCalibrationData] = useState(null)
 
   // Seed from ShiftRouteModule props so missedStopOrders is immediately correct
@@ -266,11 +314,29 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
         if (match?.dumpsite_detail) {
           setDumpSiteLocation(match.dumpsite_detail)
           setDumpSiteName(match.dumpsite_detail?.name || 'Dump Site')
-          setPhase('dump_site')
+
+          // ── Resume logic: backend is canonical, sessionStorage is fallback ──
+          // Priority: server end_shift_phase > sessionStorage > default (dump_site)
+          const serverPhase = shift?.end_shift_phase
+          const localPhase  = sessionStorage.getItem('ww_endshift_phase')
+          const persisted   = serverPhase || localPhase
+          const PAST_DUMP   = ['waiting_dump_confirmation', 'returning', 'at_base', 'early_termination', 'calibration_complete']
+          if (persisted && PAST_DUMP.includes(persisted)) {
+            // Driver already visited dump site — restore to where they were
+            setCalibrationData(match)
+            setPhaseRaw(persisted)
+          } else {
+            // Fresh start or still at/before dump site
+            setPhase('dump_site')
+          }
           api.patch(`/api/driver/shift/${shift.id}/update-status/`, { status: 'end_shift' }).catch(() => { })
         } else {
           setCalibrationData(match)
-          setPhase('calibration_complete')
+          // Restore from server first, sessionStorage second, then default
+          const serverPhase = shift?.end_shift_phase
+          const localPhase  = sessionStorage.getItem('ww_endshift_phase')
+          const persisted   = serverPhase || localPhase
+          setPhaseRaw(persisted || 'calibration_complete')
           api.patch(`/api/driver/shift/${shift.id}/update-status/`, { status: 'end_shift' }).catch(() => { })
         }
       })
@@ -333,13 +399,27 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
     mapInstance.current = map
     setTimeout(() => map.invalidateSize(), 0)
 
-    const driverIcon = L.divIcon({ /* ...existing icon html... */ })
+    const driverIcon = L.divIcon({
+      html: `<div style="position:relative;width:18px;height:18px;">
+             <span style="position:absolute;inset:-6px;border-radius:50%;border:2px solid #2563eb;opacity:0.4;animation:esmPulse 2s ease infinite;"></span>
+             <div style="position:absolute;inset:0;background:#2563eb;border:3px solid white;border-radius:50%;box-shadow:0 0 12px rgba(37,99,235,0.7);"></div>
+           </div>`,
+      className: '', iconSize: [18, 18], iconAnchor: [9, 9]
+    })
     driverMarker.current = L.marker(center, { icon: driverIcon, zIndexOffset: 1000 }).addTo(map)
 
     if (baseLocation) {
       const baseLat = Number(baseLocation.lat)
       const baseLng = Number(baseLocation.lng)
-      const baseIcon = L.divIcon({ /* ...existing icon html... */ })
+      const baseIcon = L.divIcon({
+        html: `<div style="position:relative;width:40px;height:40px;">
+                 <span style="position:absolute;inset:-6px;border-radius:50%;border:2px solid #16a34a;opacity:0.45;animation:esmPulse 2.2s ease infinite .3s;"></span>
+                 <div style="position:absolute;inset:0;background:#16a34a;border:3px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 14px rgba(22,163,74,0.55);font-size:18px;">
+                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                 </div>
+               </div>`,
+        className: '', iconSize: [40, 40], iconAnchor: [20, 20]
+      })
       L.marker([baseLat, baseLng], { icon: baseIcon })
         .addTo(map)
         .bindPopup(`<b>${baseName}</b><br/><span style="font-size:11px;color:#16a34a;font-weight:700;text-transform:uppercase">Home Base</span>`)
@@ -654,7 +734,7 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
           <div style={{
             position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
             background: 'rgba(15,23,42,0.93)', backdropFilter: 'blur(8px)',
-            padding: '16px 18px 18px', color: '#fff',
+            padding: '76px 18px 18px', color: '#fff',
             boxShadow: '0 4px 20px rgba(0,0,0,.2)',
           }}>
             {/* Status pills row */}
@@ -689,15 +769,17 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
                 marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5,
                 background: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: '3px 10px',
               }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.65)', letterSpacing: '.04em' }}>
-                  ⏱ {formattedTime}
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.65)', letterSpacing: '.04em' }}>
+                  <TimerIcon /> {formattedTime}
                 </span>
               </div>
             </div>
 
             {/* Destination title */}
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-              <span style={{ fontSize: 22, marginTop: 1 }}>🏠</span>
+              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, background: 'rgba(255,255,255,0.15)', borderRadius: 8, marginTop: 1 }}>
+                <HomeIcon size={16} color="#fff" />
+              </span>
               <div>
                 <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, marginBottom: 2 }}>
                   {baseName}
@@ -711,7 +793,7 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
 
           {/* ── TURN INSTRUCTION CARD ── */}
           <div style={{
-            position: 'absolute', top: 122, left: 14, right: 14, zIndex: 10,
+            position: 'absolute', top: 182, left: 14, right: 14, zIndex: 10,
             background: 'rgba(255,255,255,0.97)', borderRadius: 16, overflow: 'hidden',
             display: 'flex', alignItems: 'stretch',
             boxShadow: '0 6px 28px rgba(0,0,0,.18)',
@@ -722,7 +804,7 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
               borderRight: '3px solid #16a34a28',
               display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0',
             }}>
-              <span style={{ fontSize: 30 }}>🏠</span>
+              <HomeIcon size={32} color="#16a34a" />
             </div>
             <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
               <div style={{
@@ -777,8 +859,8 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
                 </p>
               )}
               {!isAtBase && distanceToBase == null && (
-                <p style={{ fontSize: 12, color: '#f59e0b', marginBottom: 12 }}>
-                  📡 Waiting for GPS signal…
+                <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#f59e0b', marginBottom: 12 }}>
+                  <RadarIcon /> Waiting for GPS signal…
                 </p>
               )}
 

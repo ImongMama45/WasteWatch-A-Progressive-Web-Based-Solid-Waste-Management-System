@@ -10,14 +10,23 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = 'django-insecure-change-this-in-production-use-env-variable'
 
-DEBUG = True
+import os
+
+DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
     '.ngrok-free.app',
     '.ngrok-free.dev',
+    '.onrender.com',
 ]
+
+if os.environ.get('RENDER_EXTERNAL_HOSTNAME'):
+    ALLOWED_HOSTS.append(os.environ.get('RENDER_EXTERNAL_HOSTNAME'))
+
+if DEBUG:
+    ALLOWED_HOSTS.append('*')
 
 # ---------------------------------------------------------------------------
 # Application definition
@@ -48,6 +57,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',   # Must be first
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -111,12 +121,21 @@ WSGI_APPLICATION = 'wastewatch.wsgi.application'
 #     }
 # }
 
+import dj_database_url
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
+
+if os.environ.get('DATABASE_URL'):
+    DATABASES['default'] = dj_database_url.config(
+        default=os.environ.get('DATABASE_URL'),
+        conn_max_age=600,
+        conn_health_checks=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -179,9 +198,12 @@ AUTHENTICATION_BACKENDS = [
     'accounts.backends.EmailBackend',
 ]
 
-SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SAMESITE = 'None' if not DEBUG else 'Lax'
+SESSION_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_HTTPONLY = True
-CSRF_COOKIE_SAMESITE    = 'Lax'
+
+CSRF_COOKIE_SAMESITE    = 'None' if not DEBUG else 'Lax'
+CSRF_COOKIE_SECURE      = not DEBUG
 CSRF_COOKIE_HTTPONLY    = False
 
 CORS_ALLOWED_ORIGINS = [
@@ -191,9 +213,13 @@ CORS_ALLOWED_ORIGINS = [
     'https://127.0.0.1:3000',
 ]
 
+if os.environ.get('VERCEL_FRONTEND_URL'):
+    CORS_ALLOWED_ORIGINS.append(os.environ.get('VERCEL_FRONTEND_URL'))
+
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://.*\.ngrok-free\.app$",
     r"^https://.*\.ngrok-free\.dev$",
+    r"^https://.*\.vercel\.app$",
 ]
 if lan_ip:
     CORS_ALLOWED_ORIGINS.append(f'http://{lan_ip}:3000')
@@ -209,7 +235,11 @@ CSRF_TRUSTED_ORIGINS = [
 
     'https://*.ngrok-free.app',
     'https://*.ngrok-free.dev',
+    'https://*.vercel.app',
 ]
+if os.environ.get('VERCEL_FRONTEND_URL'):
+    CSRF_TRUSTED_ORIGINS.append(os.environ.get('VERCEL_FRONTEND_URL'))
+
 if lan_ip:
     CSRF_TRUSTED_ORIGINS.append(f'http://{lan_ip}:3000')
     CSRF_TRUSTED_ORIGINS.append(f'https://{lan_ip}:3000')
@@ -231,4 +261,9 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.SessionAuthentication',
     ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '5/minute',
+        'user': '30/minute',
+        'report_submission': '3/minute',
+    }
 }

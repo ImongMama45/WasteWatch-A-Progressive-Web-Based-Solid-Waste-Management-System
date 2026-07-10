@@ -167,7 +167,7 @@ function DevStatusBadge({ phase, activeShift }) {
   if (!p) return null
   return (
     <div style={{
-      position: 'fixed', top: 70, left: 16, zIndex: 9998,
+      position: 'fixed', bottom: 16, left: 16, zIndex: 9998,
       display: 'inline-flex', alignItems: 'center', gap: 6,
       background: `${p.color}18`, border: `1px solid ${p.color}55`,
       backdropFilter: 'blur(8px)',

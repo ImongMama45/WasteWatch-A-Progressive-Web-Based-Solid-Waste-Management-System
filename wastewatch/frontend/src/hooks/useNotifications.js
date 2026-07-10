@@ -7,16 +7,19 @@
  */
 import { useState, useEffect, useCallback, useRef } from 'react'
 import api from '../api/client'
+import { useAuth } from '../context/AuthContext'
 
 const POLL_INTERVAL_MS = 30_000
 
 export function useNotifications() {
+    const { user } = useAuth()
     const [notifications, setNotifications] = useState([])
     const [unreadCount, setUnreadCount] = useState(0)
     const [loading, setLoading] = useState(true)
     const timerRef = useRef(null)
 
     const fetchUnread = useCallback(async () => {
+        if (!user) return
         try {
             const res = await api.get('/api/notifications/unread/')
             setUnreadCount(res.data.count ?? 0)
@@ -26,10 +29,11 @@ export function useNotifications() {
         } finally {
             setLoading(false)
         }
-    }, [])
+    }, [user])
 
     // Full list fetch (used by NotificationCenter)
     const fetchAll = useCallback(async () => {
+        if (!user) return []
         try {
             const res = await api.get('/api/notifications/')
             return res.data

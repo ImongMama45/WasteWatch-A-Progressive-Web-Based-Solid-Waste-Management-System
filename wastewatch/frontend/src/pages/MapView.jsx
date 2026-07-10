@@ -20,6 +20,7 @@ import {
 } from '../utils/pickupStatusSync'
 import useUserLocation from '../hooks/useUserLocation'
 import { getApiErrorMessage } from '../utils/notificationHelpers'
+import { AlertTriangle, MapPin, User, Clock, Tag, Pin, Info, CheckCircle, XCircle } from 'lucide-react'
 
 export const LUCENA_CENTER = [13.9373, 121.6170];
 
@@ -884,7 +885,7 @@ export default function MapView() {
     const pendingSchedules = schedulesRef.current.filter(s => {
       const st = String(s.status || '').toUpperCase()
       const isCompletedOrCancelled = ['COMPLETED', 'CANCELLED'].includes(st)
-      
+
       if (isCompletedOrCancelled && !showInactive) return false
 
       if (showInactive) {
@@ -1404,13 +1405,14 @@ export default function MapView() {
       })
     }
 
-    // ── Live truck markers — only visible when a barangay zone is selected (unless 'All Barangays' is enabled) ──
+    // ── Live truck markers ──
     const showAll = activeFiltersRef.current.allBarangays
     const showInactive = activeFiltersRef.current.inactiveRoutes
+    const showAllTrucks = !zoneFocusActive || showAll
 
-    if (activeFilters.trucks && (zoneFocusActive || showAll || showInactive)) {
+    if (activeFilters.trucks) {
       const barangayTrucks = barangayDataRef.current.trucks
-      const allowedShiftIds = showAll ? null : new Set(barangayTrucks.map(t => t.id))
+      const allowedShiftIds = showAllTrucks ? null : new Set(barangayTrucks.map(t => t.id))
 
       activeTrucksRef.current.forEach(truck => {
         if (allowedShiftIds && !allowedShiftIds.has(truck.id)) return
@@ -1756,8 +1758,8 @@ export default function MapView() {
               { key: "trucks", label: "Truck Markers", icon: ICONS.truck },
               { key: "dumpSites", label: "Dump Sites", icon: ICONS.dumpsite },
               { key: "reports", label: "Garbage Reports", icon: ICONS.warning },
-              { key: "allBarangays", label: "Show All Barangays", icon: <div style={{width: 14, height: 14, border: '2px solid currentColor', borderRadius: 2}}></div> },
-              { key: "inactiveRoutes", label: "Show Inactive/Completed Routes", icon: <div style={{width: 14, height: 14, border: '2px solid currentColor', borderRadius: 2, borderStyle: 'dashed'}}></div> },
+              { key: "allBarangays", label: "Show All Barangays", icon: <div style={{ width: 14, height: 14, border: '2px solid currentColor', borderRadius: 2 }}></div> },
+              { key: "inactiveRoutes", label: "Show Inactive/Completed Routes", icon: <div style={{ width: 14, height: 14, border: '2px solid currentColor', borderRadius: 2, borderStyle: 'dashed' }}></div> },
             ].map(f => (
               <div key={f.key} className="filter-chip" onClick={() => toggleFilter(f.key)}
                 style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
@@ -1771,7 +1773,7 @@ export default function MapView() {
             <div style={{ color: "#94a3b8", fontSize: 11, marginTop: 16, marginBottom: 10, fontWeight: 600, letterSpacing: '0.5px' }}>ZONE TYPES</div>
             {Object.entries(ZONE_META).map(([key, meta]) => (
               <div key={key} className="filter-chip" onClick={() => toggleFilter(key)}
-                style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0" }}>
+                style={{ color: 'white', display: "flex", alignItems: "center", gap: 12, padding: "8px 0" }}>
                 <div style={{ width: 18, height: 18, borderRadius: 4, background: activeFilters[key] ? meta.color : "transparent", border: "1.5px solid", borderColor: activeFilters[key] ? meta.color : "#475569", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: '#0f172a', fontWeight: 900 }}>
                   {activeFilters[key] ? "✓" : ""}
                 </div>
@@ -1860,8 +1862,8 @@ export default function MapView() {
             }}>+</button>
         </div>
 
-        {/* ── BOTTOM PANEL ── */}
-        {panelOpen && (
+        {/* ── BOTTOM PANEL (Routes & Zones) ── */}
+        {panelOpen && panelMode !== "report" && (
           <>
             <div onClick={() => setPanelOpen(false)}
               style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 450 }} />
@@ -1882,13 +1884,32 @@ export default function MapView() {
                 {panelMode === "zone" && selectedZone && (
                   <ZonePanel zone={selectedZone} barangayData={barangayData} schedules={schedules} onClearFocus={clearBarangayFocus} />
                 )}
-                {panelMode === "report" && selectedReport && <ReportPanel report={selectedReport} onStatusChange={() => {
-                  fetchReports()
-                  setPanelOpen(false)
-                }} />}
               </div>
             </div>
           </>
+        )}
+
+        {/* ── REPORT MODAL OVERLAY ── */}
+        {panelOpen && panelMode === "report" && selectedReport && (
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 600,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 20, background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(4px)'
+          }}>
+            <div style={{ position: 'absolute', inset: 0 }} onClick={() => setPanelOpen(false)} />
+            <div style={{
+              position: 'relative', width: '100%', maxWidth: 440,
+              background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: '24px', overflow: 'hidden',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)',
+              animation: 'fadeInScale 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+            }}>
+              <ReportPanel report={selectedReport} onClose={() => setPanelOpen(false)} onStatusChange={() => {
+                fetchReports()
+                setPanelOpen(false)
+              }} />
+            </div>
+          </div>
         )}
 
       </div>
@@ -2042,12 +2063,12 @@ function DetailRow({ icon, label, value, accent, last }) {
       padding: '10px 14px',
       borderBottom: last ? 'none' : '1px solid rgba(255,255,255,0.05)',
     }}>
-      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, flexShrink: 0, color: '#94a3b8' }}>{icon}</span>
-      <span style={{ color: '#64748b', fontSize: 11, fontWeight: 600, width: 80, flexShrink: 0, letterSpacing: '.03em' }}>
+      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, flexShrink: 0, color: '#2e3641ff' }}>{icon}</span>
+      <span style={{ color: '#343d48ff', fontSize: 11, fontWeight: 600, width: 80, flexShrink: 0, letterSpacing: '.03em' }}>
         {label}
       </span>
       <span style={{
-        color: accent ? '#14b8a6' : '#e2e8f0',
+        color: accent ? '#14b8a6' : '#344152ff',
         fontSize: 13,
         fontWeight: accent ? 700 : 400,
         flex: 1,
@@ -2060,7 +2081,7 @@ function DetailRow({ icon, label, value, accent, last }) {
 }
 
 
-function ReportPanel({ report, onStatusChange }) {
+function ReportPanel({ report, onStatusChange, onClose }) {
   const { user } = useAuth()
   const { notify } = useNotification()
   const canModerate = REPORT_MODERATOR_ROLES.includes(user?.role)
@@ -2071,6 +2092,8 @@ function ReportPanel({ report, onStatusChange }) {
     ? new Date(report.created_at || report.reported).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
     : 'Unknown'
 
+  const reporterName = report.user_name || report.reported_by_name || report.reporter_name || 'Anonymous'
+
   const statusLabel = {
     pending: 'Pending Review',
     approved: 'Approved (Visible)',
@@ -2079,6 +2102,21 @@ function ReportPanel({ report, onStatusChange }) {
   }[report.status] ?? report.status?.toUpperCase()
 
   const tags = report.tags ? report.tags.split(',') : []
+  
+  // Aggregate images into a clean array
+  let rawImages = []
+  if (report.images && Array.isArray(report.images)) {
+    rawImages = report.images
+  } else if (report.image_url || report.image || report.photo_url) {
+    rawImages = [report.image_url || report.image || report.photo_url]
+  }
+
+  const imageUrls = rawImages.map(rawImg => {
+    if (rawImg && !rawImg.startsWith('http') && !rawImg.startsWith('/')) {
+      return `/media/${rawImg}`
+    }
+    return rawImg
+  }).filter(Boolean)
 
   function handleApprove() {
     const id = report.report_id || report.id
@@ -2114,79 +2152,124 @@ function ReportPanel({ report, onStatusChange }) {
   }
 
   return (
-    <>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-        <div style={{ fontSize: 30 }}>⚠️</div>
-        <div style={{ flex: 1 }}>
-          <div style={{ color: "white", fontWeight: 800, fontSize: 17 }}>{typeLabels[report.issue_type || report.type] ?? (report.issue_type || report.type)}</div>
-          <div style={{ color: "#94a3b8", fontSize: 12 }}>{report.barangay_name || report.address}</div>
-        </div>
-        <div style={{ background: `${severityColors[report.severity]}22`, border: `1px solid ${severityColors[report.severity]}`, borderRadius: 20, padding: "4px 12px" }}>
-          <span style={{ color: severityColors[report.severity], fontSize: 12, fontWeight: 700 }}>{report.severity?.toUpperCase()}</span>
-        </div>
-      </div>
-      
-      {tags.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
-          {tags.map(tag => (
-            <span key={tag} style={{ 
-              fontSize: 10, background: tag === 'Misconduct' ? '#ef4444' : 'rgba(255,255,255,0.08)', 
-              color: tag === 'Misconduct' ? 'white' : '#cbd5e1', 
-              padding: '2px 8px', borderRadius: 6, border: tag === 'Misconduct' ? 'none' : '1px solid rgba(255,255,255,0.1)'
-            }}>{tag}</span>
-          ))}
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', maxHeight: '80vh', position: 'relative' }}>
+      {/* Top Close Button */}
+      {onClose && (
+        <button onClick={onClose} style={{ 
+          position: 'absolute', top: 12, right: 12, width: 32, height: 32, 
+          borderRadius: '50%', background: 'var(--surface-2)', border: '1px solid var(--border)', 
+          color: 'var(--text-muted)', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', 
+          cursor: 'pointer', zIndex: 10 
+        }}>✕</button>
       )}
 
-      {report.reported_user_name && (
-        <div style={{ 
-          background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', 
-          borderRadius: 8, padding: '10px 12px', marginBottom: 14, color: '#fca5a5', fontSize: 12
+      <div style={{ padding: '24px', overflowY: 'auto' }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 16, paddingRight: 32 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ color: "var(--text)", fontWeight: 800, fontSize: 22, marginBottom: 4 }}>{typeLabels[report.issue_type || report.type] ?? (report.issue_type || report.type)}</div>
+            <div style={{ color: "var(--text-muted)", fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <MapPin size={14} color="var(--accent)" /> {report.barangay_name || report.address}
+            </div>
+          </div>
+          <div style={{ background: `${severityColors[report.severity]}15`, border: `1px solid ${severityColors[report.severity]}40`, borderRadius: 20, padding: "4px 12px", flexShrink: 0 }}>
+            <span style={{ color: severityColors[report.severity], fontSize: 12, fontWeight: 700 }}>{report.severity?.toUpperCase()}</span>
+          </div>
+        </div>
+
+        {/* Simplified Photo Display - Supports Multiple Pictures */}
+        {imageUrls.length > 0 && (
+          <div style={{ 
+            marginBottom: 20, 
+            display: 'flex', 
+            gap: 12, 
+            overflowX: 'auto',
+            paddingBottom: 8, // space for scrollbar if visible
+            scrollbarWidth: 'thin'
+          }}>
+            {imageUrls.map((url, idx) => (
+              <div key={idx} style={{ 
+                flexShrink: 0,
+                width: imageUrls.length === 1 ? '100%' : '85%', 
+                borderRadius: '16px', 
+                overflow: 'hidden', 
+                border: '1px solid var(--border)', 
+                background: 'var(--surface-2)' 
+              }}>
+                <img src={url} alt={`Report Photo ${idx + 1}`} style={{ width: '100%', maxHeight: '250px', objectFit: 'contain', display: 'block' }} />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tags.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
+            {tags.map(tag => (
+              <span key={tag} style={{
+                fontSize: 11, fontWeight: 600, background: tag === 'Misconduct' ? 'rgba(239,68,68,0.1)' : 'var(--surface-2)',
+                color: tag === 'Misconduct' ? '#ef4444' : 'var(--text-muted)',
+                padding: '4px 10px', borderRadius: 8, border: tag === 'Misconduct' ? '1px solid rgba(239,68,68,0.2)' : '1px solid var(--border)'
+              }}>{tag}</span>
+            ))}
+          </div>
+        )}
+
+        {report.reported_user_name && (
+          <div style={{
+            background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+            borderRadius: 12, padding: '12px 16px', marginBottom: 20, color: '#fca5a5', fontSize: 13
+          }}>
+            <b>Reported Person:</b> {report.reported_user_name}
+          </div>
+        )}
+
+        <div style={{
+          background: 'var(--surface-2)',
+          border: '1px solid var(--border)',
+          borderRadius: 16, overflow: 'hidden', marginBottom: 20,
         }}>
-          <b>Reported Person:</b> {report.reported_user_name}
+          <DetailRow icon={<User size={14} />} label="Reported By" value={reporterName} />
+          <DetailRow icon={<Clock size={14} />} label="Time" value={reportedStr} />
+          <DetailRow icon={<Tag size={14} />} label="Type" value={typeLabels[report.issue_type || report.type] ?? (report.issue_type || report.type)} />
+          <DetailRow icon={<Pin size={14} />} label="Status" value={statusLabel} accent last />
         </div>
-      )}
 
-      <Row label="REPORT TYPE" value={typeLabels[report.issue_type || report.type] ?? (report.issue_type || report.type)} />
-      <Row label="REPORTED" value={reportedStr} />
-      <Row label="STATUS" value={statusLabel} accent />
+        {report.rejection_reason && (
+          <div style={{ background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 12, padding: '12px 16px', marginBottom: 20 }}>
+            <div style={{ fontSize: 11, color: '#ef4444', fontWeight: 700, marginBottom: 4 }}>REJECTION REASON</div>
+            <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.5 }}>{report.rejection_reason}</div>
+          </div>
+        )}
 
-      {report.rejection_reason && (
-        <Row label="REASON" value={report.rejection_reason} />
-      )}
+        {report.description || report.notes ? (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, marginBottom: 6, paddingLeft: 4 }}>DESCRIPTION</div>
+            <div style={{ padding: "14px 16px", background: "var(--surface-2)", border: '1px solid var(--border)', borderRadius: 16, color: "var(--text)", fontSize: 13, lineHeight: 1.6 }}>
+              {report.description || report.notes}
+            </div>
+          </div>
+        ) : null}
 
-      {report.description || report.notes ? (
-        <div style={{ marginTop: 10, padding: "10px 12px", background: "rgba(255,255,255,0.04)", borderRadius: 10, color: "#cbd5e1", fontSize: 12, lineHeight: 1.5 }}>
-          {report.description || report.notes}
-        </div>
-      ) : null}
+        {canModerate && (
+          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+            {report.status === 'pending' && (
+              <>
+                <button onClick={handleApprove} className="btn" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: 6, background: "rgba(46,204,113,0.1)", border: "1px solid rgba(46,204,113,0.4)", color: "var(--accent)", borderRadius: 12, padding: "12px", fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}><CheckCircle size={16} /> Approve</button>
+                <button onClick={handleReject} className="btn" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: 6, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.4)", color: "#ef4444", borderRadius: 12, padding: "12px", fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}><XCircle size={16} /> Reject</button>
+              </>
+            )}
+            {report.status === 'approved' && (
+              <button onClick={handleResolve} className="btn" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: 6, background: "rgba(46,204,113,0.1)", border: "1px solid rgba(46,204,113,0.4)", color: "var(--accent)", borderRadius: 12, padding: "12px", fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}><CheckCircle size={16} /> Mark Resolved</button>
+            )}
+          </div>
+        )}
 
-      {report.image && (
-        <div style={{ marginTop: 12, borderRadius: 10, overflow: 'hidden' }}>
-          <img src={report.image} alt="Evidence" style={{ width: '100%', height: 'auto' }} />
-        </div>
-      )}
-
-      {canModerate && (
-        <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-          {report.status === 'pending' && (
-            <>
-              <button onClick={handleApprove} style={{ flex: 1, background: "rgba(34,197,94,0.1)", border: "1px solid #22c55e", color: "#22c55e", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✅ Approve</button>
-              <button onClick={handleReject} style={{ flex: 1, background: "rgba(239,68,68,0.1)", border: "1px solid #ef4444", color: "#ef4444", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✕ Reject</button>
-            </>
-          )}
-          {report.status === 'approved' && (
-            <button onClick={handleResolve} style={{ flex: 1, background: "rgba(34,197,94,0.1)", border: "1px solid #22c55e", color: "#22c55e", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>🏁 Mark Resolved</button>
-          )}
-        </div>
-      )}
-
-      {!canModerate && (
-        <div style={{ marginTop: 18, padding: "10px 14px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#64748b", fontSize: 12 }}>
-          ℹ️ Barangay Officials, and Admins can moderate reports.
-        </div>
-      )}
-    </>
+        {!canModerate && (
+          <div style={{ marginTop: 10, padding: "12px 16px", background: "rgba(59,130,246,0.05)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: 12, color: "#60a5fa", fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Info size={16} /> Barangay Officials, and Admins can moderate reports.
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

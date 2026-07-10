@@ -434,9 +434,7 @@ export default function UserManagement() {
       `}</style>
 
       <div className="page">
-        <div style={{ color: 'red', padding: 8, fontSize: 12 }}>
-          DEBUG: loading={String(loading)} | users={users.length} | filtered={filtered.length} | page={currentPage}/{totalPages}
-        </div>
+
         {/* ── Header ── */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
           <div>

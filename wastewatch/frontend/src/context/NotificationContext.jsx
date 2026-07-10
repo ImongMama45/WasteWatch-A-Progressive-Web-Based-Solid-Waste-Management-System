@@ -1,11 +1,23 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { CheckCircle, AlertTriangle, AlertCircle, RefreshCw } from 'lucide-react'
 
 const NotificationContext = createContext(null)
 
 const DEFAULT_DURATION = 45000
 const EXIT_MS = 220
 const MAX_VISIBLE = 3
+
+function getIconComponent(iconName) {
+  if (!iconName) return null
+  switch (iconName) {
+    case 'check_circle': return <CheckCircle size={18} />
+    case 'warning': return <AlertTriangle size={18} />
+    case 'error': return <AlertCircle size={18} />
+    case 'sync': return <RefreshCw size={18} className="ww-spin" />
+    default: return <AlertCircle size={18} />
+  }
+}
 
 function iconForVariant(variant) {
   switch (variant) {
@@ -102,7 +114,7 @@ function NotificationItem({ item, onDismiss }) {
       <div className="ww-notification__content">
         {showIcon && (
           <div className="ww-notification__icon" style={styles.iconWrap || undefined}>
-            <span className="msi" style={{ fontSize: 18 }}>{iconName}</span>
+            {getIconComponent(iconName)}
           </div>
         )}
         <div className="ww-notification__text">
@@ -242,6 +254,12 @@ function NotificationHost({ items, position, onDismiss }) {
         @keyframes wwNotifyOut {
           from { opacity: 1; transform: translateY(0) scale(1); }
           to { opacity: 0; transform: translateY(-8px) scale(0.985); }
+        }
+        @keyframes wwSpin {
+          100% { transform: rotate(360deg); }
+        }
+        .ww-spin {
+          animation: wwSpin 1.5s linear infinite;
         }
         @media (max-width: 640px) {
           .ww-notification-host {

@@ -138,15 +138,75 @@ def public_schedule_view(request):
     Personalized schedule requires auth — handled in watcher API.
     """
     from driver.models import CollectionSchedule
+    import datetime
     
     # CollectionSchedule has a ManyToMany relationship to Barangay via 'barangays' field
-    schedules = CollectionSchedule.objects.prefetch_related('barangays').all()[:10]
-    data = [
-        {
+    schedules = CollectionSchedule.objects.prefetch_related('barangays').all().order_by('id')
+    
+    today_name = datetime.datetime.now().strftime("%a")
+    
+    data = []
+    for s in schedules:
+        is_today = today_name in s.days if s.days else False
+        data.append({
             'day': s.days,
             'zone': ", ".join([b.name for b in s.barangays.all()]) if s.barangays.exists() else s.area,
             'time': f"{s.start_time.strftime('%I:%M %p')} – {s.end_time.strftime('%I:%M %p')}",
-            'isNext': False # Logic for 'isNext' can be added later
-        } for s in schedules
-    ]
+            'isNext': is_today,
+            'status': 'upcoming' if is_today else 'pending'
+        })
+    
+    return JsonResponse(data, safe=False)
+
+
+@require_http_methods(['GET'])
+def public_live_view(request):
+    """
+    Returns active truck locations for the citizen-facing map.
+    Data is stripped of sensitive driver information.
+    """
+    from driver.models import DriverShift
+    from django.utils import timezone
+    from datetime import timedelta
+
+    now = timezone.now()
+    staleness_cutoff = now - timedelta(hours=24)
+    
+    active_shifts = DriverShift.objects.filter(
+        is_active=True,
+        ended_at__isnull=True,
+        started_at__gte=staleness_cutoff
+    ).select_related('truck', 'schedule')
+
+    data = []
+    for shift in active_shifts:
+        schedule = shift.schedule
+        if not schedule:
+            from driver.models import TruckCrewAssignment, CollectionSchedule
+            assignment = TruckCrewAssignment.objects.filter(
+                driver=shift.driver, date=now.date(), is_active=True
+            ).select_related('schedule').first()
+            if assignment:
+                schedule = assignment.schedule
+            if not schedule:
+                schedule = CollectionSchedule.objects.filter(driver=shift.driver, date=now.date()).first()
+            if not schedule:
+                schedule = CollectionSchedule.objects.filter(driver=shift.driver).first()
+
+        barangays = ", ".join([b.name for b in schedule.barangays.all()]) if schedule and schedule.barangays.exists() else (schedule.area if schedule and schedule.area else "City-wide")
+        
+        data.append({
+            'id': shift.id,
+            'truck_plate': shift.truck.plate_number if shift.truck else 'Unknown',
+            'truck_model': shift.truck.model if shift.truck else 'Unknown',
+            'driver_name': shift.driver.get_full_name() if shift.driver else 'Unknown',
+            'latitude': float(shift.current_latitude) if shift.current_latitude else None,
+            'longitude': float(shift.current_longitude) if shift.current_longitude else None,
+            'op_status': shift.op_status,
+            'barangays': barangays,
+            'started_at': shift.started_at.isoformat() if shift.started_at else None,
+            'last_updated': shift.last_location_update.isoformat() if shift.last_location_update else None
+        })
+        
+        
     return JsonResponse(data, safe=False)

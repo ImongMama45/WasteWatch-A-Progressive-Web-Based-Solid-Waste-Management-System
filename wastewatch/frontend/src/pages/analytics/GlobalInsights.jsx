@@ -600,131 +600,126 @@ function RankingsSection({ rankings, problematic, userBarangay }) {
   )
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function daysDiff(dateFrom, dateTo) {
+  const a = new Date(dateFrom), b = new Date(dateTo)
+  return Math.max(1, Math.round((b - a) / 86400000) + 1)
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
-export default function GlobalInsights({ userBarangay, selectedBarangay, selectedPeriod }) {
+export default function GlobalInsights({ userBarangay, selectedBarangay, dateFrom, dateTo, selectedPeriod }) {
   const [data, setData] = useState(PLACEHOLDER)
   const [loading, setLoading] = useState(true)
-  const period = selectedPeriod || 'This Week'
+  const [error, setError] = useState(null)
 
   useEffect(() => {
-    async function fetchAll() {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+
+    async function fetchLive() {
       try {
-        const [kpiRes, brgyRes, truckRes, trendRes] = await Promise.allSettled([
-          api.get('/api/analytics/kpi/'),
-          api.get('/api/analytics/barangay-performance/'),
-          api.get('/api/analytics/truck-performance/'),
-          api.get('/api/analytics/trends/'),
-        ])
-
-        const kpis = kpiRes.status === 'fulfilled' ? asList(kpiRes.value.data) : []
-        const barangayRows = brgyRes.status === 'fulfilled' ? asList(brgyRes.value.data) : []
-        const truckRows = truckRes.status === 'fulfilled' ? asList(truckRes.value.data) : []
-        const trendRows = trendRes.status === 'fulfilled' ? asList(trendRes.value.data) : []
-
-        const targetPeriod = normalizePeriod(period)
-        const selectedKpi = kpis.find(row => normalizePeriod(row.period) === targetPeriod) ?? kpis[0] ?? prev.kpi
-        const selectedTruckRows = truckRows.filter(row => normalizePeriod(row.period) === targetPeriod)
-        const selectedBrgyRows = barangayRows.filter(row => normalizePeriod(row.period) === targetPeriod)
-        const selectedTruckCount = selectedTruckRows.length || prev.kpi.active_trucks || 0
-        const selectedBarangayCount = selectedBrgyRows.length || prev.kpi.barangays_served || 0
-        const selectedCollectionRate = selectedKpi.total_routes
-          ? Math.round(((selectedKpi.completed_routes || 0) / Math.max(selectedKpi.total_routes, 1)) * 100)
-          : prev.kpi.collection_rate
-        const selectedResolutionRate = selectedKpi.total_reports
-          ? Math.round(((selectedKpi.resolved_reports || 0) / Math.max(selectedKpi.total_reports, 1)) * 100)
-          : prev.kpi.resolution_rate
-        const normalizedKpi = {
-          ...prev.kpi,
-          collected_kg: selectedKpi.collected_kg ?? prev.kpi.collected_kg,
-          collection_rate: selectedCollectionRate,
-          active_trucks: selectedTruckCount,
-          open_hotspots: prev.kpi.open_hotspots,
-          escalations: selectedKpi.total_reports != null
-            ? Math.max(0, (selectedKpi.total_reports || 0) - (selectedKpi.resolved_reports || 0))
-            : prev.kpi.escalations,
-          barangays_served: selectedBarangayCount,
-          total_routes: selectedKpi.total_routes ?? prev.kpi.total_routes,
-          completed_routes: selectedKpi.completed_routes ?? prev.kpi.completed_routes,
-          missed_stops: selectedKpi.missed_stops ?? prev.kpi.missed_stops,
-          avg_fill_rate: selectedKpi.avg_fill_rate ?? prev.kpi.avg_fill_rate,
-          total_reports: selectedKpi.total_reports ?? prev.kpi.total_reports,
-          resolved_reports: selectedKpi.resolved_reports ?? prev.kpi.resolved_reports,
-          collected_kg_delta: prev.kpi.collected_kg_delta,
-          collection_rate_delta: prev.kpi.collection_rate_delta,
-          hotspots_delta: prev.kpi.hotspots_delta,
-          resolution_rate: selectedResolutionRate,
+        const params = new URLSearchParams()
+        if (selectedBarangay && selectedBarangay !== 'all') {
+          params.set('barangay_id', selectedBarangay)
         }
-        const mappedTrucks = selectedTruckRows.length
-          ? selectedTruckRows.map(row => ({
-            id: row.truck_id,
-            driver: row.driver_name,
-            routes: Number(row.routes || 0),
-            completed: Number(row.completed || 0),
-            missed: Number(row.missed || 0),
-            fill: Number(row.avg_fill || 0),
-            km: Number(row.total_km || 0),
-          }))
-          : prev.trucks
+        if (dateFrom && dateTo) {
+          params.set('days', String(daysDiff(dateFrom, dateTo)))
+        }
 
-        const mappedRankings = selectedBrgyRows.length
-          ? selectedBrgyRows
-            .map(row => {
-              const reports = Number(row.reports || 0)
-              const resolved = Number(row.resolved || 0)
-              const score = Math.max(0, Math.min(100, Math.round(((resolved / Math.max(reports, 1)) * 100) * 0.7 + Math.min(Number(row.waste_collected_kg || 0) / 100, 30))))
-              const trend = resolved >= reports ? 'up' : resolved >= reports * 0.6 ? 'same' : 'down'
-              return {
-                name: row.barangay_name,
-                score,
-                compliance: Math.round((resolved / Math.max(reports, 1)) * 100),
-                trend,
-                population: row.population || null,
-                hotspots: row.hotspots || 0,
-                reports,
-              }
-            })
-            .sort((a, b) => b.score - a.score)
-          : prev.rankings
+        const res = await api.get(`/api/analytics/live/?${params}`)
+        if (cancelled) return
+        const d = res.data
 
-        const mappedProblematic = selectedBrgyRows.length
-          ? [...selectedBrgyRows]
-            .map(row => {
-              const reports = Number(row.reports || 0)
-              const resolved = Number(row.resolved || 0)
-              const score = Math.max(0, Math.min(100, Math.round(((resolved / Math.max(reports, 1)) * 100) * 0.7 + Math.min(Number(row.waste_collected_kg || 0) / 100, 30))))
-              const trend = resolved >= reports ? 'up' : resolved >= reports * 0.6 ? 'same' : 'down'
-              return {
-                name: row.barangay_name,
-                score,
-                compliance: Math.round((resolved / Math.max(reports, 1)) * 100),
-                trend,
-                population: row.population || null,
-                hotspots: row.hotspots || 0,
-                reports,
-              }
-            })
-            .filter(row => row.score < 60)
-            .sort((a, b) => a.score - b.score)
-          : prev.problematic
+        // ── Map summary → KPI cards ──────────────────────────────────────────
+        const s = d.summary || {}
+        const completionPct = Math.round((s.completion_rate ?? 0) * 100)
+        const kpi = {
+          ...PLACEHOLDER.kpi,
+          collected_kg: Math.round(s.total_weight_kg ?? 0),
+          collection_rate: completionPct,
+          active_trucks: (d.fleet || []).length,
+          barangays_served: (d.barangay_breakdown || []).length,
+          total_routes: s.stops_total ?? 0,
+          completed_routes: s.stops_completed ?? 0,
+          missed_stops: s.stops_missed ?? 0,
+          completion_rate: completionPct,
+          collected_kg_delta: null,
+          collection_rate_delta: null,
+          hotspots_delta: null,
+        }
+
+        // ── Map weight_over_time → daily bar/line chart ───────────────────────
+        const wasteDaily = (d.weight_over_time || []).map(row => ({
+          label: new Date(row.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }),
+          value: Math.round(row.weight_kg),
+          deliveries: row.deliveries,
+        }))
+
+        // ── Map barangay_breakdown → rankings ─────────────────────────────────
+        const mappedRankings = (d.barangay_breakdown || [])
+          .map(row => {
+            const rate = row.completion_rate ?? 0
+            const score = Math.min(100, Math.round(rate * 70 + Math.min(row.weight_kg / 50, 30)))
+            const trend = rate >= 0.9 ? 'up' : rate >= 0.6 ? 'same' : 'down'
+            return {
+              name: row.name,
+              score,
+              compliance: Math.round(rate * 100),
+              trend,
+              weight_kg: row.weight_kg,
+              deliveries: row.deliveries,
+              stops_completed: row.stops_completed,
+              stops_missed: row.stops_missed,
+              hotspots: 0,
+              reports: row.stops_completed + row.stops_missed,
+            }
+          })
+          .sort((a, b) => b.score - a.score)
+
+        const mappedProblematic = [...mappedRankings]
+          .filter(r => r.score < 60)
+          .sort((a, b) => a.score - b.score)
+
+        // ── Map fleet → truck performance ─────────────────────────────────────
+        const mappedTrucks = (d.fleet || []).map(row => ({
+          truck_id: row.plate_number,
+          driver_name: row.driver_name,
+          routes: row.stops_total,
+          completed: row.stops_completed,
+          missed: row.stops_missed,
+          avg_fill: 0,
+          total_km: row.total_weight_kg
+            ? `${(row.total_weight_kg / 1000).toFixed(1)}t`
+            : '—',
+        }))
+
+        // ── Issue trends from weight_over_time (deliveries per day) ───────────
+        const issueTrends = (d.weight_over_time || []).map(row => ({
+          label: new Date(row.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }),
+          value: row.deliveries,
+        }))
 
         setData(prev => ({
           ...prev,
-          kpi: normalizedKpi,
-          trucks: mappedTrucks,
-          rankings: mappedRankings,
-          problematic: mappedProblematic,
-          issueTrends: trendRows.length
-            ? trendRows.map(t => ({
-              label: t.date,
-              value: t.report_count,
-            }))
-            : prev.issueTrends,
+          kpi,
+          wasteDaily: wasteDaily.length ? wasteDaily : prev.wasteDaily,
+          rankings: mappedRankings.length ? mappedRankings : prev.rankings,
+          problematic: mappedProblematic.length ? mappedProblematic : prev.problematic,
+          trucks: mappedTrucks.length ? mappedTrucks : prev.trucks,
+          issueTrends: issueTrends.length ? issueTrends : prev.issueTrends,
         }))
-      } catch { /* stay on placeholder */ }
-      finally { setLoading(false) }
+      } catch (err) {
+        if (!cancelled) setError('Could not load live data — showing cached figures.')
+        // keep PLACEHOLDER intact
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
-    fetchAll()
-  }, [period, selectedBarangay])
+
+    fetchLive()
+    return () => { cancelled = true }
+  }, [selectedBarangay, dateFrom, dateTo])
 
   if (loading) return (
     <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
@@ -735,6 +730,16 @@ export default function GlobalInsights({ userBarangay, selectedBarangay, selecte
 
   return (
     <>
+      {error && (
+        <div style={{
+          background: 'rgba(231,76,60,.08)', border: '1px solid rgba(231,76,60,.25)',
+          borderRadius: 8, padding: '10px 14px', marginBottom: 14,
+          fontSize: 12, color: 'var(--danger)', fontWeight: 600,
+        }}>
+          ⚠ {error}
+        </div>
+      )}
+
       {/* ── Overview KPIs ── */}
       <OverviewKPIs kpi={data.kpi} />
 
@@ -753,13 +758,14 @@ export default function GlobalInsights({ userBarangay, selectedBarangay, selecte
       <IssueTrendsSection trends={data.issueTrends} hotspots={data.hotspots} />
       <HotspotsSection hotspots={data.hotspots} stats={data.stats} />
       <TruckPerformanceSection trucks={data.trucks} />
-      <WasteComposition segments={data.wasteComposition} />
 
       {/* ── Map ── */}
       <GCard>
-        <SHead icon={<Map size={16} />} title="Barangay Cleanliness Map" subtitle="Color-coded by compliance score · Red = active hotspots" />
+        <SHead icon={<Map size={16} />} title="Barangay Cleanliness Map" subtitle="Color-coded by completion rate · Sourced from live delivery data" />
         <HotspotMap userBarangay={userBarangay} />
       </GCard>
     </>
   )
 }
+
+

@@ -74,13 +74,13 @@ function SeverityDot({ severity }) {
 
 function PhaseIndicator({ phase, size = 8 }) {
   const map = {
-    navigate_to_base: { color: '#3B82F6', pulse: true,  title: 'Navigating to base'  },
-    confirm_start:    { color: '#22C55E', pulse: true,  title: 'Confirming start'     },
-    checkin:          { color: '#22C55E', pulse: true,  title: 'Checking in'          },
-    shiftroute:       { color: '#22C55E', pulse: false, title: 'On route'             },
-    on_route:         { color: '#22C55E', pulse: false, title: 'On route'             },
-    end_shift:        { color: '#EAB308', pulse: true,  title: 'Ending shift'         },
-    completed:        { color: '#22C55E', pulse: false, title: 'Completed', check: true },
+    navigate_to_base: { color: '#3B82F6', pulse: true, title: 'Navigating to base' },
+    confirm_start: { color: '#22C55E', pulse: true, title: 'Confirming start' },
+    checkin: { color: '#22C55E', pulse: true, title: 'Checking in' },
+    shiftroute: { color: '#22C55E', pulse: false, title: 'On route' },
+    on_route: { color: '#22C55E', pulse: false, title: 'On route' },
+    end_shift: { color: '#EAB308', pulse: true, title: 'Ending shift' },
+    completed: { color: '#22C55E', pulse: false, title: 'Completed', check: true },
   }
   const cfg = map[phase] || { color: '#9CA3AF', pulse: false, title: 'Offline' }
 
@@ -343,8 +343,10 @@ export default function AdminDashboard() {
         completedStops,
         progressPct,
         // shift fields
-        hasActiveShift: !!activeShift,
-        phase,
+        hasActiveShift: !!activeShift && activeShift.status !== 'done',
+        isShiftDone: activeShift?.status === 'done',
+        isExtendedMode: activeShift?.is_extended_mode === true,
+        phase: activeShift?.status === 'done' ? 'completed' : phase,
       }
     })
   }, [drivers, todaysRoutes, activeShifts])
@@ -361,6 +363,7 @@ export default function AdminDashboard() {
     }
     return [...result].sort((a, b) => {
       if (a.hasActiveShift !== b.hasActiveShift) return a.hasActiveShift ? -1 : 1
+      if (a.isShiftDone !== b.isShiftDone) return a.isShiftDone ? -1 : 1
       if (a.hasRouteToday !== b.hasRouteToday) return a.hasRouteToday ? -1 : 1
       return (a.plate || '').localeCompare(b.plate || '')
     })
@@ -629,8 +632,8 @@ export default function AdminDashboard() {
                               width: `${t.progressPct}%`,
                               background: t.hasRouteToday
                                 ? TRUCK_COLORS[
-                                    mergedTrucks.findIndex(m => m.id === t.id) % TRUCK_COLORS.length
-                                  ].color
+                                  mergedTrucks.findIndex(m => m.id === t.id) % TRUCK_COLORS.length
+                                ].color
                                 : '#9CA3AF',
                             }} />
                           </div>
@@ -647,8 +650,10 @@ export default function AdminDashboard() {
                       ))}
 
                       {filteredTrucks.length === 0 && (
-                        <div style={{ padding: '12px 0', fontSize: 13,
-                          color: 'var(--ui-text-muted)', textAlign: 'center' }}>
+                        <div style={{
+                          padding: '12px 0', fontSize: 13,
+                          color: 'var(--ui-text-muted)', textAlign: 'center'
+                        }}>
                           No trucks match "{truckFilter}"
                         </div>
                       )}
@@ -681,55 +686,61 @@ export default function AdminDashboard() {
                 <div>
                   {filteredTrucks.length === 0
                     ? <div className="empty-state">
-                        <IcoCheck size={24} color="#16A34A" />
-                        <div style={{ marginTop: 8 }}>No trucks match filter</div>
-                      </div>
+                      <IcoCheck size={24} color="#16A34A" />
+                      <div style={{ marginTop: 8 }}>No trucks match filter</div>
+                    </div>
                     : filteredTrucks.map(t => {
-                        let statusText = 'Offline / No schedule'
-                        if (t.hasActiveShift) {
+                      let statusText = 'Offline / No schedule'
+                      if (t.isShiftDone) {
+                        statusText = 'Done shift'
+                      } else if (t.hasActiveShift) {
+                        if (t.isExtendedMode) {
+                          statusText = 'Collecting Missed Stops'
+                        } else {
                           const labels = {
                             navigate_to_base: 'Navigating to base',
-                            confirm_start:    'At base — confirming',
-                            checkin:          'Checking in',
-                            shiftroute:       'On route',
-                            on_route:         'On route',
-                            end_shift:        'Ending shift',
-                            completed:        'Completed',
+                            confirm_start: 'At base — confirming',
+                            checkin: 'Checking in',
+                            shiftroute: 'On route',
+                            on_route: 'On route',
+                            end_shift: 'Ending shift',
+                            completed: 'Completed',
                           }
                           statusText = labels[t.phase] || 'Active shift'
-                        } else if (t.hasRouteToday) {
-                          statusText = 'Scheduled today — offline'
                         }
+                      } else if (t.hasRouteToday) {
+                        statusText = 'Scheduled today — offline'
+                      }
 
-                        return (
-                          <div key={t.id}
-                            className="flat-card hoverable"
-                            style={{
-                              marginBottom: 8,
-                              display: 'flex', justifyContent: 'space-between',
-                              alignItems: 'center',
-                              opacity: !t.hasActiveShift && !t.hasRouteToday ? 0.5 : 1,
-                            }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                              <PhaseIndicator phase={t.phase} size={12} />
-                              <div>
-                                <div style={{ fontWeight: 800, fontSize: 14 }}>{t.plate}</div>
-                                <div style={{ fontSize: 12, color: 'var(--ui-text-muted)', marginTop: 2 }}>
-                                  {t.driverNames} · {t.barangayNames?.split(',')[0] || t.zone || 'Unassigned'}
-                                </div>
+                      return (
+                        <div key={t.id}
+                          className="flat-card hoverable"
+                          style={{
+                            marginBottom: 8,
+                            display: 'flex', justifyContent: 'space-between',
+                            alignItems: 'center',
+                            opacity: (!t.hasActiveShift && !t.hasRouteToday && !t.isShiftDone) ? 0.5 : 1,
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                            <PhaseIndicator phase={t.phase} size={12} />
+                            <div>
+                              <div style={{ fontWeight: 800, fontSize: 14 }}>{t.plate}</div>
+                              <div style={{ fontSize: 12, color: 'var(--ui-text-muted)', marginTop: 2 }}>
+                                {t.driverNames} · {t.barangayNames?.split(',')[0] || t.zone || 'Unassigned'}
                               </div>
                             </div>
-                            <div style={{
-                              fontSize: 11, fontWeight: 700,
-                              color: 'var(--ui-text-muted)',
-                              textTransform: 'uppercase', letterSpacing: '0.05em',
-                            }}>
-                              {statusText}
-                            </div>
                           </div>
-                        )
-                      })
+                          <div style={{
+                            fontSize: 11, fontWeight: 700,
+                            color: 'var(--ui-text-muted)',
+                            textTransform: 'uppercase', letterSpacing: '0.05em',
+                          }}>
+                            {statusText}
+                          </div>
+                        </div>
+                      )
+                    })
                   }
                 </div>
               )}

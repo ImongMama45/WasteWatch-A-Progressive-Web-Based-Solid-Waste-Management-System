@@ -141,6 +141,32 @@ export default function ReportDetail() {
             </div>
           </div>
 
+          {/* Rejection Feedback */}
+          {report.status === 'rejected' && (
+            <div style={{
+              background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)',
+              borderRadius: 12, padding: 16,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 16 }}>⚠️</span>
+                <div style={{ fontSize: 11, fontWeight: 800, color: '#DC2626', letterSpacing: '.06em' }}>
+                  REJECTION FEEDBACK
+                </div>
+              </div>
+              <div style={{ fontSize: 14, color: '#0F172A', lineHeight: 1.6, marginBottom: 10 }}>
+                {report.rejection_reason || <span style={{ color: '#94A3B8', fontStyle: 'italic' }}>No reason provided.</span>}
+              </div>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 12, color: '#64748B' }}>
+                {report.rejected_by_name && (
+                  <span><strong style={{ color: '#334155' }}>Rejected by:</strong> {report.rejected_by_name}</span>
+                )}
+                {report.rejected_at && (
+                  <span><strong style={{ color: '#334155' }}>On:</strong> {new Date(report.rejected_at).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+                )}
+              </div>
+            </div>
+          )}
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 24 }}>
             <div>
               <div style={{ fontSize: 11, fontWeight: 800, color: '#94A3B8', letterSpacing: '.06em', marginBottom: 4 }}>REPORTER</div>

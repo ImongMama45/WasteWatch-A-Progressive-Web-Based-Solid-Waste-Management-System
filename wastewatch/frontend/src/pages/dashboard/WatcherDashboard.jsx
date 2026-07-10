@@ -5,22 +5,48 @@ import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
 import HomeCarousel from '../../components/carousel/HomeCarousel'
 import { ICONS } from '../../api/navConfig'
+import DispatchCard from '../../components/DispatchCard'
 
 export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [reports, setReports] = useState([])
   const [stats, setStats] = useState({ total: 0, pending_approval: 0, resolved: 0, rejected: 0 })
+  const [pendingTasksCount, setPendingTasksCount] = useState(0)
+  const [totalTasksCount, setTotalTasksCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('schedule')
   const [activeTab1, setActiveTab1] = useState('reports')
+  const [activeDispatch, setActiveDispatch] = useState(null)
 
   useEffect(() => {
-    api.get('/api/watcher/reports/')
-      .then((r) => { setReports(r.data); setStats({ total: r.data.length, pending_approval: 0, resolved: 0, rejected: 0 }) })
+    Promise.all([
+      api.get('/api/watcher/reports/'),
+      api.get('/api/watcher/stop-validations/'),
+      api.get('/api/public/live/').catch(() => ({ data: [] }))
+    ])
+      .then(([rRes, vRes, liveRes]) => {
+        setReports(rRes.data)
+        setStats({ total: rRes.data.length, pending_approval: 0, resolved: 0, rejected: 0 })
+        const validations = vRes.data?.results ?? vRes.data ?? []
+        const pending = validations.filter(v => {
+          const status = v.current_status ? v.current_status.toUpperCase().replace(/ /g, '_') : 'PENDING_INSPECTION'
+          return status === 'PENDING_INSPECTION' || status === 'COLLECTION_REPORTED'
+        })
+        setPendingTasksCount(pending.length)
+        setTotalTasksCount(validations.length)
+
+        if (liveRes && liveRes.data) {
+          const userBrgy = user?.barangay_name || user?.barangay?.name;
+          if (userBrgy) {
+            const dispatched = liveRes.data.find(d => d.barangays && d.barangays.includes(userBrgy));
+            if (dispatched) setActiveDispatch(dispatched);
+          }
+        }
+      })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [])
+  }, [user?.barangay_name, user?.barangay?.name])
 
   const badgeClass = (status) => `badge badge-${status}`
 
@@ -36,10 +62,16 @@ export default function Dashboard() {
           <p className="text-muted text-sm">Stay updated on garbage collection in your area</p>
         </div>
 
+        <DispatchCard 
+            dispatchData={activeDispatch} 
+            userBarangay={user?.barangay_name || user?.barangay?.name} 
+        />
+
         {/* ── INSPECTION CTA ── */}
         <div
           onClick={() => navigate('/watcher-tasks')}
           style={{
+            position: 'relative',
             marginBottom: 20, padding: '20px 20px', borderRadius: 16, cursor: 'pointer',
             background: 'linear-gradient(135deg, #0f172a 0%, #134e4a 100%)',
             border: '1px solid rgba(20,184,166,.35)',
@@ -50,6 +82,20 @@ export default function Dashboard() {
           onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 8px 32px rgba(20,184,166,.25)' }}
           onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 4px 24px rgba(20,184,166,.15)' }}
         >
+          {/* Notification Indicator Dot */}
+          {!loading && totalTasksCount > 0 && (
+            <div style={{
+              position: 'absolute',
+              top: -12, right: 10,
+              width: 25, height: 25,
+              borderRadius: '50%',
+              background: pendingTasksCount > 0 ? '#ef4444' : '#10b981',
+              border: '4px solid var(--bg)',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+              zIndex: 2
+            }} />
+          )}
+
           <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(20,184,166,.15)', border: '1.5px solid rgba(20,184,166,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent)', flexShrink: 0 }}>
             <div style={{ width: 26, height: 26 }}>{ICONS.search}</div>
           </div>

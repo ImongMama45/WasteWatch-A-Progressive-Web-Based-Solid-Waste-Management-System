@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef } from 'react'
 import { Bell, PlusCircle, X, Megaphone, AlertTriangle, Newspaper, Send, Save, CheckCircle, Image as ImageIcon } from 'lucide-react'
-import DashboardLayout from '../../components/DashboardLayout'
+import Navbar from '../../components/Navbar'
+import BottomNav from '../../components/BottomNav'
 import { useAuth } from '../../context/AuthContext'
 import { useNotification } from '../../context/NotificationContext'
 import { useNewsItems } from '../../hooks/useNewsItems'
@@ -367,8 +368,9 @@ export default function NewsPage() {
   const featuredItems = useMemo(() => newsItems.filter(i => i.is_featured), [newsItems])
 
   return (
-    <DashboardLayout>
-      <div className="page">
+    <div>
+      <Navbar />
+      <div className="page" style={{ maxWidth: 1200, margin: '0 auto' }}>
 
         {/* Header */}
         <div style={{ marginBottom: 18 }}>
@@ -420,6 +422,7 @@ export default function NewsPage() {
           onPublished={() => { /* optionally refetch newsItems here */ }}
         />
       )}
-    </DashboardLayout>
+      <BottomNav />
+    </div>
   )
 }

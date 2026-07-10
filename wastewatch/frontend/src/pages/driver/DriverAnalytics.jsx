@@ -15,26 +15,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
 
-// ─── MOCK DATA ────────────────────────────────────────────────────────────────
-
-const MOCK_SUMMARY = {
-    routesCompleted: 24,
-    stopsCompleted: 218,
-    totalWorkingHours: 96,
-    avgCompletionMins: 42,
-}
-
-const MOCK_WEEKLY = [
-    { day: 'Mon', stops: 12 },
-    { day: 'Tue', stops: 9 },
-    { day: 'Wed', stops: 0 },
-    { day: 'Thu', stops: 14 },
-    { day: 'Fri', stops: 11 },
-    { day: 'Sat', stops: 7 },
-    { day: 'Sun', stops: 0 },
-]
-
-const MOCK_TREND = [10, 50, 48, 44, 46, 41, 43, 42]
+// ─── MOCK DATA REMOVED ────────────────────────────────────────────────────────
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -67,21 +48,59 @@ function StatCard({ label, value, unit, icon, color, sub }) {
 
 function BarChart({ data, color = '#2ecc71' }) {
     const max = Math.max(...data.map(d => d.stops), 1)
+    const [hoverIndex, setHoverIndex] = useState(null)
     return (
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 120 }}>
             {data.map((d, i) => {
                 const pct = (d.stops / max) * 100
                 return (
-                    <div key={i} style={{
-                        flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+                    <div key={i} 
+                        onMouseEnter={() => setHoverIndex(i)}
+                        onMouseLeave={() => setHoverIndex(null)}
+                        style={{
+                        flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, cursor: 'pointer', position: 'relative'
                     }}>
-                        <div style={{ width: '100%', flex: 1, display: 'flex', alignItems: 'flex-end', position: 'relative' }}>
-                            {d.stops > 0 && (
+                        {/* CUSTOM HTML TOOLTIP */}
+                        {hoverIndex === i && (
+                            <div style={{
+                                position: 'absolute',
+                                left: '50%',
+                                top: `calc(${100 - pct}% - 30px)`,
+                                transform: 'translate(-50%, -100%)',
+                                background: 'var(--surface)',
+                                border: '1px solid var(--border)',
+                                borderRadius: 8,
+                                padding: '8px 12px',
+                                boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                                pointerEvents: 'none',
+                                textAlign: 'center',
+                                minWidth: 90,
+                                zIndex: 10,
+                                animation: 'fadeUp 0.15s ease-out'
+                            }}>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 2 }}>
+                                    {d.day}
+                                    <div style={{ fontSize: 9, fontWeight: 500, opacity: 0.8 }}>{d.date}</div>
+                                </div>
+                                <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>
+                                    {d.stops} <span style={{ fontSize: 11, fontWeight: 600 }}>stops</span>
+                                </div>
+                                {/* Tooltip Tail */}
                                 <div style={{
-                                    position: 'absolute', top: -18, left: '50%', transform: 'translateX(-50%)',
-                                    fontSize: 10, fontWeight: 700, color,
-                                }}>{d.stops}</div>
-                            )}
+                                    position: 'absolute',
+                                    bottom: -5,
+                                    left: '50%',
+                                    transform: 'translateX(-50%) rotate(45deg)',
+                                    width: 10,
+                                    height: 10,
+                                    background: 'var(--surface)',
+                                    borderRight: '1px solid var(--border)',
+                                    borderBottom: '1px solid var(--border)',
+                                }} />
+                            </div>
+                        )}
+
+                        <div style={{ width: '100%', flex: 1, display: 'flex', alignItems: 'flex-end', position: 'relative' }}>
                             <div style={{
                                 width: '100%', borderRadius: '5px 5px 0 0',
                                 background: d.stops === 0
@@ -104,6 +123,7 @@ function BarChart({ data, color = '#2ecc71' }) {
 // ─── SVG LINE CHART ───────────────────────────────────────────────────────────
 
 function LineChart({ data, color = '#3b82f6', label = 'm' }) {
+    const [hoverNode, setHoverNode] = useState(null)
     if (!Array.isArray(data) || data.length === 0) {
         return (
             <div style={{
@@ -124,7 +144,8 @@ function LineChart({ data, color = '#3b82f6', label = 'm' }) {
     }
 
     if (data.length === 1) {
-        const value = data[0]
+        const value = typeof data[0] === 'object' ? data[0].val : data[0]
+        const dateStr = typeof data[0] === 'object' ? data[0].date : ''
         return (
             <div style={{
                 height: 120,
@@ -139,6 +160,7 @@ function LineChart({ data, color = '#3b82f6', label = 'm' }) {
                 color: 'var(--text-muted)',
             }}>
                 <div style={{ fontSize: 11, fontWeight: 700 }}>Single data point</div>
+                {dateStr && <div style={{ fontSize: 10, fontWeight: 500, color: 'var(--text-muted)' }}>{dateStr}</div>}
                 <div style={{ fontFamily: 'var(--font-head)', fontSize: 28, fontWeight: 800, color }}>
                     {value}{label}
                 </div>
@@ -147,11 +169,13 @@ function LineChart({ data, color = '#3b82f6', label = 'm' }) {
     }
 
     const W = 320, H = 100, PAD = 16
-    const max = Math.max(...data, 1)
-    const min = Math.min(...data)
+    const vals = data.map(d => typeof d === 'object' ? d.val : d)
+    const max = Math.max(...vals, 1)
+    const min = Math.min(...vals)
     const range = max - min || 1
 
-    const pts = data.map((v, i) => {
+    const pts = data.map((d, i) => {
+        const v = typeof d === 'object' ? d.val : d
         const x = PAD + (i / (data.length - 1)) * (W - PAD * 2)
         const y = PAD + ((max - v) / range) * (H - PAD * 2)
         return [x, y]
@@ -166,7 +190,8 @@ function LineChart({ data, color = '#3b82f6', label = 'm' }) {
     ].join(' ')
 
     return (
-        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
+        <div style={{ position: 'relative', width: '100%' }}>
+            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', overflow: 'visible', display: 'block' }}>
             <defs>
                 <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor={color} stopOpacity="0.25" />
@@ -190,10 +215,62 @@ function LineChart({ data, color = '#3b82f6', label = 'm' }) {
             <polyline points={polyline} fill="none" stroke={color}
                 strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
             {pts.map(([x, y], i) => (
-                <circle key={i} cx={x} cy={y} r="3.5" fill={color} stroke="var(--surface)" strokeWidth="2" />
+                <g key={i}
+                   onMouseEnter={() => setHoverNode({ 
+                       i, x, y, 
+                       val: typeof data[i] === 'object' ? data[i].val : data[i],
+                       date: typeof data[i] === 'object' ? data[i].date : null
+                   })}
+                   onMouseLeave={() => setHoverNode(null)}
+                   style={{ cursor: 'pointer' }}>
+                    <circle cx={x} cy={y} r={hoverNode?.i === i ? "5" : "3.5"} fill={color} stroke="var(--surface)" strokeWidth="2" style={{ transition: 'r .2s ease' }} />
+                    <circle cx={x} cy={y} r="16" fill="transparent" />
+                </g>
             ))}
         </svg>
-    )
+    
+            {/* CUSTOM HTML TOOLTIP */}
+            {hoverNode && (
+                <div style={{
+                    position: 'absolute',
+                    left: `calc(${(hoverNode.x / W) * 100}%)`,
+                    top: `calc(${(hoverNode.y / H) * 100}%)`,
+                    transform: 'translate(-50%, -100%)',
+                    marginTop: -10,
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 8,
+                    padding: '8px 12px',
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                    pointerEvents: 'none',
+                    textAlign: 'center',
+                    minWidth: 80,
+                    zIndex: 10,
+                    animation: 'fadeUp 0.15s ease-out'
+                }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 2 }}>
+                        Route {hoverNode.i + 1}
+                        {hoverNode.date && <div style={{ fontSize: 9, fontWeight: 500, opacity: 0.8 }}>{hoverNode.date}</div>}
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>
+                        {hoverNode.val} <span style={{ fontSize: 11, fontWeight: 600 }}>{label === 'm' ? 'mins' : label}</span>
+                    </div>
+                    {/* Tooltip Tail */}
+                    <div style={{
+                        position: 'absolute',
+                        bottom: -5,
+                        left: '50%',
+                        transform: 'translateX(-50%) rotate(45deg)',
+                        width: 10,
+                        height: 10,
+                        background: 'var(--surface)',
+                        borderRight: '1px solid var(--border)',
+                        borderBottom: '1px solid var(--border)',
+                    }} />
+                </div>
+            )}
+        </div>
+)
 }
 
 // ─── PERIOD TAB ───────────────────────────────────────────────────────────────
@@ -216,20 +293,34 @@ export default function DriverAnalytics() {
     const { user } = useAuth()
     const navigate = useNavigate()
 
-    const [period, setPeriod] = useState('week')
-    const [summary, setSummary] = useState(MOCK_SUMMARY)
-    const [weekly, setWeekly] = useState(MOCK_WEEKLY)
-    const [trend, setTrend] = useState(MOCK_TREND)
+        const [period, setPeriod] = useState('week')
+    const [summary, setSummary] = useState({ routesCompleted: 0, stopsCompleted: 0, totalWorkingHours: 0, avgCompletionMins: 0 })
+    const [weekly, setWeekly] = useState([])
+    const [trend, setTrend] = useState([])
+    const [loading, setLoading] = useState(true)
+    const [hoverRow, setHoverRow] = useState(null)
+    const [error, setError] = useState(null)
 
-    useEffect(() => {
-        api.get('/api/driver/shift/analytics/').catch(() => ({ data: null }))
+        const fetchAnalytics = () => {
+        setLoading(true)
+        setError(null)
+        api.get(`/api/driver/shift/analytics/?period=${period}`)
             .then(res => {
-                if (!res.data) return
+                if (!res.data) throw new Error('No data returned')
                 if (res.data.summary) setSummary(res.data.summary)
                 if (res.data.weekly)  setWeekly(res.data.weekly)
                 if (res.data.trend)   setTrend(res.data.trend)
             })
-    }, [])
+            .catch(err => {
+                console.error('Failed to load analytics:', err)
+                setError('Failed to load performance data. Please check your connection.')
+            })
+            .finally(() => setLoading(false))
+    }
+
+    useEffect(() => {
+        fetchAnalytics()
+    }, [period])
 
     const weekStops = weekly.reduce((a, d) => a + d.stops, 0)
     const bestDay = [...weekly].sort((a, b) => b.stops - a.stops)[0]
@@ -273,20 +364,41 @@ export default function DriverAnalytics() {
                     ))}
                 </div>
 
+                {/* ── ERROR & LOADING STATES ── */}
+                {loading && (
+                    <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        <div className="spinner" style={{ margin: '0 auto 12px', width: 24, height: 24, border: '3px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>Loading analytics...</div>
+                        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                    </div>
+                )}
+
+                {error && !loading && (
+                    <div style={{ padding: '24px 16px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 12, marginBottom: 24, textAlign: 'center' }}>
+                        <span className="material-symbols-rounded" style={{ color: '#ef4444', fontSize: 28, marginBottom: 8 }}>wifi_off</span>
+                        <div style={{ color: '#ef4444', fontSize: 14, fontWeight: 600, marginBottom: 12 }}>{error}</div>
+                        <button onClick={fetchAnalytics} className="btn" style={{ padding: '6px 16px', fontSize: 13 }}>Try Again</button>
+                    </div>
+                )}
+
                 {/* ── STAT CARDS 2×2 ── */}
+                {!loading && !error && (
+                    <>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}
                     className="da-card">
-                    <StatCard label="Routes Done" value={fmt(summary.routesCompleted)} color="#2ecc71" sub="this month" />
-                    <StatCard label="Stops Done" value={fmt(summary.stopsCompleted)} color="#3b82f6" sub="this month" />
+                    <StatCard label="Routes Done" value={fmt(summary.routesCompleted)} color="#2ecc71" sub={`this ${period}`} />
+                    <StatCard label="Stops Done" value={fmt(summary.stopsCompleted)} color="#3b82f6" sub={`this ${period}`} />
                     <StatCard label="Working Time" value={summary.totalWorkingHours} unit="hrs" color="#f59e0b" sub="total hours logged" />
                     <StatCard label="Avg. Completion" value={summary.avgCompletionMins} unit="min" color="#a78bfa" sub="per route" />
                 </div>
 
-                {/* ── WEEKLY BAR CHART ── */}
+                {/* ── WEEKLY/MONTHLY BAR CHART ── */}
                 <div className="card da-card" style={{ marginBottom: 20 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
                         <div>
-                            <h2 className="section-title" style={{ margin: 0, fontSize: 15 }}>Stops This Week</h2>
+                            <h2 className="section-title" style={{ margin: 0, fontSize: 15 }}>
+                                {period === 'week' ? 'Stops This Week' : 'Stops This Month'}
+                            </h2>
                             <p className="text-muted text-xs" style={{ marginTop: 3 }}>
                                 {weekStops} stops · Best: {bestDay?.day} ({bestDay?.stops})
                             </p>
@@ -339,17 +451,63 @@ export default function DriverAnalytics() {
                     })()}
                 </div>
 
-                {/* ── WEEKLY BREAKDOWN TABLE ── */}
+                {/* ── BREAKDOWN TABLE ── */}
                 <div className="card da-card">
-                    <h2 className="section-title" style={{ fontSize: 15, marginBottom: 14 }}>Weekly Breakdown</h2>
+                    <h2 className="section-title" style={{ fontSize: 15, marginBottom: 14 }}>
+                        {period === 'week' ? 'Weekly Breakdown' : 'Monthly Breakdown'}
+                    </h2>
                     <div>
                         {weekly.map((d, i) => {
                             const pct = weekStops > 0 ? (d.stops / weekStops) * 100 : 0
                             return (
-                                <div key={i} style={{
+                                <div key={i} 
+                                    onMouseEnter={() => setHoverRow(i)}
+                                    onMouseLeave={() => setHoverRow(null)}
+                                    style={{
                                     display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0',
                                     borderBottom: i < weekly.length - 1 ? '1px solid var(--border)' : 'none',
+                                    position: 'relative', cursor: 'pointer'
                                 }}>
+                                    {/* CUSTOM HTML TOOLTIP */}
+                                    {hoverRow === i && (
+                                        <div style={{
+                                            position: 'absolute',
+                                            left: '50%',
+                                            top: -35,
+                                            transform: 'translate(-50%, 0)',
+                                            background: 'var(--surface)',
+                                            border: '1px solid var(--border)',
+                                            borderRadius: 8,
+                                            padding: '8px 12px',
+                                            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                                            pointerEvents: 'none',
+                                            textAlign: 'center',
+                                            minWidth: 90,
+                                            zIndex: 10,
+                                            animation: 'fadeUp 0.15s ease-out'
+                                        }}>
+                                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 2 }}>
+                                                {d.day}
+                                                <div style={{ fontSize: 9, fontWeight: 500, opacity: 0.8 }}>{d.date}</div>
+                                            </div>
+                                            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>
+                                                {d.stops} <span style={{ fontSize: 11, fontWeight: 600 }}>stops</span>
+                                            </div>
+                                            {/* Tooltip Tail */}
+                                            <div style={{
+                                                position: 'absolute',
+                                                bottom: -5,
+                                                left: '50%',
+                                                transform: 'translateX(-50%) rotate(45deg)',
+                                                width: 10,
+                                                height: 10,
+                                                background: 'var(--surface)',
+                                                borderRight: '1px solid var(--border)',
+                                                borderBottom: '1px solid var(--border)',
+                                            }} />
+                                        </div>
+                                    )}
+
                                     <div style={{ width: 36, fontWeight: 700, fontSize: 13 }}>{d.day}</div>
                                     <div style={{ flex: 1 }}>
                                         <div style={{ height: 7, borderRadius: 99, background: 'var(--bg)', overflow: 'hidden' }}>
@@ -374,6 +532,8 @@ export default function DriverAnalytics() {
                         })}
                     </div>
                 </div>
+                </>
+                )}
 
             </div>
         </>

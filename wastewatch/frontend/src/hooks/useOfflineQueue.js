@@ -9,7 +9,7 @@
  */
 
 const DB_NAME = 'wastewatch_db'
-const DB_VERSION = 5   // v5: sync version across offline modules
+const DB_VERSION = 6   // v6: added proof_submissions and inspection_submissions
 
 const STORES = ['reports', 'analytics_queue', 'events_queue', 'sync_log', 'proof_submissions', 'inspection_submissions']
 
@@ -69,6 +69,7 @@ export function getQueue(storeName) {
       syncedAt: null,
     }
     await idbTx(storeName, 'readwrite', s => s.put(record))
+    window.dispatchEvent(new CustomEvent('ww-idb-updated', { detail: { storeName } }))
     return record
   }
 
@@ -95,7 +96,10 @@ export function getQueue(storeName) {
         if (!getReq.result) return resolve(null)
         const updated = { ...getReq.result, ...patch }
         const putReq = store.put(updated)
-        putReq.onsuccess = () => resolve(updated)
+        putReq.onsuccess = () => {
+          window.dispatchEvent(new CustomEvent('ww-idb-updated', { detail: { storeName } }))
+          resolve(updated)
+        }
         putReq.onerror = () => reject(putReq.error)
       }
       getReq.onerror = () => reject(getReq.error)
@@ -106,6 +110,9 @@ export function getQueue(storeName) {
     const all = await getAll()
     const synced = all.filter(r => r.status === 'synced')
     await Promise.all(synced.map(r => idbTx(storeName, 'readwrite', s => s.delete(r.id))))
+    if (synced.length > 0) {
+      window.dispatchEvent(new CustomEvent('ww-idb-updated', { detail: { storeName } }))
+    }
     return synced.length
   }
 

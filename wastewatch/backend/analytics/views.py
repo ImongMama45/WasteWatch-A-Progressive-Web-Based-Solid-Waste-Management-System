@@ -1,15 +1,16 @@
 from rest_framework import viewsets, permissions, response
 from rest_framework.decorators import action
-from django.db.models import Count, Sum, Avg, Q, F
+from django.db.models import Count, Sum, Avg, Q, F, FloatField, ExpressionWrapper
+from django.db.models.functions import TruncDate
 from django.utils.dateparse import parse_date
 from django.utils import timezone
-from datetime import timedelta, datetime
+from datetime import timedelta, date as date_type
 
 from .models import SystemKPI, TruckPerformance, BarangayPerformance, IssueTrend, ActivityLog
 from .serializers import (
-    SystemKPISerializer, 
-    TruckPerformanceSerializer, 
-    BarangayPerformanceSerializer, 
+    SystemKPISerializer,
+    TruckPerformanceSerializer,
+    BarangayPerformanceSerializer,
     IssueTrendSerializer,
     ActivityLogSerializer
 )
@@ -21,6 +22,10 @@ from accounts.models import Barangay
 
 from django.http import HttpResponse
 import csv
+
+# ── Status constants (mirrored from frontend pickupStatusSync.js) ──────────────
+COMPLETED_STATUSES = ['COMPLETED']
+MISSED_STATUSES = ['DRIVER_MISSED', 'FAILED']
 
 class AnalyticsViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated]
@@ -81,6 +86,225 @@ class AnalyticsViewSet(viewsets.ViewSet):
         if area and area != 'All Routes':
             return Q(area=area)
         return Q()
+
+    @action(detail=False, methods=['get'])
+    def live_dashboard(self, request):
+        """
+        GET /api/analytics/live/?barangay_id=<id>&days=30
+
+        Dynamically aggregates from live tables:
+          - WasteDelivery   → total weight, deliveries, weight-over-time
+          - PickupStatus    → stops completed vs missed, completion rate
+          - Truck           → per-truck efficiency
+          - Barangay        → per-barangay breakdown
+
+        Query params:
+          barangay_id  — filter to a single barangay (omit for global)
+          days         — lookback window in days (default 30)
+        """
+        # ── Date window ──────────────────────────────────────────────────────
+        try:
+            days = max(1, min(365, int(request.query_params.get('days', 30))))
+        except (TypeError, ValueError):
+            days = 30
+
+        today = timezone.now().date()
+        date_from = today - timedelta(days=days - 1)
+
+        # ── Barangay scope ───────────────────────────────────────────────────
+        barangay_id = request.query_params.get('barangay_id')
+        scope = 'global'
+        brgy_obj = None
+        if barangay_id and barangay_id != 'all':
+            try:
+                brgy_obj = Barangay.objects.get(pk=int(barangay_id))
+                scope = 'barangay'
+            except (Barangay.DoesNotExist, ValueError):
+                pass
+
+        # ── WasteDelivery base queryset ──────────────────────────────────────
+        #  WasteDelivery.barangays is a direct M2M to accounts.Barangay.
+        #  WasteDelivery.date is a DateField (driver arrival date at dumpsite).
+        delivery_qs = WasteDelivery.objects.filter(date__range=[date_from, today])
+        if brgy_obj:
+            delivery_qs = delivery_qs.filter(barangays=brgy_obj)
+
+        # ── PickupStatus base queryset ───────────────────────────────────────
+        #  Linked to Barangay via PickupStatus.barangay FK.
+        #  PickupStatus.updated_at is the auto timestamp; use schedule__date for date.
+        pickup_qs = PickupStatus.objects.filter(
+            schedule__date__range=[date_from, today]
+        )
+        if brgy_obj:
+            pickup_qs = pickup_qs.filter(barangay=brgy_obj)
+
+        # ── Summary ──────────────────────────────────────────────────────────
+        delivery_agg = delivery_qs.aggregate(
+            total_weight_kg=Sum('net_weight'),
+            total_estimated_kg=Sum('estimated_kg'),
+            total_deliveries=Count('id'),
+        )
+        # Prefer net_weight (scale data); fall back to estimated_kg
+        raw_weight = delivery_agg['total_weight_kg'] or 0
+        est_weight = delivery_agg['total_estimated_kg'] or 0
+        total_weight_kg = float(raw_weight if raw_weight > 0 else est_weight)
+        total_deliveries = delivery_agg['total_deliveries'] or 0
+
+        stops_completed = pickup_qs.filter(status__in=COMPLETED_STATUSES).count()
+        stops_missed    = pickup_qs.filter(status__in=MISSED_STATUSES).count()
+        stops_total     = pickup_qs.count()
+        completion_rate = round(stops_completed / stops_total, 4) if stops_total else 0.0
+
+        # ── Weight over time (daily series) ──────────────────────────────────
+        weight_series = (
+            delivery_qs
+            .values('date')
+            .annotate(
+                weight_kg=Sum('net_weight'),
+                estimated_kg=Sum('estimated_kg'),
+                deliveries=Count('id'),
+            )
+            .order_by('date')
+        )
+        weight_over_time = [
+            {
+                'date': str(row['date']),
+                'weight_kg': float(
+                    row['weight_kg'] if (row['weight_kg'] or 0) > 0
+                    else (row['estimated_kg'] or 0)
+                ),
+                'deliveries': row['deliveries'],
+            }
+            for row in weight_series
+        ]
+
+        # ── Per-barangay breakdown (always returned, for global map/chart) ───
+        brgy_weight = (
+            WasteDelivery.objects
+            .filter(date__range=[date_from, today])
+            .values('barangays__id', 'barangays__name')
+            .annotate(
+                weight_kg=Sum('net_weight'),
+                estimated_kg=Sum('estimated_kg'),
+                deliveries=Count('id'),
+            )
+            .order_by('-weight_kg')
+        )
+
+        # Per-barangay pickup stats
+        brgy_pickups = (
+            PickupStatus.objects
+            .filter(schedule__date__range=[date_from, today])
+            .values('barangay__id', 'barangay__name')
+            .annotate(
+                stops_total=Count('id'),
+                stops_completed=Count('id', filter=Q(status__in=COMPLETED_STATUSES)),
+                stops_missed=Count('id', filter=Q(status__in=MISSED_STATUSES)),
+            )
+        )
+        # Build lookup dict for pickup stats
+        pickup_by_brgy = {
+            row['barangay__id']: row
+            for row in brgy_pickups
+            if row['barangay__id'] is not None
+        }
+
+        barangay_breakdown = []
+        for row in brgy_weight:
+            bid = row['barangays__id']
+            bname = row['barangays__name']
+            if bid is None:
+                continue
+            p = pickup_by_brgy.get(bid, {})
+            s_total = p.get('stops_total', 0) or 0
+            s_done  = p.get('stops_completed', 0) or 0
+            s_miss  = p.get('stops_missed', 0) or 0
+            rate    = round(s_done / s_total, 4) if s_total else 0.0
+            wkg     = float((row['weight_kg'] or 0) if (row['weight_kg'] or 0) > 0 else (row['estimated_kg'] or 0))
+            barangay_breakdown.append({
+                'barangay_id':     bid,
+                'name':            bname,
+                'weight_kg':       wkg,
+                'deliveries':      row['deliveries'],
+                'stops_completed': s_done,
+                'stops_missed':    s_miss,
+                'completion_rate': rate,
+            })
+
+        # ── Per-truck performance ─────────────────────────────────────────────
+        truck_qs = PickupStatus.objects.filter(
+            schedule__date__range=[date_from, today]
+        )
+        if brgy_obj:
+            truck_qs = truck_qs.filter(barangay=brgy_obj)
+
+        truck_perf = (
+            truck_qs
+            .values('schedule__truck__plate_number', 'schedule__driver__first_name', 'schedule__driver__last_name')
+            .annotate(
+                stops_total=Count('id'),
+                stops_completed=Count('id', filter=Q(status__in=COMPLETED_STATUSES)),
+                stops_missed=Count('id', filter=Q(status__in=MISSED_STATUSES)),
+            )
+            .order_by('-stops_completed')
+        )
+        fleet = [
+            {
+                'plate_number':    row['schedule__truck__plate_number'] or '—',
+                'driver_name':     f"{row['schedule__driver__first_name'] or ''} {row['schedule__driver__last_name'] or ''}".strip() or '—',
+                'stops_total':     row['stops_total'],
+                'stops_completed': row['stops_completed'],
+                'stops_missed':    row['stops_missed'],
+                'completion_rate': round(row['stops_completed'] / row['stops_total'], 4) if row['stops_total'] else 0.0,
+            }
+            for row in truck_perf
+            if row['schedule__truck__plate_number']
+        ]
+
+        # ── Dumpsite delivery weight per truck ────────────────────────────────
+        truck_delivery_qs = WasteDelivery.objects.filter(date__range=[date_from, today])
+        if brgy_obj:
+            truck_delivery_qs = truck_delivery_qs.filter(barangays=brgy_obj)
+        truck_weights = (
+            truck_delivery_qs
+            .values('truck__plate_number')
+            .annotate(
+                delivery_count=Count('id'),
+                total_weight_kg=Sum('net_weight'),
+                total_estimated_kg=Sum('estimated_kg'),
+            )
+        )
+        truck_weight_map = {
+            row['truck__plate_number']: {
+                'delivery_count':    row['delivery_count'],
+                'total_weight_kg':   float((row['total_weight_kg'] or 0) if (row['total_weight_kg'] or 0) > 0 else (row['total_estimated_kg'] or 0)),
+            }
+            for row in truck_weights
+        }
+        for f in fleet:
+            wmap = truck_weight_map.get(f['plate_number'], {})
+            f['delivery_count']  = wmap.get('delivery_count', 0)
+            f['total_weight_kg'] = wmap.get('total_weight_kg', 0.0)
+
+        return response.Response({
+            'scope':              scope,
+            'barangay_id':        brgy_obj.pk if brgy_obj else None,
+            'barangay_name':      brgy_obj.name if brgy_obj else None,
+            'date_from':          str(date_from),
+            'date_to':            str(today),
+            'days':               days,
+            'summary': {
+                'total_weight_kg':  total_weight_kg,
+                'total_deliveries': total_deliveries,
+                'stops_completed':  stops_completed,
+                'stops_missed':     stops_missed,
+                'stops_total':      stops_total,
+                'completion_rate':  completion_rate,
+            },
+            'weight_over_time':   weight_over_time,
+            'barangay_breakdown': barangay_breakdown,
+            'fleet':              fleet,
+        })
 
     @action(detail=False, methods=['get'])
     def dashboard(self, request):

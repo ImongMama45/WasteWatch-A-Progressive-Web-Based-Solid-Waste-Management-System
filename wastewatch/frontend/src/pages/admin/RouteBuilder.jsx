@@ -3,6 +3,7 @@ import DashboardLayout from '../../components/DashboardLayout'
 import { useTrucks } from '../../hooks/useTrucks'
 import { useUsers } from '../../hooks/useUsers'
 import { useDumpsites } from '../../hooks/useDumpsites'
+import { useHotspots } from '../../hooks/useHotspots'
 import api from '../../api/client'
 import { detectConflicts, formatTime12h } from '../../utils/scheduleConflicts'
 
@@ -166,9 +167,10 @@ export default function RouteBuilder() {
   const [orsFetching, setOrsFetching] = useState(false)
   const orsAbortRef = useRef(null)
 
-  const { trucks } = useTrucks()
-  const { drivers } = useUsers()
-  const { sites: dumpsites } = useDumpsites()
+  const { trucks, loading: trucksLoading, refresh: refreshTrucks } = useTrucks()
+  const { drivers, refresh: refreshDrivers } = useUsers()
+  const { sites: dumpsites, refresh: refreshDumpsites } = useDumpsites()
+  const { items: hotspots, refresh: refreshHotspots } = useHotspots()
 
   const [editId, setEditId] = useState(null)
   const [truck, setTruck] = useState('')
@@ -200,11 +202,15 @@ export default function RouteBuilder() {
 
   // ── Auto-fill driver when truck selected ─────────────────────────────────
   useEffect(() => {
-    if (!truck) return
+    if (!truck || trucksLoading) return
     const t = trucks.find(t => String(t.id) === String(truck))
-    if (t?.drivers?.length === 1) setDriver(String(t.drivers[0]))
-    else if (t?.drivers && !t.drivers.includes(parseInt(driver))) setDriver('') // reset if currently selected driver is not assigned to this truck
-  }, [truck, trucks])
+    if (!t) return
+    if (t.drivers?.length === 1) {
+      setDriver(String(t.drivers[0]))
+    } else if (t.drivers?.length > 0 && driver && !t.drivers.includes(parseInt(driver))) {
+      setDriver('')
+    }
+  }, [truck, trucks, trucksLoading])
 
   // ── Auto-optimize stops by proximity ─────────────────────────────────────
   const prevStopsRef = useRef([])
@@ -240,6 +246,12 @@ export default function RouteBuilder() {
   }
   const fetchCalendarEvents = () => { api.get('/api/driver/calendar-events/').then(r => setCalendarEvents(r.data)).catch(console.error) }
   useEffect(() => {
+    if (activeTab === 'builder') {
+      refreshTrucks()
+      refreshDrivers()
+      refreshDumpsites()
+      refreshHotspots()
+    }
     if (activeTab === 'list' || activeTab === 'calendar') { fetchSchedules(); if (activeTab === 'calendar') fetchCalendarEvents() }
   }, [activeTab])
 
@@ -476,6 +488,9 @@ export default function RouteBuilder() {
       }
       if (editId) await api.patch(`/api/driver/collection-schedules/${editId}/`, payload)
       else await api.post('/api/driver/collection-schedules/', payload)
+
+      await refreshTrucks()
+      await refreshDrivers()
 
       setSaved(true)
       showToast(`✅ Route ${editId ? 'updated' : 'saved'}!`)
@@ -1254,6 +1269,51 @@ export default function RouteBuilder() {
                         <IcoRoute size={11} color="var(--accent)" /> Order auto-optimized by proximity
                       </div>
                     )}
+
+                    {/* Hotspots Section */}
+                    {(() => {
+                      const selNames = barangays.filter(b => selectedBarangays.includes(b.id)).map(b => b.name);
+                      const availableHotspots = (hotspots || []).filter(h => selNames.includes(h.barangay_name));
+
+                      if (availableHotspots.length > 0) {
+                        return (
+                          <div style={{ marginBottom: 15, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 10, border: '1px solid var(--border)' }}>
+                            <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                              Reported Hotspots in Area
+                            </p>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 150, overflowY: 'auto', scrollbarWidth: 'none' }}>
+                              {availableHotspots.map(h => {
+                                const isAdded = stops.some(s => Math.abs(s.lat - h.latitude) < 0.0001 && Math.abs(s.lng - h.longitude) < 0.0001);
+                                return (
+                                  <div key={h.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: 'var(--surface)', borderRadius: 6, border: '1px solid var(--border)' }}>
+                                    <div>
+                                      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>
+                                        {h.count > 1 ? `${h.type} Cluster (${h.count})` : h.type}
+                                      </div>
+                                      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{h.barangay_name}</div>
+                                    </div>
+                                    <button 
+                                      disabled={isAdded}
+                                      onClick={() => {
+                                        setStops(prev => [...prev, { stop_id: generateUUID(), lat: parseFloat(h.latitude), lng: parseFloat(h.longitude), label: `Hotspot: ${h.type}`, barangay_id: barangays.find(b => b.name === h.barangay_name)?.id }]);
+                                        if (mapInst.current) { mapInst.current.panTo([parseFloat(h.latitude), parseFloat(h.longitude)]); setShowMap(true); setTimeout(() => { try { mapInst.current?.invalidateSize() } catch { } }, 50) }
+                                        showToast('📍 Hotspot added to route');
+                                      }}
+                                      style={{ 
+                                        padding: '4px 10px', fontSize: 10, fontWeight: 700, borderRadius: 5, cursor: isAdded ? 'default' : 'pointer',
+                                        background: isAdded ? 'rgba(22,163,74,.1)' : 'var(--accent)', color: isAdded ? 'var(--accent)' : '#fff', border: 'none'
+                                      }}>
+                                      {isAdded ? 'Added' : '+ Add'}
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
 
                     {/* Manual coords */}
                     <div style={{ marginTop: 9, paddingLeft: 32 }}>

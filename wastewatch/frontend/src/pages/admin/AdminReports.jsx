@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import api from '../../api/client'
 import BarangaySelect from '../../components/BarangaySelect'
 
@@ -46,6 +47,7 @@ function SeverityBadge({ v }) {
 }
 
 export default function AdminReports() {
+  const navigate = useNavigate()
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
   const [filters, setFilters] = useState({
@@ -173,7 +175,15 @@ export default function AdminReports() {
                 </tr>
               ) : (
                 reports.map(r => (
-                  <tr key={r.id} style={{ borderBottom: '1px solid var(--border)', background: r.tags?.includes('Misconduct') ? 'rgba(231,76,60,0.03)' : 'transparent' }}>
+                  <tr 
+                    key={r.id} 
+                    onClick={() => navigate(`/report/${r.id}`)}
+                    style={{ 
+                      borderBottom: '1px solid var(--border)', 
+                      background: r.tags?.includes('Misconduct') ? 'rgba(231,76,60,0.03)' : 'transparent',
+                      cursor: 'pointer'
+                    }}
+                  >
                     <td style={{ padding: '14px 16px', fontSize: 13, fontWeight: 700 }}>#{r.id}</td>
                     <td style={{ padding: '14px 16px', fontSize: 13 }}>{r.barangay_name}</td>
                     <td style={{ padding: '14px 16px', fontSize: 13 }}>

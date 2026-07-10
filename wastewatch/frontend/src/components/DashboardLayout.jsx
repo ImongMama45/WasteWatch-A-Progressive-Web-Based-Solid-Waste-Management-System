@@ -21,7 +21,6 @@ import { DriverGpsProvider } from '../context/DriverGpsContext'
 import { useNotifications } from '../hooks/useNotifications'
 import DumpsiteArrivalAlert from '../pages/dumpsite/components/DumpsiteArrivalAlert'
 
-
 // ─── NavGroup: collapsible sidebar section ────────────────────────────────────
 function NavGroup({ group, currentPath, onNavigate, onExpandSidebar }) {
   const hasActive = group.items?.some(item => item.path === currentPath)
@@ -567,12 +566,12 @@ export default function DashboardLayout({ children }) {
         const data = JSON.parse(n.message)
         if (n.type === 'WATCHER_STOP_VERIFIED') return `Watcher (${data.watcher_name}): ${data.text}`
         if (n.type === 'WATCHER_ROUTE_SUMMARY') {
-          return n.title === 'Route Confirmation Complete' 
+          return n.title === 'Route Confirmation Complete'
             ? `Route finished. Driver: ${data.truck_name}`
             : `Live updates from Watcher (${data.watcher_name})`
         }
       }
-    } catch (e) {}
+    } catch (e) { }
     return n.message
   }
 
@@ -768,7 +767,6 @@ export default function DashboardLayout({ children }) {
         </div>
       )}
 
-      {/* ── Main Content ── */}
       <main className="dashboard-main">
         {role === 'driver' ? (
           <DriverGpsProvider>{children}</DriverGpsProvider>

@@ -312,6 +312,32 @@ export default function ValidateReports() {
                 </p>
               </div>
 
+              {/* Rejection Feedback */}
+              {drawerReport.status === 'rejected' && (
+                <div style={{
+                  background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)',
+                  borderRadius: 10, padding: '14px 16px', marginBottom: 16,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <div style={{ width: 16, height: 16, color: 'var(--danger)' }}>{ICONS.warning}</div>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--danger)', letterSpacing: '.06em' }}>
+                      REJECTION FEEDBACK
+                    </div>
+                  </div>
+                  <p style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text)', margin: '0 0 10px' }}>
+                    {drawerReport.rejection_reason || <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>No reason provided.</span>}
+                  </p>
+                  <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-muted)' }}>
+                    {drawerReport.rejected_by_name && (
+                      <span><strong style={{ color: 'var(--text)' }}>Rejected by:</strong> {drawerReport.rejected_by_name}</span>
+                    )}
+                    {drawerReport.rejected_at && (
+                      <span><strong style={{ color: 'var(--text)' }}>On:</strong> {new Date(drawerReport.rejected_at).toLocaleString()}</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Photo */}
               {drawerReport.image ? (
                 <div style={{

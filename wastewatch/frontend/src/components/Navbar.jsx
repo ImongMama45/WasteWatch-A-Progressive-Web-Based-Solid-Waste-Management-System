@@ -534,6 +534,7 @@ export default function Navbar() {
     { path: '/map', label: 'Map' },
     { path: '/schedule', label: 'Schedule' },
     { path: '/about', label: 'About' },
+    { path: '/announcements', label: 'Announcements' },
     ...(user ? [{ path: '/dashboard', label: 'Dashboard' }] : []),
   ]
 

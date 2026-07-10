@@ -12,7 +12,14 @@
  *   Profile   — 👤  → /profile (future)
  */
 
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { ClipboardCheck, Truck } from 'lucide-react'
+import GlobalCameraModal from './GlobalCameraModal'
+import ReportForm from '../pages/ReportForm'
+import { useAuth } from '../context/AuthContext'
+import { useNotification } from '../context/NotificationContext'
+import api from '../api/client'
 
 const NAV_ITEMS = [
   {
@@ -72,6 +79,66 @@ const NAV_ITEMS = [
 export default function BottomNav() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { user } = useAuth()
+  const { notify } = useNotification()
+  const isWatcher = user?.role === 'watcher'
+
+  const [cameraOpen, setCameraOpen] = useState(false)
+  const [showWatcherMenu, setShowWatcherMenu] = useState(false)
+  const [taskCounts, setTaskCounts] = useState({ verify: 0, confirm: 0 })
+  const menuRef = useRef(null)
+  const hoverTimeoutRef = useRef(null)
+
+  // Overlay state for the unified report form
+  const [reportFormOpen, setReportFormOpen] = useState(false)
+  const [reportFormPhoto, setReportFormPhoto] = useState(null)
+
+  const handleMouseEnter = () => {
+    if (!isWatcher) return
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current)
+    setShowWatcherMenu(true)
+  }
+
+  const handleMouseLeave = () => {
+    if (!isWatcher) return
+    hoverTimeoutRef.current = setTimeout(() => {
+      setShowWatcherMenu(false)
+    }, 600) // 600ms delay to allow crossing the gap
+  }
+
+  // Click outside to close watcher menu
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setShowWatcherMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('touchstart', handleClickOutside)
+    return () => {
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current)
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('touchstart', handleClickOutside)
+    }
+  }, [])
+
+  // Fetch pending tasks for watcher so we know if buttons should be disabled
+  useEffect(() => {
+    if (!isWatcher) return
+    api.get('/api/watcher/stop-validations/')
+      .then(res => {
+        const validations = res.data?.results ?? res.data ?? []
+        let verify = 0
+        let confirm = 0
+        validations.forEach(v => {
+          const status = v.current_status ? v.current_status.toUpperCase().replace(/ /g, '_') : 'PENDING_INSPECTION'
+          if (status === 'PENDING_INSPECTION') verify++
+          if (status === 'COLLECTION_REPORTED') confirm++
+        })
+        setTaskCounts({ verify, confirm })
+      })
+      .catch(() => {})
+  }, [isWatcher, location.pathname])
 
   const isActive = (path) => location.pathname === path
 
@@ -89,16 +156,99 @@ export default function BottomNav() {
         </button>
       ))}
 
-      {/* Center raised camera button */}
-      <div className="bottom-nav-center">
+      {/* Center raised camera button / Speed Dial */}
+      <div
+        className="bottom-nav-center"
+        ref={menuRef}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        {isWatcher && (
+          <div style={{
+            position: 'absolute',
+            bottom: '80px',
+            left: '50%',
+            transform: `translateX(-50%) translateY(${showWatcherMenu ? '0' : '15px'})`,
+            display: 'flex',
+            gap: '16px',
+            opacity: showWatcherMenu ? 1 : 0,
+            pointerEvents: showWatcherMenu ? 'auto' : 'none',
+            transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+            zIndex: 100
+          }}>
+            {/* Verification Button (Red) */}
+            <button onClick={(e) => { 
+                e.stopPropagation(); 
+                if (taskCounts.verify === 0) {
+                  notify({ variant: 'warning-dark', message: 'No Available Verification yet Today' })
+                  setShowWatcherMenu(false)
+                  return
+                }
+                navigate('/verification-tasks'); 
+                setShowWatcherMenu(false) 
+              }}
+              style={{
+                height: 48, padding: '0 16px', borderRadius: '24px',
+                background: taskCounts.verify > 0 ? '#ef4444' : '#64748b', 
+                color: 'white', border: 'none',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                boxShadow: taskCounts.verify > 0 ? '0 4px 12px rgba(239,68,68,0.4)' : 'none', 
+                cursor: taskCounts.verify > 0 ? 'pointer' : 'not-allowed',
+                fontWeight: 600, fontSize: '13px', whiteSpace: 'nowrap',
+                opacity: taskCounts.verify > 0 ? 1 : 0.8
+              }}>
+              <ClipboardCheck size={18} />
+              Verify
+            </button>
+            {/* Confirm Button (Green) */}
+            <button onClick={(e) => { 
+                e.stopPropagation(); 
+                if (taskCounts.confirm === 0) {
+                  notify({ variant: 'warning-dark', message: 'No Available Confirmation yet Today' })
+                  setShowWatcherMenu(false)
+                  return
+                }
+                navigate('/watcher/confirm'); 
+                setShowWatcherMenu(false) 
+              }}
+              style={{
+                height: 48, padding: '0 16px', borderRadius: '24px',
+                background: taskCounts.confirm > 0 ? '#10b981' : '#64748b', 
+                color: 'white', border: 'none',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                boxShadow: taskCounts.confirm > 0 ? '0 4px 12px rgba(16,185,129,0.4)' : 'none', 
+                cursor: taskCounts.confirm > 0 ? 'pointer' : 'not-allowed',
+                fontWeight: 600, fontSize: '13px', whiteSpace: 'nowrap',
+                opacity: taskCounts.confirm > 0 ? 1 : 0.8
+              }}>
+              <Truck size={18} />
+              Confirm
+            </button>
+          </div>
+        )}
         <button
           className="bottom-nav-camera"
-          onClick={() => navigate('/report/submit')}
+          onClick={() => {
+            setCameraOpen(true)
+            setShowWatcherMenu(false)
+          }}
           aria-label="Submit Report"
+          style={{
+            transform: showWatcherMenu ? 'scale(0.9) rotate(45deg)' : 'scale(1) rotate(0deg)',
+            transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+            background: showWatcherMenu ? '#334155' : undefined,
+            color: showWatcherMenu ? '#f8fafc' : undefined
+          }}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="26" height="26">
-            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-            <circle cx="12" cy="13" r="4" />
+            {showWatcherMenu ? (
+              <path d="M12 4v16m8-8H4" />
+            ) : (
+              <>
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                <circle cx="12" cy="13" r="4" />
+              </>
+            )}
           </svg>
         </button>
       </div>
@@ -114,6 +264,30 @@ export default function BottomNav() {
           <span className="bottom-nav-label">{item.label}</span>
         </button>
       ))}
+
+      {/* Global Camera Overlay */}
+      <GlobalCameraModal
+        visible={cameraOpen}
+        onClose={() => setCameraOpen(false)}
+        onCapture={(capturedData) => {
+          setCameraOpen(false)
+          const isArray = Array.isArray(capturedData)
+          const blob = isArray ? capturedData[0] : capturedData
+          const previewUrl = URL.createObjectURL(blob)
+          setReportFormPhoto({ blob, url: previewUrl })
+          setReportFormOpen(true)
+        }}
+      />
+
+      {/* Unified Offline Report Form Overlay */}
+      <ReportForm
+        isOpen={reportFormOpen}
+        onClose={() => {
+          setReportFormOpen(false)
+          setReportFormPhoto(null)
+        }}
+        initialPhoto={reportFormPhoto}
+      />
     </div>
   )
 }

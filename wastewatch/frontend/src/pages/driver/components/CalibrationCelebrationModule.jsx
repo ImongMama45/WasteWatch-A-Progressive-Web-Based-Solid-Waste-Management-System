@@ -32,9 +32,45 @@ export default function CalibrationCelebrationModule({ calibrationData, schedule
   const mapRef = useRef(null)
   const mapInstance = useRef(null)
 
-  // Calculate completed and missed
-  const totalStops = schedule?.waypoints?.length ? schedule.waypoints.length - 1 : parseInt(sessionStorage.getItem('ww_total_stops') || '0', 10)
-  const completedStops = parseInt(sessionStorage.getItem('ww_completed_stops') || '0', 10)
+  // ── Resolve the stop-status map ─────────────────────────────────────────
+  // Prefer the live prop; fall back to the snapshot written just before
+  // TruckNotFull was shown (covers the auto-complete path where handleNextStop
+  // is never called and ww_completed_stops is never written).
+  const resolvedStatuses = useMemo(() => {
+    if (stopStatuses && stopStatuses.size > 0) return stopStatuses
+    try {
+      const raw = sessionStorage.getItem('ww_stop_statuses_snapshot') ||
+                  sessionStorage.getItem('ww_stop_statuses')
+      if (raw) return new Map(JSON.parse(raw).map(([k, v]) => [Number(k), v]))
+    } catch { }
+    return new Map()
+  }, [stopStatuses])
+
+  // Statuses that count as "successfully handled" (not missed)
+  const COMPLETED_STATUSES = new Set([
+    'VERIFIED_COLLECTED',
+    'COLLECTION_REPORTED',
+    'COLLECTION_DISPUTED',
+    'EMPTY_STOP',
+  ])
+
+  const totalStops = schedule?.waypoints?.length
+    ? schedule.waypoints.length - 1
+    : parseInt(sessionStorage.getItem('ww_total_stops') || '0', 10)
+
+  // Derive completedStops from the status map — do NOT trust ww_completed_stops
+  // because it is only written by handleNextStop (skipped on auto-complete).
+  const completedStops = useMemo(() => {
+    if (resolvedStatuses.size === 0) {
+      // Last resort: ww_completed_stops written by the normal next-stop flow
+      return parseInt(sessionStorage.getItem('ww_completed_stops') || '0', 10)
+    }
+    let count = 0
+    resolvedStatuses.forEach((status, idx) => {
+      if (idx >= 1 && COMPLETED_STATUSES.has(status)) count++
+    })
+    return count
+  }, [resolvedStatuses])
 
   const missedStops = useMemo(() => {
     if (!schedule?.waypoints) {
@@ -47,13 +83,13 @@ export default function CalibrationCelebrationModule({ calibrationData, schedule
       return []
     }
     return schedule.waypoints.filter((wp, index) => {
-      if (index === 0) return false // skip base
-      const status = stopStatuses?.get(index)
-      return status !== 'VERIFIED_COLLECTED' && status !== 'COLLECTION_REPORTED' && status !== 'COLLECTION_DISPUTED'
+      if (index === 0) return false // skip depot
+      const status = resolvedStatuses.get(index)
+      return !COMPLETED_STATUSES.has(status)
     })
-  }, [schedule, stopStatuses])
+  }, [schedule, resolvedStatuses])
 
-  
+
 
   const kgCollected = calibrationData?.net_weight || calibrationData?.estimated_kg || '0.00'
 

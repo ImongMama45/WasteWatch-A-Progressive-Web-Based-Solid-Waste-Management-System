@@ -55,7 +55,9 @@ import Navbar from '../../../components/Navbar'
 import api from '../../../api/client'
 import { useAuth } from '../../../context/AuthContext'
 import EndShiftModule from './EndShiftModule'
-import CameraProofModal from './CameraProofModal'
+import MultiPhotoPicker from '../../../components/MultiPhotoPicker'
+import { useOnline } from '../../../hooks/useOnline'
+import { getQueue } from '../../../hooks/useOfflineQueue'
 import {
   broadcastPickupStatusSync,
   buildStopValidationSnapshot,
@@ -305,24 +307,24 @@ function MapLegend() {
 function RouteOverlay({ children, visible, onClose }) {
   if (!visible) return null
   return (
-    <div 
+    <div
       onClick={onClose}
       style={{
-      position: 'fixed', inset: 0, zIndex: 3000,
-      background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(5px)',
-      display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'flex-end',
-    }}>
+        position: 'fixed', inset: 0, zIndex: 3000,
+        background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(5px)',
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'flex-end',
+      }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
         <Navbar />
       </div>
-      <div 
+      <div
         onClick={e => e.stopPropagation()}
         style={{
-        width: '100%', height: '80vh', overflow: 'auto',
-        borderRadius: '18px 18px 0 0', background: '#f8fafc',
-        boxShadow: '0 -8px 40px rgba(0,0,0,0.35)',
-      }}>
+          width: '100%', height: '80vh', overflow: 'auto',
+          borderRadius: '18px 18px 0 0', background: '#f8fafc',
+          boxShadow: '0 -8px 40px rgba(0,0,0,0.35)',
+        }}>
         {children}
       </div>
     </div>
@@ -337,16 +339,20 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
   const [submitting, setSubmitting] = useState(false)
   const [stop, setStop] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [photoUploaded, setPhotoUploaded] = useState(false)
-  const [cameraOpen, setCameraOpen] = useState(false)
-  const [capturedPhotoUrl, setCapturedPhotoUrl] = useState(null)
+  const [photos, setPhotos] = useState([])
+  const [cameraError, setCameraError] = useState('')
+
+  const { user } = useAuth()
+  const isOnline = useOnline()
+  const proofQueue = getQueue('proof_submissions')
 
   useEffect(() => {
-    if (!visible) return
-    setNote('')
-    setPhotoUploaded(false)
-    setCapturedPhotoUrl(null)
-    setCameraOpen(false)
+    if (!visible) {
+      setNote('')
+      setPhotos([])
+      setCameraError('')
+      return
+    }
 
     setLoading(true)
     api.get('/api/driver/stops/current/')
@@ -361,27 +367,84 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
       .finally(() => setLoading(false))
   }, [visible])
 
-  const stopName = stop?.address || currentStop || `Stop ${stopIndex}`
-  const barangay = stop?.barangay || sessionStorage.getItem('ww_barangay') || ''
+  const displayName = stop?.address || currentStop || `Stop ${stopIndex}`
+  const displayBarangay = stop?.barangay || sessionStorage.getItem('ww_barangay') || ''
 
   function selectPreset(preset) {
     setNote(prev => prev ? `${prev}, ${preset}` : preset)
   }
 
-  function handlePhotoSuccess({ photoUrl }) {
-    setPhotoUploaded(true)
-    setCapturedPhotoUrl(photoUrl || null)
-    setCameraOpen(false)
-    sessionStorage.setItem('ww_pending_collection_note', note.trim())
-  }
-
   async function handleConfirm() {
-    if (!photoUploaded) return
+    if (photos.length === 0) {
+      setCameraError('You must take at least one photo to confirm.')
+      return
+    }
+    if (!user?.id) {
+      setCameraError('You must be logged in to submit proof.')
+      return
+    }
+    
     setSubmitting(true)
-    sessionStorage.setItem('ww_pending_collection_note', note.trim())
-    sessionStorage.setItem('ww_pending_collection_at', new Date().toISOString())
-    setSubmitting(false)
-    onConfirm()
+    setCameraError('')
+
+    try {
+      const photoRes = await fetch(photos[0])
+      const photoBlob = await photoRes.blob()
+
+      const note_ = note.trim()
+      const collected_at = new Date().toISOString()
+      const lat = gpsPos?.lat || sessionStorage.getItem('ww_gps_lat')
+      const lng = gpsPos?.lng || sessionStorage.getItem('ww_gps_lng')
+      const photoName = `pickup-${stopIndex}-${Date.now()}.jpg`
+      const stopId = stop?.id || sessionStorage.getItem('ww_pending_collection_stop_id')
+
+      if (isOnline) {
+        try {
+          const formData = new FormData()
+          formData.append('photo', photoBlob, photoName)
+          formData.append('note', note_)
+          formData.append('collected_at', collected_at)
+          if (lat) formData.append('lat', lat)
+          if (lng) formData.append('lng', lng)
+          formData.append('schedule_id', scheduleId || '')
+          formData.append('stop_order', String(stopIndex))
+
+          const res = await api.post(`/api/driver/stops/collect/`, formData)
+
+          sessionStorage.setItem('ww_pending_collection_photo_url', res.data?.photo_url || '')
+          sessionStorage.setItem('ww_pending_collection_note', note_)
+          sessionStorage.setItem('ww_pending_collection_at', collected_at)
+          setSubmitting(false)
+          onConfirm()
+          return
+        } catch (netErr) {
+          const isNetworkErr = !netErr?.response
+          if (!isNetworkErr) throw netErr
+        }
+      }
+
+      await proofQueue.enqueue({
+        ownerId: String(user.id),
+        stopId: stopId,
+        stopOrder: stopIndex,
+        scheduleId: scheduleId || null,
+        photo: photoBlob,
+        photoName,
+        note: note_,
+        collected_at,
+        lat,
+        lng,
+      }, 1) 
+
+      sessionStorage.setItem('ww_pending_collection_photo_url', '')
+      sessionStorage.setItem('ww_pending_collection_note', note_)
+      sessionStorage.setItem('ww_pending_collection_at', collected_at)
+      setSubmitting(false)
+      onConfirm()
+    } catch (err) {
+      setCameraError(err?.response?.data?.error || err?.message || 'Proof photo upload failed.')
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -410,8 +473,8 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
 
             <div className="am-card" style={{ margin: '0 16px', marginTop: -18, background: '#fff', borderRadius: 14, padding: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.08)', marginBottom: 16 }}>
               <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.06em', marginBottom: 4 }}>CURRENT STOP</div>
-              <div style={{ fontWeight: 900, fontSize: 15, color: '#0f172a', marginBottom: 2 }}>{stopName}</div>
-              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>{barangay}</div>
+              <div style={{ fontWeight: 900, fontSize: 15, color: '#0f172a', marginBottom: 2 }}>{displayName}</div>
+              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>{displayBarangay}</div>
             </div>
 
             <div style={{ padding: '0 16px', marginBottom: 14 }}>
@@ -436,66 +499,54 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
               />
             </div>
 
-            <div style={{ padding: '0 16px', marginBottom: 20 }}>
-              {!photoUploaded ? (
-                <button onClick={() => setCameraOpen(true)} style={{
-                  width: '100%', padding: '16px', borderRadius: 14,
-                  border: '2px dashed #cbd5e1', background: '#fff',
-                  display: 'flex', alignItems: 'center', gap: 14,
-                  cursor: 'pointer', transition: 'all .15s',
-                }}>
-                  <div style={{ width: 46, height: 46, borderRadius: 12, flexShrink: 0, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>📷</div>
-                  <div style={{ textAlign: 'left' }}>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', marginBottom: 2 }}>Take Proof Photo</div>
-                    <div style={{ fontSize: 11, color: '#94a3b8' }}>Required · GPS location will be verified</div>
+            <div style={{ padding: '0 16px', marginBottom: 28 }}>
+              <div style={{
+                background: '#fff',
+                border: `1.5px dashed ${cameraError ? '#ef4444' : '#cbd5e1'}`,
+                borderRadius: 16,
+                padding: '16px',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: '#0f172a' }}>Take Proof Photo</h3>
+                    <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>Required &middot; GPS location will be verified</p>
                   </div>
-                  <div style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 800, letterSpacing: '.05em', padding: '4px 8px', borderRadius: 20, background: 'rgba(245,158,11,0.1)', color: '#f59e0b', flexShrink: 0 }}>REQUIRED</div>
-                </button>
-              ) : (
-                <div style={{ width: '100%', padding: '14px 16px', borderRadius: 14, border: '1.5px solid rgba(22,163,74,0.35)', background: 'rgba(22,163,74,0.05)', display: 'flex', alignItems: 'center', gap: 12 }}>
-                  {capturedPhotoUrl ? (
-                    <img src={capturedPhotoUrl} alt="Proof" style={{ width: 46, height: 46, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }} />
-                  ) : (
-                    <div style={{ width: 46, height: 46, borderRadius: 12, flexShrink: 0, background: 'rgba(22,163,74,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>✅</div>
+                  {photos.length === 0 && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 800, letterSpacing: '.05em',
+                      padding: '4px 10px', borderRadius: 999,
+                      background: 'rgba(245,158,11,0.12)',
+                      color: '#f59e0b',
+                    }}>
+                      REQUIRED
+                    </span>
                   )}
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: '#16a34a', marginBottom: 2 }}>Photo uploaded</div>
-                    <div style={{ fontSize: 11, color: '#64748b' }}>GPS location verified</div>
-                  </div>
-                  <button onClick={() => { setPhotoUploaded(false); setCapturedPhotoUrl(null); setCameraOpen(true) }}
-                    style={{ padding: '6px 12px', borderRadius: 20, border: '1px solid #e2e8f0', background: '#fff', color: '#475569', fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>
-                    Retake
-                  </button>
                 </div>
-              )}
+                
+                <MultiPhotoPicker
+                  photos={photos}
+                  onChange={setPhotos}
+                  error={cameraError}
+                />
+              </div>
             </div>
 
             <div style={{ padding: '0 16px 28px', marginTop: 'auto' }}>
-              <button onClick={handleConfirm} disabled={submitting || !photoUploaded} style={{
+              <button onClick={handleConfirm} disabled={submitting || photos.length === 0} style={{
                 width: '100%', padding: '16px', borderRadius: 30, border: 'none',
-                background: submitting || !photoUploaded ? '#e2e8f0' : '#0f172a',
-                color: submitting || !photoUploaded ? '#94a3b8' : '#fff',
+                background: submitting || photos.length === 0 ? '#e2e8f0' : '#0f172a',
+                color: submitting || photos.length === 0 ? '#94a3b8' : '#fff',
                 fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900,
-                letterSpacing: '.06em', cursor: submitting || !photoUploaded ? 'not-allowed' : 'pointer',
-                boxShadow: submitting || !photoUploaded ? 'none' : '0 6px 20px rgba(15,23,42,0.3)',
+                letterSpacing: '.06em', cursor: submitting || photos.length === 0 ? 'not-allowed' : 'pointer',
+                boxShadow: submitting || photos.length === 0 ? 'none' : '0 6px 20px rgba(15,23,42,0.3)',
                 transition: 'all .2s',
               }}>
-                {submitting ? 'Saving…' : !photoUploaded ? '📷 Take a photo first' : '✓ Confirm Collection'}
+                {submitting ? 'Saving…' : photos.length === 0 ? '📷 Take a photo first' : '✓ Confirm Collection'}
               </button>
             </div>
           </div>
         )}
       </RouteOverlay>
-
-      <CameraProofModal
-        visible={cameraOpen && visible}
-        stopIndex={stopIndex}
-        scheduleId={scheduleId}
-        gpsPos={gpsPos}
-        note={note}
-        onSuccess={handlePhotoSuccess}
-        onClose={() => setCameraOpen(false)}
-      />
     </>
   )
 }
@@ -517,7 +568,7 @@ function StopCompletedOverlay({ visible, schedule, currentStopIndex, stopStatuse
   const stops = (schedule?.waypoints || []).slice(1).map((wp, i) => {
     const wpIndex = i + 1
     const status = normalizeStopStatus(stopStatuses.get(wpIndex))
-    const isCompleted = isCompletedStopStatus(status)
+    const isCompleted = isCompletedStopStatus(status) || status === 'EMPTY_STOP'
     return {
       id: wpIndex,
       name: wp.name || wp.label || `Stop ${wpIndex}`,
@@ -530,6 +581,17 @@ function StopCompletedOverlay({ visible, schedule, currentStopIndex, stopStatuse
   const total = stops.length
   const progress = total > 0 ? Math.round((completed / total) * 100) : 0
   const isRouteComplete = total > 0 && progress === 100
+
+  // Auto-advance to TruckNotFull if the overlay becomes visible and route is already 100%
+  useEffect(() => {
+    if (!visible || !isRouteComplete || !onShowTruckNotFull) return
+    const timer = setTimeout(() => {
+      try { sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...stopStatuses])) } catch { }
+      sessionStorage.setItem('ww_route_complete', 'true')
+      onShowTruckNotFull()
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [visible, isRouteComplete]) // eslint-disable-line
 
   return (
     <RouteOverlay visible={visible}>
@@ -692,19 +754,30 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
   const { user } = useAuth()
   const navigate = useNavigate()
   const { notify } = useNotification()
-  const { formattedTime, shiftActive } = useShiftTimer()
+  const {
+    formattedTime,
+    shiftActive,
+    scheduleId: activeScheduleId,
+    loading: shiftLoading,
+    endShift: endShiftOnBackend,
+  } = useShiftTimer()
   const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } = useDriverGps()
 
   const [hasNewStops, setHasNewStops] = useState(false)
 
-  // ── Guard: redirect if no active shift ──────────────────────────────────────
+  // Wait for the backend check to resolve before deciding to redirect —
+  // otherwise a page refresh briefly reads shiftActive=false and bounces
+  // the driver out before /active/ has responded.
   const hasRedirected = useRef(false)
   useEffect(() => {
+    if (shiftLoading) return
     if (!shiftActive && !hasRedirected.current) {
       hasRedirected.current = true
       navigate('/dashboard', { replace: true })
     }
-  }, [shiftActive, navigate])
+  }, [shiftActive, shiftLoading, navigate])
+
+
 
   const [routeState, setRouteState] = useState(() => {
     return sessionStorage.getItem('ww_route_state') || 'navigating'
@@ -744,6 +817,21 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
   const [schedule, setSchedule] = useState(null)
   const [mapLoading, setMapLoading] = useState(true)
 
+  // Guard: if the driver has an active shift on a DIFFERENT route than the
+  // one this module just loaded, don't let them silently work the wrong route.
+  const hasWarnedMismatch = useRef(false)
+  useEffect(() => {
+    if (shiftLoading || !shiftActive || !schedule?.id || !activeScheduleId) return
+    if (String(activeScheduleId) !== String(schedule.id) && !hasWarnedMismatch.current) {
+      hasWarnedMismatch.current = true
+      notify({
+        variant: 'error-dark',
+        message: 'You have an active shift on a different route. Redirecting to your dashboard.',
+      })
+      navigate('/dashboard', { replace: true })
+    }
+  }, [shiftLoading, shiftActive, activeScheduleId, schedule?.id, notify, navigate])
+
   const [currentStopIndex, setCurrentStopIndex] = useState(() => {
     const s = sessionStorage.getItem('ww_current_stop_index')
     return s ? parseInt(s, 10) : 1
@@ -758,6 +846,14 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
   const [orsData, setOrsData] = useState(null)
   const [orsFetchKey, setOrsFetchKey] = useState(0)
   const lastOrsGpsPosRef = useRef(null)
+  // Straight-line fallback layer (always drawn; replaced by ORS when online)
+  const fallbackRouteLayer = useRef(null)
+  // Last successful ORS geometry — persisted across brief offline periods
+  const lastOrsGeometryRef = useRef(null)
+  // Retry timer ref for ORS backoff
+  const orsRetryTimerRef = useRef(null)
+  // Track online status for auto-retry
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine)
 
   const [localWaypoints, setLocalWaypoints] = useState([])
   // Missed stops from OTHER drivers' routes — shown as floating markers,
@@ -980,8 +1076,20 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     setMapReady(true)
     setTimeout(() => map.invalidateSize(), 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leafletReady, schedule])
+  }, [leafletReady, schedule, showTruckNotFull])
 
+
+  // ── Online / offline listener — triggers ORS retry on reconnect ─────────
+  useEffect(() => {
+    const handleOnline = () => { setIsOnline(true); setOrsFetchKey(k => k + 1) }
+    const handleOffline = () => setIsOnline(false)
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
 
   // GPS-movement-triggered ORS re-fetch
   // Fires whenever gpsPos changes; if the driver has moved >10m from the
@@ -1143,37 +1251,143 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     })
   }, [floatingMissedStops, mapReady])
 
-  // 4. ORS directions
-  useEffect(() => {
-    if (!currentTarget || !mapReady) return
-    const orsApiKey = import.meta.env.VITE_ORS_API_KEY
-    if (!orsApiKey) return
+  // ── Helper: build the ordered coordinate list for ORS / fallback ─────────
+  const buildRouteCoords = useCallback(() => {
     const startLng = Number(gpsPos?.lng ?? waypoints[0]?.lng ?? 121.617)
     const startLat = Number(gpsPos?.lat ?? waypoints[0]?.lat ?? 13.9373)
     const routableFromCurrent = getRoutableIndices().filter(idx => idx >= currentStopIndex)
-    const remaining = routableFromCurrent.slice(0, 40).map(idx => {
-      const wp = waypoints[idx]
-      return [Number(wp.lng), Number(wp.lat)]
-    })
-    const coordinates = [[startLng, startLat], ...remaining]
-    if (coordinates.length < 2) return
-    fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: orsApiKey },
-      body: JSON.stringify({ coordinates, instructions: true }),
-    })
-      .then(r => r.json())
-      .then(data => {
-        if (!data.routes?.length) return
-        setOrsData(data.routes[0])
-        if (mapInstance.current && window.L) {
-          if (routeLayer.current) mapInstance.current.removeLayer(routeLayer.current)
-          const pts = decodePolyline(data.routes[0].geometry)
-          routeLayer.current = window.L.polyline(pts, { color: '#3b82f6', weight: 6, opacity: 0.85 }).addTo(mapInstance.current)
-        }
+    const remaining = routableFromCurrent
+      .slice(0, 40)
+      .filter(idx => waypoints[idx] && waypoints[idx].lat != null && waypoints[idx].lng != null)
+      .map(idx => {
+        const wp = waypoints[idx]
+        return [Number(wp.lng), Number(wp.lat)]
       })
-      .catch(console.error)
-  }, [orsFetchKey, gpsPos?.lat, gpsPos?.lng, currentTarget?.lat, currentTarget?.lng, currentStopIndex, getRoutableIndices, waypoints, mapReady])
+      
+    const target = remaining[0]
+    const orsCoords = target ? [[startLng, startLat], target] : [[startLng, startLat]]
+    return { startLat, startLng, remaining, orsCoords }
+  }, [gpsPos, waypoints, getRoutableIndices, currentStopIndex])
+
+  // ── Draw / update the straight-line fallback polyline ─────────────────────
+  // Called immediately so the driver always sees some route even without ORS.
+  const drawFallbackRoute = useCallback(() => {
+    if (!mapReady || !mapInstance.current || !window.L) return
+    const L = window.L
+    const { startLat, startLng, remaining } = buildRouteCoords()
+    
+    if (fallbackRouteLayer.current) {
+      try { mapInstance.current.removeLayer(fallbackRouteLayer.current) } catch { }
+      fallbackRouteLayer.current = null
+    }
+    
+    if (!remaining.length) return
+    
+    // Build [lat, lng] pairs for Leaflet (only to the immediate next stop)
+    const pts = [[startLat, startLng], [remaining[0][1], remaining[0][0]]]
+    
+    fallbackRouteLayer.current = L.polyline(pts, {
+      color: '#94a3b8',
+      weight: 3,
+      opacity: 0.7,
+      dashArray: '8 8',
+    }).addTo(mapInstance.current)
+  }, [buildRouteCoords, mapReady])
+
+  // ── Draw the ORS route (replaces fallback when ORS succeeds) ─────────────
+  const drawOrsRoute = useCallback((geometry) => {
+    if (!mapInstance.current || !window.L) return
+    
+    if (routeLayer.current) {
+      try { mapInstance.current.removeLayer(routeLayer.current) } catch { }
+      routeLayer.current = null
+    }
+    if (fallbackRouteLayer.current) {
+      try { mapInstance.current.removeLayer(fallbackRouteLayer.current) } catch { }
+      fallbackRouteLayer.current = null
+    }
+    
+    if (!geometry) return
+    
+    const pts = decodePolyline(geometry)
+    routeLayer.current = window.L.polyline(pts, { color: '#3b82f6', weight: 6, opacity: 0.85 }).addTo(mapInstance.current)
+  }, [])
+
+  // 4. ORS directions — with offline fallback and exponential-backoff retry
+  useEffect(() => {
+    if (!currentTarget || !mapReady) return
+
+    // Always draw the straight-line fallback first so the driver never sees a
+    // blank map.  This also covers: no API key, offline, ORS error.
+    drawFallbackRoute()
+
+    // If we have a cached ORS geometry, redraw it on top immediately so the
+    // driver keeps the turn-by-turn line during a brief offline period.
+    if (lastOrsGeometryRef.current) {
+      drawOrsRoute(lastOrsGeometryRef.current)
+    }
+
+    const orsApiKey = import.meta.env.VITE_ORS_API_KEY
+    if (!orsApiKey) return          // no key — straight-line is the only route
+    if (!isOnline) return           // offline — cached route already redrawn above
+
+    const { orsCoords } = buildRouteCoords()
+    if (orsCoords.length < 2) return
+
+    // Clear any pending retry before starting a fresh fetch
+    if (orsRetryTimerRef.current) { clearTimeout(orsRetryTimerRef.current); orsRetryTimerRef.current = null }
+
+    let cancelled = false
+    let attempt = 0
+    const MAX_ATTEMPTS = 3
+    const BASE_DELAY_MS = 2000
+
+    async function attemptFetch() {
+      if (cancelled) return
+      try {
+        const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: orsApiKey },
+          body: JSON.stringify({ coordinates: orsCoords, instructions: true }),
+        })
+        if (cancelled) return
+        if (!res.ok) throw new Error(`ORS HTTP ${res.status}`)
+        const data = await res.json()
+        if (cancelled) return
+        if (!data.routes?.length) {
+          // ORS returned no routes (e.g. unreachable area) — keep fallback visible
+          console.warn('[ORS] No routes returned — using straight-line fallback')
+          drawFallbackRoute()
+          return
+        }
+        const route = data.routes[0]
+        setOrsData(route)
+        lastOrsGeometryRef.current = route.geometry // cache for offline reuse
+        drawOrsRoute(route.geometry)
+      } catch (err) {
+        if (cancelled) return
+        attempt += 1
+        console.warn(`[ORS] Fetch failed (attempt ${attempt}/${MAX_ATTEMPTS}):`, err.message)
+        // Ensure fallback is visible while we wait to retry
+        drawFallbackRoute()
+        if (attempt < MAX_ATTEMPTS && navigator.onLine) {
+          // Exponential backoff: 2 s, 4 s, 8 s
+          const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1)
+          orsRetryTimerRef.current = setTimeout(() => { if (!cancelled) attemptFetch() }, delay)
+        } else {
+          console.warn('[ORS] Max retries reached — falling back to straight-line route')
+        }
+      }
+    }
+
+    attemptFetch()
+
+    return () => {
+      cancelled = true
+      if (orsRetryTimerRef.current) { clearTimeout(orsRetryTimerRef.current); orsRetryTimerRef.current = null }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orsFetchKey, currentTarget?.lat, currentTarget?.lng, currentStopIndex, mapReady, isOnline])
 
   // 5. Move driver marker — runs every time gpsPos updates.
   useEffect(() => {
@@ -1201,11 +1415,14 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
 
   // 6. Cleanup
   useEffect(() => () => {
+    if (orsRetryTimerRef.current) clearTimeout(orsRetryTimerRef.current)
     if (mapInstance.current) {
       mapInstance.current.remove()
       mapInstance.current = null
     }
     driverMarker.current = null
+    fallbackRouteLayer.current = null
+    routeLayer.current = null
   }, [])
 
   const teleportTo = useCallback((wp) => {
@@ -1257,6 +1474,29 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
         sessionStorage.setItem('ww_stop_statuses', JSON.stringify([...parsed]))
       } catch { }
       next.set(currentStopIndex, 'COLLECTION_REPORTED')
+
+      // ── Auto-detect route completion ────────────────────────────────────────
+      // Check if every non-depot waypoint is now completed after this confirmation.
+      const allWaypoints = schedule?.waypoints || []
+      const stopCount = allWaypoints.length - 1 // exclude depot at index 0
+      if (stopCount > 0) {
+        let completedCount = 0
+        for (let i = 1; i <= stopCount; i++) {
+          const s = normalizeStopStatus(next.get(i))
+          if (isCompletedStopStatus(s) || s === 'EMPTY_STOP') completedCount++
+        }
+        if (completedCount >= stopCount) {
+          // All stops done — snapshot, mark route complete, go straight to TruckNotFull
+          try { sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...next])) } catch { }
+          sessionStorage.setItem('ww_route_complete', 'true')
+          // Defer so state update from setStopStatuses settles first
+          setTimeout(() => {
+            setShowTruckNotFull(true)
+          }, 400)
+          return next
+        }
+      }
+      // ── Not yet complete — show StopCompletedOverlay as usual ───────────────
       return next
     })
     repaintMarker(currentStopIndex, 'COLLECTION_REPORTED')
@@ -1281,34 +1521,39 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     setRouteState('navigating')
   }
 
-  function handleEndShift() {
-    // Only locally flag missed stops when ending early (route incomplete).
-    // On route complete, EndShiftModule handles submission via extended_mode or shift/end.
+  async function handleEndShift() {
     const routeComplete = sessionStorage.getItem('ww_route_complete') === 'true'
+    let missedStopOrders = []
+
     if (!routeComplete) {
+      missedStopOrders = getRoutableIndices().filter(idx => idx >= currentStopIndex)
       setStopStatuses(prev => {
         const next = new Map(prev)
-        getRoutableIndices()
-          .filter(idx => idx >= currentStopIndex)
-          .forEach(idx => {
-            if (isMissedStopStatus(normalizeStopStatus(prev.get(idx)))) {
-              next.set(idx, 'DRIVER_MISSED')
-              repaintMarker(idx, 'DRIVER_MISSED')
-            }
-          })
-        // Persist the final snapshot for EndShiftModule to read
-        try {
-          sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...next]))
-        } catch { }
+        missedStopOrders.forEach(idx => {
+          if (isMissedStopStatus(normalizeStopStatus(prev.get(idx)))) {
+            next.set(idx, 'DRIVER_MISSED')
+            repaintMarker(idx, 'DRIVER_MISSED')
+          }
+        })
+        try { sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...next])) } catch { }
         return next
       })
     } else {
-      // Route complete — persist current statuses so EndShiftModule can show the mini-map
-      try {
-        sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...stopStatuses]))
-      } catch { }
+      try { sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...stopStatuses])) } catch { }
     }
-    onAdvance('end_shift')
+
+    try {
+      // Wait for backend confirmation before advancing the UI — this is what
+      // guarantees the shift banner/state disappears globally, not just locally.
+      await endShiftOnBackend({ scheduleId: schedule?.id, missedStopOrders })
+      onAdvance('end_shift')
+    } catch (err) {
+      console.error('[ShiftRouteModule] Failed to end shift on backend:', err)
+      notify({
+        variant: 'error-dark',
+        message: 'Could not end your shift — check your connection and try again.',
+      })
+    }
   }
 
   // Called by TruckNotFull when extended_mode API succeeds (TruckNotFull makes the API call itself)
@@ -1353,190 +1598,203 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
   }
 
   const accentColor = TURN_COLOR[stepType] ?? '#0f172a'
+  const isTargetRoutable = isRoutableStopStatus(getStopStatus(currentStopIndex))
 
   return (
     <>
-      <Navbar />
-      <style>{`
-        @keyframes navPulse    { 0%,100%{opacity:1} 50%{opacity:.3} }
-        @keyframes markerPulse { 0%,100%{transform:scale(1);opacity:.5} 50%{transform:scale(1.6);opacity:0} }
-        @keyframes navFadeUp   { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes arrowPop    { 0%{transform:scale(.8);opacity:0} 60%{transform:scale(1.1)} 100%{transform:scale(1);opacity:1} }
-      `}</style>
+      {/* ── Only render ShiftRouteModule UI when TruckNotFull is NOT shown ── */}
+      {!showTruckNotFull && (
+        <>
+          <Navbar />
+          <style>{`
+            @keyframes navPulse    { 0%,100%{opacity:1} 50%{opacity:.3} }
+            @keyframes markerPulse { 0%,100%{transform:scale(1);opacity:.5} 50%{transform:scale(1.6);opacity:0} }
+            @keyframes navFadeUp   { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+            @keyframes arrowPop    { 0%{transform:scale(.8);opacity:0} 60%{transform:scale(1.1)} 100%{transform:scale(1);opacity:1} }
+          `}</style>
 
-      <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-body)', overflow: 'hidden', position: 'relative' }}>
-        {/* MAP */}
-        <div style={{ position: 'absolute', inset: 0, zIndex: 0, background: '#2a3441' }}>
-          <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
-          <MapLegend />
-          {import.meta.env.DEV && (
-            <div style={{ position: 'absolute', top: '50%', right: 14, marginTop: 54, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button onClick={() => teleportTo(currentTarget)} disabled={!currentTarget} title="Teleport to Current Stop"
-                style={{ width: 44, height: 44, borderRadius: '50%', background: currentTarget ? '#f59e0b' : '#cbd5e1', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentTarget ? 'pointer' : 'not-allowed', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 20 }}>📍</button>
-              <button onClick={() => teleportTo(nextTarget)} disabled={!nextTarget} title="Teleport to Next Stop"
-                style={{ width: 44, height: 44, borderRadius: '50%', background: nextTarget ? '#8b5cf6' : '#cbd5e1', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: nextTarget ? 'pointer' : 'not-allowed', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 20 }}>⏭</button>
-              {isMock && (
-                <button onClick={clearMock} title="Clear Mock GPS"
-                  style={{ width: 44, height: 44, borderRadius: '50%', background: '#ef4444', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 16, fontWeight: 800, color: '#fff' }}>✕</button>
-              )}
-              <button onClick={() => markRemainingMissed(currentStopIndex + 1)} title="Simulate shift end"
-                style={{ width: 44, height: 44, borderRadius: '50%', background: '#0f172a', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 14, color: '#fff', fontWeight: 800 }}>🚫</button>
-            </div>
-          )}
-        </div>
-
-        {/* STOP HEADER */}
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(30,42,58,0.92)', backdropFilter: 'blur(8px)', padding: '16px 18px 18px', color: '#fff', boxShadow: '0 4px 20px rgba(0,0,0,.15)' }}>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-            <GpsStatusPill isTracking={isTracking} error={gpsError} accuracy={gpsAccuracy} />
-            <ConnPill />
-            {isExtendedMode && (
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.5)', borderRadius: 20, padding: '3px 10px' }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', animation: 'navPulse 1.5s ease infinite', display: 'inline-block' }} />
-                <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: '.04em' }}>COLLECTING UNCLAIMED</span>
-              </div>
-            )}
-            <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: '3px 10px' }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.65)', letterSpacing: '.04em' }}>⏱ {formattedTime}</span>
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-              <span style={{ fontSize: 20, marginTop: 2 }}>📍</span>
-              <div>
-                <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, marginBottom: 2 }}>{currentTarget?.label || `Stop ${currentStopIndex}`}</div>
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>{currentStopIndex} of {waypoints.length - 1} · {schedule?.days || ''}</div>
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-              {[
-                { status: 'PENDING_INSPECTION', color: '#94a3b8' },
-                { status: 'READY_FOR_COLLECTION', color: '#f59e0b' },
-                { status: 'EMPTY_STOP', color: '#94a3b8' },
-                { status: 'COLLECTION_REPORTED', color: '#eab308' },
-                { status: 'VERIFIED_COLLECTED', color: '#16a34a' },
-                { status: 'COLLECTION_DISPUTED', color: '#ef4444' },
-              ].map(({ status, color }) => {
-                const count = [...stopStatuses.values()].filter(s => normalizeStopStatus(s) === status).length
-                return count > 0 && (
-                  <div key={status} style={{ display: 'flex', alignItems: 'center', gap: 3, background: `${color}22`, border: `1px solid ${color}44`, borderRadius: 20, padding: '2px 8px' }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
-                    <span style={{ fontSize: 9, fontWeight: 800, color, letterSpacing: '.04em' }}>{count}</span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-
-        {hasNewStops && (
-          <div style={{
-            position: 'absolute', top: 130, left: 14, right: 14, zIndex: 20,
-            background: '#0f172a', borderRadius: 12, padding: '12px 16px',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
-          }}>
-            <span style={{ color: '#fff', fontSize: 13, fontWeight: 700 }}>
-              📦 New stops assigned to your route
-            </span>
-            <button onClick={() => setHasNewStops(false)} style={{
-              background: 'none', border: 'none', color: 'rgba(255,255,255,0.6)',
-              fontSize: 18, cursor: 'pointer', padding: 0
-            }}>✕</button>
-          </div>
-        )}
-
-        {/* TURN INSTRUCTION CARD */}
-        <div key={stepType} style={{ position: 'absolute', top: 122, left: 14, right: 14, zIndex: 10, background: 'rgba(255,255,255,0.97)', borderRadius: 16, overflow: 'hidden', display: 'flex', alignItems: 'stretch', boxShadow: '0 6px 28px rgba(0,0,0,.18)', backdropFilter: 'blur(6px)', animation: 'navFadeUp .25s ease' }}>
-          <div style={{ width: 76, flexShrink: 0, background: `${accentColor}12`, borderRight: `3px solid ${accentColor}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
-            <div style={{ animation: 'arrowPop .3s ease' }}>
-              <TurnArrow type={stepType} bearing={stepBearing} size={48} color={accentColor} />
-            </div>
-          </div>
-          <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-            <div style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 900, color: '#0f172a', lineHeight: 1.2, marginBottom: instructionDist ? 5 : 0 }}>{instructionText}</div>
-            {instructionDist && (
-              <div style={{ fontSize: 13, color: accentColor, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke={accentColor} strokeWidth="2" strokeLinecap="round">
-                  <line x1="8" y1="2" x2="8" y2="14" />
-                  <line x1="3" y1="9" x2="8" y2="14" />
-                  <line x1="13" y1="9" x2="8" y2="14" />
-                </svg>
-                in {instructionDist}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* BOTTOM PANEL */}
-        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(12px)', borderTopLeftRadius: 24, borderTopRightRadius: 24, boxShadow: '0 -4px 24px rgba(0,0,0,.1)', display: 'flex', flexDirection: 'column', paddingBottom: 24 }}>
-          <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2, margin: '12px auto' }} />
-          <div style={{ padding: '4px 12px 16px', display: 'flex', alignItems: 'center', borderBottom: '1px solid rgba(0,0,0,.06)' }}>
-            <StatCell value={arrivalTimeStr} label="arrival" />
-            <div style={{ width: 1, height: 32, background: '#e2e8f0' }} />
-            <StatCell value={etaMinutes} label="min" />
-            <div style={{ width: 1, height: 32, background: '#e2e8f0' }} />
-            <StatCell value={distanceKmStr} label="km" />
-          </div>
-          <div style={{ padding: '20px 20px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <p style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, textAlign: 'center', color: isNearDestination ? '#0f172a' : '#64748b', marginBottom: 6, transition: 'color .3s' }}>
-              {isNearDestination ? 'You have arrived!' : 'On the way to next stop'}
-            </p>
-            {!isNearDestination && distanceToStop != null && (
-              <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12 }}>
-                {distanceToStop > 1000
-                  ? `${(distanceToStop / 1000).toFixed(1)} km to destination`
-                  : `${Math.round(distanceToStop)} m to destination`}
-              </p>
-            )}
-            {!isNearDestination && distanceToStop == null && (
-              <p style={{ fontSize: 12, color: '#f59e0b', marginBottom: 12 }}>📡 Waiting for GPS signal…</p>
-            )}
-            {(() => {
-              const currentStatus = stopStatuses.has(currentStopIndex) ? normalizeStopStatus(stopStatuses.get(currentStopIndex)) : 'PENDING_INSPECTION';
-              const isRoutable = isRoutableStopStatus(currentStatus);
-              const canArrive = isNearDestination && isRoutable;
-
-              let buttonText = 'Confirm on Arrival';
-              if (isNearDestination) {
-                if (isRoutable) buttonText = 'Confirm Arrival';
-                else buttonText = 'Waiting for Inspection...';
-              }
-
-              return (
-                <div style={{ width: '100%', maxWidth: 360, display: 'flex', gap: 10 }}>
-                  <button
-                    id="arrived-btn"
-                    disabled={!canArrive}
-                    onClick={handleArrived}
-                    style={{
-                      flex: 1, padding: '18px 12px', borderRadius: 30, border: 'none',
-                      fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900, letterSpacing: '.06em',
-                      transition: 'all .35s ease',
-                      cursor: canArrive ? 'pointer' : 'not-allowed',
-                      background: canArrive ? '#0f172a' : '#e2e8f0',
-                      color: canArrive ? '#fff' : '#94a3b8',
-                      boxShadow: canArrive ? '0 6px 20px rgba(15,23,42,0.3)' : 'none',
-                    }}>
-                    {buttonText}
-                  </button>
-                  <button
-                    onClick={() => setShowFullConfirm(true)}
-                    style={{
-                      padding: '18px 16px', borderRadius: 30, border: '2px solid #ef4444',
-                      background: '#fff', color: '#ef4444', fontFamily: 'var(--font-head)',
-                      fontSize: 15, fontWeight: 900, letterSpacing: '.02em', flexShrink: 0,
-                      cursor: 'pointer', transition: 'all .2s'
-                    }}>
-                    Full
-                  </button>
+          <div style={{ position: 'fixed', top: 60, bottom: 0, left: 0, right: 0, zIndex: 900, display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-body)', overflow: 'hidden', background: '#1e293b' }}>
+            {/* MAP */}
+            <div style={{ position: 'absolute', inset: 0, zIndex: 0, background: '#2a3441' }}>
+              <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+              <MapLegend />
+              {import.meta.env.DEV && (
+                <div style={{ position: 'absolute', top: '50%', right: 14, marginTop: 54, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <button onClick={() => teleportTo(currentTarget)} disabled={!currentTarget} title="Teleport to Current Stop"
+                    style={{ width: 44, height: 44, borderRadius: '50%', background: currentTarget ? '#f59e0b' : '#cbd5e1', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentTarget ? 'pointer' : 'not-allowed', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 20 }}>📍</button>
+                  <button onClick={() => teleportTo(nextTarget)} disabled={!nextTarget} title="Teleport to Next Stop"
+                    style={{ width: 44, height: 44, borderRadius: '50%', background: nextTarget ? '#8b5cf6' : '#cbd5e1', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: nextTarget ? 'pointer' : 'not-allowed', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 20 }}>⏭</button>
+                  {isMock && (
+                    <button onClick={clearMock} title="Clear Mock GPS"
+                      style={{ width: 44, height: 44, borderRadius: '50%', background: '#ef4444', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 16, fontWeight: 800, color: '#fff' }}>✕</button>
+                  )}
+                  <button onClick={() => markRemainingMissed(currentStopIndex + 1)} title="Simulate shift end"
+                    style={{ width: 44, height: 44, borderRadius: '50%', background: '#0f172a', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 14, color: '#fff', fontWeight: 800 }}>🚫</button>
                 </div>
-              );
-            })()}
-          </div>
-        </div>
-      </div>
+              )}
+            </div>
 
+            {/* STOP HEADER */}
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(30,42,58,0.92)', backdropFilter: 'blur(8px)', padding: '16px 18px 18px', color: '#fff', boxShadow: '0 4px 20px rgba(0,0,0,.15)' }}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+                <GpsStatusPill isTracking={isTracking} error={gpsError} accuracy={gpsAccuracy} />
+                <ConnPill />
+                {isExtendedMode && (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.5)', borderRadius: 20, padding: '3px 10px' }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', animation: 'navPulse 1.5s ease infinite', display: 'inline-block' }} />
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: '.04em' }}>COLLECTING UNCLAIMED</span>
+                  </div>
+                )}
+                <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: '3px 10px' }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.65)', letterSpacing: '.04em' }}>⏱ {formattedTime}</span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <span style={{ fontSize: 20, marginTop: 2 }}>📍</span>
+                  <div>
+                    <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, marginBottom: 2 }}>{currentTarget?.label || `Stop ${currentStopIndex}`}</div>
+                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>{currentStopIndex} of {waypoints.length - 1} · {schedule?.days || ''}</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                  {[
+                    { status: 'PENDING_INSPECTION', color: '#94a3b8' },
+                    { status: 'READY_FOR_COLLECTION', color: '#f59e0b' },
+                    { status: 'EMPTY_STOP', color: '#94a3b8' },
+                    { status: 'COLLECTION_REPORTED', color: '#eab308' },
+                    { status: 'VERIFIED_COLLECTED', color: '#16a34a' },
+                    { status: 'COLLECTION_DISPUTED', color: '#ef4444' },
+                  ].map(({ status, color }) => {
+                    const count = [...stopStatuses.values()].filter(s => normalizeStopStatus(s) === status).length
+                    return count > 0 && (
+                      <div key={status} style={{ display: 'flex', alignItems: 'center', gap: 3, background: `${color}22`, border: `1px solid ${color}44`, borderRadius: 20, padding: '2px 8px' }}>
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
+                        <span style={{ fontSize: 9, fontWeight: 800, color, letterSpacing: '.04em' }}>{count}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {hasNewStops && (
+              <div style={{
+                position: 'absolute', top: 105, left: 14, right: 14, zIndex: 20,
+                background: '#0f172a', borderRadius: 12, padding: '12px 16px',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+              }}>
+                <span style={{ color: '#fff', fontSize: 13, fontWeight: 700 }}>
+                  📦 New stops assigned to your route
+                </span>
+                <button onClick={() => setHasNewStops(false)} style={{
+                  background: 'none', border: 'none', color: 'rgba(255,255,255,0.6)',
+                  fontSize: 18, cursor: 'pointer', padding: 0
+                }}>✕</button>
+              </div>
+            )}
+
+            {/* TURN INSTRUCTION CARD */}
+            {isTargetRoutable && (!distanceToStop || distanceToStop > 30) && (
+              <div key={stepType} style={{ position: 'absolute', top: hasNewStops ? 160 : 105, left: 14, right: 14, zIndex: 10, background: 'rgba(255,255,255,0.97)', borderRadius: 16, overflow: 'hidden', display: 'flex', alignItems: 'stretch', boxShadow: '0 6px 28px rgba(0,0,0,.18)', backdropFilter: 'blur(6px)', transition: 'top .3s ease', animation: 'navFadeUp .25s ease' }}>
+                <div style={{ width: 76, flexShrink: 0, background: `${accentColor}12`, borderRight: `3px solid ${accentColor}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
+                  <div style={{ animation: 'arrowPop .3s ease' }}>
+                    <TurnArrow type={stepType} bearing={stepBearing} size={48} color={accentColor} />
+                  </div>
+                </div>
+                <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                  <div style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 900, color: '#0f172a', lineHeight: 1.2, marginBottom: instructionDist ? 5 : 0 }}>{instructionText}</div>
+                  {instructionDist && (
+                    <div style={{ fontSize: 13, color: accentColor, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke={accentColor} strokeWidth="2" strokeLinecap="round">
+                        <line x1="8" y1="2" x2="8" y2="14" />
+                        <line x1="3" y1="9" x2="8" y2="14" />
+                        <line x1="13" y1="9" x2="8" y2="14" />
+                      </svg>
+                      in {instructionDist}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* BOTTOM PANEL */}
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(12px)', borderTopLeftRadius: 24, borderTopRightRadius: 24, boxShadow: '0 -4px 24px rgba(0,0,0,.1)', display: 'flex', flexDirection: 'column', paddingBottom: 24 }}>
+              <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2, margin: '12px auto' }} />
+              {isTargetRoutable && (
+                <div style={{ padding: '4px 12px 16px', display: 'flex', alignItems: 'center', borderBottom: '1px solid rgba(0,0,0,.06)' }}>
+                  <StatCell value={arrivalTimeStr} label="arrival" />
+                  <div style={{ width: 1, height: 32, background: '#e2e8f0' }} />
+                  <StatCell value={etaMinutes} label="min" />
+                  <div style={{ width: 1, height: 32, background: '#e2e8f0' }} />
+                  <StatCell value={distanceKmStr} label="km" />
+                </div>
+              )}
+              <div style={{ padding: '20px 20px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <p style={{ fontFamily: 'var(--font-head)', fontSize: isTargetRoutable ? 18 : 15, fontWeight: 800, textAlign: 'center', color: isTargetRoutable ? (isNearDestination ? '#0f172a' : '#64748b') : '#f59e0b', marginBottom: 6, transition: 'color .3s' }}>
+                  {isTargetRoutable 
+                    ? (isNearDestination ? 'You have arrived!' : 'On the way to next stop') 
+                    : `No verified Stops yet, contact your assigned watcher (${currentTarget?.watcher_names || 'Unknown'})`}
+                </p>
+                {isTargetRoutable && !isNearDestination && distanceToStop != null && (
+                  <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12 }}>
+                    {distanceToStop > 1000
+                      ? `${(distanceToStop / 1000).toFixed(1)} km to destination`
+                      : `${Math.round(distanceToStop)} m to destination`}
+                  </p>
+                )}
+                {isTargetRoutable && !isNearDestination && distanceToStop == null && (
+                  <p style={{ fontSize: 12, color: '#f59e0b', marginBottom: 12 }}>📡 Waiting for GPS signal…</p>
+                )}
+                {(() => {
+                  const currentStatus = stopStatuses.has(currentStopIndex) ? normalizeStopStatus(stopStatuses.get(currentStopIndex)) : 'PENDING_INSPECTION';
+                  const isRoutable = isRoutableStopStatus(currentStatus);
+                  const canArrive = isNearDestination && isRoutable;
+
+                  let buttonText = 'Confirm on Arrival';
+                  if (isNearDestination) {
+                    if (isRoutable) buttonText = 'Confirm Arrival';
+                    else buttonText = 'Waiting for Inspection...';
+                  }
+
+                  return (
+                    <div style={{ width: '100%', maxWidth: 360, display: 'flex', gap: 10 }}>
+                      <button
+                        id="arrived-btn"
+                        disabled={!canArrive}
+                        onClick={handleArrived}
+                        style={{
+                          flex: 1, padding: '18px 12px', borderRadius: 30, border: 'none',
+                          fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900, letterSpacing: '.06em',
+                          transition: 'all .35s ease',
+                          cursor: canArrive ? 'pointer' : 'not-allowed',
+                          background: canArrive ? '#0f172a' : '#e2e8f0',
+                          color: canArrive ? '#fff' : '#94a3b8',
+                          boxShadow: canArrive ? '0 6px 20px rgba(15,23,42,0.3)' : 'none',
+                        }}>
+                        {buttonText}
+                      </button>
+                      <button
+                        onClick={() => setShowFullConfirm(true)}
+                        style={{
+                          padding: '18px 16px', borderRadius: 30, border: '2px solid #ef4444',
+                          background: '#fff', color: '#ef4444', fontFamily: 'var(--font-head)',
+                          fontSize: 15, fontWeight: 900, letterSpacing: '.02em', flexShrink: 0,
+                          cursor: 'pointer', transition: 'all .2s'
+                        }}>
+                        Full
+                      </button>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Overlays — always mounted for state continuity ── */}
       <ArrivedOverlay
         visible={routeState === 'arrived'}
         currentStop={currentTarget?.label || sessionStorage.getItem('ww_current_stop')}
@@ -1548,7 +1806,7 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
       />
 
       <StopCompletedOverlay
-        visible={routeState === 'completed'}
+        visible={routeState === 'completed' && !showTruckNotFull}
         schedule={schedule}
         currentStopIndex={currentStopIndex}
         stopStatuses={stopStatuses}

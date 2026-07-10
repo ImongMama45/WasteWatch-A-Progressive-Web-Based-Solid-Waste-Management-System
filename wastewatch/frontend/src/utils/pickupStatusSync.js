@@ -68,8 +68,10 @@ export const resolveStopVisualStatus = (stop, fallback = 'PENDING_INSPECTION') =
   return normalizeStopStatus(fallback)
 }
 
-export const isRoutableStopStatus = (status) =>
-  normalizeStopStatus(status) === 'READY_FOR_COLLECTION'
+export const isRoutableStopStatus = (status) => {
+  const norm = normalizeStopStatus(status)
+  return norm === 'READY_FOR_COLLECTION'
+}
 
 // COLLECTION_REPORTED is included because the driver has submitted proof.
 // If a watcher later disputes it → COLLECTION_DISPUTED, which is also

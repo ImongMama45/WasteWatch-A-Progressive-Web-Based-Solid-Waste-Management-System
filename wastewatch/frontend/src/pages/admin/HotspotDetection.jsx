@@ -10,6 +10,7 @@ import { useEffect, useRef, useState, useMemo } from 'react'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useHotspots } from '../../hooks/useHotspots'
 import AdminReports from './AdminReports'
+import api from '../../api/client'
 
 const LUCENA_CENTER = [13.9373, 121.617]
 
@@ -50,13 +51,18 @@ export default function HotspotDetection() {
   const mapInst     = useRef(null)
   const circlesRef  = useRef([])
 
-  const { items: hotspots, loading } = useHotspots()
+  const { items: hotspots, loading, refresh: refreshHotspots } = useHotspots()
 
   const [mapReady,  setMapReady]  = useState(false)
   const [selected,  setSelected]  = useState(null)
   const [filter,    setFilter]    = useState('all')
   const [typeFilter,setTypeFilter]= useState('all')
+  const [distributionFilter, setDistributionFilter] = useState('all')
   const [showReports, setShowReports] = useState(false)
+  const [routeModal, setRouteModal] = useState(null)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [trucks, setTrucks] = useState([])
+  const [selectedTruckId, setSelectedTruckId] = useState('')
 
   // Load Leaflet
   useEffect(() => {
@@ -69,6 +75,14 @@ export default function HotspotDetection() {
     s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
     s.onload = () => setMapReady(true)
     document.head.appendChild(s)
+  }, [])
+
+  // Load active trucks for the assign modal
+  useEffect(() => {
+    api.get('/api/driver/trucks/').then(res => {
+      const active = (res.data || []).filter(t => t.status === 'active')
+      setTrucks(active)
+    }).catch(() => {})
   }, [])
 
   // Init map
@@ -137,13 +151,14 @@ export default function HotspotDetection() {
     setSelected(h)
   }
 
-  const allTypes = useMemo(() => [...new Set(hotspots.map(h => h.type))], [hotspots])
+  const allTypes = useMemo(() => [...new Set(hotspots.map(h => h.type).filter(Boolean))], [hotspots])
 
   const filtered = useMemo(() => hotspots.filter(h => {
     const ms = filter === 'all' || h.status === filter
     const mt = typeFilter === 'all' || h.type === typeFilter
-    return ms && mt
-  }).sort((a, b) => b.count - a.count), [hotspots, filter, typeFilter])
+    const md = distributionFilter === 'all' ? true : (distributionFilter === 'clustered' ? h.count > 1 : h.count <= 1)
+    return ms && mt && md
+  }).sort((a, b) => b.count - a.count), [hotspots, filter, typeFilter, distributionFilter])
 
   const counts = useMemo(() => ({
     critical: hotspots.filter(h => h.status === 'critical').length,
@@ -159,8 +174,9 @@ export default function HotspotDetection() {
       <style>{`
         .hs-row { transition: background .12s; cursor: pointer; }
         .hs-row:hover { background: var(--surface-2) !important; }
-        .hs-filter { transition: all .15s; cursor: pointer; }
-        .hs-filter:hover { opacity: .82; }
+        .hs-filter { transition: all 0.2s ease; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+        .hs-filter:hover { transform: translateY(-1px); box-shadow: 0 3px 6px rgba(0,0,0,0.08); }
+        .hs-filter:active { transform: translateY(0); box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
       `}</style>
 
       <div className="page">
@@ -285,10 +301,11 @@ export default function HotspotDetection() {
                   <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: 16, cursor: 'pointer' }}>×</button>
                 </div>
                 {[
-                  { label: 'REPORTS',  value: selected.count, accent: true },
-                  { label: 'STATUS',   value: selected.status.charAt(0).toUpperCase() + selected.status.slice(1) },
-                  { label: 'LAST REPORT', value: selected.ago || 'recently' },
-                  { label: 'LOCATION', value: `${selected.latitude.toFixed(4)}, ${selected.longitude.toFixed(4)}` },
+                  { label: 'REPORTS',     value: selected.count, accent: true },
+                  { label: 'STATUS',       value: selected.status.charAt(0).toUpperCase() + selected.status.slice(1) },
+                  { label: 'LAST REPORT',  value: selected.ago || 'recently' },
+                  { label: 'LOCATION',     value: `${Number(selected.latitude).toFixed(4)}, ${Number(selected.longitude).toFixed(4)}` },
+                  ...(selected.assigned_truck_plate ? [{ label: 'ASSIGNED TRUCK', value: `🚛 ${selected.assigned_truck_plate}` }] : [])
                 ].map(r => (
                   <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                     <span style={{ color: '#64748b', fontSize: 10, fontWeight: 700 }}>{r.label}</span>
@@ -309,14 +326,10 @@ export default function HotspotDetection() {
                     border: '1px solid rgba(52,152,219,0.35)', color: '#3498db',
                     borderRadius: 8, padding: '8px', fontWeight: 700, fontSize: 11,
                     cursor: 'pointer', fontFamily: 'var(--font-body)',
-                  }} onClick={() => {
-                    const confirm = window.confirm(`Generate automated collection route for Brgy. ${selected.barangay_name}?`)
-                    if (!confirm) return
-                    // In a real app, this would call a specific endpoint. 
-                    // For now, we rely on the backend automation signal or a manual route builder.
-                    alert(`Route generation requested for ${selected.barangay_name}. The system will assign an available truck soon.`)
-                  }}>
-                    Gen. Route
+                  }} onClick={() => { setRouteModal(selected); setSelectedTruckId(selected.assigned_truck_id ? String(selected.assigned_truck_id) : '') }}>
+                    {selected.assigned_truck_plate 
+                      ? 'Re-assign Truck' 
+                      : (selected.count > 1 ? '+ Add Route Part' : 'Assign Truck')}
                   </button>
                 </div>
               </div>
@@ -327,17 +340,17 @@ export default function HotspotDetection() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', maxHeight: 560 }}>
 
             {/* Filters */}
-            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
               {['all', 'critical', 'high', 'medium', 'low'].map(f => {
-                const m = STATUS_META[f] || { color: 'var(--text-muted)', bg: 'transparent', border: 'var(--border)' }
+                const m = STATUS_META[f] || { color: 'var(--text)', bg: 'var(--surface-2)', border: 'transparent' }
                 const active = filter === f
                 return (
-                  <button key={f} className="hs-filter" onClick={() => setFilter(f)} style={{
-                    padding: '4px 11px', borderRadius: 20, border: '1px solid',
-                    fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)',
-                    borderColor: active ? (m.color || 'var(--accent)') : 'var(--border)',
-                    color: active ? (m.color || 'var(--accent)') : 'var(--text-muted)',
-                    background: active ? (m.bg || 'rgba(46,204,113,0.08)') : 'transparent',
+                  <button key={`status-${f}`} className="hs-filter" onClick={() => setFilter(f)} style={{
+                    padding: '6px 14px', borderRadius: 20, border: '1px solid',
+                    fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
+                    borderColor: active ? (m.color || 'var(--accent)') : 'transparent',
+                    color: active ? (m.color || 'var(--accent)') : 'var(--text)',
+                    background: active ? (m.bg || 'rgba(46,204,113,0.12)') : 'var(--surface-2)',
                   }}>
                     {f === 'all' ? `All (${hotspots.length})` : m.label}
                   </button>
@@ -345,14 +358,33 @@ export default function HotspotDetection() {
               })}
             </div>
 
-            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              {[
+                { id: 'all', label: 'All Densities' },
+                { id: 'clustered', label: 'Clustered (< 10m)' },
+                { id: 'isolated', label: 'Isolated (Single)' }
+              ].map(d => (
+                <button key={`dist-${d.id}`} className="hs-filter" onClick={() => setDistributionFilter(d.id)} style={{
+                  padding: '6px 14px', borderRadius: 20, border: '1px solid',
+                  fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
+                  borderColor: distributionFilter === d.id ? 'var(--accent)' : 'transparent',
+                  color: distributionFilter === d.id ? 'var(--accent)' : 'var(--text)',
+                  background: distributionFilter === d.id ? 'rgba(46,204,113,0.12)' : 'var(--surface-2)',
+                }}>
+                  {d.label}
+                </button>
+              ))}
+            </div>
+
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
               {['all', ...allTypes].map(t => (
-                <button key={t} className="hs-filter" onClick={() => setTypeFilter(t)} style={{
-                  padding: '3px 10px', borderRadius: 20, border: '1px solid var(--border)',
-                  fontSize: 9, fontWeight: 600, fontFamily: 'var(--font-body)',
-                  color: typeFilter === t ? 'var(--accent)' : 'var(--text-muted)',
-                  background: typeFilter === t ? 'rgba(46,204,113,0.08)' : 'transparent',
-                  borderColor: typeFilter === t ? 'var(--accent)' : 'var(--border)',
+                <button key={`type-${t}`} className="hs-filter" onClick={() => setTypeFilter(t)} style={{
+                  padding: '6px 14px', borderRadius: 20, border: '1px solid',
+                  fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)',
+                  borderColor: typeFilter === t ? 'var(--accent)' : 'transparent',
+                  color: typeFilter === t ? 'var(--accent)' : 'var(--text)',
+                  background: typeFilter === t ? 'rgba(46,204,113,0.12)' : 'var(--surface-2)',
                 }}>
                   {TYPE_ICON[t] || ''} {t === 'all' ? 'All Types' : t}
                 </button>
@@ -406,6 +438,90 @@ export default function HotspotDetection() {
         )}
 
       </div>
+
+      {/* Assign Truck Modal */}
+      {routeModal && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(15,23,42,0.7)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }}>
+          <div style={{
+            background: 'var(--surface)', borderRadius: 16, border: '1px solid var(--border)',
+            padding: 24, width: '90%', maxWidth: 420, boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
+          }}>
+            <h3 style={{ margin: '0 0 6px', fontSize: 17, color: 'var(--text)', fontFamily: 'var(--font-head)', fontWeight: 800 }}>
+              {routeModal.count > 1 ? 'Assign Truck for Route Waypoint' : 'Assign Truck for Direct Collection'}
+            </h3>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 18, lineHeight: 1.6 }}>
+              Brgy. {routeModal.barangay_name} &nbsp;·&nbsp; {routeModal.count} report{routeModal.count > 1 ? 's' : ''}
+              {routeModal.count > 1
+                ? ' — this will be added as a waypoint in the selected truck\'s route.'
+                : ' — the selected truck will be dispatched for isolated collection.'}
+            </p>
+
+            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.05em', display: 'block', marginBottom: 6 }}>SELECT TRUCK</label>
+            {trucks.length === 0 ? (
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 18 }}>No active trucks found.</p>
+            ) : (
+              <select
+                value={selectedTruckId}
+                onChange={e => setSelectedTruckId(e.target.value)}
+                style={{
+                  width: '100%', padding: '10px 12px', borderRadius: 8, marginBottom: 18,
+                  border: '1.5px solid var(--border)', background: 'var(--surface-2)',
+                  color: 'var(--text)', fontSize: 13, fontFamily: 'var(--font-body)',
+                }}
+              >
+                <option value=''>— Choose a truck —</option>
+                {trucks.map(t => (
+                  <option key={t.id} value={String(t.id)}>
+                    {t.plate_number} · {t.model}{t.zone ? ` · ${t.zone}` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                disabled={isGenerating}
+                onClick={() => { setRouteModal(null); setSelectedTruckId('') }}
+                style={{
+                  background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)',
+                  padding: '9px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 13,
+                  opacity: isGenerating ? 0.5 : 1,
+                }}>Cancel</button>
+              <button
+                disabled={isGenerating || !selectedTruckId}
+                onClick={async () => {
+                  setIsGenerating(true)
+                  try {
+                    const res = await api.post(`/api/watcher/hotspots/${routeModal.id}/assign-truck/`, { truck_id: Number(selectedTruckId) })
+                    setSelected(prev => prev ? { ...prev, assigned_truck_id: res.data.assigned_truck_id, assigned_truck_plate: res.data.assigned_truck_plate } : prev)
+                    refreshHotspots()
+                  } catch (err) {
+                    console.error('[HotspotDetection] assign-truck failed', err)
+                  } finally {
+                    setIsGenerating(false)
+                    setRouteModal(null)
+                    setSelectedTruckId('')
+                  }
+                }}
+                style={{
+                  background: selectedTruckId ? 'var(--accent)' : 'var(--surface-2)',
+                  border: 'none', color: selectedTruckId ? '#000' : 'var(--text-muted)',
+                  padding: '9px 18px', borderRadius: 8, cursor: selectedTruckId ? 'pointer' : 'not-allowed',
+                  fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8,
+                  opacity: isGenerating ? 0.7 : 1,
+                }}>
+                {isGenerating ? <div className='spinner' style={{ width: 14, height: 14, borderWidth: 2, borderColor: 'rgba(0,0,0,0.3)', borderTopColor: '#000' }} /> : null}
+                {isGenerating ? 'Assigning...' : '🚛 Confirm Assignment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </DashboardLayout>
   )
 }

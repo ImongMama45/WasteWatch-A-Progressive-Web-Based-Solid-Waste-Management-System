@@ -70,8 +70,14 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
 
     setLoading(true)
     try {
+      const nameParts = form.full_name.trim().split(' ');
+      const first_name = nameParts[0] || '';
+      const last_name = nameParts.length > 1 ? nameParts.slice(1).join(' ') : ' ';
+      
       const payload = {
-        full_name: form.full_name,
+        first_name: first_name,
+        last_name: last_name,
+        username: form.email.split('@')[0] + Math.floor(Math.random() * 10000),
         email: form.email,
         password: form.password,
         password2: form.password2,
@@ -86,19 +92,22 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
       navigate('/dashboard')
     } catch (err) {
       console.error('DEBUG: Registration Error', err.response?.data);
-      const data = err.response?.data
+      const data = err.response?.data || {}
       if (typeof data === 'string') {
         setError('Server error. Please try again later.')
         return
       }
       const fieldErrors = []
-      if (data?.full_name) fieldErrors.push(`Name: ${data.full_name[0]}`)
+      if (data?.first_name) fieldErrors.push(`First Name: ${data.first_name[0]}`)
+      if (data?.last_name) fieldErrors.push(`Last Name: ${data.last_name[0]}`)
+      if (data?.username) fieldErrors.push(`Username: ${data.username[0]}`)
       if (data?.email) fieldErrors.push(`Email: ${data.email[0]}`)
       if (data?.password) fieldErrors.push(`Password: ${data.password[0]}`)
       if (data?.barangay) fieldErrors.push(`Barangay: ${data.barangay[0]}`)
       if (data?.non_field_errors) fieldErrors.push(data.non_field_errors[0])
+      if (data?.error) fieldErrors.push(data.error)
 
-      setError(fieldErrors.length > 0 ? fieldErrors.join(' | ') : (data?.error || 'Registration failed.'))
+      setError(fieldErrors.length > 0 ? fieldErrors.join(' | ') : 'Registration failed.')
     } finally {
       setLoading(false)
     }

@@ -18,6 +18,8 @@ import { useNotification } from '../../context/NotificationContext'
 import HomeCarousel from '../../components/carousel/HomeCarousel'
 import { ICONS } from '../../api/navConfig'
 import { getApiErrorMessage } from '../../utils/notificationHelpers'
+import api from '../../api/client'
+import DispatchCard from '../../components/DispatchCard'
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 
@@ -111,11 +113,25 @@ export default function BrgyDashboard() {
   const [expandedReport, setExpandedReport] = useState(null)
   const [expandedTruck, setExpandedTruck] = useState(null)
   const [toast, setToast] = useState(null)
+  const [activeDispatch, setActiveDispatch] = useState(null)
 
   useEffect(() => {
     fetchStats()
     fetchReports()
-  }, [])
+    async function fetchLiveDispatch() {
+      try {
+        const res = await api.get('/api/public/live/')
+        if (res.data) {
+          const userBrgy = user?.barangay_name || user?.barangay?.name;
+          if (userBrgy) {
+            const dispatched = res.data.find(d => d.barangays && d.barangays.includes(userBrgy));
+            if (dispatched) setActiveDispatch(dispatched);
+          }
+        }
+      } catch (err) { /* silent */ }
+    }
+    fetchLiveDispatch()
+  }, [user?.barangay_name, user?.barangay?.name])
 
   async function fetchStats() {
     try {
@@ -263,6 +279,11 @@ export default function BrgyDashboard() {
             {user?.barangay_name || 'Your Barangay'} · Monitor, validate &amp; coordinate
           </p>
         </div>
+
+        <DispatchCard 
+            dispatchData={activeDispatch} 
+            userBarangay={user?.barangay_name || user?.barangay?.name} 
+        />
 
         <div className='mobile-schedule'>
           <HomeCarousel role="brgy_official" userBarangay={user?.barangay_name} onReport={() => navigate('/report/submit')} extraSecondCta={{ label: '✔ Validate', onClick: () => navigate('/brgy/validate-reports') }} />

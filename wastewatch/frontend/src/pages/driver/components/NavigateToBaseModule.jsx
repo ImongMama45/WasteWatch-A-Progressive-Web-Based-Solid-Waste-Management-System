@@ -29,6 +29,15 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
+function calculateBearing(lat1, lon1, lat2, lon2) {
+    const toRad = d => d * Math.PI / 180
+    const toDeg = r => r * 180 / Math.PI
+    const dLon = toRad(lon2 - lon1)
+    const y = Math.sin(dLon) * Math.cos(toRad(lat2))
+    const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon)
+    return (toDeg(Math.atan2(y, x)) + 360) % 360
+}
+
 function decodePolyline(encoded) {
   let pts = [], i = 0, lat = 0, lng = 0
   while (i < encoded.length) {
@@ -292,17 +301,21 @@ export default function NavigateToBaseModule({ onAdvance, shift }) {
         </div>
 
         {/* ── TURN INSTRUCTION CARD ── */}
-        <div style={{ position: 'absolute', top: 122, left: 14, right: 14, zIndex: 10, background: 'rgba(255,255,255,0.97)', borderRadius: 16, overflow: 'hidden', display: 'flex', alignItems: 'stretch', boxShadow: '0 6px 28px rgba(0,0,0,.18)', animation: 'ntbFadeUp .25s ease' }}>
-          <div style={{ width: 76, flexShrink: 0, background: '#16a34a12', borderRight: '3px solid #16a34a28', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
-            <span style={{ fontSize: 30 }}>🏠</span>
-          </div>
-          <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-            <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, color: '#0f172a', lineHeight: 1.2, marginBottom: 4 }}>
-              {instructionText}
+        {(!distanceToBase || distanceToBase > 30) && (
+          <div style={{ position: 'absolute', top: 122, left: 14, right: 14, zIndex: 10, background: 'rgba(255,255,255,0.97)', borderRadius: 16, overflow: 'hidden', display: 'flex', alignItems: 'stretch', boxShadow: '0 6px 28px rgba(0,0,0,.18)', animation: 'ntbFadeUp .25s ease' }}>
+            <div style={{ width: 76, flexShrink: 0, background: '#16a34a12', borderRight: '3px solid #16a34a28', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0', color: '#16a34a' }}>
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: `rotate(${gpsPos && baseLocation ? calculateBearing(gpsPos.lat, gpsPos.lng, Number(baseLocation.lat), Number(baseLocation.lng)) : 0}deg)`, transition: 'transform 0.3s ease' }}>
+                <path d="M12 19V5M5 12l7-7 7 7"/>
+              </svg>
             </div>
-            <div style={{ fontSize: 13, color: '#16a34a', fontWeight: 700 }}>{distLabel}</div>
+            <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, color: '#0f172a', lineHeight: 1.2, marginBottom: 4 }}>
+                {instructionText}
+              </div>
+              <div style={{ fontSize: 13, color: '#16a34a', fontWeight: 700 }}>{distLabel}</div>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* ── BOTTOM PANEL ── */}
         <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(255,255,255,0.97)', backdropFilter: 'blur(12px)', borderTopLeftRadius: 24, borderTopRightRadius: 24, boxShadow: '0 -4px 24px rgba(0,0,0,.12)', display: 'flex', flexDirection: 'column', paddingBottom: 'env(safe-area-inset-bottom, 16px)' }}>

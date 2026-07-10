@@ -29,6 +29,8 @@ class Truck(models.Model):
         max_digits=8, decimal_places=2, default=1000.00,
         help_text="Rated maximum payload in kg. Used by dumpsite fill slider."
     )
+    photo = CloudinaryField('image', null=True, blank=True)
+    date_bought = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -55,6 +57,11 @@ class Truck(models.Model):
 
                 if orig.status != TruckStatus.INACTIVE and self.status == TruckStatus.INACTIVE:
                     self.schedules.update(driver=None, truck=None)
+                    # Driver/crew are no longer cleared by the frontend now that
+                    # "edit truck" and "assign driver/crew" are separate modals —
+                    # this must be authoritative here instead.
+                    self.drivers.clear()
+                    self.crew.clear()
 
             except Truck.DoesNotExist:
                 if self.status == TruckStatus.MAINTENANCE:
@@ -286,6 +293,18 @@ class DriverShift(models.Model):
 
     driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='shifts')
     truck = models.ForeignKey(Truck, on_delete=models.SET_NULL, null=True, blank=True, related_name='shifts')
+    
+    # ── NEW: direct link to the route this shift is running ──────────────
+    schedule = models.ForeignKey(
+        'CollectionSchedule',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='driver_shifts',
+        help_text='The specific route/schedule this shift is executing. '
+                   'Set at shift-start time so schedule_id is authoritative, '
+                   'not re-derived on every request.',
+    )
+
     status = models.CharField(max_length=32, choices=PHASE_CHOICES, default='navigate_to_base')
     duty_type = models.CharField(max_length=50, default='normal')
     started_at = models.DateTimeField(auto_now_add=True)
@@ -296,6 +315,11 @@ class DriverShift(models.Model):
         max_length=20,
         default='on_duty',
         help_text="Operational status: on_duty | on_route | heading_to_dumpsite | at_dumpsite | returning_to_base | delayed"
+    )
+    end_shift_phase = models.CharField(
+        max_length=40,
+        blank=True, default='',
+        help_text="EndShiftModule sub-phase: dump_site | waiting_dump_confirmation | returning | at_base | calibration_complete"
     )
     is_extended_mode = models.BooleanField(default=False, help_text="True if driver opted to take missed stops")
     current_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)

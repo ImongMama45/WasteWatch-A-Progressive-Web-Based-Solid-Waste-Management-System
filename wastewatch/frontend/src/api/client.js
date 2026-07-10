@@ -10,11 +10,10 @@ function getCsrfToken() {
   return null
 }
 
-// baseURL is intentionally empty — all requests go through the Vite dev proxy
-// (see vite.config.js). This avoids CORS entirely: the browser only ever talks
-// to localhost:3000, and Vite forwards /api/* to Django at localhost:8000.
+// baseURL is intentionally empty in dev — all requests go through the Vite dev proxy
+// In production (Vercel), it uses VITE_API_URL to point to the Render backend.
 const api = axios.create({
-  baseURL: '',
+  baseURL: import.meta.env.VITE_API_URL || '',
   withCredentials: true,
   headers: {
     'Accept': 'application/json',

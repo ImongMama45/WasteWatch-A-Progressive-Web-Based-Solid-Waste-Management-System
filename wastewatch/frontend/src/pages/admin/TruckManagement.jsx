@@ -65,41 +65,42 @@ function decodePolyline(encoded) {
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
-const EMPTY_FORM = { plate_number: '', model: '', status: 'active', drivers: [], crew: [], last_service: '', max_capacity_kg: 1000 }
-
-function TruckModal({ truck, onSave, onClose, drivers, crewPool }) {
+function TruckEntityModal({ truck, onSave, onClose }) {
   const { notify } = useNotification()
-  const [form, setForm] = useState(truck ? {
-    plate_number: truck.plate_number, model: truck.model, status: truck.status,
-    drivers: truck.drivers || [], crew: truck.crew || [],
-    last_service: truck.last_service || '',
-    max_capacity_kg: truck.max_capacity_kg || 1000,
-  } : { ...EMPTY_FORM })
-  const [crewInput, setCrewInput] = useState('')
-  const [driverInput, setDriverInput] = useState('')
+  const [plateNumber, setPlateNumber] = useState(truck?.plate_number || '')
+  const [modelName, setModelName] = useState(truck?.model || '')
+  const [maxCapacityKg, setMaxCapacityKg] = useState(truck?.max_capacity_kg || 1000)
+  const [status, setStatus] = useState(truck?.status || 'active')
+  const [dateBought, setDateBought] = useState(truck?.date_bought || '')
+  const [photoFile, setPhotoFile] = useState(null)
+  const [photoPreview, setPhotoPreview] = useState(truck?.photo_url || null)
 
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
-
-  const addCrew = (id) => {
-    if (!id || form.crew.includes(parseInt(id))) return
-    set('crew', [...form.crew, parseInt(id)])
-    setCrewInput('')
+  function handlePhotoChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPhotoFile(file)
+    setPhotoPreview(URL.createObjectURL(file))
   }
 
-  const removeCrew = (id) => set('crew', form.crew.filter(c => c !== id))
+  function handleSubmit() {
+    if (!plateNumber.trim()) return notify({ variant: 'error-solid', message: 'Plate number is required.' })
+    if (!modelName.trim()) return notify({ variant: 'error-solid', message: 'Model is required.' })
 
-  const availableCrew = crewPool.filter(c => !form.crew.includes(c.id))
+    const fd = new FormData()
+    fd.append('plate_number', plateNumber)
+    fd.append('model', modelName)
+    fd.append('max_capacity_kg', maxCapacityKg)
+    fd.append('status', status)
+    if (dateBought) fd.append('date_bought', dateBought)
+    if (photoFile) fd.append('photo', photoFile)
 
-  const getMemberName = (id) => {
-    const u = crewPool.find(x => x.id === id) || drivers.find(x => x.id === id)
-    return u ? u.full_name : 'Unknown'
+    onSave(fd, truck?.id ?? null)
   }
 
   return (
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
-      zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: 16,
+      zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
     }} onClick={onClose}>
       <div style={{
         background: 'var(--surface)', borderRadius: 16, padding: 24,
@@ -109,28 +110,40 @@ function TruckModal({ truck, onSave, onClose, drivers, crewPool }) {
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: 0 }}>
-            {truck ? 'Edit Truck' : 'Add New Truck'}
+            {truck ? 'Edit Truck' : 'Add Truck'}
           </h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#888' }}>×</button>
         </div>
 
-        {/* Plate & Model */}
+        {/* Photo */}
+        <div style={{ marginBottom: 16, textAlign: 'center' }}>
+          <div style={{
+            width: 120, height: 120, borderRadius: 12, margin: '0 auto 10px',
+            background: 'var(--surface-2)', border: '1px dashed var(--border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+          }}>
+            {photoPreview
+              ? <img src={photoPreview} alt="Truck" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>No photo</span>}
+          </div>
+          <input type="file" accept="image/*" onChange={handlePhotoChange} style={{ fontSize: 12 }} />
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
           <div>
             <label className="form-label">Plate Number</label>
-            <input className="form-input" value={form.plate_number} onChange={e => set('plate_number', e.target.value)} placeholder="LCN-001" />
+            <input className="form-input" value={plateNumber} onChange={e => setPlateNumber(e.target.value)} placeholder="LCN-001" />
           </div>
           <div>
             <label className="form-label">Model</label>
-            <input className="form-input" value={form.model} onChange={e => set('model', e.target.value)} placeholder="Isuzu Elf" />
+            <input className="form-input" value={modelName} onChange={e => setModelName(e.target.value)} placeholder="Isuzu Elf" />
           </div>
         </div>
 
-        {/* Status & Max Capacity */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
           <div>
             <label className="form-label">Status</label>
-            <select className="form-input" value={form.status} onChange={e => set('status', e.target.value)}>
+            <select className="form-input" value={status} onChange={e => setStatus(e.target.value)}>
               <option value="active">Active</option>
               <option value="maintenance">Maintenance</option>
               <option value="inactive">Inactive</option>
@@ -138,20 +151,94 @@ function TruckModal({ truck, onSave, onClose, drivers, crewPool }) {
           </div>
           <div>
             <label className="form-label">Max Capacity (kg)</label>
-            <input className="form-input" type="number" min="0" step="100" value={form.max_capacity_kg} onChange={e => set('max_capacity_kg', e.target.value)} />
+            <input className="form-input" type="number" min="0" step="100" value={maxCapacityKg} onChange={e => setMaxCapacityKg(e.target.value)} />
           </div>
         </div>
 
-        {/* Zone & Last Service */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
-          <div>
-            <label className="form-label">Assigned Barangay</label>
-            <input className="form-input" value={form.assigned_barangays || 'No routes assigned'} readOnly style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }} />
-          </div>
-          <div>
-            <label className="form-label">Last Service</label>
-            <input className="form-input" type="date" value={form.last_service} onChange={e => set('last_service', e.target.value)} />
-          </div>
+        <div style={{ marginBottom: 20 }}>
+          <label className="form-label">Date Bought</label>
+          <input className="form-input" type="date" value={dateBought} onChange={e => setDateBought(e.target.value)} />
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSubmit}>
+            {truck ? 'Save Changes' : 'Add Truck'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AssignTruckModal({ truck, trucks, onSave, onClose, drivers, crewPool }) {
+  const { notify } = useNotification()
+  const [selectedTruckId, setSelectedTruckId] = useState(truck?.id || '')
+  const [assignedDrivers, setAssignedDrivers] = useState(truck?.drivers || [])
+  const [assignedCrew, setAssignedCrew] = useState(truck?.crew || [])
+  const [crewInput, setCrewInput] = useState('')
+  const [driverInput, setDriverInput] = useState('')
+
+  // If user picks a different truck from the dropdown mid-flow, load its current assignment
+  useEffect(() => {
+    const t = trucks.find(t => String(t.id) === String(selectedTruckId))
+    if (t) {
+      setAssignedDrivers(t.drivers || [])
+      setAssignedCrew(t.crew || [])
+    }
+  }, [selectedTruckId, trucks])
+
+  const getMemberName = (id) => {
+    const u = crewPool.find(x => x.id === id) || drivers.find(x => x.id === id)
+    return u ? u.full_name : 'Unknown'
+  }
+
+  const availableCrew = crewPool.filter(c => !assignedCrew.includes(c.id))
+
+  function addCrew(id) {
+    if (!id) return
+    const member = crewPool.find(c => String(c.id) === String(id))
+    if (!member || assignedCrew.includes(member.id)) return
+    setAssignedCrew(prev => [...prev, member.id])
+    setCrewInput('')
+  }
+
+  function handleSubmit() {
+    if (!selectedTruckId) return notify({ variant: 'error-solid', message: 'Please select a truck.' })
+    onSave({ drivers: assignedDrivers, crew: assignedCrew }, selectedTruckId)
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+      zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }} onClick={onClose}>
+      <div style={{
+        background: 'var(--surface)', borderRadius: 16, padding: 24,
+        width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+      }} onClick={e => e.stopPropagation()}>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+          <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: 0 }}>
+            Assign Truck to a Driver
+          </h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#888' }}>×</button>
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label className="form-label">Truck</label>
+          <select
+            className="form-input"
+            value={selectedTruckId}
+            onChange={e => setSelectedTruckId(e.target.value)}
+            disabled={!!truck}   // locked if opened from a specific row
+          >
+            <option value="">— Select truck —</option>
+            {trucks.map(t => (
+              <option key={t.id} value={t.id}>{t.plate_number} — {t.model}</option>
+            ))}
+          </select>
         </div>
 
         {/* Drivers */}
@@ -163,27 +250,30 @@ function TruckModal({ truck, onSave, onClose, drivers, crewPool }) {
               value={driverInput}
               onChange={e => setDriverInput(e.target.value)}
               style={{ flex: 1 }}
-              disabled={form.drivers.length >= 2}
+              disabled={assignedDrivers.length >= 2}
             >
               <option value="">— Select driver —</option>
-              {drivers.filter(d => !form.drivers.includes(d.id)).map(d => <option key={d.id} value={d.id}>{d.full_name}</option>)}
+              {drivers.filter(d => !assignedDrivers.includes(d.id)).map(d => <option key={d.id} value={d.id}>{d.full_name}</option>)}
             </select>
             <button
+              type="button"
               onClick={() => {
-                if (!driverInput || form.drivers.includes(parseInt(driverInput)) || form.drivers.length >= 2) return
-                set('drivers', [...form.drivers, parseInt(driverInput)])
+                if (!driverInput || assignedDrivers.length >= 2) return
+                const drv = drivers.find(d => String(d.id) === String(driverInput))
+                if (!drv || assignedDrivers.includes(drv.id)) return
+                setAssignedDrivers(prev => [...prev, drv.id])
                 setDriverInput('')
               }}
               style={{ background: 'var(--accent)', color: '#0d1117', border: 'none', borderRadius: 8, padding: '0 14px', fontWeight: 700, cursor: 'pointer' }}
-              disabled={form.drivers.length >= 2}
+              disabled={assignedDrivers.length >= 2}
             >Add</button>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {form.drivers.length === 0 && <span style={{ fontSize: 12, color: '#aaa' }}>No driver assigned.</span>}
-            {form.drivers.map(id => (
+            {assignedDrivers.length === 0 && <span style={{ fontSize: 12, color: '#aaa' }}>No driver assigned.</span>}
+            {assignedDrivers.map(id => (
               <span key={id} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 20, padding: '4px 10px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
                 {getMemberName(id)}
-                <button onClick={() => set('drivers', form.drivers.filter(d => d !== id))} style={{ background: 'none', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
+                <button type="button" onClick={() => setAssignedDrivers(prev => prev.filter(d => d !== id))} style={{ background: 'none', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
               </span>
             ))}
           </div>
@@ -193,39 +283,20 @@ function TruckModal({ truck, onSave, onClose, drivers, crewPool }) {
         <div style={{ marginBottom: 20 }}>
           <label className="form-label">Crew Members</label>
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <select
-              className="form-input"
-              value={crewInput}
-              onChange={e => setCrewInput(e.target.value)}
-              style={{ flex: 1 }}
-            >
+            <select className="form-input" value={crewInput} onChange={e => setCrewInput(e.target.value)} style={{ flex: 1 }}>
               <option value="">— Select crew member —</option>
               {availableCrew.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
             </select>
-            <button
-              onClick={() => addCrew(crewInput)}
-              style={{
-                background: 'var(--accent)', color: '#0d1117', border: 'none',
-                borderRadius: 8, padding: '0 14px', fontWeight: 700, cursor: 'pointer',
-              }}
+            <button type="button" onClick={() => addCrew(crewInput)}
+              style={{ background: 'var(--accent)', color: '#0d1117', border: 'none', borderRadius: 8, padding: '0 14px', fontWeight: 700, cursor: 'pointer' }}
             >Add</button>
           </div>
-
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {form.crew.length === 0 && (
-              <span style={{ fontSize: 12, color: '#aaa' }}>No crew assigned yet.</span>
-            )}
-            {form.crew.map(id => (
-              <span key={id} style={{
-                background: 'var(--surface-2)', border: '1px solid var(--border)',
-                borderRadius: 20, padding: '4px 10px', fontSize: 12,
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}>
+            {assignedCrew.length === 0 && <span style={{ fontSize: 12, color: '#aaa' }}>No crew assigned yet.</span>}
+            {assignedCrew.map(id => (
+              <span key={id} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 20, padding: '4px 10px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
                 {getMemberName(id)}
-                <button
-                  onClick={() => removeCrew(id)}
-                  style={{ background: 'none', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}
-                >×</button>
+                <button type="button" onClick={() => setAssignedCrew(prev => prev.filter(c => c !== id))} style={{ background: 'none', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
               </span>
             ))}
           </div>
@@ -233,16 +304,7 @@ function TruckModal({ truck, onSave, onClose, drivers, crewPool }) {
 
         <div style={{ display: 'flex', gap: 10 }}>
           <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
-          <button
-            className="btn btn-primary"
-            style={{ flex: 1 }}
-            onClick={() => {
-              if (!form.plate_number.trim()) return notify({ variant: 'error-solid', message: 'Plate number is required.' })
-              onSave(form)
-            }}
-          >
-            {truck ? 'Save Changes' : 'Add Truck'}
-          </button>
+          <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSubmit}>Save Assignment</button>
         </div>
       </div>
     </div>
@@ -503,34 +565,38 @@ export default function TruckManagement() {
 
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
-  const [modal, setModal] = useState(null)   // null | 'add' | truck object
+  const [modal, setModal] = useState(null)   // null | { type: 'add_truck'|'edit_truck'|'assign_truck', truck: obj|null }
   const [expanded, setExpanded] = useState(null)
   const [toast, setToast] = useState(null)
   const [viewRouteTruck, setViewRouteTruck] = useState(null)
-  const [warningModal, setWarningModal] = useState(null) // { action: 'delete', truck: obj } | { action: 'status', id: id, form: obj }
+  const [warningModal, setWarningModal] = useState(null)
 
   function showToast(msg) {
     setToast(msg)
     setTimeout(() => setToast(null), 3000)
   }
 
-  async function handleSave(form) {
-    const id = modal === 'add' ? null : modal.id
-    
-    // Check if status changed from active to maintenance/inactive
+  async function handleSave(form, truckId = null) {
+    const id = truckId;
+
     if (id) {
       const originalTruck = trucks.find(t => t.id === id)
-      if (originalTruck && originalTruck.status === 'active' && (form.status === 'maintenance' || form.status === 'inactive')) {
+      let newStatus = form instanceof FormData ? form.get('status') : form.status;
+      
+      if (originalTruck && originalTruck.status === 'active' && (newStatus === 'maintenance' || newStatus === 'inactive')) {
         setWarningModal({ action: 'status', id, form })
         return
       }
     }
-    
+
     executeSave(id, form)
   }
 
   async function executeSave(id, form) {
-    const res = await saveTruck(id, form)
+    const payload = form instanceof FormData ? form : { ...form }
+    if (!(payload instanceof FormData) && !payload.last_service) payload.last_service = null
+
+    const res = await saveTruck(id, payload)
     if (res.ok) {
       showToast(id ? '✅ Truck updated successfully.' : '✅ Truck added successfully.')
       setModal(null)
@@ -554,10 +620,12 @@ export default function TruckManagement() {
 
   async function confirmStatusChange(reason) {
     const { id, form } = warningModal
-    const finalForm = { ...form, status_reason: reason }
-    if (form.status === 'inactive') {
-      finalForm.drivers = []
-      finalForm.crew = []
+    let finalForm = form;
+    if (finalForm instanceof FormData) {
+      finalForm.append('status_reason', reason);
+    } else {
+      finalForm = { ...form, status_reason: reason }
+      // Backend automatically handles clearing drivers & crew on inactive transition now.
     }
     setWarningModal(null)
     executeSave(id, finalForm)
@@ -596,15 +664,22 @@ export default function TruckManagement() {
       )}
 
       {/* Modal */}
-      {modal && (
-        <TruckModal
-          truck={modal === 'add' ? null : modal}
+      {modal?.type === 'add_truck' || modal?.type === 'edit_truck' ? (
+        <TruckEntityModal
+          truck={modal.truck}
+          onSave={handleSave}
+          onClose={() => setModal(null)}
+        />
+      ) : modal?.type === 'assign_truck' ? (
+        <AssignTruckModal
+          truck={modal.truck}
+          trucks={trucks}
           onSave={handleSave}
           onClose={() => setModal(null)}
           drivers={drivers}
           crewPool={crewPool}
         />
-      )}
+      ) : null}
 
       {/* Route Map Modal */}
       {viewRouteTruck && (
@@ -642,12 +717,20 @@ export default function TruckManagement() {
             </div>
             <p className="text-muted text-sm">Manage fleet, assign drivers and crew members.</p>
           </div>
-          <button
-            className="btn btn-primary"
-            onClick={() => setModal('add')}
-          >
-            + Add Truck
-          </button>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              className="btn btn-outline"
+              onClick={() => setModal({ type: 'assign_truck', truck: null })}
+            >
+              Assign Truck
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={() => setModal({ type: 'add_truck', truck: null })}
+            >
+              + Add Truck
+            </button>
+          </div>
         </div>
 
         {/* ── KPI Strip ── */}
@@ -845,11 +928,11 @@ export default function TruckManagement() {
                       {/* Crew list */}
                       <div style={{ marginBottom: 16 }}>
                         <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 8 }}>
-                          {truck.status === 'inactive' 
-                            ? 'PAST CREW MEMBERS' 
+                          {truck.status === 'inactive'
+                            ? 'PAST CREW MEMBERS'
                             : `CREW MEMBERS (${truck.crew?.length || 0})`}
                         </div>
-                        
+
                         {truck.status === 'inactive' ? (
                           <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic', background: 'var(--surface)', border: '1px solid var(--border)', padding: '6px 12px', borderRadius: 8 }}>
                             {truck.past_crew_names ? truck.past_crew_names : 'No past crew recorded.'}
@@ -881,10 +964,19 @@ export default function TruckManagement() {
                         <button
                           className="btn btn-outline btn-sm"
                           style={{ flex: 1 }}
-                          onClick={() => setModal(truck)}
+                          onClick={() => setModal({ type: 'edit_truck', truck })}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                            <div style={{ width: 14, height: 14 }}>{ICONS.edit}</div> Edit / Reassign
+                            <div style={{ width: 14, height: 14 }}>{ICONS.edit}</div> Edit
+                          </div>
+                        </button>
+                        <button
+                          className="btn btn-outline btn-sm"
+                          style={{ flex: 1 }}
+                          onClick={() => setModal({ type: 'assign_truck', truck })}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                            <div style={{ width: 14, height: 14 }}>{ICONS.profile}</div> Assign
                           </div>
                         </button>
                         <button
@@ -910,7 +1002,7 @@ export default function TruckManagement() {
       {warningModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, backdropFilter: 'blur(4px)' }}>
           <div style={{ background: 'var(--surface)', width: '90%', maxWidth: 400, borderRadius: 16, padding: 24, boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
-            
+
             {warningModal.action === 'delete' ? (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, color: '#e74c3c' }}>
@@ -920,7 +1012,7 @@ export default function TruckManagement() {
                   <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Delete Truck</h3>
                 </div>
                 <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 24, lineHeight: 1.5 }}>
-                  Are you sure you want to delete <strong>{warningModal.truck.plate_number}</strong>? <br/><br/>
+                  Are you sure you want to delete <strong>{warningModal.truck.plate_number}</strong>? <br /><br />
                   Deleting this truck will orphan any assigned routes (leaving them blank for reassignment). This action cannot be undone.
                 </p>
                 <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
@@ -939,12 +1031,12 @@ export default function TruckManagement() {
                   <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Change Status</h3>
                 </div>
                 <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.5 }}>
-                  You are changing this truck's status to <strong>{warningModal.form.status}</strong>. 
+                  You are changing this truck's status to <strong>{warningModal.form.status}</strong>.
                   {warningModal.form.status === 'inactive' && ' This will unassign the truck, driver, and crew from all active routes.'}
                 </p>
                 <div style={{ marginBottom: 24 }}>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 8 }}>Reason for {warningModal.form.status}</label>
-                  <textarea 
+                  <textarea
                     id="statusReasonInput"
                     style={{ width: '100%', minHeight: 80, padding: 12, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontSize: 13, resize: 'vertical' }}
                     placeholder={`Why is this truck ${warningModal.form.status}?`}

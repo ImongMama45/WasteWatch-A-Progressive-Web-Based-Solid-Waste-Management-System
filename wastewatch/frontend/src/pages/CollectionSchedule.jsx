@@ -220,8 +220,8 @@ export default function CollectionSchedule() {
 
                       {/* Main Row */}
                       <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16 }}>
-                        <div style={{ width: 48, height: 48, borderRadius: 12, background: isActive ? 'rgba(46,204,113,.1)' : 'var(--surface-2)', border: `1px solid ${isActive ? 'rgba(46,204,113,.3)' : 'var(--border)'}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <div style={{ fontSize: 10, fontWeight: 800, color: isActive ? '#2ecc71' : 'var(--text-muted)', textTransform: 'uppercase' }}>
+                        <div style={{ minWidth: 68, minHeight: 48, padding: '4px 10px', borderRadius: 12, background: isActive ? 'rgba(46,204,113,.1)' : 'var(--surface-2)', border: `1px solid ${isActive ? 'rgba(46,204,113,.3)' : 'var(--border)'}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: isActive ? '#2ecc71' : 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'center', lineHeight: 1.2, whiteSpace: 'nowrap' }}>
                             {item.days || '—'}
                           </div>
                         </div>

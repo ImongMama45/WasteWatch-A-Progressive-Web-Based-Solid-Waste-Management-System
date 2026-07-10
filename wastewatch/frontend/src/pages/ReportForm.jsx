@@ -1,437 +1,375 @@
 /**
- * ReportForm.jsx — Report Garbage Issue
- * ---------------------------------------
- * GPS is captured silently on mount — user cannot edit it.
- * Photo must be taken via camera — gallery upload is not allowed.
+ * pages/ReportForm.jsx
+ * -------------------------------------
+ * Unified offline report form overlay. 
+ * Replaces the old full-page ReportForm.
+ * Combines the queue (OfflineReportQueue) and the builder (OfflineReportBuilder).
  */
 
-import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
-import Navbar from '../components/Navbar'
-import BottomNav from '../components/BottomNav'
-import { useAuth } from '../context/AuthContext'
-import { useNotification } from '../context/NotificationContext'
-import api from '../api/client'
-import { getApiErrorMessage } from '../utils/notificationHelpers'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useOnline } from '../hooks/useOnline'
+import { useOfflineReports } from '../hooks/useOfflineReports'
+import { useOfflineSyncManager } from '../hooks/useOfflineSyncManager'
+import OfflineReportQueue from '../components/OfflineReportQueue'
+import MultiPhotoPicker from '../components/MultiPhotoPicker'
+import { Trash2, Truck, AlertTriangle, Camera, MapPin, Tag, Flame, FileText, CheckCircle, RefreshCw } from 'lucide-react'
+import '../styles/pages/OfflineModules.css'
 
-const ISSUE_TYPES = [
-  { value: '', label: 'Select Issue Type' },
-  { value: 'overflow', label: 'Overflow' },
-  { value: 'missed', label: 'Missed Collection' },
-  { value: 'illegal_dumping', label: 'Illegal Dumping' },
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const WASTE_TYPES = [
+  { value: 'overflow', label: 'Overflow', icon: <Trash2 size={20} />, color: '#ef4444', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.4)' },
+  { value: 'missed', label: 'Missed', icon: <Truck size={20} />, color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.4)' },
+  { value: 'illegal_dumping', label: 'Illegal Dump', icon: <AlertTriangle size={20} />, color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', border: 'rgba(124,58,237,0.4)' },
 ]
 
 const SEVERITIES = [
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
+  { value: 'low', label: 'Low', color: '#22c55e', desc: 'Minor issue' },
+  { value: 'medium', label: 'Medium', color: '#f59e0b', desc: 'Needs attention' },
+  { value: 'high', label: 'High', color: '#ef4444', desc: 'Urgent' },
 ]
 
-const ALL_TAGS = ['Near School', 'Near market', 'Side Road', 'Residential', 'Highway', 'Near River', 'Misconduct']
+// ─── GPS helpers ──────────────────────────────────────────────────────────────
 
-export default function ReportForm() {
-  const { user } = useAuth()
-  const navigate = useNavigate()
-  const { notify } = useNotification()
-  const fileRef = useRef(null)
+const LS_LAST_LOC = 'ww_last_location'
 
-  const [gps, setGps] = useState({ lat: null, lng: null, status: 'detecting', address: '' })
-  const [barangays, setBarangays] = useState([])
-  const [systemUsers, setSystemUsers] = useState([])
-  const [preview, setPreview] = useState(null)
-  const [submitting, setSubmitting] = useState(false)
-  const [errors, setErrors] = useState({})
-  const [selectedTags, setSelectedTags] = useState([])
-  const [showMoreTags, setShowMoreTags] = useState(false)
-  const [isManualLocation, setIsManualLocation] = useState(false)
+function cacheLocation(loc) {
+  try { localStorage.setItem(LS_LAST_LOC, JSON.stringify(loc)) } catch { }
+}
 
-  const [form, setForm] = useState({
-    issue_type: '',
-    severity: 'medium',
-    description: '',
-    image: null,
-    manual_address: '',
-    reported_user: '',
+function getCachedLocation() {
+  try {
+    const raw = localStorage.getItem(LS_LAST_LOC)
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+
+async function reverseGeocode(lat, lng) {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+      { headers: { 'Accept-Language': 'en' } }
+    )
+    const data = await res.json()
+    return data.display_name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+  } catch {
+    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+  }
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () =>
+      resolve({ base64: reader.result, url: URL.createObjectURL(file), file })
+    reader.onerror = reject
+    reader.readAsDataURL(file)
   })
+}
 
-  // Silently capture GPS on mount
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export default function ReportForm({ isOpen, onClose, initialPhoto }) {
+  const isOnline = useOnline()
+  const { reports, addReport, retryReport, pendingCount, failedCount, pushReport } = useOfflineReports()
+  const { syncNow, isSyncing, lastSyncAt } = useOfflineSyncManager()
+
+  const [view, setView] = useState('builder') // 'builder'
+
+  const [wasteType, setWasteType] = useState('overflow')
+  const [severity, setSeverity] = useState('medium')
+  const [notes, setNotes] = useState('')
+  const [location, setLocation] = useState(null)
+  const [gpsState, setGpsState] = useState('idle')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
+
+  const [photos, setPhotos] = useState([]) // array of base64
+  const [photoError, setPhotoError] = useState('')
+
+  // ── Initialization ────────────────────────────────────────────────────────
   useEffect(() => {
+    if (isOpen) {
+      setWasteType('overflow')
+      setSeverity('medium')
+      setNotes('')
+      setLocation(null)
+      setGpsState('idle')
+      setSubmitting(false)
+      setSubmitted(false)
+      setPhotoError('')
+
+      if (initialPhoto && initialPhoto.blob) {
+        const reader = new FileReader()
+        reader.onload = () => {
+          setPhotos([reader.result])
+        }
+        reader.readAsDataURL(initialPhoto.blob)
+      } else {
+        setPhotos([])
+      }
+      setView('builder')
+    }
+  }, [isOpen, initialPhoto])
+
+  useEffect(() => {
+    if (isOpen && view === 'builder' && gpsState === 'idle') {
+      captureGPS()
+    }
+  }, [isOpen, view, gpsState])
+
+  // ── Escape to close ────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!isOpen) return
+    const handler = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [isOpen, onClose])
+
+  // ── Revoke object URL on unmount ───────────────────────────────────────────
+  useEffect(() => {
+    return () => {
+      // Nothing to revoke since photos are base64
+    }
+  }, [photos, initialPhoto])
+
+  // ── GPS capture ───────────────────────────────────────────────────────────
+  const captureGPS = useCallback(() => {
+    setGpsState('loading')
     if (!navigator.geolocation) {
-      setGps({ lat: null, lng: null, status: 'error', address: '' })
+      const cached = getCachedLocation()
+      if (cached) { setLocation(cached); setGpsState('cached') }
+      else setGpsState('error')
       return
     }
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const { latitude: lat, longitude: lng } = pos.coords
-        setGps(prev => ({ ...prev, lat, lng, status: 'ready' }))
-        
-        // Reverse geocode
-        try {
-          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`)
-          const data = await res.json()
-          setGps(prev => ({ ...prev, address: data.display_name || '' }))
-        } catch { }
+        const address = await reverseGeocode(lat, lng)
+        const loc = { lat, lng, address }
+        cacheLocation(loc)
+        setLocation(loc)
+        setGpsState('done')
       },
-      () => setGps({ lat: null, lng: null, status: 'error', address: '' }),
-      { enableHighAccuracy: true, timeout: 10000 }
+      () => {
+        const cached = getCachedLocation()
+        if (cached) { setLocation(cached); setGpsState('cached') }
+        else setGpsState('error')
+      },
+      { timeout: 8000, maximumAge: 120000, enableHighAccuracy: true }
     )
   }, [])
 
-  useEffect(() => {
-    api.get('/api/barangays/').then(r => setBarangays(r.data)).catch(() => { })
-    
-    // Fetch users for misconduct reporting
-    // Note: This endpoint might require auth/role checks on backend
-    api.get('/api/accounts/users/').then(r => {
-      setSystemUsers(r.data)
-    }).catch(err => {
-      console.error('Failed to fetch system users:', err)
-    })
-  }, [])
-
-  function handleChange(e) {
-    const { name, value } = e.target
-    setForm(prev => ({ ...prev, [name]: value }))
-    setErrors(prev => ({ ...prev, [name]: '' }))
-  }
-
-  function toggleTag(tag) {
-    setSelectedTags(prev => {
-      const next = prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
-      // Clear reported_user if Misconduct tag removed
-      if (!next.includes('Misconduct')) {
-        setForm(f => ({ ...f, reported_user: '' }))
-      }
-      return next
-    })
-  }
-
-  function handleFile(e) {
-    const file = e.target.files[0]
-    if (!file) return
-    setForm(prev => ({ ...prev, image: file }))
-    const reader = new FileReader()
-    reader.onload = ev => setPreview(ev.target.result)
-    reader.readAsDataURL(file)
-  }
-
-  async function handleSubmit() {
-    const errs = {}
-    if (!form.issue_type) errs.issue_type = 'Please select an issue type.'
-    if (!isManualLocation && gps.status !== 'ready') {
-      errs.gps = 'Location could not be detected. Please enable GPS or enter address manually.'
+  const handleSubmit = useCallback(async () => {
+    if (submitting) return
+    if (photos.length === 0) {
+      setPhotoError('Kinakailangan ang larawan. Mag-attach ng photo bago mag-submit.')
+      return
     }
-    if (isManualLocation && !form.manual_address) {
-      errs.manual_address = 'Please enter the location address.'
-    }
-    if (Object.keys(errs).length) { setErrors(errs); return }
 
     setSubmitting(true)
-    const fd = new FormData()
-    if (!isManualLocation) {
-      if (isGpsValid(gps.lat)) fd.append('latitude', Number(gps.lat).toFixed(6))
-      if (isGpsValid(gps.lng)) fd.append('longitude', Number(gps.lng).toFixed(6))
-      fd.append('address', gps.address || '')
-    } else {
-      fd.append('address', form.manual_address)
-    }
-    
-    fd.append('issue_type', form.issue_type)
-    fd.append('severity', form.severity)
-    fd.append('description', form.description)
-    fd.append('tags', selectedTags.join(','))
-    if (form.reported_user) fd.append('reported_user', form.reported_user)
-    if (form.image) fd.append('image', form.image)
-    if (user?.barangay) fd.append('barangay', user.barangay)
-
-    // Debug: log FormData entries
-    console.log('[ReportForm] Submitting payload:')
-    for (let [key, val] of fd.entries()) {
-      console.log(`  ${key}:`, val instanceof File ? `File(${val.name})` : val)
-    }
-
     try {
-      const response = await api.post('/api/watcher/reports/', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
-      console.log('[ReportForm] Success:', response.data)
-      navigate('/map', {
-        state: {
-          success: 'Report submitted!',
-          focusReport: response.data
+      const payload = {
+        issue_type: wasteType,
+        severity,
+        description: notes,
+        latitude: location?.lat,
+        longitude: location?.lng,
+        address: location?.address,
+        photos: photos,
+      }
+      try {
+        await addReport(payload)
+      } catch (idbErr) {
+        if (isOnline) {
+          console.warn('[ReportForm] IDB failed, pushing directly to server...', idbErr)
+          await pushReport({ ...payload, id: 'temp-' + Date.now(), createdAt: new Date().toISOString() })
+        } else {
+          throw idbErr
         }
-      })
+      }
+      setSubmitted(true)
+      setTimeout(() => {
+        onClose()
+        // Reset state after closing so next time it opens fresh
+        setTimeout(() => setSubmitted(false), 300)
+      }, 1500)
     } catch (err) {
-      const data = err.response?.data || {}
-      console.error('[ReportForm] Submission error:')
-      
-      let errorDetails = ''
-      if (typeof data === 'string') {
-        errorDetails = data
-      } else {
-        errorDetails = Object.entries(data)
-          .map(([k, v]) => {
-            const val = Array.isArray(v) ? v[0] : v
-            return typeof val === 'object' ? JSON.stringify(val) : `${k}: ${val}`
-          })
-          .join('\n')
-      }
-      
-      notify({ variant: 'error-dark', message: getApiErrorMessage(err, `Report failed: ${errorDetails}`) })
-
-      if (typeof data === 'object') {
-        Object.keys(data).forEach(key => {
-          console.error(`  Field "${key}":`, data[key])
-        })
-        const mapped = {}
-        for (const [k, v] of Object.entries(data)) {
-          mapped[k] = Array.isArray(v) ? v[0] : v
-        }
-        setErrors(mapped)
-      }
+      console.error('[ReportForm] submit error:', err)
+      setPhotoError("Nabigo ang pag-save: Browser Storage Error. Mangyaring i-check kung puno ang storage, o i-refresh ang browser.")
     } finally {
       setSubmitting(false)
     }
-  }
+  }, [submitting, photos, addReport, wasteType, severity, notes, location])
 
-  const visibleTags = showMoreTags ? ALL_TAGS : ALL_TAGS.slice(0, 3)
-  const isGpsValid = (val) => val !== null && val !== undefined && !isNaN(Number(val))
-  const locationDisplay = gps.status === 'ready'
-    ? (gps.address || `Auto-detected: ${isGpsValid(gps.lat) ? Number(gps.lat).toFixed(4) : '?'}, ${isGpsValid(gps.lng) ? Number(gps.lng).toFixed(4) : '?'}`)
-    : gps.status === 'detecting'
-      ? 'Detecting your location…'
-      : 'Location unavailable'
+  if (!isOpen) return null
+
+  const selectedWaste = WASTE_TYPES.find(w => w.value === wasteType) || WASTE_TYPES[0]
+  const selectedSeverity = SEVERITIES.find(s => s.value === severity) || SEVERITIES[0]
+  const canSubmit = photos.length > 0 && !submitting
 
   return (
     <>
-      <Navbar />
-      <div className="page" style={{ maxWidth: 800 }}>
+      <div className="orb-backdrop" onClick={onClose} aria-hidden />
 
+      <div className="orb-sheet" role="dialog" aria-modal aria-label="Report Form">
+        <div className="orb-handle" />
 
-        <div style={{ marginBottom: 24 }}>
-          <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 22, fontWeight: 800 }}>
-            Report Garbage Issue
-          </h2>
-          <p className="text-muted text-sm">Help us keep the community clean</p>
-        </div>
-
-        <div className="card card-dark" style={{ padding: 24 }}>
-          <h3 style={{ fontFamily: 'var(--font-head)', color: 'white', fontSize: 17, fontWeight: 700, marginBottom: 20 }}>
-            Issue Details
-          </h3>
-
-          {/* Issue Type & Severity */}
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <div className="form-group" style={{ flex: 1, minWidth: 200 }}>
-              <label className="form-label">Issue Type</label>
-              <select
-                className={`form-input ${errors.issue_type ? 'error' : ''}`}
-                name="issue_type"
-                value={form.issue_type}
-                onChange={handleChange}
-              >
-                {ISSUE_TYPES.map(t => (
-                  <option key={t.value} value={t.value} disabled={t.value === ''}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-              {errors.issue_type && <p className="form-error">{errors.issue_type}</p>}
+        {/* Always render builder view */}
+        <>
+          <div className="orb-header">
+            <div className="orb-header__text">
+              <h2 className="orb-header__title">Report a Problem</h2>
+              <p className="orb-header__sub">Saved offline · syncs when connected</p>
             </div>
-
-            <div className="form-group" style={{ flex: 1, minWidth: 200 }}>
-              <label className="form-label">Severity</label>
-              <select
-                className="form-input"
-                name="severity"
-                value={form.severity}
-                onChange={handleChange}
-              >
-                {SEVERITIES.map(s => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <button className="orb-close" onClick={onClose} aria-label="Close">✕</button>
           </div>
 
-          {/* Location — GPS with manual toggle */}
-          <div className="form-group">
-            <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
-              Location
-              <button 
-                type="button" 
-                onClick={() => setIsManualLocation(!isManualLocation)}
-                style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, cursor: 'pointer', padding: 0 }}
-              >
-                {isManualLocation ? 'Use GPS' : 'Enter Manually'}
-              </button>
-            </label>
-            
-            {!isManualLocation ? (
-              <div className="gps-field">
-                <span className={`gps-dot ${gps.status}`} />
-                <span style={{ fontSize: 13, color: gps.status === 'ready' ? 'var(--text)' : 'var(--text-muted)' }}>
-                  {locationDisplay}
-                </span>
-                {gps.status === 'detecting' && <span className="gps-spinner" />}
-                {gps.status === 'error' && (
-                   <button 
-                     type="button" 
-                     className="btn btn-sm" 
-                     style={{ marginLeft: 10, padding: '2px 8px', fontSize: 11 }}
-                     onClick={() => window.location.reload()}
-                   >
-                     Retry
-                   </button>
-                )}
+          {submitted ? (
+            <div className="orb-success">
+              <div className="orb-success__icon" style={{ color: '#22c55e', display: 'flex', justifyContent: 'center', marginBottom: '12px' }}>
+                <CheckCircle size={48} />
               </div>
-            ) : (
-              <input
-                className={`form-input ${errors.manual_address ? 'error' : ''}`}
-                name="manual_address"
-                placeholder="Enter nearby landmark or street address"
-                value={form.manual_address}
-                onChange={handleChange}
-              />
-            )}
-            {errors.gps && <p className="form-error">{errors.gps}</p>}
-            {errors.manual_address && <p className="form-error">{errors.manual_address}</p>}
-          </div>
-
-          {/* Tags */}
-          <div className="form-group">
-            <label className="form-label">Tags</label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {visibleTags.map(tag => (
-                <button
-                  key={tag}
-                  type="button"
-                  onClick={() => toggleTag(tag)}
-                  className="tag-chip"
-                  style={{
-                    background: selectedTags.includes(tag) ? 'rgba(46,204,113,.15)' : 'transparent',
-                    borderColor: selectedTags.includes(tag) ? 'var(--accent)' : 'var(--border)',
-                    color: selectedTags.includes(tag) ? 'var(--accent)' : 'white',
-                  }}
-                >
-                  {tag}
-                </button>
-              ))}
-              <button
-                type="button"
-                className="tag-chip"
-                onClick={() => setShowMoreTags(p => !p)}
-                style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
-              >
-                {showMoreTags ? '▲' : '• • •'}
-              </button>
+              <h3 className="orb-success__title">Report Queued!</h3>
+              <p className="orb-success__sub">
+                Your report is saved offline and will sync automatically when you're online.
+              </p>
             </div>
-          </div>
+          ) : (
+            <div className="orb-body">
+              {/* ── PHOTO (mandatory) ── */}
+              <div className="orb-field">
+                <label className="orb-label">
+                  <span style={{ display: 'flex', alignItems: 'center', marginRight: '6px' }}><Camera size={16} /></span> Photo
+                  <span className="orb-required">*</span>
+                  <span className="orb-label-hint">(kinakailangan)</span>
+                </label>
 
-          {/* Reported User (only if Misconduct tag selected) */}
-          {selectedTags.includes('Misconduct') && (
-            <div className="form-group animate-fade-in">
-              <label className="form-label">Person to Report</label>
-              <select
-                className={`form-input ${errors.reported_user ? 'error' : ''}`}
-                name="reported_user"
-                value={form.reported_user}
-                onChange={handleChange}
+                <MultiPhotoPicker photos={photos} onChange={(newPhotos) => { setPhotos(newPhotos); setPhotoError('') }} error={photoError} />
+              </div>
+
+              {/* ── GPS Location ── */}
+              <div className="orb-field">
+                <label className="orb-label">
+                  <span style={{ display: 'flex', alignItems: 'center', marginRight: '6px' }}><MapPin size={16} /></span> Location
+                  {gpsState !== 'idle' && (
+                    <span className={`orb-gps-badge orb-gps-badge--${gpsState}`}>
+                      {gpsState === 'loading' ? 'Getting GPS…'
+                        : gpsState === 'cached' ? '📦 Cached'
+                          : gpsState === 'error' ? '⚠️ Unavailable' : '✓ Located'}
+                    </span>
+                  )}
+                </label>
+                <div className="orb-location-box">
+                  {location ? <span className="orb-location-box__addr">{location.address}</span>
+                    : <span className="orb-location-box__placeholder">{gpsState === 'loading' ? 'Detecting your location…' : 'Location not available'}</span>}
+                  <button className="orb-location-box__retry" onClick={captureGPS} aria-label="Retry GPS" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <RefreshCw size={16} />
+                  </button>
+                </div>
+              </div>
+
+              {/* ── Waste Type ── */}
+              <div className="orb-field">
+                <label className="orb-label">
+                  <span style={{ display: 'flex', alignItems: 'center', marginRight: '6px' }}><Tag size={16} /></span> Waste Type
+                </label>
+                <div className="orb-waste-grid">
+                  {WASTE_TYPES.map(w => (
+                    <button
+                      key={w.value}
+                      className={`orb-waste-btn${wasteType === w.value ? ' orb-waste-btn--selected' : ''}`}
+                      style={wasteType === w.value ? { background: w.bg, borderColor: w.color, color: w.color } : undefined}
+                      onClick={() => setWasteType(w.value)}
+                    >
+                      <span className="orb-waste-btn__emoji" style={{ display: 'flex', alignItems: 'center' }}>{w.icon}</span>
+                      <span className="orb-waste-btn__label">{w.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── Severity ── */}
+              <div className="orb-field">
+                <label className="orb-label">
+                  <span style={{ display: 'flex', alignItems: 'center', marginRight: '6px' }}><Flame size={16} /></span> Severity
+                </label>
+                <div className="orb-severity-row">
+                  {SEVERITIES.map(s => (
+                    <button
+                      key={s.value}
+                      className={`orb-sev-btn${severity === s.value ? ' orb-sev-btn--selected' : ''}`}
+                      style={severity === s.value ? { borderColor: s.color, color: s.color, background: `${s.color}18` } : undefined}
+                      onClick={() => setSeverity(s.value)}
+                      title={s.desc}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="orb-severity-desc" style={{ color: selectedSeverity?.color || '#64748b' }}>
+                  {selectedSeverity?.desc || ''}
+                </p>
+              </div>
+
+              {/* ── Notes ── */}
+              <div className="orb-field">
+                <label className="orb-label">
+                  <span style={{ display: 'flex', alignItems: 'center', marginRight: '6px' }}><FileText size={16} /></span> Notes <span className="orb-optional">(optional)</span>
+                </label>
+                <textarea
+                  className="orb-textarea"
+                  rows={3}
+                  placeholder="Describe the issue — e.g. overflowing bin near store, illegal dump site…"
+                  value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  maxLength={500}
+                />
+                <span className="orb-char-count">{notes.length}/500</span>
+              </div>
+
+              {/* ── Summary chip ── */}
+              <div className="orb-summary" style={{ borderColor: (selectedWaste && selectedWaste.border) || 'transparent' }}>
+                <span style={{ color: (selectedWaste && selectedWaste.color) || '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  {selectedWaste ? selectedWaste.icon : <Tag size={16} />} {selectedWaste ? selectedWaste.label : 'Waste'}
+                </span>
+                <span className="orb-summary__sep">·</span>
+                <span style={{ color: (selectedSeverity && selectedSeverity.color) || '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <Flame size={16} /> {selectedSeverity ? selectedSeverity.label : 'Severity'}
+                </span>
+                <span className="orb-summary__sep">·</span>
+                <span style={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <MapPin size={16} /> {location ? 'Located' : 'No GPS'}
+                </span>
+                <span className="orb-summary__sep">·</span>
+                <span style={{ color: photos.length > 0 ? '#22c55e' : '#ef4444' }}>
+                  {photos.length > 0 ? 'Photo ✓' : 'No Photo'}
+                </span>
+              </div>
+
+              {photos.length === 0 && (
+                <div className="orb-photo-required-banner">
+                  Mag-attach ng larawan para ma-submit ang report
+                </div>
+              )}
+
+              {/* ── Submit ── */}
+              <button
+                className={`orb-submit${submitting ? ' orb-submit--loading' : ''}${!canSubmit ? ' orb-submit--disabled' : ''}`}
+                onClick={handleSubmit}
+                disabled={!canSubmit}
+                title={photos.length === 0 ? 'Kinakailangan ang larawan' : ''}
               >
-                <option value="">Select Person (Driver/Watcher/Official)</option>
-                {systemUsers.map(u => (
-                  <option key={u.id} value={u.id}>
-                    {u.full_name} ({u.role?.replace('_', ' ')})
-                  </option>
-                ))}
-              </select>
-              {errors.reported_user && <p className="form-error">{errors.reported_user}</p>}
+                {submitting
+                  ? <><span className="orb-spinner" /> Saving…</>
+                  : photos.length === 0
+                    ? <><Camera size={18} style={{ marginRight: '8px' }} /> Mag-attach ng Photo muna</>
+                    : isOnline ? 'Submit Report' : 'Submit Report (Offline)'}
+              </button>
             </div>
           )}
-
-          {/* Description */}
-          <div className="form-group">
-            <label className="form-label">Description</label>
-            <textarea
-              className="form-input"
-              name="description"
-              rows={4}
-              placeholder="Provide details about the issue.."
-              value={form.description}
-              onChange={handleChange}
-            />
-          </div>
-
-          {/* ── Capture Photo — camera only, no gallery ── */}
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Capture Photo</label>
-            <div
-              className="photo-upload-zone"
-              onClick={() => fileRef.current?.click()}
-            >
-              {preview ? (
-                <>
-                  <img
-                    src={preview}
-                    alt="Captured"
-                    style={{ maxHeight: 160, borderRadius: 8, marginBottom: 8 }}
-                  />
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    📷 Tap to retake
-                  </span>
-                </>
-              ) : (
-                <>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>📷</div>
-                  <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12, textAlign: 'center' }}>
-                    Tap to open camera, to capture a photo of the issue.
-                  </div>
-                  <button
-                    className="btn btn-outline btn-sm"
-                    onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
-                  >
-                    Open Camera
-                  </button>
-                </>
-              )}
-            </div>
-
-            {/*
-              capture="environment" = opens rear camera directly on mobile.
-              accept="image/*"      = restricts to images.
-              Together these prevent the "browse files / gallery" option
-              from appearing on most mobile browsers.
-            */}
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              style={{ display: 'none' }}
-              onChange={handleFile}
-            />
-          </div>
-        </div>
-
-        {/* Bottom actions */}
-        <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-          <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => navigate(-1)}>
-            Cancel
-          </button>
-          <button
-            className="btn btn-primary"
-            style={{ flex: 2, fontWeight: 700, letterSpacing: '.04em' }}
-            onClick={handleSubmit}
-            disabled={submitting || gps.status === 'detecting'}
-          >
-            {submitting ? 'Submitting…' : 'SUBMIT REPORT'}
-          </button>
-        </div>
-
+        </>
       </div>
-      <BottomNav />
     </>
   )
 }

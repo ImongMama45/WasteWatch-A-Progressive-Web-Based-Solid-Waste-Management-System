@@ -22,10 +22,19 @@ class TruckSerializer(serializers.ModelSerializer):
         source='crew'
     )
     fill_estimates = TruckFillEstimateSerializer(many=True, read_only=True)
+    photo_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Truck
         fields = '__all__'
+
+    def get_photo_url(self, obj):
+        if obj.photo:
+            try:
+                return obj.photo.url
+            except Exception:
+                return None
+        return None
 
     def get_driver_details(self, obj):
         details = []
@@ -94,7 +103,23 @@ class CollectionScheduleSerializer(serializers.ModelSerializer):
     def get_completed_stops(self, obj):
         from django.utils import timezone
         today = timezone.localdate()
-        return obj.pickups.filter(status='COMPLETED', collected_at__date=today).count()
+        from django.db.models import Q
+        pickup_completed_orders = set(obj.pickups.filter(
+            Q(status='COMPLETED', collected_at__date=today) |
+            Q(status='DRIVER_MISSED', updated_at__date=today)
+        ).values_list('stop_order', flat=True))
+        
+        try:
+            from watcher.models import StopValidation
+            empty_stop_orders = set(StopValidation.objects.filter(
+                schedule=obj,
+                collection_date=today,
+                current_status='EMPTY_STOP'
+            ).values_list('stop_order', flat=True))
+        except Exception:
+            empty_stop_orders = set()
+
+        return len(pickup_completed_orders | empty_stop_orders)
 
     def get_total_stops(self, obj):
         count = obj.pickups.count()
@@ -117,7 +142,23 @@ class CollectionScheduleSerializer(serializers.ModelSerializer):
         if ended_shift:
             count = obj.pickups.count()
             total_stops = count if count > 0 else max(0, len(obj.waypoints or []) - 1)
-            completed_stops = obj.pickups.filter(status='COMPLETED', collected_at__date=today).count()
+            from django.db.models import Q
+            pickup_completed_orders = set(obj.pickups.filter(
+                Q(status='COMPLETED', collected_at__date=today) |
+                Q(status='DRIVER_MISSED', updated_at__date=today)
+            ).values_list('stop_order', flat=True))
+            
+            try:
+                from watcher.models import StopValidation
+                empty_stop_orders = set(StopValidation.objects.filter(
+                    schedule=obj,
+                    collection_date=today,
+                    current_status='EMPTY_STOP'
+                ).values_list('stop_order', flat=True))
+            except Exception:
+                empty_stop_orders = set()
+                
+            completed_stops = len(pickup_completed_orders | empty_stop_orders)
             if total_stops > 0 and completed_stops >= total_stops:
                 return 'completed'
             else:
@@ -219,21 +260,34 @@ class CalendarEventSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class DriverShiftSerializer(serializers.ModelSerializer):
-    truck_plate     = serializers.CharField(
-                        source='truck.plate_number', read_only=True)
-    truck_model     = serializers.CharField(
-                        source='truck.model', read_only=True)
-    route_id        = serializers.SerializerMethodField()
+    truck_id        = serializers.SerializerMethodField()
+    truck_plate     = serializers.CharField(source='truck.plate_number', read_only=True)
+    truck_model     = serializers.CharField(source='truck.model', read_only=True)
+    schedule_id     = serializers.SerializerMethodField()
+    route_id        = serializers.SerializerMethodField()  # kept as alias for backward compat
     barangay_names  = serializers.SerializerMethodField()
+    elapsed_ms      = serializers.SerializerMethodField()
 
     class Meta:
         model = DriverShift
         fields = [
-            'id', 'status', 'started_at', 'ended_at', 'truck', 'truck_plate',
-            'truck_model', 'route_id', 'barangay_names', 'driver', 'is_active', 'op_status'
+            'id', 'status', 'started_at', 'ended_at',
+            'truck', 'truck_id', 'truck_plate', 'truck_model',
+            'schedule', 'schedule_id', 'route_id', 'barangay_names',
+            'driver', 'is_active', 'op_status', 'end_shift_phase', 'elapsed_ms',
         ]
 
-    def _get_active_schedule(self, obj):
+    def get_truck_id(self, obj):
+        return obj.truck_id  # Django gives you the FK id without a join
+
+    def _resolve_schedule(self, obj):
+        """
+        Prefer the FK set at shift-start. Only fall back to the old
+        heuristic lookup for legacy shifts created before this field existed.
+        """
+        if obj.schedule_id:
+            return obj.schedule
+
         from .models import TruckCrewAssignment, CollectionSchedule
         from django.utils import timezone
         today = timezone.localdate()
@@ -247,12 +301,21 @@ class DriverShiftSerializer(serializers.ModelSerializer):
             schedule = CollectionSchedule.objects.filter(driver=obj.driver).first()
         return schedule
 
-    def get_route_id(self, obj):
-        schedule = self._get_active_schedule(obj)
+    def get_schedule_id(self, obj):
+        schedule = self._resolve_schedule(obj)
         return schedule.id if schedule else None
 
+    def get_route_id(self, obj):
+        return self.get_schedule_id(obj)
+
     def get_barangay_names(self, obj):
-        schedule = self._get_active_schedule(obj)
+        schedule = self._resolve_schedule(obj)
         if schedule:
             return ", ".join([b.name for b in schedule.barangays.all()])
         return ''
+
+    def get_elapsed_ms(self, obj):
+        from django.utils import timezone
+        if not obj.is_active or not obj.started_at:
+            return 0
+        return int((timezone.now() - obj.started_at).total_seconds() * 1000)

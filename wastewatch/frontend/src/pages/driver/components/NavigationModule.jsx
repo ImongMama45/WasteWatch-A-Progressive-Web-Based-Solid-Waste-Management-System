@@ -141,7 +141,9 @@ function decodePolyline(encoded) {
 export default function NavigationModule({ setRouteState }) {
   const { user } = useAuth()
   const { formattedTime, shiftActive } = useShiftTimer()
-  const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } = useGpsTracking({ enabled: shiftActive, intervalMs: 5000 })
+  // GPS is ALWAYS enabled in the navigation module — position data is required
+  // for turn-by-turn routing, geofenced arrival detection, and live map updates.
+  const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } = useGpsTracking({ enabled: true, intervalMs: 5000 })
   const isExtendedMode = sessionStorage.getItem('ww_extended_mode') === 'true'
 
   // Developer Mock GPS — mockGps bypasses real GPS (accuracy check also bypassed for dev)

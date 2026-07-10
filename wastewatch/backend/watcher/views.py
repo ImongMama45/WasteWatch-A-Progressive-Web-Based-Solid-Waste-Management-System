@@ -1,5 +1,6 @@
 from django.utils import timezone
 from rest_framework import viewsets, permissions, status, filters
+from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -43,6 +44,13 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
     filterset_fields = ['barangay', 'status', 'issue_type', 'severity']
     search_fields = ['address', 'description']
     ordering_fields = ['created_at', 'severity']
+    throttle_scope = 'report_submission'
+
+    def get_throttles(self):
+        # Only throttle the creation of new reports to prevent spam
+        if self.action == 'create':
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
 
     def get_queryset(self):
         user = self.request.user
@@ -175,14 +183,17 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
         hotspots = GarbageHotspot.objects.select_related('barangay').all()
 
         data = []
+        import re
         for h in hotspots:
             # Try to find the originating report by the sentinel name pattern
             report = None
-            if h.name.startswith('Report #'):
+            if h.name and h.name.startswith('Report #'):
                 try:
-                    report_id = int(h.name.split('Report #')[1].split(' —')[0])
-                    report = GarbageReport.objects.filter(id=report_id).select_related('barangay').first()
-                except (ValueError, IndexError):
+                    match = re.search(r'Report #(\d+)', h.name)
+                    if match:
+                        report_id = int(match.group(1))
+                        report = GarbageReport.objects.filter(id=report_id).select_related('barangay').first()
+                except Exception:
                     pass
 
             data.append({
@@ -197,7 +208,8 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
                 'address':       report.address if report else h.name,
                 'reported':      report.created_at.isoformat() if report else None,
                 'description':   report.description if report else '',
-                'image':         report.image.url if report and report.image else None,
+                'images':        [img.url for img in [report.image, report.image_2, report.image_3, report.image_4] if report and img] if report else [],
+                'user_name':     (report.user.get_full_name() or report.user.username) if report and report.user else None,
                 'rejection_reason': None,
             })
 
@@ -213,6 +225,46 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
             'resolved': qs.filter(status=ReportStatus.RESOLVED).count(),
             'rejected': qs.filter(status=ReportStatus.REJECTED).count(),
         })
+
+    @action(detail=False, methods=['get'])
+    def leaderboard(self, request):
+        """
+        Returns the top barangays based on the number of resolved reports and resolution rate.
+        Used for the Cleanest Barangay Leaderboard widget.
+        """
+        from django.db.models import Count, Q
+        
+        stats = GarbageReport.objects.exclude(barangay__isnull=True).values(
+            'barangay__name'
+        ).annotate(
+            total=Count('id'),
+            resolved=Count('id', filter=Q(status=ReportStatus.RESOLVED))
+        )
+        
+        leaderboard_data = []
+        for item in stats:
+            total = item['total']
+            resolved = item['resolved']
+            rate = int((resolved / total) * 100) if total > 0 else 0
+            
+            # Simple scoring metric: heavily weight resolutions, lightly weight rate
+            score = (resolved * 10) + rate
+            
+            leaderboard_data.append({
+                'barangay': item['barangay__name'],
+                'resolved': resolved,
+                'total': total,
+                'rate': rate,
+                'score': score
+            })
+            
+        # Sort by score descending and return top 5
+        leaderboard_data.sort(key=lambda x: x['score'], reverse=True)
+        
+        for i, entry in enumerate(leaderboard_data):
+            entry['rank'] = i + 1
+            
+        return Response(leaderboard_data[:5])
 
 class CollectionConfirmationViewSet(viewsets.ModelViewSet):
     queryset = CollectionConfirmation.objects.all()
@@ -243,6 +295,10 @@ class GarbageHotspotViewSet(viewsets.ModelViewSet):
         """
         import math
 
+        def fmt_time(dt):
+            """Cross-platform 12-hour time without leading zero (works on Windows & Linux)."""
+            return dt.strftime('%I:%M %p').lstrip('0') if dt else ''
+
         def haversine_km(lat1, lon1, lat2, lon2):
             R = 6371
             phi1, phi2 = math.radians(lat1), math.radians(lat2)
@@ -266,37 +322,93 @@ class GarbageHotspotViewSet(viewsets.ModelViewSet):
             qs = GarbageHotspot.objects.filter(
                 latitude__range=(drv_lat - lat_delta, drv_lat + lat_delta),
                 longitude__range=(drv_lng - lng_delta, drv_lng + lng_delta),
-            ).select_related('barangay')
+            ).select_related('barangay', 'assigned_truck')
         else:
-            qs = GarbageHotspot.objects.select_related('barangay').all()[:50]
+            qs = GarbageHotspot.objects.select_related('barangay', 'assigned_truck').all()[:50]
 
         data = []
         for h in qs:
             dist_km = haversine_km(drv_lat, drv_lng, float(h.latitude), float(h.longitude)) if has_coords else 0
             data.append({
-                'id':          h.id,
-                'severity':    h.severity,
-                'barangay':    h.barangay.name if h.barangay else 'Unknown',
-                'address':     h.name,
-                'description': '',
-                'distanceKm':  round(dist_km, 2),
-                'reportedAt':  h.created_at.strftime('%-I:%M %p') if h.created_at else '',
-                'type':        'overflow',
-                'latitude':    float(h.latitude),
-                'longitude':   float(h.longitude),
+                'id':                  h.id,
+                'severity':            h.severity,
+                'barangay':            h.barangay.name if h.barangay else 'Unknown',
+                'address':             h.name,
+                'description':         '',
+                'distanceKm':          round(dist_km, 2),
+                'reportedAt':          fmt_time(h.created_at),
+                'type':                'overflow',
+                'latitude':            float(h.latitude),
+                'longitude':           float(h.longitude),
+                'assigned_truck_id':   h.assigned_truck_id,
+                'assigned_truck_plate':h.assigned_truck.plate_number if h.assigned_truck else None,
             })
         data.sort(key=lambda x: x['distanceKm'])
         return Response(data)
+
+    @action(detail=False, methods=['get'], url_path='assigned')
+    def assigned(self, request):
+        """
+        Returns hotspots assigned to the requesting driver's truck.
+        The driver must have an active shift with an associated truck.
+        """
+        from driver.models import DriverShift
+        shift = DriverShift.objects.filter(driver=request.user, is_active=True).select_related('truck').first()
+        if not shift or not shift.truck:
+            return Response([])
+        qs = GarbageHotspot.objects.filter(
+            assigned_truck=shift.truck
+        ).select_related('barangay', 'assigned_truck')
+        data = []
+        for h in qs:
+            data.append({
+                'id':                  h.id,
+                'severity':            h.severity,
+                'barangay':            h.barangay.name if h.barangay else 'Unknown',
+                'address':             h.name,
+                'description':         '',
+                'distanceKm':          None,
+                'reportedAt':          fmt_time(h.created_at),
+                'type':                'overflow',
+                'latitude':            float(h.latitude),
+                'longitude':           float(h.longitude),
+                'assigned_truck_id':   h.assigned_truck_id,
+                'assigned_truck_plate':h.assigned_truck.plate_number if h.assigned_truck else None,
+            })
+        return Response(data)
+
+    @action(detail=True, methods=['post'], url_path='assign-truck')
+    def assign_truck(self, request, pk=None):
+        """
+        Admin assigns a truck to a hotspot for direct collection.
+        Body: { truck_id: <int> }  — pass null to un-assign.
+        """
+        from driver.models import Truck
+        if request.user.role not in ('admin', 'brgy_official'):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('Only admins can assign trucks to hotspots.')
+        hotspot = self.get_object()
+        truck_id = request.data.get('truck_id')
+        if truck_id:
+            try:
+                truck = Truck.objects.get(id=truck_id)
+                hotspot.assigned_truck = truck
+            except Truck.DoesNotExist:
+                return Response({'error': 'Truck not found.'}, status=404)
+        else:
+            hotspot.assigned_truck = None
+        hotspot.save(update_fields=['assigned_truck'])
+        return Response({
+            'status': 'ok',
+            'id': hotspot.id,
+            'assigned_truck_id': hotspot.assigned_truck_id,
+            'assigned_truck_plate': hotspot.assigned_truck.plate_number if hotspot.assigned_truck else None,
+        })
 
     @action(detail=True, methods=['post'], url_path='noted')
     def noted(self, request, pk=None):
         """Mark that the driver has noted this hotspot. No model changes needed — returns 200."""
         return Response({'status': 'noted', 'id': pk})
-
-    @action(detail=True, methods=['post'], url_path='add-to-route')
-    def add_to_route(self, request, pk=None):
-        """Placeholder: driver requests to add this hotspot to their current route."""
-        return Response({'status': 'added', 'id': pk})
 
 class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
     """

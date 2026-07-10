@@ -88,6 +88,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 
+# ── GET  /api/auth/csrf/ ──────────────────────────────────────────────────────
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+@ensure_csrf_cookie
+def get_csrf_token_view(request):
+    return Response({'detail': 'CSRF cookie set'})
+
+
 # ── GET  /api/auth/me/ ────────────────────────────────────────────────────────
 @api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
@@ -134,11 +142,12 @@ def api_logout_view(request):
 
 
 # ── POST /api/auth/register/ ─────────────────────────────────────────────────
-@require_http_methods(['POST'])
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
 def api_register_view(request):
-    data = _json_body(request)
-    if data is None:
-        return JsonResponse({'error': 'Invalid JSON payload.'}, status=400)
+    data = request.data
+    if not data:
+        return JsonResponse({'error': 'Invalid payload.'}, status=400)
 
     print(f"DEBUG: api_register_view - Received barangay: {data.get('barangay')}")
 

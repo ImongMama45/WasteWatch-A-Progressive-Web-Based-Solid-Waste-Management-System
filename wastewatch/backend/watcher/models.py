@@ -17,7 +17,6 @@ from django.db import models
 from django.conf import settings  # Use settings.AUTH_USER_MODEL, not User directly
 from cloudinary.models import CloudinaryField
 
-
 # ---------------------------------------------------------------------------
 # Choice classes — defined as classes so they're importable and reusable
 # ---------------------------------------------------------------------------
@@ -90,6 +89,9 @@ class GarbageReport(models.Model):
         null=True,
         blank=True,
     )
+    image_2 = models.ImageField(upload_to='reports/', null=True, blank=True)
+    image_3 = models.ImageField(upload_to='reports/', null=True, blank=True)
+    image_4 = models.ImageField(upload_to='reports/', null=True, blank=True)
 
     # Classification
     issue_type = models.CharField(
@@ -215,6 +217,9 @@ class GarbageHotspot(models.Model):
     barangay = models.ForeignKey('accounts.Barangay', on_delete=models.CASCADE, related_name='hotspots')
     latitude  = models.DecimalField(max_digits=9,  decimal_places=6)
     longitude = models.DecimalField(max_digits=10, decimal_places=6)
+    assigned_truck = models.ForeignKey(
+        'driver.Truck', on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_hotspots'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

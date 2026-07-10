@@ -16,10 +16,12 @@ import { useNavigate } from 'react-router-dom'
 import Navbar from '../../components/Navbar'
 import BottomNav from '../../components/BottomNav'
 import { ICONS } from '../../api/navConfig'
+import api from '../../api/client'
 import OfflineBanner from '../../components/OfflineBanner'
 import OfflineReportBuilder from '../../components/OfflineReportBuilder'
 import OfflineReportQueue from '../../components/OfflineReportQueue'
 import OfflineEventCalendar from '../../components/OfflineEventCalendar'
+import QuickReport from '../../components/QuickReport'
 import {
   GARBAGE_REPORTS as MAPVIEW_GARBAGE_REPORTS,
   LUCENA_CENTER as MAPVIEW_LUCENA_CENTER,
@@ -498,6 +500,7 @@ export default function PublicDashboard() {
   const [heroSlide, setHeroSlide] = useState(0)
   const [annSlide, setAnnSlide] = useState(0)
   const [showBuilder, setShowBuilder] = useState(false)
+  const [leaderboard, setLeaderboard] = useState([])
 
   // Popup state
   const [showSchedulePopup, setShowSchedulePopup] = useState(false)
@@ -515,6 +518,14 @@ export default function PublicDashboard() {
     const t = setInterval(() => setHeroSlide(p => (p + 1) % HERO_SLIDES.length), 4500)
     return () => clearInterval(t)
   }, [])
+
+  useEffect(() => {
+    if (isOnline) {
+      api.get('/api/watcher/reports/leaderboard/')
+        .then(res => setLeaderboard(res.data))
+        .catch(err => console.error('Failed to fetch leaderboard', err))
+    }
+  }, [isOnline])
 
   useEffect(() => {
     if (announcements.length <= 1) return
@@ -585,18 +596,55 @@ export default function PublicDashboard() {
 
   return (
     <div className="ld-root">
+      <style>{`
+        .ld-workspace-col {
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 16px;
+          background: var(--surface-2);
+          padding: 24px;
+          transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .ld-workspace-col:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 12px 32px rgba(0,0,0,0.15);
+        }
+        .fab-quick-report {
+          position: fixed;
+          bottom: 80px;
+          right: 20px;
+          background: var(--surface-2);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 30px;
+          padding: 14px 20px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          color: var(--text);
+          font-weight: 700;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+          z-index: 99;
+          cursor: pointer;
+          transition: transform 0.2s;
+        }
+        .fab-quick-report:hover {
+          transform: scale(1.05);
+        }
+        @media (min-width: 768px) {
+          .fab-quick-report { bottom: 30px; right: 30px; }
+        }
+      `}</style>
       <OfflineBanner />
       <Navbar />
 
-      {/* ════════ HERO — with live/cached map background ════════ */}
+      {/* ════════ HERO ════════ */}
       <section className="ld-hero ld-hero--dark">
-        {/* Non-interactive Leaflet map layer from the full MapView */}
         <HeroMapLayer isOnline={isOnline} />
-
-        {/* Gradient overlay for text readability */}
         <div className="ld-hero__overlay" />
 
-        {/* Offline indicator on map */}
         {!isOnline && (
           <div className="ld-hero__map-badge">
             <span className="ld-hero__map-badge-dot" />
@@ -615,92 +663,29 @@ export default function PublicDashboard() {
             <span className="ld-eyebrow__dot" />
             {currentHero.eyebrow}
           </div>
-
           <h1 className="ld-hero__heading ld-hero__heading--light">{currentHero.title}</h1>
           <p className="ld-hero__sub ld-hero__sub--light">{currentHero.sub}</p>
-
           <div className="ld-hero__actions">
-            <button
-              className="ld-btn ld-btn--hero-primary"
-              onClick={() => setShowBuilder(true)}
-            >
+            <button className="ld-btn ld-btn--hero-primary" onClick={() => setShowBuilder(true)}>
               <IconFlag /> Mag-report Ngayon
             </button>
-            <button
-              className="ld-btn ld-btn--hero-outline"
-              onClick={() => setShowSchedulePopup(true)}
-            >
+            <button className="ld-btn ld-btn--hero-outline" onClick={() => setShowSchedulePopup(true)}>
               <IconCalendar /> Tingnan ang Schedule
             </button>
           </div>
-
-          {/* Hero slide dots */}
           <div className="ld-hero__dots">
             {HERO_SLIDES.map((_, i) => (
-              <button
-                key={i}
-                className={`ld-hero__dot${heroSlide === i ? ' ld-hero__dot--active' : ''}`}
-                onClick={() => setHeroSlide(i)}
-                aria-label={`Slide ${i + 1}`}
-              />
+              <button key={i} className={`ld-hero__dot${heroSlide === i ? ' ld-hero__dot--active' : ''}`} onClick={() => setHeroSlide(i)} aria-label={`Slide ${i + 1}`} />
             ))}
           </div>
         </div>
 
-        {/* Floating stat chips */}
-        <div className="ld-hero__chips">
-          <div className="ld-chip ld-chip--dark">
-            <span className="ld-chip__dot ld-chip__dot--green" />
-            <div>
-              <div className="ld-chip__value">33</div>
-              <div className="ld-chip__label">Barangays</div>
-            </div>
-          </div>
-          <div className="ld-chip ld-chip--dark">
-            <span className="ld-chip__dot ld-chip__dot--amber" />
-            <div>
-              <div className="ld-chip__value">{stats.total_reports || 0}</div>
-              <div className="ld-chip__label">Total Reports</div>
-            </div>
-          </div>
-          <div className="ld-chip ld-chip--dark">
-            <span className="ld-chip__dot ld-chip__dot--blue" />
-            <div>
-              <div className="ld-chip__value">PWA</div>
-              <div className="ld-chip__label">Works Offline</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Pending sync pill */}
         {pendingCount > 0 && (
           <div className="ld-hero__sync-pill" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ width: 14, height: 14, display: 'inline-flex' }}>{ICONS.clock}</span> {pendingCount} report{pendingCount > 1 ? 's' : ''} pending sync
           </div>
         )}
       </section>
-
-      {/* ════════ STATS BAR ════════ */}
-      <div className="ld-stats-wrap">
-        <div className="ld-stats">
-          <div className="ld-stat">
-            <div className="ld-stat__value">33</div>
-            <div className="ld-stat__label">Barangays Covered</div>
-          </div>
-          <div className="ld-stat">
-            <div className="ld-stat__value">{stats.active_trucks || 0}</div>
-            <div className="ld-stat__label">Active Trucks</div>
-          </div>
-          <div className="ld-stat">
-            <div className="ld-stat__value">{stats.hotspots || 0}</div>
-            <div className="ld-stat__label">Hotspots Detected</div>
-          </div>
-          <div className="ld-stat">
-            <div className="ld-stat__value">{stats.resolved_reports || 0}</div>
-            <div className="ld-stat__label">Issues Resolved</div>
-          </div>
-        </div>
-      </div>
 
       {/* ════════ FEATURE CARDS ════════ */}
       <div className="ld-features-wrap">
@@ -731,150 +716,32 @@ export default function PublicDashboard() {
         </div>
       </div>
 
-      {/* ════════ COMBO SECTION: SCHEDULE + REPORTS ════════ */}
-      <div className="ld-combo-wrap">
-        <div className="ld-combo-inner">
-          <div className="ld-combo-grid">
-
-            {/* ── LEFT: Collection Schedule ── */}
-            <div className="ld-combo-col">
-              <div className="ld-section-head">
-                <div>
-                  <div className="ld-eyebrow">
-                    <span className="ld-eyebrow__dot" /> Inyong Zone
-                  </div>
-                  <h2 className="ld-section-title">Collection Schedule</h2>
-                </div>
-                <button
-                  className="ld-btn ld-btn--outline-green ld-btn--sm"
-                  onClick={() => setShowSchedulePopup(true)}
-                >
-                  View Schedule →
-                </button>
-              </div>
-
-              {/* Next collection badge */}
-              <div className="ld-next-badge">
-                <div className="ld-next-badge__icon"><IconCalendar /></div>
-                <div style={{ flex: 1 }}>
-                  <div className="ld-next-badge__label">Susunod na Koleksyon</div>
-                  <div className="ld-next-badge__row">
-                    <span className="ld-next-badge__day">{nextCollection?.day || 'Lunes'}</span>
-                    <span className="ld-next-badge__pill">
-                      {nextCollection?.time?.split('–')[0]?.trim() || '6:00 AM'}
-                    </span>
-                    <span className="ld-next-badge__pill">{nextCollection?.zone || 'Brgy. Isabang'}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Compact schedule list (first 4 items) */}
-              <div className="ld-schedule-list">
-                <div className="ld-schedule-head">
-                  <span className="ld-schedule-head-title">Lingguhang Iskedyul</span>
-                  {!isOnline && <span className="ld-cached">CACHED</span>}
-                </div>
-                {schedule.slice(0, 4).map((s, i) => (
-                  <div key={i} className={`ld-schedule-item${s.isNext ? ' ld-schedule-item--next' : ''}`}>
-                    <div className={`ld-sched-icon ${s.status === 'upcoming' ? 'ld-sched-icon--check' : 'ld-sched-icon--cross'}`}>
-                      {s.status === 'upcoming' ? <IconCheck /> : <IconX />}
-                    </div>
-                    <div>
-                      <div className="ld-sched-day">{s.day}</div>
-                      <div className="ld-sched-zone">{s.zone}</div>
-                    </div>
-                    <div className="ld-sched-time">{s.time}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Action buttons */}
-              <div className="ld-combo-actions">
-                <button
-                  className="ld-btn ld-btn--outline ld-btn--sm"
-                  onClick={() => setShowCalendarPopup(true)}
-                >
-                  <IconCalendar /> Event Calendar
-                </button>
-                <button
-                  className="ld-btn ld-btn--outline-green ld-btn--sm"
-                  onClick={() => setShowSchedulePopup(true)}
-                >
-                  Full Schedule →
-                </button>
-              </div>
-            </div>
-
-            {/* ── RIGHT: Report Queue ── */}
-            <div className="ld-combo-col">
-              <div className="ld-section-head">
-                <div>
-                  <div className="ld-eyebrow">
-                    <span className="ld-eyebrow__dot" /> Inyong mga Report
-                  </div>
-                  <h2 className="ld-section-title">Mga Naipadala</h2>
-                </div>
-                <button
-                  className="ld-btn ld-btn--primary ld-btn--sm"
-                  onClick={() => setShowBuilder(true)}
-                >
-                  + Bagong Report
-                </button>
-              </div>
-              <OfflineReportQueue
-                reports={reports}
-                isSyncing={isSyncing || reportsSyncing}
-                isOnline={isOnline}
-                lastSync={lastSyncAt}
-                pendingCount={pendingCount}
-                failedCount={failedCount}
-                onSyncNow={handleSyncNow}
-                onRetry={retryReport}
-                onNewReport={() => setShowBuilder(true)}
-                onReportClick={handleReportClick}
-              />
-            </div>
-
-          </div>
-        </div>
-      </div>
-
-      {/* ════════ ANNOUNCEMENTS ════════ */}
+      {/* ════════ ANNOUNCEMENTS (MOVED UP) ════════ */}
       <div className="ld-ann-wrap">
         <div className="ld-ann-inner">
           <div className="ld-section-head">
             <div>
               <div className="ld-eyebrow">
                 <span className="ld-eyebrow__dot" /> Balita
-                {isStale && !isRefreshing && (
-                  <span className="ld-eyebrow__tag ld-eyebrow__tag--amber">CACHED</span>
-                )}
-                {isRefreshing && (
-                  <span className="ld-eyebrow__tag ld-eyebrow__tag--blue">Nag-a-update…</span>
-                )}
+                {isStale && !isRefreshing && <span className="ld-eyebrow__tag ld-eyebrow__tag--amber">CACHED</span>}
+                {isRefreshing && <span className="ld-eyebrow__tag ld-eyebrow__tag--blue">Nag-a-update…</span>}
               </div>
               <h2 className="ld-section-title">Mga Anunsyo</h2>
             </div>
-            <button
-              className="ld-btn ld-btn--outline-green ld-btn--sm"
-              onClick={() => navigate('/announcements')}
-            >
+            <button className="ld-btn ld-btn--outline-green ld-btn--sm" onClick={() => navigate('/announcements')}>
               Lahat ng Balita →
             </button>
           </div>
 
           <div className="ld-ann-card">
             <div className="ld-ann-img-wrap">
-              <img key={annSlide} src={currentAnn?.image} alt={currentAnn?.title} className="ld-ann-img" />
+              <img key={annSlide} src={currentAnn?.image_url || currentAnn?.image} alt={currentAnn?.title} className="ld-ann-img" />
             </div>
             <div className="ld-ann-content">
               <span className="ld-ann-category">📣 Anunsyo</span>
               <h3 className="ld-ann-title">{currentAnn?.title}</h3>
-              <p className="ld-ann-body">{currentAnn?.body}</p>
-              <button
-                className="ld-btn ld-btn--primary ld-btn--sm"
-                onClick={() => navigate(`/announcements/${currentAnn?.id}`)}
-              >
+              <p className="ld-ann-body">{currentAnn?.description || currentAnn?.body}</p>
+              <button className="ld-btn ld-btn--primary ld-btn--sm" onClick={() => navigate('/announcements')}>
                 Basahin pa →
               </button>
             </div>
@@ -896,19 +763,193 @@ export default function PublicDashboard() {
         </div>
       </div>
 
-      {/* ════════ MID CTA ════════ */}
-      <div className="ld-cta ld-cta--mid">
-        <div className="ld-cta__inner">
-          <div className="ld-cta__track">
-            <span>I-track</span> · <span>Subaybayan</span> · <span>Mag-report</span>
+      {/* ════════ CITIZEN WORKSPACE (Glassmorphism applied) ════════ */}
+      <div className="ld-combo-wrap">
+        <div className="ld-combo-inner">
+          <div className="ld-section-head" style={{ marginBottom: 32 }}>
+            <div>
+              <div className="ld-eyebrow">
+                <span className="ld-eyebrow__dot" /> Dashboard
+              </div>
+              <h2 className="ld-section-title">Citizen Workspace</h2>
+            </div>
           </div>
-          <p className="ld-cta__quote">"Isang App para sa Lahat ng Waste Management"</p>
-          <p className="ld-cta__sub">
-            Ang kumpletong platform ng solid waste management para sa mga mamamayan, field teams, at administrasyon ng Lucena City.
-          </p>
-          <button className="ld-btn ld-btn--primary" onClick={() => navigate('/about')}>
-            Alamin Kung Paano Gumagana →
-          </button>
+
+          <div className="ld-combo-grid">
+            {/* ── LEFT: Collection Schedule ── */}
+            <div className="ld-combo-col ld-workspace-col">
+              <div className="ld-section-head">
+                <div>
+                  <h3 className="ld-section-title" style={{ fontSize: '1.2rem' }}>Collection Schedule</h3>
+                </div>
+                <button className="ld-btn ld-btn--outline-green ld-btn--sm" onClick={() => setShowSchedulePopup(true)}>
+                  View Schedule →
+                </button>
+              </div>
+
+              <div className="ld-next-badge">
+                <div className="ld-next-badge__icon"><IconCalendar /></div>
+                <div style={{ flex: 1 }}>
+                  <div className="ld-next-badge__label">Susunod na Koleksyon</div>
+                  <div className="ld-next-badge__row">
+                    <span className="ld-next-badge__day">{nextCollection?.day || 'Lunes'}</span>
+                    <span className="ld-next-badge__pill">{nextCollection?.time?.split('–')[0]?.trim() || '6:00 AM'}</span>
+                    <span className="ld-next-badge__pill">{nextCollection?.zone || 'Brgy. Isabang'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="ld-schedule-list">
+                <div className="ld-schedule-head">
+                  <span className="ld-schedule-head-title">Lingguhang Iskedyul</span>
+                  {!isOnline && <span className="ld-cached">CACHED</span>}
+                </div>
+                {schedule.slice(0, 4).map((s, i) => (
+                  <div key={i} className={`ld-schedule-item${s.isNext ? ' ld-schedule-item--next' : ''}`}>
+                    <div className={`ld-sched-icon ${s.status === 'upcoming' ? 'ld-sched-icon--check' : 'ld-sched-icon--cross'}`}>
+                      {s.status === 'upcoming' ? <IconCheck /> : <IconX />}
+                    </div>
+                    <div>
+                      <div className="ld-sched-day">{s.day}</div>
+                      <div className="ld-sched-zone">{s.zone}</div>
+                    </div>
+                    <div className="ld-sched-time">{s.time}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="ld-combo-actions">
+                <button className="ld-btn ld-btn--outline ld-btn--sm" onClick={() => setShowCalendarPopup(true)}>
+                  <IconCalendar /> Event Calendar
+                </button>
+              </div>
+            </div>
+
+            {/* ── RIGHT: Report Queue ── */}
+            <div className="ld-combo-col ld-workspace-col">
+              <div className="ld-section-head">
+                <div>
+                  <h3 className="ld-section-title" style={{ fontSize: '1.2rem' }}>Mga Naipadala</h3>
+                </div>
+              </div>
+              <OfflineReportQueue
+                reports={reports}
+                isSyncing={isSyncing || reportsSyncing}
+                isOnline={isOnline}
+                lastSync={lastSyncAt}
+                pendingCount={pendingCount}
+                failedCount={failedCount}
+                onSyncNow={handleSyncNow}
+                onRetry={retryReport}
+                onNewReport={() => window.dispatchEvent(new Event('open-quick-report'))}
+                onReportClick={handleReportClick}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ════════ CITY OVERVIEW (Moved Down) ════════ */}
+      <div
+        className="ld-stats-wrap"
+        style={{
+          marginTop: 40,
+          background: `url('/cgso-real.jpg') center/cover no-repeat`
+        }}
+      >
+        <div style={{
+          paddingTop: 80,
+          background: `
+            linear-gradient(
+              to bottom, 
+              rgba(13, 31, 15, 0.82), 
+              rgba(46, 125, 50, 0.85)
+            )
+          `,
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)'
+        }}>
+          <div style={{ maxWidth: 1000, margin: '0 auto', padding: '0 24px', textAlign: 'center', marginBottom: 40 }}>
+            <div className="ld-eyebrow" style={{ justifyContent: 'center', color: 'rgba(0, 0, 0, 0.85)', border: '1px solid rgba(255,255,255,0.25)', backdropFilter: 'blur(4px)' }}>
+              <span className="ld-eyebrow__dot" style={{ background: 'black' }} /> City Overview
+            </div>
+            <h2 className="ld-section-title" style={{ color: 'white', textShadow: '0 2px 10px rgba(0,0,0,0.5)', marginBottom: 12 }}>Ang Epekto Natin</h2>
+            <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '1.05rem', maxWidth: 650, margin: '0 auto', lineHeight: 1.5 }}>
+              Tingnan ang live na estado ng pamamahala ng basura sa Lucena City. Ang datos na ito ay mula sa pinagsamang report ng mga mamamayan at mabilis na aksyon ng pamahalaan.
+            </p>
+          </div>
+          <div className="ld-stats">
+            <div className="ld-stat">
+              <div className="ld-stat__value">33</div>
+              <div className="ld-stat__label" style={{ marginBottom: 6 }}>Barangays Covered</div>
+              <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)', lineHeight: 1.3 }}>Lahat ng sakop na lugar ng WasteWatch system</div>
+            </div>
+            <div className="ld-stat">
+              <div className="ld-stat__value">{stats.active_trucks || 0}</div>
+              <div className="ld-stat__label" style={{ marginBottom: 6 }}>Active Trucks</div>
+              <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)', lineHeight: 1.3 }}>Mga garbage truck na kasalukuyang nasa byahe</div>
+            </div>
+            <div className="ld-stat">
+              <div className="ld-stat__value">{stats.hotspots || 0}</div>
+              <div className="ld-stat__label" style={{ marginBottom: 6 }}>Hotspots Detected</div>
+              <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)', lineHeight: 1.3 }}>Mga kalsadang madalas tapunan ng basura</div>
+            </div>
+            <div className="ld-stat">
+              <div className="ld-stat__value">{stats.resolved_reports || 0}</div>
+              <div className="ld-stat__label" style={{ marginBottom: 6 }}>Issues Resolved</div>
+              <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)', lineHeight: 1.3 }}>Mga report na matagumpay na nakolekta at nalinis</div>
+            </div>
+          </div>
+
+          {/* Cleanest Barangay Leaderboard */}
+          <div style={{ maxWidth: 700, margin: '50px auto 0', background: 'rgba(13,31,15,0.4)', backdropFilter: 'blur(16px)', borderRadius: 20, padding: 32, border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ color: 'white', marginTop: 0, marginBottom: 6, fontSize: '1.4rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+              🏆 Top 3 Cleanest Barangays
+            </h3>
+            <p style={{ color: 'rgba(255,255,255,0.65)', textAlign: 'center', fontSize: '0.9rem', marginTop: 0, marginBottom: 24, lineHeight: 1.4 }}>
+              Niraranggo (PTS) base sa bilis at dami ng nalutas na report. Mas mataas na points,<br />mas aktibong nililinis ng barangay ang kanilang nasasakupan.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {leaderboard.length > 0 ? leaderboard.slice(0, 3).map((item, idx) => (
+                <div key={idx} style={{ display: 'flex', alignItems: 'center', background: 'rgba(0,0,0,0.25)', padding: '16px 20px', borderRadius: 12, transition: 'transform 0.2s', border: '1px solid rgba(255,255,255,0.05)' }} className="ld-leaderboard-item">
+                  <div style={{ fontSize: '1.75rem', fontWeight: 800, color: idx === 0 ? '#fbbf24' : idx === 1 ? '#94a3b8' : '#b45309', marginRight: 20, minWidth: 32, textAlign: 'center' }}>
+                    #{item.rank}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ color: 'white', fontWeight: 700, fontSize: '1.2rem', marginBottom: 2 }}>{item.barangay}</div>
+                    <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: '0.9rem', display: 'flex', gap: 12 }}>
+                      <span>{item.resolved} resolved</span>
+                      <span style={{ color: 'rgba(255,255,255,0.3)' }}>•</span>
+                      <span>{item.rate}% success rate</span>
+                    </div>
+                  </div>
+                  <div style={{ color: '#81c784', fontWeight: 800, fontSize: '1.4rem', textAlign: 'right' }}>
+                    {item.score} <span style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)', display: 'block', fontWeight: 600, marginTop: -4 }}>PTS</span>
+                  </div>
+                </div>
+              )) : (
+                <div style={{ color: 'rgba(255,255,255,0.6)', textAlign: 'center', padding: '30px 0', fontSize: '0.95rem' }}>
+                  {!isOnline ? 'Kumonekta sa internet para makita ang leaderboard.' : 'Nilo-load ang data...'}
+                </div>
+              )}
+            </div>
+          </div>
+          {/* ════════ MID CTA ════════ */}
+          <div className="ld-cta ld-cta--mid" style={{ background: 'rgba(13,31,15,0.2)', marginTop: 80, backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+            <div className="ld-cta__inner">
+              <div className="ld-cta__track">
+                <span>I-track</span> · <span>Subaybayan</span> · <span>Mag-report</span>
+              </div>
+              <p className="ld-cta__quote">"Isang App para sa Lahat ng Waste Management"</p>
+              <p className="ld-cta__sub">
+                Ang kumpletong platform ng solid waste management para sa mga mamamayan, field teams, at administrasyon ng Lucena City.
+              </p>
+              <button className="ld-btn ld-btn--primary" onClick={() => navigate('/about')}>
+                Alamin Kung Paano Gumagana →
+              </button>
+            </div>
+          </div>
+
         </div>
       </div>
 
@@ -947,19 +988,12 @@ export default function PublicDashboard() {
           </div>
         </div>
         <div className="ld-footer__bottom">
-          <p className="ld-footer__copy">© 2026 BS Information Technology — CSTC · Para sa thesis lamang · Lucena City</p>
+          <p className="ld-footer__copy">© 2026 BS Information Technology — DLL · Para sa thesis lamang · Lucena City</p>
           <p className="ld-footer__contact">WasteWatch · Lucena City CENRO</p>
         </div>
       </footer>
 
       <BottomNav />
-
-      {/* ════════ REPORT BUILDER SHEET ════════ */}
-      <OfflineReportBuilder
-        isOpen={showBuilder}
-        onClose={() => setShowBuilder(false)}
-        onSubmit={handleSubmitReport}
-      />
 
       {/* ════════ SCHEDULE POPUP ════════ */}
       {showSchedulePopup && (
@@ -1004,20 +1038,35 @@ export default function PublicDashboard() {
               ))}
             </div>
 
-            {/* Sync status for selected barangay */}
+            {/* ════════ LIVE TRUCK STATUS INDICATOR ════════ */}
             {selectedBarangay !== 'all' && (
-              <div className="ld-brgy-sync-row">
-                <span className={`ld-brgy-sync-dot${brgyIsLive ? ' ld-brgy-sync-dot--live' : brgyIsCached ? ' ld-brgy-sync-dot--cached' : ''}`} />
-                <span className="ld-brgy-sync-label">
-                  {brgyIsLive
-                    ? `Live data — synced for ${selectedBarangay}`
-                    : brgyIsCached
-                      ? `Cached schedule for ${selectedBarangay}`
-                      : isOnline
-                        ? `Loading schedule for ${selectedBarangay}…`
-                        : `Offline — no cached data for ${selectedBarangay}`
-                  }
-                </span>
+              <div style={{ margin: '16px 20px 0', background: 'var(--ld-surface-2)', border: '1px solid var(--ld-line)', borderRadius: 12, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 14 }}>
+                <div style={{ position: 'relative', width: 44, height: 44, borderRadius: '50%', background: 'rgba(46, 125, 50, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ld-green)' }}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="1" y="3" width="15" height="13" rx="1" ry="1"></rect>
+                    <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon>
+                    <circle cx="5.5" cy="18.5" r="2.5"></circle>
+                    <circle cx="18.5" cy="18.5" r="2.5"></circle>
+                  </svg>
+                  {brgyIsLive && scheduleForSelected.some(s => s.isNext) && (
+                    <span style={{ position: 'absolute', top: -2, right: -2, width: 12, height: 12, borderRadius: '50%', background: '#4caf50', animation: 'ldPulse 1.5s infinite', border: '2px solid var(--ld-surface-2)' }} />
+                  )}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--ld-text)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    Live Truck Radar
+                    {!isOnline && <span className="ld-brgy-sync-dot ld-brgy-sync-dot--cached" style={{ animation: 'none' }} />}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--ld-text-3)', marginTop: 2, lineHeight: 1.3 }}>
+                    {brgyIsLive ? (
+                      scheduleForSelected.some(s => s.isNext)
+                        ? <span style={{ color: 'var(--ld-green)', fontWeight: 600 }}>Trak ay kasalukuyang umiikot sa lugar.</span>
+                        : 'Walang active truck operation ngayon.'
+                    ) : brgyIsCached ? (
+                      'Naka-pause ang tracker (Offline mode)'
+                    ) : 'Kumonekta sa internet para sa live updates.'}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -1114,6 +1163,9 @@ export default function PublicDashboard() {
           </div>
         </>
       )}
+
+      {/* ════════ FLOATING QUICK REPORT BUTTON ════════ */}
+      <QuickReport />
 
     </div>
   )

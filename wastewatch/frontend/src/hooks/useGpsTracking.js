@@ -21,7 +21,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import api from '../api/client'
-import useShiftTimer from '../hooks/useShiftTimer' // ← ADD THIS
+import useShiftTimer from '../hooks/useShiftTimer'
 
 const DEFAULT_INTERVAL_MS = 10_000   // send to backend every 10 s
 const SYNC_FAIL_THRESHOLD = 3       // warn after this many consecutive failures
@@ -29,6 +29,20 @@ const GEO_OPTIONS = {
   enableHighAccuracy: true,
   maximumAge: 0,
   timeout: 20_000,
+}
+
+/**
+ * Fires a one-shot getCurrentPosition on first call to prime the browser
+ * permission prompt.  Silently ignores errors — the watchPosition loop below
+ * will surface any real failure through the error state.
+ */
+function primeGpsPermission() {
+  if (!navigator.geolocation) return
+  navigator.geolocation.getCurrentPosition(
+    () => { /* permission granted — watchPosition takes over */ },
+    () => { /* permission denied / unavailable — watchPosition will report */ },
+    { enableHighAccuracy: true, timeout: 10_000, maximumAge: Infinity },
+  )
 }
 
 export default function useGpsTracking({
@@ -74,6 +88,15 @@ export default function useGpsTracking({
       })
   }, [intervalMs])
 
+  // ── Prime GPS permission on mount — always, regardless of `enabled` ────────
+  // This triggers the browser's location permission dialog at the earliest
+  // opportunity (component mount) rather than lazily when tracking starts.
+  // All driver process components must have GPS available as a baseline.
+  useEffect(() => {
+    primeGpsPermission()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // ── Start / stop watchPosition ─────────────────────────────────────────────
   useEffect(() => {
     if (!enabled) {
@@ -98,6 +121,10 @@ export default function useGpsTracking({
         setAccuracy(Math.round(acc))
         setError(null)
         setIsTracking(true)
+        
+        sessionStorage.setItem('ww_gps_lat', String(lat))
+        sessionStorage.setItem('ww_gps_lng', String(lng))
+        
         if (syncEnabled) syncToBackend(lat, lng, acc)
       },
       (err) => {

@@ -14,6 +14,7 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-route
 import { AuthProvider } from './context/AuthContext'
 import PrivateRoute from './components/PrivateRoute'
 import DashboardLayout from './components/DashboardLayout'
+import ShiftStatusBanner from './components/ShiftStatusBanner'
 
 // Public pages
 import PublicDashboard from './pages/dashboard/PublicDashboard'
@@ -21,7 +22,6 @@ import AuthModal from './components/AuthModal'
 // Authenticated pages — import these from your existing files
 // (these are placeholders — wire up your actual page components)
 import DashboardRouter from './pages/dashboard/DashboardRouter'
-import ReportForm from './pages/ReportForm'
 import VerificationTasks from './pages/watcher/VerificationTasksModule'
 import MapView from './pages/MapView'
 import EscalateToAdmin from './pages/EscalateToAdmin'
@@ -77,6 +77,7 @@ export default function App() {
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
+        <ShiftStatusBanner />
         <Routes>
 
           {/* ── PUBLIC — no auth required, offline-capable ── */}
@@ -242,12 +243,6 @@ export default function App() {
               </DashboardLayout>
             </PrivateRoute>
 
-          } />
-
-          <Route path="/report/submit" element={
-            <PrivateRoute>
-              <ReportForm />
-            </PrivateRoute>
           } />
 
           {/* ── DUMPSITE MODULE ── */}

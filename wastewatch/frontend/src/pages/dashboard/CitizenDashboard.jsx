@@ -22,7 +22,7 @@ import HomeCarousel from '../../components/carousel/HomeCarousel'
 import OfflineReportBuilder from '../../components/OfflineReportBuilder'
 import { useOfflineReports } from '../../hooks/useOfflineReports'
 import { ICONS } from '../../api/navConfig'
-
+import DispatchCard from '../../components/DispatchCard'
 const STATUS_META = {
   pending: { label: 'Pending', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' },
   approved: { label: 'Approved', color: '#22c55e', bg: 'rgba(34,197,94,0.1)' },
@@ -55,8 +55,15 @@ export default function CitizenDashboard() {
   const [showBuilder, setShowBuilder] = useState(false)
   const [announcements, setAnnouncements] = useState([])
 
+  const userBrgy = user?.barangay_name || user?.barangay?.name || '';
+  const filteredSchedule = schedule.filter(s => {
+    if (!userBrgy) return true;
+    return s.zone && s.zone.toLowerCase().includes(userBrgy.toLowerCase());
+  });
 
-  const nextDay = schedule.find(s => s.isNext) || schedule[0]
+  const nextDay = filteredSchedule.find(s => s.isNext) || filteredSchedule[0]
+
+  const [activeDispatch, setActiveDispatch] = useState(null)
 
   useEffect(() => {
     Promise.all([
@@ -65,13 +72,37 @@ export default function CitizenDashboard() {
       api.get('/api/watcher/reports/stats/').catch(() => ({ data: { total: 0, pending: 0, resolved: 0 } })),
       api.get('/api/watcher/hotspots/').catch(() => ({ data: [] })),
       api.get('/api/public/schedule/').catch(() => ({ data: [] })),
+      api.get('/api/public/live/').catch(() => ({ data: [] })),
     ])
-      .then(([r, s, h, sc]) => {
-        if (r.data) setMyReports(r.data.slice(0, 5))
-        if (s.data) setStats(s.data)
-        if (h.data) setHotspots(h.data.slice(0, 4))
-        if (sc.data) setSchedule(sc.data)
-        if (ann.data) setAnnouncements(ann.data)
+      .then(([newsRes, reportsRes, statsRes, hotspotsRes, scheduleRes, liveRes]) => {
+        if (newsRes.data) setAnnouncements(newsRes.data)
+        if (reportsRes.data) setMyReports(reportsRes.data.slice(0, 5))
+        if (statsRes.data) setStats(statsRes.data)
+        if (hotspotsRes.data) {
+          setHotspots(hotspotsRes.data.slice(0, 4).map(h => {
+            let pType = 'Mixed';
+            if (h.name) {
+              if (h.name.includes('—')) pType = h.name.split('—')[1].trim();
+              else if (h.name.includes('-')) pType = h.name.split('-')[1].trim();
+              else pType = h.name;
+            }
+            return {
+              ...h,
+              count: h.report_count || 0,
+              type: pType,
+              status: h.severity || 'low'
+            }
+          }))
+        }
+        if (scheduleRes.data) setSchedule(scheduleRes.data)
+
+        if (liveRes && liveRes.data) {
+          const userBrgy = user?.barangay_name || user?.barangay?.name;
+          if (userBrgy) {
+            const dispatched = liveRes.data.find(d => d.barangays && d.barangays.includes(userBrgy));
+            if (dispatched) setActiveDispatch(dispatched);
+          }
+        }
       })
       .finally(() => setLoading(false))
 
@@ -81,7 +112,7 @@ export default function CitizenDashboard() {
         .then(res => setCrewAssignment(res.data))
         .catch(() => setCrewAssignment(null))
     }
-  }, [user?.employee_type])
+  }, [user?.employee_type, user?.barangay_name, user?.barangay?.name])
 
   const handleSubmitReport = useCallback(async (fields) => {
     await addReport(fields)
@@ -125,6 +156,11 @@ export default function CitizenDashboard() {
             {user?.barangay_name || 'Your Barangay'} · Stay updated on waste collection in your area
           </p>
         </div>
+
+        <DispatchCard
+          dispatchData={activeDispatch}
+          userBarangay={user?.barangay_name || user?.barangay?.name}
+        />
 
         <div className='mobile-schedule'>
           <HomeCarousel role="citizen" userBarangay={user?.barangay_name} onReport={() => setShowBuilder(true)} />
@@ -468,6 +504,16 @@ export default function CitizenDashboard() {
                           }}>
                             {report.address || report.barangay_name}
                           </div>
+                          {/* Rejection reason — citizen-facing */}
+                          {report.status === 'rejected' && report.rejection_reason && (
+                            <div style={{
+                              fontSize: 11, color: 'var(--danger)', marginTop: 4,
+                              display: 'flex', alignItems: 'flex-start', gap: 4, lineHeight: 1.4,
+                            }}>
+                              <span style={{ flexShrink: 0 }}>⚠️</span>
+                              <span>Reason: {report.rejection_reason}</span>
+                            </div>
+                          )}
                         </div>
 
                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -532,11 +578,16 @@ export default function CitizenDashboard() {
 
               {/* Full schedule */}
               <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                {schedule.map((s, i) => (
+                {filteredSchedule.length === 0 ? (
+                  <div style={{ padding: '30px 20px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <div style={{ marginBottom: 8 }}><span style={{ width: 24, height: 24, display: 'inline-block', opacity: 0.5 }}>{ICONS.schedule}</span></div>
+                    No specific schedule listed for {userBrgy || 'your area'}.
+                  </div>
+                ) : filteredSchedule.map((s, i) => (
                   <div key={i} style={{
                     display: 'flex', alignItems: 'center', gap: 12,
                     padding: '13px 16px',
-                    borderBottom: i < schedule.length - 1 ? '1px solid var(--border)' : 'none',
+                    borderBottom: i < filteredSchedule.length - 1 ? '1px solid var(--border)' : 'none',
                     background: s.isNext ? 'rgba(46,204,113,0.03)' : 'transparent',
                   }}>
                     {/* Day icon */}
