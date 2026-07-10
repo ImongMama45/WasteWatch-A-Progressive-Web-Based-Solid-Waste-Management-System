@@ -117,6 +117,8 @@ def me_view(request):
 
 
 # ── POST /api/auth/login/ ─────────────────────────────────────────────────────
+from django.views.decorators.csrf import csrf_exempt
+@csrf_exempt
 @require_http_methods(['POST'])
 def api_login_view(request):
     data = _json_body(request)
@@ -135,6 +137,7 @@ def api_login_view(request):
 
 
 # ── POST /api/auth/logout/ ────────────────────────────────────────────────────
+@csrf_exempt
 @require_http_methods(['POST'])
 def api_logout_view(request):
     logout(request)
@@ -142,6 +145,7 @@ def api_logout_view(request):
 
 
 # ── POST /api/auth/register/ ─────────────────────────────────────────────────
+@csrf_exempt
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def api_register_view(request):

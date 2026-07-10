@@ -241,6 +241,7 @@ CSRF_TRUSTED_ORIGINS = [
     'https://*.ngrok-free.app',
     'https://*.ngrok-free.dev',
     'https://*.vercel.app',
+    'https://waste-watch-a-progressive-web-based.vercel.app',
 ]
 if os.environ.get('VERCEL_FRONTEND_URL'):
     CSRF_TRUSTED_ORIGINS.append(os.environ.get('VERCEL_FRONTEND_URL'))
