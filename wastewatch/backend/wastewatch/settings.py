@@ -227,6 +227,11 @@ if lan_ip:
 
 CORS_ALLOW_CREDENTIALS = True   # Needed for session-based auth
 
+from corsheaders.defaults import default_headers
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'ngrok-skip-browser-warning',
+]
+
 CSRF_TRUSTED_ORIGINS = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
