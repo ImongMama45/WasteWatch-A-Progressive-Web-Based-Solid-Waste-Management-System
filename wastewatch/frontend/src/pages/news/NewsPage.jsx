@@ -1,11 +1,14 @@
-import { useState, useMemo } from 'react'
-import { Bell, PlusCircle, X, Megaphone, AlertTriangle, Newspaper, Send, Save, CheckCircle } from 'lucide-react'
-import DashboardLayout from '../../components/DashboardLayout'
+import { useState, useMemo, useRef } from 'react'
+import { Bell, PlusCircle, X, Megaphone, AlertTriangle, Newspaper, Send, Save, CheckCircle, Image as ImageIcon } from 'lucide-react'
+import Navbar from '../../components/Navbar'
+import BottomNav from '../../components/BottomNav'
 import { useAuth } from '../../context/AuthContext'
+import { useNotification } from '../../context/NotificationContext'
 import { useNewsItems } from '../../hooks/useNewsItems'
 import { useEmergencyAlerts } from '../../hooks/useEmergencyAlerts'
 import { useBarangaySpotlights } from '../../hooks/useBarangaySpotlights'
 import api from '../../api/client'
+import { getApiErrorMessage } from '../../utils/notificationHelpers'
 
 import EmergencyAlertBanner from './components/EmergencyAlertBanner'
 import FeaturedNewsCarousel from './components/FeaturedNewsCarousel'
@@ -25,7 +28,10 @@ const PRIORITY_OPTIONS = [
   { value: 'medium', label: 'Medium' },
   { value: 'high',   label: 'High — Urgent' },
 ]
-const CATEGORIES = ['General', 'Service Updates', 'Community', 'Rankings', 'Emergency']
+const CATEGORIES = [
+  'General', 'Announcements', 'News', 'Service Updates',
+  'Community', 'Cleanup Drives', 'Rankings', 'Advisories', 'Emergency',
+]
 
 const EMPTY_FORM = {
   type: 'announcement', category: 'General',
@@ -38,26 +44,49 @@ function CreatePostModal({ barangays, onClose, onPublished }) {
   const [form,      setForm]      = useState(EMPTY_FORM)
   const [saving,    setSaving]    = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [imageFile,    setImageFile]    = useState(null)
+  const [imagePreview, setImagePreview] = useState(null)
+  const [dragging, setDragging] = useState(false)
+  const fileInputRef = useRef(null)
+  const { notify } = useNotification()
 
   function set(key, val) { setForm(f => ({ ...f, [key]: val })) }
 
+  function applyFile(file) {
+    if (!file || !file.type.startsWith('image/')) return
+    setImageFile(file)
+    const reader = new FileReader()
+    reader.onload = e => setImagePreview(e.target.result)
+    reader.readAsDataURL(file)
+  }
+  function removeImage() { setImageFile(null); setImagePreview(null) }
+
   async function handleSubmit(isDraft = false) {
     if (!form.title.trim() || !form.body.trim()) {
-      alert('Title and content are required.')
+      notify({ variant: 'error-solid', message: 'Title and content are required.' })
       return
     }
     setSaving(true)
     try {
       const endpoint = form.type === 'emergency' ? '/api/news/alerts/' : '/api/news/items/'
-      const payload  = { ...form, is_active: !isDraft, description: form.body }
-      if (!payload.barangay) delete payload.barangay
-      await api.post(endpoint, payload)
+      const fd = new FormData()
+      fd.append('title',       form.title)
+      fd.append('description', form.body)
+      fd.append('type',        form.type)
+      fd.append('category',    form.category)
+      fd.append('priority',    form.priority)
+      fd.append('is_pinned',   form.is_pinned)
+      fd.append('is_featured', form.is_featured)
+      fd.append('is_active',   !isDraft)
+      if (form.barangay) fd.append('barangay', form.barangay)
+      if (imageFile)     fd.append('image', imageFile)
+      await api.post(endpoint, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
       setSaving(false)
-      if (isDraft) { alert('Draft saved.'); onClose() }
+      if (isDraft) { notify({ variant: 'success', message: 'Draft saved.' }); onClose() }
       else { setSubmitted(true); onPublished?.() }
     } catch (err) {
       console.error(err)
-      alert('Failed to save post.')
+      notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed to save post.') })
       setSaving(false)
     }
   }
@@ -189,6 +218,50 @@ function CreatePostModal({ barangays, onClose, onPublished }) {
                 />
               </div>
 
+              {/* Cover Image */}
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <ImageIcon size={13} strokeWidth={2} style={{ color: 'var(--text-muted)' }} />
+                  Cover Image
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span>
+                </label>
+                {imagePreview ? (
+                  <div style={{ position: 'relative', borderRadius: 'var(--radius)', overflow: 'hidden', border: '1px solid var(--border)' }}>
+                    <img src={imagePreview} alt="Preview" style={{ width: '100%', height: 140, objectFit: 'cover', display: 'block' }} />
+                    <button
+                      onClick={removeImage}
+                      style={{
+                        position: 'absolute', top: 6, right: 6,
+                        background: 'rgba(0,0,0,.55)', border: 'none', borderRadius: '50%',
+                        width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'pointer', color: '#fff',
+                      }}
+                    ><X size={13} strokeWidth={2.5} /></button>
+                  </div>
+                ) : (
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragOver={e => { e.preventDefault(); setDragging(true) }}
+                    onDragLeave={() => setDragging(false)}
+                    onDrop={e => { e.preventDefault(); setDragging(false); applyFile(e.dataTransfer.files[0]) }}
+                    style={{
+                      border: `2px dashed ${dragging ? 'var(--accent)' : 'var(--border)'}`,
+                      borderRadius: 'var(--radius)', padding: '16px',
+                      textAlign: 'center', cursor: 'pointer',
+                      background: dragging ? 'rgba(46,204,113,.04)' : 'transparent',
+                      transition: 'border-color .15s',
+                    }}
+                  >
+                    <ImageIcon size={22} strokeWidth={1.5} style={{ color: 'var(--text-muted)', display: 'block', margin: '0 auto 6px' }} />
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Drag & drop or <span style={{ color: 'var(--accent)', fontWeight: 600 }}>browse</span>
+                    </div>
+                  </div>
+                )}
+                <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }}
+                  onChange={e => applyFile(e.target.files[0])} />
+              </div>
+
               {/* Category + Priority */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 <div className="form-group" style={{ margin: 0 }}>
@@ -295,8 +368,9 @@ export default function NewsPage() {
   const featuredItems = useMemo(() => newsItems.filter(i => i.is_featured), [newsItems])
 
   return (
-    <DashboardLayout>
-      <div className="page">
+    <div>
+      <Navbar />
+      <div className="page" style={{ maxWidth: 1200, margin: '0 auto' }}>
 
         {/* Header */}
         <div style={{ marginBottom: 18 }}>
@@ -348,6 +422,7 @@ export default function NewsPage() {
           onPublished={() => { /* optionally refetch newsItems here */ }}
         />
       )}
-    </DashboardLayout>
+      <BottomNav />
+    </div>
   )
 }

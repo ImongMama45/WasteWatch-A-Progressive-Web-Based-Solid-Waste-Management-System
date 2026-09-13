@@ -4,25 +4,49 @@ import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
 import HomeCarousel from '../../components/carousel/HomeCarousel'
+import { ICONS } from '../../api/navConfig'
+import DispatchCard from '../../components/DispatchCard'
 
 export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [reports, setReports] = useState([])
   const [stats, setStats] = useState({ total: 0, pending_approval: 0, resolved: 0, rejected: 0 })
+  const [pendingTasksCount, setPendingTasksCount] = useState(0)
+  const [totalTasksCount, setTotalTasksCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('schedule')
   const [activeTab1, setActiveTab1] = useState('reports')
+  const [activeDispatch, setActiveDispatch] = useState(null)
 
   useEffect(() => {
     Promise.all([
       api.get('/api/watcher/reports/'),
-      api.get('/api/watcher/stats/'),
+      api.get('/api/watcher/stop-validations/'),
+      api.get('/api/public/live/').catch(() => ({ data: [] }))
     ])
-      .then(([r, s]) => { setReports(r.data); setStats(s.data) })
+      .then(([rRes, vRes, liveRes]) => {
+        setReports(rRes.data)
+        setStats({ total: rRes.data.length, pending_approval: 0, resolved: 0, rejected: 0 })
+        const validations = vRes.data?.results ?? vRes.data ?? []
+        const pending = validations.filter(v => {
+          const status = v.current_status ? v.current_status.toUpperCase().replace(/ /g, '_') : 'PENDING_INSPECTION'
+          return status === 'PENDING_INSPECTION' || status === 'COLLECTION_REPORTED'
+        })
+        setPendingTasksCount(pending.length)
+        setTotalTasksCount(validations.length)
+
+        if (liveRes && liveRes.data) {
+          const userBrgy = user?.barangay_name || user?.barangay?.name;
+          if (userBrgy) {
+            const dispatched = liveRes.data.find(d => d.barangays && d.barangays.includes(userBrgy));
+            if (dispatched) setActiveDispatch(dispatched);
+          }
+        }
+      })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [])
+  }, [user?.barangay_name, user?.barangay?.name])
 
   const badgeClass = (status) => `badge badge-${status}`
 
@@ -38,10 +62,16 @@ export default function Dashboard() {
           <p className="text-muted text-sm">Stay updated on garbage collection in your area</p>
         </div>
 
+        <DispatchCard 
+            dispatchData={activeDispatch} 
+            userBarangay={user?.barangay_name || user?.barangay?.name} 
+        />
+
         {/* ── INSPECTION CTA ── */}
         <div
           onClick={() => navigate('/watcher-tasks')}
           style={{
+            position: 'relative',
             marginBottom: 20, padding: '20px 20px', borderRadius: 16, cursor: 'pointer',
             background: 'linear-gradient(135deg, #0f172a 0%, #134e4a 100%)',
             border: '1px solid rgba(20,184,166,.35)',
@@ -52,7 +82,23 @@ export default function Dashboard() {
           onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 8px 32px rgba(20,184,166,.25)' }}
           onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 4px 24px rgba(20,184,166,.15)' }}
         >
-          <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(20,184,166,.15)', border: '1.5px solid rgba(20,184,166,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, flexShrink: 0 }}>🔍</div>
+          {/* Notification Indicator Dot */}
+          {!loading && totalTasksCount > 0 && (
+            <div style={{
+              position: 'absolute',
+              top: -12, right: 10,
+              width: 25, height: 25,
+              borderRadius: '50%',
+              background: pendingTasksCount > 0 ? '#ef4444' : '#10b981',
+              border: '4px solid var(--bg)',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+              zIndex: 2
+            }} />
+          )}
+
+          <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(20,184,166,.15)', border: '1.5px solid rgba(20,184,166,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent)', flexShrink: 0 }}>
+            <div style={{ width: 26, height: 26 }}>{ICONS.search}</div>
+          </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, color: '#fff', marginBottom: 3 }}>Start Inspection Tasks</div>
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,.55)' }}>Inspection & post-collection verification</div>
@@ -137,7 +183,9 @@ export default function Dashboard() {
                   reports.slice(0, 10).map(report => (
                     <div key={report.id} className="report-item"
                       onClick={() => navigate(`/report/${report.id}`)}>
-                      <div className="report-pin">📍</div>
+                      <div className="report-pin" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div style={{ width: 20, height: 20 }}>{ICONS.pin}</div>
+                      </div>
                       <div className="report-info">
                         <div className="report-type">
                           {report.issue_type_display}
@@ -182,7 +230,9 @@ export default function Dashboard() {
                     { day: 'Friday', time: '6:00 AM – 10:00 AM' },
                   ].map((s, i) => (
                     <div key={i} className="report-item">
-                      <div className="report-pin">📅</div>
+                      <div className="report-pin" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div style={{ width: 20, height: 20 }}>{ICONS.schedule}</div>
+                      </div>
                       <div className="report-info">
                         <div className="report-type">{s.day}</div>
                         <div className="report-location">{user.barangay_name}</div>
@@ -234,7 +284,7 @@ export default function Dashboard() {
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
                   }}
                 >
-                  🗺 View Live Map
+                  <div style={{ width: 18, height: 18 }}>{ICONS.map}</div> View Live Map
                 </button>
               </div>
             </div>
@@ -251,7 +301,9 @@ export default function Dashboard() {
                   { day: 'Friday', time: '6:00 AM – 10:00 AM' },
                 ].map((s, i) => (
                   <div key={i} className="report-item">
-                    <div className="report-pin">📅</div>
+                    <div className="report-pin" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <div style={{ width: 20, height: 20 }}>{ICONS.schedule}</div>
+                    </div>
                     <div className="report-info">
                       <div className="report-type">{s.day}</div>
                       <div className="report-location">{user.barangay_name}</div>

@@ -10,14 +10,23 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = 'django-insecure-change-this-in-production-use-env-variable'
 
-DEBUG = True
+import os
+
+DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
     '.ngrok-free.app',
     '.ngrok-free.dev',
+    '.onrender.com',
 ]
+
+if os.environ.get('RENDER_EXTERNAL_HOSTNAME'):
+    ALLOWED_HOSTS.append(os.environ.get('RENDER_EXTERNAL_HOSTNAME'))
+
+if DEBUG:
+    ALLOWED_HOSTS.append('*')
 
 # ---------------------------------------------------------------------------
 # Application definition
@@ -39,18 +48,22 @@ INSTALLED_APPS = [
     'accounts',             # Custom user model + auth
     'watcher',              # Report submission, collection confirmation
     'driver',               # Driver management features
+    'dumpsite',             # Dumpsite operations
     'news',                 # News and announcements
     'analytics',            # Performance metrics and trends
-    'cloudinary_storage',   # Cloudinary storage backend
     'cloudinary',           # Cloudinary integration
+    'notifications',
 ]
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',   # Must be first
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
+    'accounts.middleware.DisableApiCsrfMiddleware',  # Exempt /api/* from CSRF (cross-domain)
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'accounts.middleware.UpdateLastActivityMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -62,9 +75,9 @@ import os
 import cloudinary
 
 CLOUDINARY_STORAGE = {
-    'CLOUD_NAME': os.environ.get('CLOUDINARY_CLOUD_NAME', 'your_cloud_name'),
-    'API_KEY': os.environ.get('CLOUDINARY_API_KEY', 'your_api_key'),
-    'API_SECRET': os.environ.get('CLOUDINARY_API_SECRET', 'your_api_secret'),
+    'CLOUD_NAME': os.environ.get('CLOUDINARY_CLOUD_NAME', 'dr5ba1lmn'),
+    'API_KEY': os.environ.get('CLOUDINARY_API_KEY', '771269991353945'),
+    'API_SECRET': os.environ.get('CLOUDINARY_API_SECRET', '7ynzBQqgrGYNRiERvAsKfM0iqmY'),
 }
 
 cloudinary.config(
@@ -74,8 +87,7 @@ cloudinary.config(
     secure     = True
 )
 
-DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
-
+# Cloudinary integration is now handled natively via CloudinaryField in models.
 ROOT_URLCONF = 'wastewatch.urls'
 
 TEMPLATES = [
@@ -110,12 +122,21 @@ WSGI_APPLICATION = 'wastewatch.wsgi.application'
 #     }
 # }
 
+import dj_database_url
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
+
+if os.environ.get('DATABASE_URL'):
+    DATABASES['default'] = dj_database_url.config(
+        default=os.environ.get('DATABASE_URL'),
+        conn_max_age=600,
+        conn_health_checks=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -178,9 +199,12 @@ AUTHENTICATION_BACKENDS = [
     'accounts.backends.EmailBackend',
 ]
 
-SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SAMESITE = 'None' if not DEBUG else 'Lax'
+SESSION_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_HTTPONLY = True
-CSRF_COOKIE_SAMESITE    = 'Lax'
+
+CSRF_COOKIE_SAMESITE    = 'None' if not DEBUG else 'Lax'
+CSRF_COOKIE_SECURE      = not DEBUG
 CSRF_COOKIE_HTTPONLY    = False
 
 CORS_ALLOWED_ORIGINS = [
@@ -190,15 +214,24 @@ CORS_ALLOWED_ORIGINS = [
     'https://127.0.0.1:3000',
 ]
 
+if os.environ.get('VERCEL_FRONTEND_URL'):
+    CORS_ALLOWED_ORIGINS.append(os.environ.get('VERCEL_FRONTEND_URL'))
+
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://.*\.ngrok-free\.app$",
     r"^https://.*\.ngrok-free\.dev$",
+    r"^https://.*\.vercel\.app$",
 ]
 if lan_ip:
     CORS_ALLOWED_ORIGINS.append(f'http://{lan_ip}:3000')
     CORS_ALLOWED_ORIGINS.append(f'https://{lan_ip}:3000')
 
 CORS_ALLOW_CREDENTIALS = True   # Needed for session-based auth
+
+from corsheaders.defaults import default_headers
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'ngrok-skip-browser-warning',
+]
 
 CSRF_TRUSTED_ORIGINS = [
     'http://localhost:3000',
@@ -208,7 +241,12 @@ CSRF_TRUSTED_ORIGINS = [
 
     'https://*.ngrok-free.app',
     'https://*.ngrok-free.dev',
+    'https://*.vercel.app',
+    'https://waste-watch-a-progressive-web-based.vercel.app',
 ]
+if os.environ.get('VERCEL_FRONTEND_URL'):
+    CSRF_TRUSTED_ORIGINS.append(os.environ.get('VERCEL_FRONTEND_URL'))
+
 if lan_ip:
     CSRF_TRUSTED_ORIGINS.append(f'http://{lan_ip}:3000')
     CSRF_TRUSTED_ORIGINS.append(f'https://{lan_ip}:3000')
@@ -230,4 +268,9 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.SessionAuthentication',
     ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '5/minute',
+        'user': '30/minute',
+        'report_submission': '3/minute',
+    }
 }

@@ -382,19 +382,21 @@
 ═══════════════════════════════════════════════════════ */
 
 .orq-wrap {
-  border-radius: 12px;
+  border-radius: 22px;
   overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 10px 40px rgba(46, 125, 50, 0.08);
+  background: var(--ld-surface, #fff);
+  border: 1px solid var(--ld-line, #e5e7eb);
 }
 
 /* Header */
 .orq-header {
-  background: #1e2633;
-  padding: 16px;
+  background: rgba(46, 204, 113, 0.05);
+  padding: 20px 22px;
   display: flex;
   align-items: center;
   gap: 12px;
-  border-radius: 12px 12px 0 0;
+  border-bottom: 1px solid var(--ld-line, #e5e7eb);
 }
 
 .orq-header__left {
@@ -405,30 +407,30 @@
 }
 
 .orq-header__icon {
-  width: 40px;
-  height: 40px;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
+  width: 44px;
+  height: 44px;
+  background: rgba(46, 204, 113, 0.15);
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: #5dade2;
+  color: #2ecc71;
 }
 
-.orq-header__icon svg { width: 20px; height: 20px; }
+.orq-header__icon svg { width: 22px; height: 22px; }
 
 .orq-header__title {
-  font-size: 13px;
-  font-weight: 700;
-  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--ld-text, #0f172a);
   margin: 0 0 2px;
   font-family: var(--font-head, sans-serif);
 }
 
 .orq-header__sub {
-  font-size: 9px;
-  color: #64748b;
+  font-size: 11px;
+  color: var(--ld-text-2, #64748b);
   margin: 0;
 }
 
@@ -436,13 +438,14 @@
 .orq-pill {
   display: flex;
   align-items: center;
-  gap: 5px;
-  background: rgba(255, 255, 255, 0.1);
+  gap: 6px;
+  background: var(--ld-surface, #fff);
+  border: 1px solid var(--ld-line, #e5e7eb);
   border-radius: 20px;
-  padding: 4px 10px;
-  font-size: 10px;
+  padding: 5px 12px;
+  font-size: 11px;
   font-weight: 700;
-  color: #fff;
+  color: var(--ld-text, #0f172a);
   flex-shrink: 0;
 }
 
@@ -460,13 +463,13 @@
 
 /* Summary chips strip */
 .orq-chips {
-  background: #fff;
-  padding: 10px 14px;
+  background: var(--ld-surface, #fff);
+  padding: 12px 22px;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   flex-wrap: wrap;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--ld-line-inner, #f1f5f9);
 }
 
 .orq-chip {
@@ -493,7 +496,7 @@
 .orq-chip--sync-btn:active { transform: scale(0.95); }
 
 /* List */
-.orq-list { background: #fff; padding: 8px 14px 4px; }
+.orq-list { background: var(--ld-surface, #fff); padding: 8px 22px 16px; }
 
 /* Section (collapsible) */
 .orq-section { border: none; margin-bottom: 4px; }
@@ -566,9 +569,9 @@
 }
 
 .orq-row__type {
-  font-size: 13px;
-  font-weight: 600;
-  color: #1a1a2e;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ld-text, #0f172a);
 }
 
 .orq-row__sev {
@@ -652,76 +655,83 @@
 
 /* Empty state */
 .orq-empty {
-  padding: 32px 0;
+  padding: 40px 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   text-align: center;
 }
 
 .orq-empty__icon {
-  width: 44px;
-  height: 44px;
-  background: #f0f2f5;
+  width: 48px;
+  height: 48px;
+  background: var(--ld-surface-2, #f8fafc);
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #ccc;
+  color: var(--ld-text-3, #94a3b8);
+  border: 1px solid var(--ld-line, #e5e7eb);
 }
 
-.orq-empty__icon svg { width: 22px; height: 22px; }
+.orq-empty__icon svg { width: 24px; height: 24px; }
 
 .orq-empty__text {
-  font-size: 13px;
-  font-weight: 600;
-  color: #1a1a2e;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ld-text, #0f172a);
   margin: 0;
 }
 
 .orq-empty__sub {
-  font-size: 11px;
-  color: #aaa;
+  font-size: 12px;
+  color: var(--ld-text-2, #64748b);
   margin: 0;
 }
 
 /* CTA bar */
 .orq-cta {
-  background: #1e2633;
-  border-radius: 0 0 12px 12px;
-  padding: 14px 16px;
+  background: var(--ld-surface-2, #f8fafc);
+  border-top: 1px solid var(--ld-line, #e5e7eb);
+  padding: 16px 22px;
   display: flex;
   align-items: center;
   gap: 14px;
 }
 
 .orq-cta__text h3 {
-  font-size: 12px;
-  font-weight: 700;
-  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ld-text, #0f172a);
   margin: 0 0 2px;
   font-family: var(--font-head, sans-serif);
 }
 
 .orq-cta__text p {
-  font-size: 10px;
-  color: #64748b;
+  font-size: 11px;
+  color: var(--ld-text-2, #64748b);
   margin: 0;
 }
 
 .orq-cta__btn {
-  background: #e2e8f0;
-  color: #1e2633;
+  background: #2ecc71;
+  color: #fff;
   border: none;
-  border-radius: 8px;
-  padding: 9px 14px;
-  font-size: 11px;
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 12px;
   font-weight: 800;
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
-  transition: background 0.15s, transform 0.1s;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(46, 204, 113, 0.2);
+}
+
+.orq-cta__btn:hover {
+  background: #27ae60;
+  box-shadow: 0 6px 16px rgba(46, 204, 113, 0.3);
 }
 
 .orq-cta__btn:active { transform: scale(0.96); }

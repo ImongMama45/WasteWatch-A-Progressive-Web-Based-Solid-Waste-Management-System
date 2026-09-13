@@ -17,7 +17,6 @@ from django.db import models
 from django.conf import settings  # Use settings.AUTH_USER_MODEL, not User directly
 from cloudinary.models import CloudinaryField
 
-
 # ---------------------------------------------------------------------------
 # Choice classes — defined as classes so they're importable and reusable
 # ---------------------------------------------------------------------------
@@ -85,12 +84,14 @@ class GarbageReport(models.Model):
     address = models.CharField(max_length=255, blank=True)
 
     # Photo evidence
-    image = CloudinaryField(
-        'image',
-        folder='reports/',
+    image = models.ImageField(
+        upload_to='reports/',
         null=True,
         blank=True,
     )
+    image_2 = models.ImageField(upload_to='reports/', null=True, blank=True)
+    image_3 = models.ImageField(upload_to='reports/', null=True, blank=True)
+    image_4 = models.ImageField(upload_to='reports/', null=True, blank=True)
 
     # Classification
     issue_type = models.CharField(
@@ -147,23 +148,6 @@ class GarbageReport(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)  # Tracks when status changes
-
-    def save(self, *args, **kwargs):
-        """
-        Gracefully handle Cloudinary upload failures.
-        If credentials missing or invalid, clear image and proceed.
-        """
-        from cloudinary.exceptions import AuthorizationRequired
-        try:
-            super().save(*args, **kwargs)
-        except (ValueError, AuthorizationRequired) as e:
-            # If "Must supply api_key" or "Unknown API key", clear image and retry
-            if 'api_key' in str(e).lower():
-                print(f'[GarbageReport] Cloudinary config error: {e}. Saving without image.')
-                self.image = None
-                super().save(*args, **kwargs)
-            else:
-                raise e
 
     class Meta:
         ordering = ['-created_at']  # Newest first
@@ -233,6 +217,9 @@ class GarbageHotspot(models.Model):
     barangay = models.ForeignKey('accounts.Barangay', on_delete=models.CASCADE, related_name='hotspots')
     latitude  = models.DecimalField(max_digits=9,  decimal_places=6)
     longitude = models.DecimalField(max_digits=10, decimal_places=6)
+    assigned_truck = models.ForeignKey(
+        'driver.Truck', on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_hotspots'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -244,7 +231,10 @@ class StopValidationStatus(models.TextChoices):
     EMPTY_STOP = 'EMPTY_STOP', 'Empty Stop'
     COLLECTION_REPORTED = 'COLLECTION_REPORTED', 'Collection Reported'
     VERIFIED_COLLECTED = 'VERIFIED_COLLECTED', 'Verified Collected'
-    COLLECTION_DISPUTED = 'COLLECTION_DISPUTED', 'Collection Disputed'
+    # NOTE: The DB constant is intentionally named COLLECTION_DISPUTED to avoid
+    # a data migration. Only the human-readable label is changed to 'Missed'.
+    # Do NOT rename the constant without a matching RunPython data migration.
+    COLLECTION_DISPUTED = 'COLLECTION_DISPUTED', 'Missed'
 
 
 class StopValidation(models.Model):
@@ -259,6 +249,13 @@ class StopValidation(models.Model):
     )
     stop_order = models.PositiveIntegerField(help_text='Waypoint index (1 = first collection stop)')
     collection_date = models.DateField(help_text='The scheduled collection day for this validation cycle')
+    barangay = models.ForeignKey(
+        'accounts.Barangay',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='stop_validations'
+    )
+    stop_id = models.CharField(max_length=100, blank=True, null=True, help_text='Stable stop ID from route builder')
 
     current_status = models.CharField(
         max_length=30,
@@ -275,10 +272,10 @@ class StopValidation(models.Model):
         related_name='pre_validations',
     )
     pre_validation_timestamp = models.DateTimeField(null=True, blank=True)
-    pre_validation_photo = CloudinaryField('pre validation proof', folder='stop-pre-validation/', null=True, blank=True)
-    pre_validation_photo_2 = CloudinaryField('pre validation proof 2', folder='stop-pre-validation/', null=True, blank=True)
-    pre_validation_photo_3 = CloudinaryField('pre validation proof 3', folder='stop-pre-validation/', null=True, blank=True)
-    pre_validation_photo_4 = CloudinaryField('pre validation proof 4', folder='stop-pre-validation/', null=True, blank=True)
+    pre_validation_photo = CloudinaryField('image', null=True, blank=True)
+    pre_validation_photo_2 = CloudinaryField('image', null=True, blank=True)
+    pre_validation_photo_3 = CloudinaryField('image', null=True, blank=True)
+    pre_validation_photo_4 = CloudinaryField('image', null=True, blank=True)
     pre_validation_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     pre_validation_longitude = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
     pre_validation_remarks = models.TextField(blank=True)
@@ -292,7 +289,7 @@ class StopValidation(models.Model):
         related_name='driver_stop_collections',
     )
     collection_timestamp = models.DateTimeField(null=True, blank=True)
-    collection_photo = CloudinaryField('collection proof', folder='stop-collection/', null=True, blank=True)
+    collection_photo = CloudinaryField('image', null=True, blank=True)
     collection_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     collection_longitude = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
     collection_notes = models.TextField(blank=True)
@@ -306,10 +303,10 @@ class StopValidation(models.Model):
         related_name='post_validations',
     )
     post_validation_timestamp = models.DateTimeField(null=True, blank=True)
-    post_validation_photo = CloudinaryField('post validation proof', folder='stop-post-validation/', null=True, blank=True)
-    post_validation_photo_2 = CloudinaryField('post validation proof 2', folder='stop-post-validation/', null=True, blank=True)
-    post_validation_photo_3 = CloudinaryField('post validation proof 3', folder='stop-post-validation/', null=True, blank=True)
-    post_validation_photo_4 = CloudinaryField('post validation proof 4', folder='stop-post-validation/', null=True, blank=True)
+    post_validation_photo = CloudinaryField('image', null=True, blank=True)
+    post_validation_photo_2 = CloudinaryField('image', null=True, blank=True)
+    post_validation_photo_3 = CloudinaryField('image', null=True, blank=True)
+    post_validation_photo_4 = CloudinaryField('image', null=True, blank=True)
     post_validation_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     post_validation_longitude = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
     dispute_reason = models.TextField(blank=True)

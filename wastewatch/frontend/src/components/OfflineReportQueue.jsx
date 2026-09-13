@@ -1,4 +1,5 @@
 import { useAuth } from '../context/AuthContext'
+import { Clock, CheckCircle, XCircle, Trash2, Truck, AlertTriangle, Leaf, Recycle, Plus, RefreshCw } from 'lucide-react'
 
 /**
  * components/OfflineReportQueue.jsx
@@ -22,26 +23,26 @@ import { useAuth } from '../context/AuthContext'
  */
 
 const STATUS_META = {
-  pending : { label: 'Pending',  emoji: '🟡', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)',  border: 'rgba(245,158,11,0.3)'  },
-  synced  : { label: 'Synced',   emoji: '🟢', color: '#22c55e', bg: 'rgba(34,197,94,0.08)',  border: 'rgba(34,197,94,0.2)'   },
-  failed  : { label: 'Failed',   emoji: '🔴', color: '#ef4444', bg: 'rgba(239,68,68,0.08)',  border: 'rgba(239,68,68,0.2)'   },
+  pending: { label: 'Pending', icon: <Clock size={14} />, color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.3)' },
+  synced: { label: 'Synced', icon: <CheckCircle size={14} />, color: '#22c55e', bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.2)' },
+  failed: { label: 'Failed', icon: <XCircle size={14} />, color: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.2)' },
 }
 
-const WASTE_EMOJI = {
-  overflow         : '🗑️',
-  missed           : '🚛',
-  illegal_dumping  : '⚠️',
-  biodegradable    : '🌿',
-  residual         : '🗑️',
-  recyclable       : '♻️',
-  special          : '⚠️',
+const WASTE_ICON = {
+  overflow: <Trash2 size={24} />,
+  missed: <Truck size={24} />,
+  illegal_dumping: <AlertTriangle size={24} />,
+  biodegradable: <Leaf size={24} />,
+  residual: <Trash2 size={24} />,
+  recyclable: <Recycle size={24} />,
+  special: <AlertTriangle size={24} />,
 }
 
 const SEV_COLOR = {
-  low      : '#22c55e',
-  medium   : '#f59e0b',
-  high     : '#ef4444',
-  critical : '#7c3aed',
+  low: '#22c55e',
+  medium: '#f59e0b',
+  high: '#ef4444',
+  critical: '#7c3aed',
 }
 
 function formatDate(iso) {
@@ -54,7 +55,7 @@ function formatDate(iso) {
 // ─── Single report row ────────────────────────────────────────────────────────
 
 function ReportRow({ report, isOnline, onRetry, onClick }) {
-  const meta   = STATUS_META[report.status] || STATUS_META.pending
+  const meta = STATUS_META[report.status] || STATUS_META.pending
   const isPending = report.status === 'pending'
   const retryCount = typeof report.retryCount === 'number' && !isNaN(report.retryCount) ? report.retryCount : 0
 
@@ -65,8 +66,8 @@ function ReportRow({ report, isOnline, onRetry, onClick }) {
       onClick={() => onClick?.(report)}
     >
       <div className="orq-row__left">
-        <span className="orq-row__emoji">
-          {WASTE_EMOJI[report.issue_type] || '🗑️'}
+        <span className="orq-row__emoji" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {WASTE_ICON[report.issue_type] || <Trash2 size={24} />}
         </span>
         <div className="orq-row__info">
           <div className="orq-row__top">
@@ -94,9 +95,9 @@ function ReportRow({ report, isOnline, onRetry, onClick }) {
       <div className="orq-row__right">
         <span
           className="orq-row__badge"
-          style={{ color: meta.color, background: meta.bg, border: `1px solid ${meta.border}` }}
+          style={{ color: meta.color, background: meta.bg, border: `1px solid ${meta.border}`, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
         >
-          {meta.emoji} {meta.label}
+          {meta.icon} {meta.label}
         </span>
 
         {report.status === 'failed' && isOnline && (
@@ -104,8 +105,9 @@ function ReportRow({ report, isOnline, onRetry, onClick }) {
             className="orq-retry-btn"
             onClick={(e) => { e.stopPropagation(); onRetry(report.id) }}
             aria-label="Retry sync"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
           >
-            🔄 Retry
+            <RefreshCw size={14} /> Retry
           </button>
         )}
 
@@ -127,7 +129,7 @@ function Section({ title, count, color, children, defaultOpen = true }) {
   return (
     <details className="orq-section" open={defaultOpen}>
       <summary className="orq-section__summary">
-        <span className="orq-section__title" style={{ color }}>{title}</span>
+        <span className="orq-section__title" style={{ color, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>{title}</span>
         <span className="orq-section__count" style={{ background: `${color}20`, color }}>{displayCount}</span>
       </summary>
       <div className="orq-section__body">{children}</div>
@@ -151,11 +153,11 @@ export default function OfflineReportQueue({
 }) {
   const { user } = useAuth()
   const pending = reports.filter(r => r.status === 'pending')
-  const failed  = reports.filter(r => r.status === 'failed')
-  const synced  = reports.filter(r => r.status === 'synced')
+  const failed = reports.filter(r => r.status === 'failed')
+  const synced = reports.filter(r => r.status === 'synced')
 
   const dispPending = typeof pendingCount === 'number' && !isNaN(pendingCount) ? pendingCount : pending.length
-  const dispFailed  = typeof failedCount === 'number' && !isNaN(failedCount) ? failedCount : failed.length
+  const dispFailed = typeof failedCount === 'number' && !isNaN(failedCount) ? failedCount : failed.length
 
   return (
     <div className="orq-wrap">
@@ -165,7 +167,7 @@ export default function OfflineReportQueue({
         <div className="orq-header__left">
           <div className="orq-header__icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" /><circle cx="12" cy="10" r="3" />
             </svg>
           </div>
           <div>
@@ -194,8 +196,8 @@ export default function OfflineReportQueue({
             <span className="orq-chip orq-chip--failed">{dispFailed} Failed</span>
           )}
           {isOnline && dispPending > 0 && !isSyncing && (
-            <button className="orq-chip orq-chip--sync-btn" onClick={onSyncNow}>
-              ⚡ Sync Now
+            <button className="orq-chip orq-chip--sync-btn" onClick={onSyncNow} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <RefreshCw size={14} /> Sync Now
             </button>
           )}
           {isSyncing && (
@@ -212,10 +214,10 @@ export default function OfflineReportQueue({
           <div className="orq-empty">
             <div className="orq-empty__icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-                <line x1="16" y1="13" x2="8" y2="13"/>
-                <line x1="16" y1="17" x2="8" y2="17"/>
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
               </svg>
             </div>
             <p className="orq-empty__text">No reports yet.</p>
@@ -223,15 +225,15 @@ export default function OfflineReportQueue({
           </div>
         ) : (
           <>
-            <Section title="⏳ Pending Sync" count={pending.length} color="#f59e0b" defaultOpen>
+            <Section title={<><Clock size={16} /> Pending Sync</>} count={pending.length} color="#f59e0b" defaultOpen>
               {pending.map(r => <ReportRow key={r.id} report={r} isOnline={isOnline} onRetry={onRetry} onClick={onReportClick} />)}
             </Section>
 
-            <Section title="❌ Failed" count={failed.length} color="#ef4444" defaultOpen>
+            <Section title={<><XCircle size={16} /> Failed</>} count={failed.length} color="#ef4444" defaultOpen>
               {failed.map(r => <ReportRow key={r.id} report={r} isOnline={isOnline} onRetry={onRetry} onClick={onReportClick} />)}
             </Section>
 
-            <Section title="✅ Synced" count={synced.length} color="#22c55e" defaultOpen={false}>
+            <Section title={<><CheckCircle size={16} /> Synced</>} count={synced.length} color="#22c55e" defaultOpen={false}>
               {synced.map(r => <ReportRow key={r.id} report={r} isOnline={isOnline} onRetry={onRetry} onClick={onReportClick} />)}
             </Section>
           </>
@@ -244,8 +246,8 @@ export default function OfflineReportQueue({
           <h3>Report a Garbage Problem?</h3>
           <p>Works offline — we sync it when you're back online.</p>
         </div>
-        <button className="orq-cta__btn" onClick={onNewReport}>
-          📤 New Report
+        <button className="orq-cta__btn" onClick={onNewReport} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+          <Plus size={18} /> New Report
         </button>
       </div>
     </div>

@@ -21,7 +21,8 @@ import api from '../../api/client'
 import HomeCarousel from '../../components/carousel/HomeCarousel'
 import OfflineReportBuilder from '../../components/OfflineReportBuilder'
 import { useOfflineReports } from '../../hooks/useOfflineReports'
-
+import { ICONS } from '../../api/navConfig'
+import DispatchCard from '../../components/DispatchCard'
 const STATUS_META = {
   pending: { label: 'Pending', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' },
   approved: { label: 'Approved', color: '#22c55e', bg: 'rgba(34,197,94,0.1)' },
@@ -30,9 +31,9 @@ const STATUS_META = {
 }
 
 const TYPE_ICONS = {
-  overflow: '🗑️',
-  illegal_dumping: '🚯',
-  missed: '📭',
+  overflow: ICONS.trash,
+  illegal_dumping: ICONS.hotspot,
+  missed: ICONS.box,
 }
 
 const SEVERITY_COLORS = { high: '#ef4444', medium: '#f59e0b', low: '#22c55e' }
@@ -52,21 +53,56 @@ export default function CitizenDashboard() {
   const [reportsTab, setReportsTab] = useState('all')   // all | pending | resolved
   const [crewAssignment, setCrewAssignment] = useState(null)
   const [showBuilder, setShowBuilder] = useState(false)
+  const [announcements, setAnnouncements] = useState([])
 
-  const nextDay = schedule.find(s => s.isNext) || schedule[0]
+  const userBrgy = user?.barangay_name || user?.barangay?.name || '';
+  const filteredSchedule = schedule.filter(s => {
+    if (!userBrgy) return true;
+    return s.zone && s.zone.toLowerCase().includes(userBrgy.toLowerCase());
+  });
+
+  const nextDay = filteredSchedule.find(s => s.isNext) || filteredSchedule[0]
+
+  const [activeDispatch, setActiveDispatch] = useState(null)
 
   useEffect(() => {
     Promise.all([
+      api.get('/api/news/items/for-dashboard/').catch(() => ({ data: [] })),
       api.get('/api/watcher/reports/').catch(() => ({ data: [] })),
       api.get('/api/watcher/reports/stats/').catch(() => ({ data: { total: 0, pending: 0, resolved: 0 } })),
       api.get('/api/watcher/hotspots/').catch(() => ({ data: [] })),
       api.get('/api/public/schedule/').catch(() => ({ data: [] })),
+      api.get('/api/public/live/').catch(() => ({ data: [] })),
     ])
-      .then(([r, s, h, sc]) => {
-        if (r.data) setMyReports(r.data.slice(0, 5))
-        if (s.data) setStats(s.data)
-        if (h.data) setHotspots(h.data.slice(0, 4))
-        if (sc.data) setSchedule(sc.data)
+      .then(([newsRes, reportsRes, statsRes, hotspotsRes, scheduleRes, liveRes]) => {
+        if (newsRes.data) setAnnouncements(newsRes.data)
+        if (reportsRes.data) setMyReports(reportsRes.data.slice(0, 5))
+        if (statsRes.data) setStats(statsRes.data)
+        if (hotspotsRes.data) {
+          setHotspots(hotspotsRes.data.slice(0, 4).map(h => {
+            let pType = 'Mixed';
+            if (h.name) {
+              if (h.name.includes('—')) pType = h.name.split('—')[1].trim();
+              else if (h.name.includes('-')) pType = h.name.split('-')[1].trim();
+              else pType = h.name;
+            }
+            return {
+              ...h,
+              count: h.report_count || 0,
+              type: pType,
+              status: h.severity || 'low'
+            }
+          }))
+        }
+        if (scheduleRes.data) setSchedule(scheduleRes.data)
+
+        if (liveRes && liveRes.data) {
+          const userBrgy = user?.barangay_name || user?.barangay?.name;
+          if (userBrgy) {
+            const dispatched = liveRes.data.find(d => d.barangays && d.barangays.includes(userBrgy));
+            if (dispatched) setActiveDispatch(dispatched);
+          }
+        }
       })
       .finally(() => setLoading(false))
 
@@ -76,7 +112,7 @@ export default function CitizenDashboard() {
         .then(res => setCrewAssignment(res.data))
         .catch(() => setCrewAssignment(null))
     }
-  }, [user?.employee_type])
+  }, [user?.employee_type, user?.barangay_name, user?.barangay?.name])
 
   const handleSubmitReport = useCallback(async (fields) => {
     await addReport(fields)
@@ -121,6 +157,11 @@ export default function CitizenDashboard() {
           </p>
         </div>
 
+        <DispatchCard
+          dispatchData={activeDispatch}
+          userBarangay={user?.barangay_name || user?.barangay?.name}
+        />
+
         <div className='mobile-schedule'>
           <HomeCarousel role="citizen" userBarangay={user?.barangay_name} onReport={() => setShowBuilder(true)} />
         </div>
@@ -162,7 +203,7 @@ export default function CitizenDashboard() {
                         borderRadius: 12, padding: '12px 14px',
                       }}>
                         <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: 6 }}>Assigned Truck</div>
-                        <div style={{ fontSize: 20 }}>🚛</div>
+                        <div style={{ width: 24, height: 24, margin: '6px 0', color: 'var(--accent)' }}>{ICONS.truck}</div>
                         <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 16, marginTop: 4 }}>
                           {crewAssignment.truck_plate}
                         </div>
@@ -175,7 +216,7 @@ export default function CitizenDashboard() {
                         borderRadius: 12, padding: '12px 14px',
                       }}>
                         <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: 6 }}>Driver</div>
-                        <div style={{ fontSize: 20 }}>👤</div>
+                        <div style={{ width: 24, height: 24, margin: '6px 0', color: 'var(--accent)' }}>{ICONS.profile}</div>
                         <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 15, marginTop: 4 }}>
                           {crewAssignment.driver_name || '—'}
                         </div>
@@ -191,13 +232,15 @@ export default function CitizenDashboard() {
                       <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--accent)', letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: 10 }}>Collection Schedule</div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                         {[
-                          { icon: '📍', label: 'Area / Route', value: crewAssignment.schedule_area || '—' },
-                          { icon: '📅', label: 'Days', value: crewAssignment.schedule_days || '—' },
-                          { icon: '🕐', label: 'Shift Start', value: crewAssignment.schedule_start || '—' },
-                          { icon: '🕔', label: 'Shift End', value: crewAssignment.schedule_end || '—' },
+                          { icon: ICONS.pin, label: 'Area / Route', value: crewAssignment.schedule_area || '—' },
+                          { icon: ICONS.schedule, label: 'Days', value: crewAssignment.schedule_days || '—' },
+                          { icon: ICONS.clock, label: 'Shift Start', value: crewAssignment.schedule_start || '—' },
+                          { icon: ICONS.clock, label: 'Shift End', value: crewAssignment.schedule_end || '—' },
                         ].map(item => (
                           <div key={item.label}>
-                            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>{item.icon} {item.label}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>
+                              <span style={{ width: 12, height: 12 }}>{item.icon}</span> {item.label}
+                            </div>
                             <div style={{ fontSize: 13, fontWeight: 700 }}>{item.value}</div>
                           </div>
                         ))}
@@ -213,10 +256,10 @@ export default function CitizenDashboard() {
                             <span key={m.id} style={{
                               fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 20,
                               background: m.id === user?.id ? 'rgba(251,191,36,0.2)' : 'var(--surface)',
-                              border: m.id === user?.id ? '1px solid rgba(251,191,36,0.4)' : '1px solid var(--border)',
                               color: m.id === user?.id ? '#f59e0b' : 'var(--text)',
+                              display: 'inline-flex', alignItems: 'center', gap: 4
                             }}>
-                              {m.id === user?.id ? '⭐ ' : ''}{m.full_name}
+                              {m.id === user?.id ? <span style={{ width: 12, height: 12 }}>{ICONS.star}</span> : null}{m.full_name}
                             </span>
                           ))}
                         </div>
@@ -228,7 +271,9 @@ export default function CitizenDashboard() {
                     background: 'var(--surface)', border: '1px solid var(--border)',
                     borderRadius: 14, padding: '28px 20px', textAlign: 'center',
                   }}>
-                    <div style={{ fontSize: 36, marginBottom: 8 }}>🚛</div>
+                    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8, color: 'var(--text-muted)' }}>
+                      <div style={{ width: 40, height: 40 }}>{ICONS.truck}</div>
+                    </div>
                     <div style={{ fontWeight: 700, marginBottom: 4 }}>No Active Assignment</div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>You haven't been assigned to a truck today. Check back later or contact your supervisor.</div>
                   </div>
@@ -340,9 +385,9 @@ export default function CitizenDashboard() {
                     <div style={{
                       width: 36, height: 36, borderRadius: 10, flexShrink: 0,
                       background: `${SEVERITY_COLORS[h.status || 'low']}15`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', color: SEVERITY_COLORS[h.status || 'low'],
                     }}>
-                      <span style={{ fontSize: 18 }}>📍</span>
+                      <div style={{ width: 18, height: 18 }}>{ICONS.pin}</div>
                     </div>
 
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -416,13 +461,15 @@ export default function CitizenDashboard() {
                   </div>
                 ) : filteredReports.length === 0 ? (
                   <div style={{ padding: '32px 20px', textAlign: 'center' }}>
-                    <div style={{ fontSize: 40, marginBottom: 10 }}>📭</div>
+                    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10, color: 'var(--text-muted)' }}>
+                      <div style={{ width: 40, height: 40 }}>{ICONS.box}</div>
+                    </div>
                     <div style={{ fontWeight: 600, marginBottom: 4 }}>No reports here yet</div>
                     <div className="text-muted text-sm">See something? Tap "Report Issue" to let us know.</div>
                     <button className="cd-btn btn btn-primary"
-                      style={{ marginTop: 14, fontSize: 12 }}
+                      style={{ marginTop: 14, fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
                       onClick={() => setShowBuilder(true)}>
-                      📸 Submit a Report
+                      <div style={{ width: 16, height: 16 }}>{ICONS.camera}</div> Submit a Report
                     </button>
                   </div>
                 ) : (
@@ -437,13 +484,14 @@ export default function CitizenDashboard() {
                         }}
                         onClick={() => navigate(`/report/${report.id}`)}>
 
-                        {/* Icon */}
                         <div style={{
                           width: 38, height: 38, borderRadius: 10, flexShrink: 0,
-                          background: 'rgba(239,68,68,0.08)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
+                          background: 'rgba(239,68,68,0.08)', color: 'var(--danger)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
                         }}>
-                          {TYPE_ICONS[report.waste_type] || '📍'}
+                          <div style={{ width: 20, height: 20 }}>
+                            {TYPE_ICONS[report.waste_type] || ICONS.pin}
+                          </div>
                         </div>
 
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -456,6 +504,16 @@ export default function CitizenDashboard() {
                           }}>
                             {report.address || report.barangay_name}
                           </div>
+                          {/* Rejection reason — citizen-facing */}
+                          {report.status === 'rejected' && report.rejection_reason && (
+                            <div style={{
+                              fontSize: 11, color: 'var(--danger)', marginTop: 4,
+                              display: 'flex', alignItems: 'flex-start', gap: 4, lineHeight: 1.4,
+                            }}>
+                              <span style={{ flexShrink: 0 }}>⚠️</span>
+                              <span>Reason: {report.rejection_reason}</span>
+                            </div>
+                          )}
                         </div>
 
                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -495,9 +553,9 @@ export default function CitizenDashboard() {
                 }}>
                   <div style={{
                     width: 44, height: 44, borderRadius: 12, flexShrink: 0,
-                    background: 'rgba(46,204,113,0.15)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22,
-                  }}>🚛</div>
+                    background: 'rgba(46,204,113,0.15)', color: 'var(--accent)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}><div style={{ width: 24, height: 24 }}>{ICONS.truck}</div></div>
                   <div style={{ flex: 1 }}>
                     <div style={{
                       fontSize: 10, fontWeight: 700, color: 'var(--accent)',
@@ -520,20 +578,28 @@ export default function CitizenDashboard() {
 
               {/* Full schedule */}
               <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                {schedule.map((s, i) => (
+                {filteredSchedule.length === 0 ? (
+                  <div style={{ padding: '30px 20px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <div style={{ marginBottom: 8 }}><span style={{ width: 24, height: 24, display: 'inline-block', opacity: 0.5 }}>{ICONS.schedule}</span></div>
+                    No specific schedule listed for {userBrgy || 'your area'}.
+                  </div>
+                ) : filteredSchedule.map((s, i) => (
                   <div key={i} style={{
                     display: 'flex', alignItems: 'center', gap: 12,
                     padding: '13px 16px',
-                    borderBottom: i < schedule.length - 1 ? '1px solid var(--border)' : 'none',
+                    borderBottom: i < filteredSchedule.length - 1 ? '1px solid var(--border)' : 'none',
                     background: s.isNext ? 'rgba(46,204,113,0.03)' : 'transparent',
                   }}>
                     {/* Day icon */}
                     <div style={{
                       width: 36, height: 36, borderRadius: 10, flexShrink: 0,
                       background: s.isNext ? 'rgba(46,204,113,0.12)' : 'var(--surface-2)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: s.isNext ? 'var(--accent)' : 'var(--text-muted)'
                     }}>
-                      {s.isNext ? '🚛' : '📅'}
+                      <div style={{ width: 20, height: 20 }}>
+                        {s.isNext ? ICONS.truck : ICONS.schedule}
+                      </div>
                     </div>
 
                     <div style={{ flex: 1 }}>
@@ -609,7 +675,7 @@ export default function CitizenDashboard() {
                 border: '1.5px solid rgba(46,204,113,0.25)',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                  <span style={{ fontSize: 22 }}>🚛</span>
+                  <div style={{ width: 26, height: 26, color: 'var(--accent)' }}>{ICONS.truck}</div>
                   <h3 className="section-title" style={{ margin: 0, fontSize: 14, color: 'var(--accent)' }}>
                     Next Collection
                   </h3>

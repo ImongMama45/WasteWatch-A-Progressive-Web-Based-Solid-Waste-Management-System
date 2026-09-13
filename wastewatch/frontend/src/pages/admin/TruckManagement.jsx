@@ -12,7 +12,10 @@ import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useTrucks } from '../../hooks/useTrucks'
 import { useUsers } from '../../hooks/useUsers'
+import { useNotification } from '../../context/NotificationContext'
+import { getApiErrorMessage } from '../../utils/notificationHelpers'
 import api from '../../api/client'
+import { ICONS } from '../../api/navConfig'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -62,38 +65,42 @@ function decodePolyline(encoded) {
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
-const EMPTY_FORM = { plate_number: '', model: '', status: 'active', driver: '', crew: [], zone: '', last_service: '' }
+function TruckEntityModal({ truck, onSave, onClose }) {
+  const { notify } = useNotification()
+  const [plateNumber, setPlateNumber] = useState(truck?.plate_number || '')
+  const [modelName, setModelName] = useState(truck?.model || '')
+  const [maxCapacityKg, setMaxCapacityKg] = useState(truck?.max_capacity_kg || 1000)
+  const [status, setStatus] = useState(truck?.status || 'active')
+  const [dateBought, setDateBought] = useState(truck?.date_bought || '')
+  const [photoFile, setPhotoFile] = useState(null)
+  const [photoPreview, setPhotoPreview] = useState(truck?.photo_url || null)
 
-function TruckModal({ truck, onSave, onClose, drivers, crewPool }) {
-  const [form, setForm] = useState(truck ? {
-    plate_number: truck.plate_number, model: truck.model, status: truck.status,
-    driver: truck.driver || '', crew: truck.crew || [],
-    zone: truck.zone, last_service: truck.last_service || '',
-  } : { ...EMPTY_FORM })
-  const [crewInput, setCrewInput] = useState('')
-
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
-
-  const addCrew = (id) => {
-    if (!id || form.crew.includes(parseInt(id))) return
-    set('crew', [...form.crew, parseInt(id)])
-    setCrewInput('')
+  function handlePhotoChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPhotoFile(file)
+    setPhotoPreview(URL.createObjectURL(file))
   }
 
-  const removeCrew = (id) => set('crew', form.crew.filter(c => c !== id))
+  function handleSubmit() {
+    if (!plateNumber.trim()) return notify({ variant: 'error-solid', message: 'Plate number is required.' })
+    if (!modelName.trim()) return notify({ variant: 'error-solid', message: 'Model is required.' })
 
-  const availableCrew = crewPool.filter(c => !form.crew.includes(c.id))
+    const fd = new FormData()
+    fd.append('plate_number', plateNumber)
+    fd.append('model', modelName)
+    fd.append('max_capacity_kg', maxCapacityKg)
+    fd.append('status', status)
+    if (dateBought) fd.append('date_bought', dateBought)
+    if (photoFile) fd.append('photo', photoFile)
 
-  const getMemberName = (id) => {
-    const u = crewPool.find(x => x.id === id) || drivers.find(x => x.id === id)
-    return u ? u.full_name : 'Unknown'
+    onSave(fd, truck?.id ?? null)
   }
 
   return (
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
-      zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: 16,
+      zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
     }} onClick={onClose}>
       <div style={{
         background: 'var(--surface)', borderRadius: 16, padding: 24,
@@ -103,106 +110,59 @@ function TruckModal({ truck, onSave, onClose, drivers, crewPool }) {
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: 0 }}>
-            {truck ? 'Edit Truck' : 'Add New Truck'}
+            {truck ? 'Edit Truck' : 'Add Truck'}
           </h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#888' }}>×</button>
         </div>
 
-        {/* Plate & Model */}
+        {/* Photo */}
+        <div style={{ marginBottom: 16, textAlign: 'center' }}>
+          <div style={{
+            width: 120, height: 120, borderRadius: 12, margin: '0 auto 10px',
+            background: 'var(--surface-2)', border: '1px dashed var(--border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+          }}>
+            {photoPreview
+              ? <img src={photoPreview} alt="Truck" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>No photo</span>}
+          </div>
+          <input type="file" accept="image/*" onChange={handlePhotoChange} style={{ fontSize: 12 }} />
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
           <div>
             <label className="form-label">Plate Number</label>
-            <input className="form-input" value={form.plate_number} onChange={e => set('plate_number', e.target.value)} placeholder="LCN-001" />
+            <input className="form-input" value={plateNumber} onChange={e => setPlateNumber(e.target.value)} placeholder="LCN-001" />
           </div>
           <div>
             <label className="form-label">Model</label>
-            <input className="form-input" value={form.model} onChange={e => set('model', e.target.value)} placeholder="Isuzu Elf" />
+            <input className="form-input" value={modelName} onChange={e => setModelName(e.target.value)} placeholder="Isuzu Elf" />
           </div>
         </div>
 
-        {/* Status & Zone */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
           <div>
             <label className="form-label">Status</label>
-            <select className="form-input" value={form.status} onChange={e => set('status', e.target.value)}>
+            <select className="form-input" value={status} onChange={e => setStatus(e.target.value)}>
               <option value="active">Active</option>
               <option value="maintenance">Maintenance</option>
               <option value="inactive">Inactive</option>
             </select>
           </div>
           <div>
-            <label className="form-label">Last Service</label>
-            <input className="form-input" type="date" value={form.last_service} onChange={e => set('last_service', e.target.value)} />
+            <label className="form-label">Max Capacity (kg)</label>
+            <input className="form-input" type="number" min="0" step="100" value={maxCapacityKg} onChange={e => setMaxCapacityKg(e.target.value)} />
           </div>
         </div>
 
-        {/* Zone */}
-        <div style={{ marginBottom: 14 }}>
-          <label className="form-label">Assigned Zone</label>
-          <input className="form-input" value={form.zone} onChange={e => set('zone', e.target.value)} placeholder="Zone 1 — Main St" />
-        </div>
-
-        {/* Driver */}
-        <div style={{ marginBottom: 14 }}>
-          <label className="form-label">Assigned Driver</label>
-          <select className="form-input" value={form.driver} onChange={e => set('driver', e.target.value)}>
-            <option value="">— No Driver —</option>
-            {drivers.map(d => <option key={d.id} value={d.id}>{d.full_name}</option>)}
-          </select>
-        </div>
-
-        {/* Crew */}
         <div style={{ marginBottom: 20 }}>
-          <label className="form-label">Crew Members</label>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <select
-              className="form-input"
-              value={crewInput}
-              onChange={e => setCrewInput(e.target.value)}
-              style={{ flex: 1 }}
-            >
-              <option value="">— Select crew member —</option>
-              {availableCrew.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
-            </select>
-            <button
-              onClick={() => addCrew(crewInput)}
-              style={{
-                background: 'var(--accent)', color: '#0d1117', border: 'none',
-                borderRadius: 8, padding: '0 14px', fontWeight: 700, cursor: 'pointer',
-              }}
-            >Add</button>
-          </div>
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {form.crew.length === 0 && (
-              <span style={{ fontSize: 12, color: '#aaa' }}>No crew assigned yet.</span>
-            )}
-            {form.crew.map(id => (
-              <span key={id} style={{
-                background: 'var(--surface-2)', border: '1px solid var(--border)',
-                borderRadius: 20, padding: '4px 10px', fontSize: 12,
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}>
-                {getMemberName(id)}
-                <button
-                  onClick={() => removeCrew(id)}
-                  style={{ background: 'none', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}
-                >×</button>
-              </span>
-            ))}
-          </div>
+          <label className="form-label">Date Bought</label>
+          <input className="form-input" type="date" value={dateBought} onChange={e => setDateBought(e.target.value)} />
         </div>
 
         <div style={{ display: 'flex', gap: 10 }}>
           <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
-          <button
-            className="btn btn-primary"
-            style={{ flex: 1 }}
-            onClick={() => {
-              if (!form.plate_number.trim()) return alert('Plate number is required.')
-              onSave(form)
-            }}
-          >
+          <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSubmit}>
             {truck ? 'Save Changes' : 'Add Truck'}
           </button>
         </div>
@@ -211,12 +171,185 @@ function TruckModal({ truck, onSave, onClose, drivers, crewPool }) {
   )
 }
 
-function RouteModal({ driverId, driverName, onClose }) {
+function AssignTruckModal({ truck, trucks, onSave, onClose, drivers, crewPool }) {
+  const { notify } = useNotification()
+  const [selectedTruckId, setSelectedTruckId] = useState(truck?.id || '')
+  const [assignedDrivers, setAssignedDrivers] = useState(truck?.drivers || [])
+  const [assignedCrew, setAssignedCrew] = useState(truck?.crew || [])
+  const [crewInput, setCrewInput] = useState('')
+  const [driverInput, setDriverInput] = useState('')
+
+  // If user picks a different truck from the dropdown mid-flow, load its current assignment
+  useEffect(() => {
+    const t = trucks.find(t => String(t.id) === String(selectedTruckId))
+    if (t) {
+      setAssignedDrivers(t.drivers || [])
+      setAssignedCrew(t.crew || [])
+    }
+  }, [selectedTruckId, trucks])
+
+  const getMemberName = (id) => {
+    const u = crewPool.find(x => x.id === id) || drivers.find(x => x.id === id)
+    return u ? u.full_name : 'Unknown'
+  }
+
+  const availableCrew = crewPool.filter(c => !assignedCrew.includes(c.id))
+
+  function addCrew(id) {
+    if (!id) return
+    const member = crewPool.find(c => String(c.id) === String(id))
+    if (!member || assignedCrew.includes(member.id)) return
+    setAssignedCrew(prev => [...prev, member.id])
+    setCrewInput('')
+  }
+
+  function handleSubmit() {
+    if (!selectedTruckId) return notify({ variant: 'error-solid', message: 'Please select a truck.' })
+    onSave({ drivers: assignedDrivers, crew: assignedCrew }, selectedTruckId)
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+      zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }} onClick={onClose}>
+      <div style={{
+        background: 'var(--surface)', borderRadius: 16, padding: 24,
+        width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+      }} onClick={e => e.stopPropagation()}>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+          <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: 0 }}>
+            Assign Truck to a Driver
+          </h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#888' }}>×</button>
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label className="form-label">Truck</label>
+          <select
+            className="form-input"
+            value={selectedTruckId}
+            onChange={e => setSelectedTruckId(e.target.value)}
+            disabled={!!truck}   // locked if opened from a specific row
+          >
+            <option value="">— Select truck —</option>
+            {trucks.map(t => (
+              <option key={t.id} value={t.id}>{t.plate_number} — {t.model}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Drivers */}
+        <div style={{ marginBottom: 14 }}>
+          <label className="form-label">Assigned Drivers (Max 2)</label>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            <select
+              className="form-input"
+              value={driverInput}
+              onChange={e => setDriverInput(e.target.value)}
+              style={{ flex: 1 }}
+              disabled={assignedDrivers.length >= 2}
+            >
+              <option value="">— Select driver —</option>
+              {drivers.filter(d => !assignedDrivers.includes(d.id)).map(d => <option key={d.id} value={d.id}>{d.full_name}</option>)}
+            </select>
+            <button
+              type="button"
+              onClick={() => {
+                if (!driverInput || assignedDrivers.length >= 2) return
+                const drv = drivers.find(d => String(d.id) === String(driverInput))
+                if (!drv || assignedDrivers.includes(drv.id)) return
+                setAssignedDrivers(prev => [...prev, drv.id])
+                setDriverInput('')
+              }}
+              style={{ background: 'var(--accent)', color: '#0d1117', border: 'none', borderRadius: 8, padding: '0 14px', fontWeight: 700, cursor: 'pointer' }}
+              disabled={assignedDrivers.length >= 2}
+            >Add</button>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {assignedDrivers.length === 0 && <span style={{ fontSize: 12, color: '#aaa' }}>No driver assigned.</span>}
+            {assignedDrivers.map(id => (
+              <span key={id} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 20, padding: '4px 10px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {getMemberName(id)}
+                <button type="button" onClick={() => setAssignedDrivers(prev => prev.filter(d => d !== id))} style={{ background: 'none', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Crew */}
+        <div style={{ marginBottom: 20 }}>
+          <label className="form-label">Crew Members</label>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            <select className="form-input" value={crewInput} onChange={e => setCrewInput(e.target.value)} style={{ flex: 1 }}>
+              <option value="">— Select crew member —</option>
+              {availableCrew.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
+            </select>
+            <button type="button" onClick={() => addCrew(crewInput)}
+              style={{ background: 'var(--accent)', color: '#0d1117', border: 'none', borderRadius: 8, padding: '0 14px', fontWeight: 700, cursor: 'pointer' }}
+            >Add</button>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {assignedCrew.length === 0 && <span style={{ fontSize: 12, color: '#aaa' }}>No crew assigned yet.</span>}
+            {assignedCrew.map(id => (
+              <span key={id} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 20, padding: '4px 10px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {getMemberName(id)}
+                <button type="button" onClick={() => setAssignedCrew(prev => prev.filter(c => c !== id))} style={{ background: 'none', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSubmit}>Save Assignment</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+function formatDaysInitials(daysStr) {
+  if (!daysStr || daysStr === 'Daily') return daysStr || 'Daily'
+  const arr = daysStr.split(', ')
+  if (arr.length > 1) {
+    return arr.map(d => d.trim()[0]).join(' - ')
+  }
+  return daysStr
+}
+function formatBarangays(bStr) {
+  if (!bStr) return 'No routes'
+  const arr = bStr.split(', ')
+  if (arr.length > 3) {
+    return `${arr.slice(0, 3).join(', ')} +${arr.length - 3} more...`
+  }
+  return bStr
+}
+function formatMaintenanceDuration(startDateStr) {
+  if (!startDateStr) return ''
+  const start = new Date(startDateStr)
+  const diffMs = Date.now() - start.getTime()
+  if (diffMs < 0) return 'Just now'
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+  const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+  const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+
+  if (diffDays > 0) return `${diffDays} day${diffDays !== 1 ? 's' : ''}, ${diffHours} hr${diffHours !== 1 ? 's' : ''}`
+  if (diffHours > 0) return `${diffHours} hr${diffHours !== 1 ? 's' : ''}, ${diffMins} min${diffMins !== 1 ? 's' : ''}`
+  if (diffMins > 0) return `${diffMins} min${diffMins !== 1 ? 's' : ''}`
+  return 'Just now'
+}
+
+function RouteModal({ truckId, driverId, driverName, onClose }) {
   const mapRef = useRef(null)
   const mapInstance = useRef(null)
   const [leafletReady, setLeafletReady] = useState(false)
-  const [schedule, setSchedule] = useState(null)
+  const [schedules, setSchedules] = useState([])
+  const [activeIdx, setActiveIdx] = useState(0)
   const [loading, setLoading] = useState(true)
+
+  const schedule = schedules[activeIdx] || null
 
   // Load Leaflet CDN dynamically if not present
   useEffect(() => {
@@ -240,73 +373,79 @@ function RouteModal({ driverId, driverName, onClose }) {
     setLoading(true)
     api.get('/api/driver/collection-schedules/')
       .then(res => {
-        const matchingSchedule = res.data.find(s => String(s.driver) === String(driverId))
-        setSchedule(matchingSchedule || null)
+        const matching = res.data.filter(s => String(s.truck) === String(truckId) && String(s.driver) === String(driverId))
+        setSchedules(matching)
+        setActiveIdx(0)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [driverId])
+  }, [truckId, driverId])
 
-  // Initialize and draw Map once Leaflet is ready and schedule is loaded
-  // Initialize and draw Map once Leaflet is ready and schedule is loaded
+  // Initialize Map
   useEffect(() => {
-    if (!leafletReady || !mapRef.current || mapInstance.current || loading) return
-
+    if (!leafletReady || !mapRef.current || mapInstance.current) return
     const L = window.L
     const map = L.map(mapRef.current, { center: [13.9373, 121.617], zoom: 14 })
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap', maxZoom: 19,
     }).addTo(map)
     mapInstance.current = map
+  }, [leafletReady])
 
-    if (!schedule?.waypoints?.length) return
+  const layerGroupRef = useRef(null)
 
-    const waypoints = schedule.waypoints
+  // Draw Schedule
+  useEffect(() => {
+    if (!leafletReady || !mapInstance.current || loading || !schedule) return
+    const L = window.L
+    const map = mapInstance.current
 
-    // ── Stop markers (unchanged) ──────────────────────────────────────────
+    if (layerGroupRef.current) {
+      layerGroupRef.current.clearLayers()
+    } else {
+      layerGroupRef.current = L.featureGroup().addTo(map)
+    }
+    const layerGroup = layerGroupRef.current
+
+    const waypoints = (schedule?.waypoints || []).filter(w => w && w.lat != null && w.lng != null)
+    if (waypoints.length === 0) return
+
     const startIcon = L.divIcon({
       html: `<div style="background:#2ecc71;width:12px;height:12px;border-radius:50%;border:2px solid white;box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>`,
       className: '', iconSize: [12, 12], iconAnchor: [6, 6],
     })
-    L.marker([waypoints[0].lat, waypoints[0].lng], { icon: startIcon }).addTo(map).bindPopup('Start Point')
+    L.marker([waypoints[0].lat, waypoints[0].lng], { icon: startIcon }).addTo(layerGroup).bindPopup('Start Point')
 
     waypoints.slice(1).forEach((wp, index) => {
       const stopIcon = L.divIcon({
         html: `<div style="background:#3498db;width:16px;height:16px;border-radius:50%;color:white;font-size:9px;font-weight:bold;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 0 6px rgba(0,0,0,0.5);">${index + 1}</div>`,
         className: '', iconSize: [16, 16], iconAnchor: [8, 8],
       })
-      L.marker([wp.lat, wp.lng], { icon: stopIcon }).addTo(map).bindPopup(`Stop ${index + 1}: ${wp.label || ''}`)
+      L.marker([wp.lat, wp.lng], { icon: stopIcon }).addTo(layerGroup).bindPopup(`Stop ${index + 1}: ${wp.label || ''}`)
     })
 
-    // ── Fallback straight-line while ORS loads ────────────────────────────
     const latlngs = waypoints.map(w => [w.lat, w.lng])
     const fallbackLine = L.polyline(latlngs, {
       color: '#2ecc71', weight: 3, opacity: 0.35, dashArray: '6, 6',
-    }).addTo(map)
+    }).addTo(layerGroup)
     map.fitBounds(fallbackLine.getBounds(), { padding: [30, 30] })
 
-    // ── ORS actual road route ─────────────────────────────────────────────
     const orsApiKey = import.meta.env.VITE_ORS_API_KEY
     if (!orsApiKey) return
 
-    // ORS accepts max 50 coordinates; slice if the route is long
     const coordinates = waypoints.slice(0, 50).map(w => [w.lng, w.lat])
 
     fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
       method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        Authorization: orsApiKey,
-      },
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: orsApiKey },
       body: JSON.stringify({ coordinates }),
     })
       .then(r => r.json())
       .then(data => {
         if (!data.routes?.length || !mapInstance.current) return
-        map.removeLayer(fallbackLine)
+        layerGroup.removeLayer(fallbackLine)
         const pts = decodePolyline(data.routes[0].geometry)
-        const orsLine = L.polyline(pts, { color: '#2ecc71', weight: 5, opacity: 0.85 }).addTo(map)
+        const orsLine = L.polyline(pts, { color: '#2ecc71', weight: 5, opacity: 0.85 }).addTo(layerGroup)
         map.fitBounds(orsLine.getBounds(), { padding: [30, 30] })
       })
       .catch(() => { /* fallbackLine stays visible */ })
@@ -345,6 +484,25 @@ function RouteModal({ driverId, driverName, onClose }) {
         </div>
 
         <div style={{ position: 'relative', width: '100%', height: 350, background: '#1e293b', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+          {schedules.length > 1 && (
+            <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 1000, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {schedules.map((s, idx) => (
+                <button
+                  key={s.id}
+                  onClick={() => setActiveIdx(idx)}
+                  style={{
+                    background: activeIdx === idx ? '#14b8a6' : 'rgba(15,23,42,0.8)',
+                    color: '#fff', borderRadius: 20, padding: '6px 12px',
+                    fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                    border: `1px solid ${activeIdx === idx ? '#14b8a6' : 'rgba(255,255,255,0.2)'}`
+                  }}
+                >
+                  {formatDaysInitials(s.days) || `Route ${idx + 1}`}
+                </button>
+              ))}
+            </div>
+          )}
           <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
 
           {(loading || !leafletReady) && (
@@ -361,7 +519,7 @@ function RouteModal({ driverId, driverName, onClose }) {
               position: 'absolute', inset: 0, background: 'rgba(30, 41, 59, 0.9)',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#fff', padding: 20, textAlign: 'center'
             }}>
-              <span style={{ fontSize: 36, marginBottom: 10 }}>📍</span>
+              <span style={{ width: 36, height: 36, marginBottom: 10, color: '#e74c3c' }}>{ICONS.map}</span>
               <span style={{ fontSize: 14, fontWeight: 600, color: '#e74c3c' }}>No Route Configured</span>
               <span style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>This driver does not have a route schedule assigned.</span>
             </div>
@@ -376,7 +534,7 @@ function RouteModal({ driverId, driverName, onClose }) {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-muted)' }}>Days:</span>
-              <span style={{ fontWeight: 600 }}>{schedule.days || '—'}</span>
+              <span style={{ fontWeight: 600 }}>{formatDaysInitials(schedule.days) || '—'}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-muted)' }}>Time Schedule:</span>
@@ -403,45 +561,84 @@ export default function TruckManagement() {
   const navigate = useNavigate()
   const { trucks, loading, saveTruck, deleteTruck: apiDeleteTruck } = useTrucks()
   const { drivers, crew: crewPool } = useUsers()
+  const { notify } = useNotification()
 
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
-  const [modal, setModal] = useState(null)   // null | 'add' | truck object
+  const [modal, setModal] = useState(null)   // null | { type: 'add_truck'|'edit_truck'|'assign_truck', truck: obj|null }
   const [expanded, setExpanded] = useState(null)
   const [toast, setToast] = useState(null)
-  const [viewRouteDriver, setViewRouteDriver] = useState(null)
+  const [viewRouteTruck, setViewRouteTruck] = useState(null)
+  const [warningModal, setWarningModal] = useState(null)
 
   function showToast(msg) {
     setToast(msg)
     setTimeout(() => setToast(null), 3000)
   }
 
-  async function handleSave(form) {
-    const id = modal === 'add' ? null : modal.id
-    const res = await saveTruck(id, form)
+  async function handleSave(form, truckId = null) {
+    const id = truckId;
+
+    if (id) {
+      const originalTruck = trucks.find(t => t.id === id)
+      let newStatus = form instanceof FormData ? form.get('status') : form.status;
+      
+      if (originalTruck && originalTruck.status === 'active' && (newStatus === 'maintenance' || newStatus === 'inactive')) {
+        setWarningModal({ action: 'status', id, form })
+        return
+      }
+    }
+
+    executeSave(id, form)
+  }
+
+  async function executeSave(id, form) {
+    const payload = form instanceof FormData ? form : { ...form }
+    if (!(payload instanceof FormData) && !payload.last_service) payload.last_service = null
+
+    const res = await saveTruck(id, payload)
     if (res.ok) {
       showToast(id ? '✅ Truck updated successfully.' : '✅ Truck added successfully.')
       setModal(null)
     } else {
-      alert(JSON.stringify(res.error))
+      notify({ variant: 'error-outline', message: getApiErrorMessage({ response: { data: res.error } }, 'Failed to save truck.') })
     }
   }
 
-  async function handleDeleteTruck(id) {
-    if (!window.confirm('Delete this truck record?')) return
-    const res = await apiDeleteTruck(id)
+  function handleDeleteTruck(truck) {
+    setWarningModal({ action: 'delete', truck })
+  }
+
+  async function confirmDelete(truck) {
+    const res = await apiDeleteTruck(truck.id)
     if (res.ok) {
       setExpanded(null)
-      showToast('🗑 Truck removed.')
+      setWarningModal(null)
+      notify({ message: 'Truck deleted permanently.', variant: 'error-dark', position: 'bottom-left' })
     }
+  }
+
+  async function confirmStatusChange(reason) {
+    const { id, form } = warningModal
+    let finalForm = form;
+    if (finalForm instanceof FormData) {
+      finalForm.append('status_reason', reason);
+    } else {
+      finalForm = { ...form, status_reason: reason }
+      // Backend automatically handles clearing drivers & crew on inactive transition now.
+    }
+    setWarningModal(null)
+    executeSave(id, finalForm)
   }
 
   const filtered = useMemo(() => trucks.filter(t => {
     const matchStatus = filter === 'all' || t.status === filter
+    const driverNames = t.driver_details?.map(d => d.full_name).join(' ') || ''
+    const assignedBarangays = t.driver_details?.map(d => d.assigned_barangays).join(' ') || ''
     const matchSearch = !search ||
       t.plate_number.toLowerCase().includes(search.toLowerCase()) ||
-      (t.driver_name || '').toLowerCase().includes(search.toLowerCase()) ||
-      t.zone.toLowerCase().includes(search.toLowerCase())
+      driverNames.toLowerCase().includes(search.toLowerCase()) ||
+      assignedBarangays.toLowerCase().includes(search.toLowerCase())
     return matchStatus && matchSearch
   }), [trucks, filter, search])
 
@@ -467,22 +664,30 @@ export default function TruckManagement() {
       )}
 
       {/* Modal */}
-      {modal && (
-        <TruckModal
-          truck={modal === 'add' ? null : modal}
+      {modal?.type === 'add_truck' || modal?.type === 'edit_truck' ? (
+        <TruckEntityModal
+          truck={modal.truck}
+          onSave={handleSave}
+          onClose={() => setModal(null)}
+        />
+      ) : modal?.type === 'assign_truck' ? (
+        <AssignTruckModal
+          truck={modal.truck}
+          trucks={trucks}
           onSave={handleSave}
           onClose={() => setModal(null)}
           drivers={drivers}
           crewPool={crewPool}
         />
-      )}
+      ) : null}
 
       {/* Route Map Modal */}
-      {viewRouteDriver && (
+      {viewRouteTruck && (
         <RouteModal
-          driverId={viewRouteDriver.id}
-          driverName={viewRouteDriver.name}
-          onClose={() => setViewRouteDriver(null)}
+          truckId={viewRouteTruck.id}
+          driverId={viewRouteTruck.driverId}
+          driverName={viewRouteTruck.name}
+          onClose={() => setViewRouteTruck(null)}
         />
       )}
 
@@ -512,12 +717,20 @@ export default function TruckManagement() {
             </div>
             <p className="text-muted text-sm">Manage fleet, assign drivers and crew members.</p>
           </div>
-          <button
-            className="btn btn-primary"
-            onClick={() => setModal('add')}
-          >
-            + Add Truck
-          </button>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              className="btn btn-outline"
+              onClick={() => setModal({ type: 'assign_truck', truck: null })}
+            >
+              Assign Truck
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={() => setModal({ type: 'add_truck', truck: null })}
+            >
+              + Add Truck
+            </button>
+          </div>
         </div>
 
         {/* ── KPI Strip ── */}
@@ -559,7 +772,7 @@ export default function TruckManagement() {
 
           <input
             className="form-input"
-            placeholder="   Search plate, driver, zone…"
+            placeholder="   Search plate, driver, barangay…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             style={{ maxWidth: 260, marginLeft: 'auto' }}
@@ -572,7 +785,7 @@ export default function TruckManagement() {
             <div style={{ textAlign: 'center', padding: 40 }}>Loading trucks...</div>
           ) : filtered.length === 0 ? (
             <div className="card" style={{ textAlign: 'center', padding: '36px 20px' }}>
-              <div style={{ fontSize: 36, marginBottom: 10 }}>🚛</div>
+              <div style={{ width: 48, height: 48, margin: '0 auto 12px', color: '#94a3b8' }}>{ICONS.truck}</div>
               <div style={{ fontWeight: 700, marginBottom: 4 }}>No trucks found</div>
               <div className="text-muted text-sm">Try adjusting your filter or search.</div>
             </div>
@@ -599,9 +812,11 @@ export default function TruckManagement() {
                     <div style={{
                       width: 44, height: 44, borderRadius: 12, flexShrink: 0,
                       background: `${sm.bg}`,
-                      border: `1px solid ${sm.border}`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22,
-                    }}>🚛</div>
+                      border: `1px solid ${sm.border}`, color: sm.color,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <div style={{ width: 24, height: 24 }}>{ICONS.truck}</div>
+                    </div>
 
                     {/* Main info */}
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -610,8 +825,9 @@ export default function TruckManagement() {
                         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{truck.model}</span>
                         <StatusBadge status={truck.status} />
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
-                        {truck.driver_name ? `👤 ${truck.driver_name}` : '👤 No driver assigned'} &nbsp;·&nbsp; {truck.zone}
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ width: 14, height: 14, flexShrink: 0 }}>{ICONS.profile}</div>
+                        {truck.driver_details?.length ? truck.driver_details.map(d => d.full_name).join(' & ') : 'No drivers assigned'} &nbsp;·&nbsp; {truck.driver_details?.length ? Array.from(new Set(truck.driver_details.map(d => d.assigned_barangays).filter(b => b && b !== 'No routes assigned'))).join(' | ') || 'No routes' : 'No routes'}
                       </div>
                       {truck.status === 'active' && <CapacityBar pct={truck.current_capacity} />}
                     </div>
@@ -639,50 +855,89 @@ export default function TruckManagement() {
                       style={{ borderTop: '1px solid var(--border)', padding: '16px', animation: 'slideDown .18s' }}
                       onClick={e => e.stopPropagation()}
                     >
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-
-                        {/* Driver card */}
-                        <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px' }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 8 }}>DRIVER</div>
-                          {truck.driver_name ? (
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <div style={{
-                                  width: 32, height: 32, borderRadius: '50%',
-                                  background: 'var(--accent)', color: '#0d1117',
-                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                  fontWeight: 800, fontSize: 13,
-                                }}>{truck.driver_name[0]}</div>
-                                <span style={{ fontSize: 13, fontWeight: 600 }}>{truck.driver_name}</span>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12, marginBottom: 16 }}>
+                        {truck.driver_details && truck.driver_details.length > 0 ? (
+                          truck.driver_details.map(d => (
+                            <div key={d.id} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                              {/* Driver & Schedule card */}
+                              <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px', flex: 1 }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 8 }}>ASSIGNMENT & SCHEDULE</div>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <div style={{
+                                        width: 32, height: 32, borderRadius: '50%', background: 'var(--accent)', color: '#0d1117',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 13,
+                                      }}>{d.full_name[0]}</div>
+                                      <span style={{ fontSize: 13, fontWeight: 600 }}>{d.full_name}</span>
+                                    </div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: '1.4' }}>
+                                      <div style={{ marginBottom: 2 }}>
+                                        <strong style={{ color: 'var(--text)' }}>Added:</strong> {truck.created_at ? new Date(truck.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown'}
+                                      </div>
+                                      <div>
+                                        <strong style={{ color: 'var(--text)' }}>Schedule:</strong>
+                                        {Array.isArray(d.schedule_description) && d.schedule_description.length > 0 ? (
+                                          <ul style={{ listStyleType: 'disc', paddingLeft: 20, margin: '4px 0 0 0', color: 'var(--text)' }}>
+                                            {d.schedule_description.map((desc, i) => {
+                                              let displayDesc = desc;
+                                              const parts = desc.split(' | ');
+                                              if (parts.length === 2) {
+                                                const timeStr = parts[1];
+                                                displayDesc = `${formatDaysInitials(parts[0])} | ${timeStr}`;
+                                              }
+                                              return <li key={i} style={{ marginBottom: 2 }}>{displayDesc}</li>
+                                            })}
+                                          </ul>
+                                        ) : (
+                                          <span style={{ marginLeft: 4 }}>No active schedule</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <button className="btn btn-outline btn-sm" style={{ fontSize: 11, padding: '6px 12px', height: 'fit-content', whiteSpace: 'nowrap' }} onClick={() => setViewRouteTruck({ id: truck.id, driverId: d.id, name: d.full_name })}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 14, height: 14 }}>{ICONS.map}</div> Show Route</div>
+                                  </button>
+                                </div>
                               </div>
-                              <button
-                                className="btn btn-outline btn-sm"
-                                style={{ fontSize: 11, padding: '4px 10px', height: 'fit-content' }}
-                                onClick={() => setViewRouteDriver({ id: truck.driver, name: truck.driver_name })}
-                              >
-                                🗺️ Show Route
-                              </button>
+                              {/* Last service */}
+                              <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px' }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 6 }}>LAST SERVICE</div>
+                                <div style={{ fontSize: 13, fontWeight: 600 }}>{d.last_service || '—'}</div>
+                              </div>
                             </div>
-                          ) : (
-                            <span style={{ fontSize: 12, color: '#e74c3c' }}>Not assigned</span>
-                          )}
-                        </div>
+                          ))
+                        ) : (
+                          <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px', gridColumn: '1 / -1' }}>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 8 }}>ASSIGNMENT & SCHEDULE</div>
+                            <span style={{ fontSize: 12, color: '#e74c3c' }}>No drivers assigned</span>
+                          </div>
+                        )}
+                      </div>
 
-                        {/* Last service */}
-                        <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px' }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 6 }}>LAST SERVICE</div>
-                          <div style={{ fontSize: 13, fontWeight: 600 }}>
-                            {truck.last_service || '—'}
+                      {truck.status === 'maintenance' && (
+                        <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px', marginBottom: 16 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#d97706', letterSpacing: '.07em', marginBottom: 6 }}>UNDER MAINTENANCE</div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                            {truck.maintenance_start ? formatMaintenanceDuration(truck.maintenance_start) : 'Start time unknown'}
                           </div>
                         </div>
-                      </div>
+                      )}
 
                       {/* Crew list */}
                       <div style={{ marginBottom: 16 }}>
                         <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 8 }}>
-                          CREW MEMBERS ({truck.crew.length})
+                          {truck.status === 'inactive'
+                            ? 'PAST CREW MEMBERS'
+                            : `CREW MEMBERS (${truck.crew?.length || 0})`}
                         </div>
-                        {truck.crew.length === 0 ? (
+
+                        {truck.status === 'inactive' ? (
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic', background: 'var(--surface)', border: '1px solid var(--border)', padding: '6px 12px', borderRadius: 8 }}>
+                            {truck.past_crew_names ? truck.past_crew_names : 'No past crew recorded.'}
+                          </div>
+                        ) : truck.crew?.length === 0 ? (
                           <div style={{ fontSize: 12, color: '#e74c3c' }}>No crew assigned to this truck.</div>
                         ) : (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -709,16 +964,29 @@ export default function TruckManagement() {
                         <button
                           className="btn btn-outline btn-sm"
                           style={{ flex: 1 }}
-                          onClick={() => setModal(truck)}
+                          onClick={() => setModal({ type: 'edit_truck', truck })}
                         >
-                          ✏️ Edit / Reassign
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                            <div style={{ width: 14, height: 14 }}>{ICONS.edit}</div> Edit
+                          </div>
+                        </button>
+                        <button
+                          className="btn btn-outline btn-sm"
+                          style={{ flex: 1 }}
+                          onClick={() => setModal({ type: 'assign_truck', truck })}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                            <div style={{ width: 14, height: 14 }}>{ICONS.profile}</div> Assign
+                          </div>
                         </button>
                         <button
                           className="btn btn-sm"
                           style={{ background: 'rgba(231,76,60,0.08)', color: '#e74c3c', border: '1px solid rgba(231,76,60,0.3)' }}
-                          onClick={() => handleDeleteTruck(truck.id)}
+                          onClick={() => handleDeleteTruck(truck)}
                         >
-                          🗑 Delete
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                            <div style={{ width: 14, height: 14 }}>{ICONS.trash}</div> Delete
+                          </div>
                         </button>
                       </div>
                     </div>
@@ -728,8 +996,65 @@ export default function TruckManagement() {
             })
           )}
         </div>
-
       </div>
+
+      {/* Warning Modal */}
+      {warningModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, backdropFilter: 'blur(4px)' }}>
+          <div style={{ background: 'var(--surface)', width: '90%', maxWidth: 400, borderRadius: 16, padding: 24, boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
+
+            {warningModal.action === 'delete' ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, color: '#e74c3c' }}>
+                  <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(231,76,60,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ width: 20, height: 20 }}>{ICONS.trash}</div>
+                  </div>
+                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Delete Truck</h3>
+                </div>
+                <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 24, lineHeight: 1.5 }}>
+                  Are you sure you want to delete <strong>{warningModal.truck.plate_number}</strong>? <br /><br />
+                  Deleting this truck will orphan any assigned routes (leaving them blank for reassignment). This action cannot be undone.
+                </p>
+                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                  <button className="btn btn-outline" onClick={() => setWarningModal(null)}>Cancel</button>
+                  <button className="btn btn-primary" style={{ background: '#e74c3c', borderColor: '#e74c3c', color: '#fff' }} onClick={() => confirmDelete(warningModal.truck)}>
+                    Yes, Delete
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, color: '#d97706' }}>
+                  <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(217,119,6,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ fontSize: 20 }}>⚠️</div>
+                  </div>
+                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Change Status</h3>
+                </div>
+                <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.5 }}>
+                  You are changing this truck's status to <strong>{warningModal.form.status}</strong>.
+                  {warningModal.form.status === 'inactive' && ' This will unassign the truck, driver, and crew from all active routes.'}
+                </p>
+                <div style={{ marginBottom: 24 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 8 }}>Reason for {warningModal.form.status}</label>
+                  <textarea
+                    id="statusReasonInput"
+                    style={{ width: '100%', minHeight: 80, padding: 12, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontSize: 13, resize: 'vertical' }}
+                    placeholder={`Why is this truck ${warningModal.form.status}?`}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                  <button className="btn btn-outline" onClick={() => setWarningModal(null)}>Cancel</button>
+                  <button className="btn btn-primary" onClick={() => confirmStatusChange(document.getElementById('statusReasonInput').value)}>
+                    Confirm Change
+                  </button>
+                </div>
+              </>
+            )}
+
+          </div>
+        </div>
+      )}
+
     </DashboardLayout>
   )
 }

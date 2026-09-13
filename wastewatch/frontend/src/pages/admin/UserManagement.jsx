@@ -6,8 +6,10 @@
 import { useState, useEffect, useMemo } from 'react'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useUsers } from '../../hooks/useUsers'
+import { useNotification } from '../../context/NotificationContext'
 import api from '../../api/client'
 import BarangaySelect from '../../components/BarangaySelect'
+import { getApiErrorMessage } from '../../utils/notificationHelpers'
 
 // ── Mock Data ─────────────────────────────────────────────────────────────────
 
@@ -23,8 +25,15 @@ const ROLE_META = {
 }
 
 const EMPTY_FORM = {
-  full_name: '', email: '', password: '', role: 'citizen',
-  barangay: '', dumpsite: '', employee_type: '', is_active: true,
+  first_name: '', last_name: '', username: '', email: '', password: '', password2: '', role: 'citizen',
+  barangay: '', dumpsite: '', employee_type: '', is_active: true, profile_pic: null,
+}
+
+export function getDisplayName(u) {
+  if (u.full_name && u.full_name.trim()) return u.full_name;
+  const parts = [u.first_name, u.last_name].filter(Boolean);
+  if (parts.length > 0) return parts.join(' ');
+  return u.email ? u.email.split('@')[0] : 'Unknown';
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -40,7 +49,15 @@ function RoleBadge({ role }) {
   )
 }
 
-function Avatar({ name, active }) {
+function Avatar({ name, active, profile_pic }) {
+  if (profile_pic) {
+    return (
+      <img src={profile_pic} alt={name} style={{
+        width: 34, height: 34, borderRadius: '50%', flexShrink: 0, objectFit: 'cover',
+        border: active ? '2px solid var(--accent)' : '2px solid #bbb',
+      }} />
+    )
+  }
   return (
     <div style={{
       width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
@@ -56,23 +73,31 @@ function Avatar({ name, active }) {
 function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
   const isEdit = !!user
   const [form, setForm] = useState(user ? {
-    full_name: user.full_name,
+    first_name: user.first_name || '',
+    last_name: user.last_name || '',
+    username: user.username || '',
     email: user.email,
     password: '',
+    password2: '',
     role: user.role,
     employee_type: user.employee_type || '',
     barangay: user.barangay || '',
     dumpsite: user.dumpsite || '',
     is_active: user.is_active,
+    profile_pic: null,
   } : { ...EMPTY_FORM })
   const [err, setErr] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   function validate() {
-    if (!form.full_name.trim()) return 'Full name is required.'
+    if (!form.first_name.trim()) return 'First name is required.'
+    if (!form.last_name.trim()) return 'Last name is required.'
+    if (!form.username.trim()) return 'Username is required.'
     if (!form.email.trim()) return 'Email is required.'
     if (!isEdit && !form.password.trim()) return 'Password is required for new users.'
+    if (form.password && form.password !== form.password2) return 'Passwords do not match.'
     if (form.role === 'dumpsite' && !form.dumpsite) return 'Please assign a dumpsite facility.'
     return ''
   }
@@ -83,6 +108,10 @@ function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
     // Strip employee_type unless citizen
     const payload = { ...form }
     if (payload.role !== 'citizen') payload.employee_type = ''
+
+    // Auto-generate full_name for backend models
+    payload.full_name = `${form.first_name} ${form.last_name}`.trim()
+
     onSave(payload)
   }
 
@@ -112,19 +141,45 @@ function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
           }}>{err}</div>
         )}
 
-        <div style={{ marginBottom: 13 }}>
-          <label className="form-label">Full Name</label>
-          <input className="form-input" value={form.full_name} onChange={e => set('full_name', e.target.value)} placeholder="e.g. Juan Dela Cruz" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 13 }}>
+          <div>
+            <label className="form-label">First Name</label>
+            <input className="form-input" value={form.first_name} onChange={e => set('first_name', e.target.value)} placeholder="Juan" />
+          </div>
+          <div>
+            <label className="form-label">Last Name</label>
+            <input className="form-input" value={form.last_name} onChange={e => set('last_name', e.target.value)} placeholder="Dela Cruz" />
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 13 }}>
+          <div>
+            <label className="form-label">Username</label>
+            <input className="form-input" value={form.username} onChange={e => set('username', e.target.value)} placeholder="juan123" />
+          </div>
+          <div>
+            <label className="form-label">Email Address</label>
+            <input className="form-input" type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="user@lucena.gov.ph" />
+          </div>
         </div>
 
         <div style={{ marginBottom: 13 }}>
-          <label className="form-label">Email Address</label>
-          <input className="form-input" type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="user@lucena.gov.ph" />
+          <label className="form-label">Profile Picture (Optional)</label>
+          <input className="form-input" type="file" accept="image/*" onChange={e => set('profile_pic', e.target.files[0])} style={{ padding: 8 }} />
         </div>
 
-        <div style={{ marginBottom: 13 }}>
-          <label className="form-label">{isEdit ? 'New Password (leave blank to keep)' : 'Password'}</label>
-          <input className="form-input" type="password" value={form.password} onChange={e => set('password', e.target.value)} placeholder="••••••••" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 13 }}>
+          <div style={{ position: 'relative' }}>
+            <label className="form-label">{isEdit ? 'New Password' : 'Password'}</label>
+            <input className="form-input" type={showPassword ? "text" : "password"} value={form.password} onChange={e => set('password', e.target.value)} placeholder="••••••••" style={{ paddingRight: 40 }} />
+            <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 10, top: 28, background: 'none', border: 'none', cursor: 'pointer', opacity: 0.6, padding: 0 }}>
+              {showPassword ? '🙈' : '👁️'}
+            </button>
+          </div>
+          <div style={{ position: 'relative' }}>
+            <label className="form-label">Confirm Password</label>
+            <input className="form-input" type={showPassword ? "text" : "password"} value={form.password2} onChange={e => set('password2', e.target.value)} placeholder="••••••••" style={{ paddingRight: 40 }} />
+          </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 13 }}>
@@ -229,6 +284,7 @@ function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
 
 export default function UserManagement() {
   const { users, loading, refresh: refreshUsers } = useUsers()
+  const { notify } = useNotification()
   const [barangays, setBarangays] = useState([])
   const [dumpsites, setDumpsites] = useState([])
 
@@ -239,6 +295,7 @@ export default function UserManagement() {
   const itemsPerPage = 20
 
   const [modal, setModal] = useState(null)  // null | 'add' | user object
+  const [deleteModal, setDeleteModal] = useState(null) // null | user object to delete
   const [toast, setToast] = useState(null)
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768)
   useEffect(() => {
@@ -256,22 +313,33 @@ export default function UserManagement() {
 
   useEffect(() => {
     api.get('/api/barangays/').then(res => setBarangays(res.data))
-    api.get('/api/driver/dumpsites/').then(res => setDumpsites(res.data))
+    api.get('/api/dumpsite/dumpsites/').then(res => setDumpsites(res.data))
   }, [])
 
-  async function handleSave(form) {
+  async function handleSave(formObj) {
     try {
+      const formData = new FormData()
+      Object.keys(formObj).forEach(key => {
+        if (formObj[key] !== null && formObj[key] !== undefined && formObj[key] !== '') {
+          formData.append(key, formObj[key])
+        }
+      })
+
       if (modal === 'add') {
-        await api.post('/api/accounts/users/', form)
+        await api.post('/api/accounts/users/', formData)
+        setRoleFilter('all')
+        setStatusFilter('all')
+        setSearch('')
         showToast('✅ User created successfully.')
       } else {
-        await api.patch(`/api/accounts/users/${modal.id}/`, form)
+        await api.patch(`/api/accounts/users/${modal.id}/`, formData)
         showToast('✅ User updated.')
       }
+      setCurrentPage(1)
       await refreshUsers()
       setModal(null)
     } catch (err) {
-      alert(JSON.stringify(err.response?.data || 'Failed to save user'))
+      notify({ variant: 'error-outline', message: getApiErrorMessage(err, 'Failed to save user') })
     }
   }
 
@@ -285,28 +353,33 @@ export default function UserManagement() {
     }
   }
 
-  async function deleteUser(id) {
-    if (!window.confirm('Delete this user? This cannot be undone.')) return
+  async function confirmDeleteUser() {
+    if (!deleteModal) return
     try {
-      await api.delete(`/api/accounts/users/${id}/`)
+      await api.delete(`/api/accounts/users/${deleteModal.id}/`)
       showToast('🗑 User removed.')
       await refreshUsers()
+      setDeleteModal(null)
     } catch {
       showToast('❌ Failed to delete user.')
     }
   }
 
-  const counts = useMemo(() => ({
-    all: users.length,
-    watcher: users.filter(u => u.role === 'watcher').length,
-    driver: users.filter(u => u.role === 'driver').length,
-    brgy_official: users.filter(u => u.role === 'brgy_official').length,
-    citizen: users.filter(u => u.role === 'citizen').length,
-    dumpsite: users.filter(u => u.role === 'dumpsite').length,
-    crew_member: users.filter(u => u.employee_type === 'crew_member').length,
-    active: users.filter(u => u.is_active).length,
-    inactive: users.filter(u => !u.is_active).length,
-  }), [users])
+  const counts = useMemo(() => {
+    const todayStr = new Date().toDateString()
+    return {
+      all: users.length,
+      watcher: users.filter(u => u.role === 'watcher').length,
+      driver: users.filter(u => u.role === 'driver').length,
+      brgy_official: users.filter(u => u.role === 'brgy_official').length,
+      citizen: users.filter(u => u.role === 'citizen').length,
+      dumpsite: users.filter(u => u.role === 'dumpsite').length,
+      crew_member: users.filter(u => u.employee_type === 'crew_member').length,
+      active: users.filter(u => u.is_active).length,
+      inactive: users.filter(u => !u.is_active).length,
+      new_today: users.filter(u => u.created_at && new Date(u.created_at).toDateString() === todayStr).length,
+    }
+  }, [users])
 
   const filtered = useMemo(() => users.filter(u => {
     const matchRole = roleFilter === 'all'
@@ -314,8 +387,8 @@ export default function UserManagement() {
       || (roleFilter === 'crew_member' && u.employee_type === 'crew_member')
     const matchStatus = statusFilter === 'all' || (statusFilter === 'active' ? u.is_active : !u.is_active)
     const matchSearch = !search ||
-      u.full_name.toLowerCase().includes(search.toLowerCase()) ||
-      u.email.toLowerCase().includes(search.toLowerCase()) ||
+      getDisplayName(u).toLowerCase().includes(search.toLowerCase()) ||
+      (u.email || '').toLowerCase().includes(search.toLowerCase()) ||
       (u.barangay_name || '').toLowerCase().includes(search.toLowerCase()) ||
       (u.dumpsite_name || '').toLowerCase().includes(search.toLowerCase())
     return matchRole && matchStatus && matchSearch
@@ -388,7 +461,7 @@ export default function UserManagement() {
             { label: 'Total Users', value: counts.all, color: '#ffffffff' },
             { label: 'Active', value: counts.active, color: '#2ecc71' },
             { label: 'Inactive', value: counts.inactive, color: '#e74c3c' },
-            { label: 'Brgy. Officials', value: counts.brgy_official, color: '#9b59b6' },
+            { label: 'New Users Today', value: counts.new_today, color: '#3498db' },
           ].map(s => (
             <div key={s.label} className="stat-card">
               <div className="label">{s.label}</div>
@@ -490,13 +563,13 @@ export default function UserManagement() {
                 }}>
                   {/* Top row: avatar + name + role badge */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                    <Avatar name={u.full_name} active={u.is_active} />
+                    <Avatar name={getDisplayName(u)} active={u.is_active} profile_pic={u.profile_pic} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
                         fontSize: 14, fontWeight: 700,
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         color: u.is_active ? 'var(--text)' : 'var(--text-muted)',
-                      }}>{u.full_name}</div>
+                      }}>{getDisplayName(u)}</div>
                       <div style={{
                         fontSize: 11, color: 'var(--text-muted)',
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -578,13 +651,13 @@ export default function UserManagement() {
               >
                 {/* Name + avatar */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                  <Avatar name={u.full_name} active={u.is_active} />
+                  <Avatar name={getDisplayName(u)} active={u.is_active} profile_pic={u.profile_pic} />
                   <div style={{ minWidth: 0 }}>
                     <div style={{
                       fontSize: 13, fontWeight: 600, overflow: 'hidden',
                       textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       color: u.is_active ? 'var(--text)' : 'var(--text-muted)',
-                    }}>{u.full_name}</div>
+                    }}>{getDisplayName(u)}</div>
                     {u.employee_type === 'crew_member' && (
                       <span style={{
                         fontSize: 8, fontWeight: 800, padding: '1px 6px', borderRadius: 10,
@@ -639,7 +712,7 @@ export default function UserManagement() {
                     }}
                   >✏️</button>
                   <button
-                    onClick={() => deleteUser(u.id)}
+                    onClick={() => setDeleteModal(u)}
                     title="Delete"
                     style={{
                       background: 'rgba(231,76,60,0.07)', border: '1px solid rgba(231,76,60,0.25)',
@@ -683,6 +756,46 @@ export default function UserManagement() {
         </div>
 
       </div>
+
+      {deleteModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+          zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }} onClick={() => setDeleteModal(null)}>
+          <div style={{
+            background: 'var(--surface)', borderRadius: 16, padding: '24px 20px',
+            width: '100%', maxWidth: 360, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            textAlign: 'center',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+            <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: '0 0 8px 0' }}>
+              Delete User?
+            </h3>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24, lineHeight: 1.4 }}>
+              Are you sure you want to permanently delete <strong>{deleteModal.full_name || deleteModal.username}</strong>? This action cannot be undone.
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => setDeleteModal(null)}
+                style={{ flex: 1, padding: '10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
+                onMouseEnter={e => e.target.style.opacity = 0.8}
+                onMouseLeave={e => e.target.style.opacity = 1}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteUser}
+                style={{ flex: 1, padding: '10px', borderRadius: 8, border: 'none', background: '#e74c3c', color: '#fff', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
+                onMouseEnter={e => e.target.style.opacity = 0.8}
+                onMouseLeave={e => e.target.style.opacity = 1}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </DashboardLayout>
   )
 }

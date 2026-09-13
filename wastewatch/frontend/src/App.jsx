@@ -14,6 +14,7 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-route
 import { AuthProvider } from './context/AuthContext'
 import PrivateRoute from './components/PrivateRoute'
 import DashboardLayout from './components/DashboardLayout'
+import ShiftStatusBanner from './components/ShiftStatusBanner'
 
 // Public pages
 import PublicDashboard from './pages/dashboard/PublicDashboard'
@@ -21,8 +22,6 @@ import AuthModal from './components/AuthModal'
 // Authenticated pages — import these from your existing files
 // (these are placeholders — wire up your actual page components)
 import DashboardRouter from './pages/dashboard/DashboardRouter'
-import ReportForm from './pages/ReportForm'
-import ConfirmCollection from './pages/watcher/ConfirmCollection'
 import VerificationTasks from './pages/watcher/VerificationTasksModule'
 import MapView from './pages/MapView'
 import EscalateToAdmin from './pages/EscalateToAdmin'
@@ -33,6 +32,7 @@ import AnalyticsTabs from './pages/analytics/AnalyticsTabs'
 import NewsPage from './pages/news/NewsPage'
 import WatcherTasksHub from './pages/watcher/WatcherTasksHub'
 import ConfirmCollectionModule from './pages/watcher/ConfirmCollectionModule'
+import NotificationsPage from './pages/NotificationsPage'
 
 // These may not exist yet — uncomment when ready:
 import TruckManagement from './pages/admin/TruckManagement'
@@ -45,6 +45,10 @@ import HotspotDetection from './pages/admin/HotspotDetection'
 import NotificationCenter from './pages/admin/NotificationCenter'
 import ActivityLog from './pages/admin/ActivityLog'
 import AdminReports from './pages/admin/AdminReports'
+import ReportDetail from './pages/admin/ReportDetail'
+import BarangayManagement from './pages/admin/BarangayManagement'
+import BarangayDetail from './pages/admin/BarangayDetail'
+import EscalationDetail from './pages/admin/EscalationDetail'
 
 import RouteOverview from './pages/driver/RouteOverview'
 import DriverAnalytics from './pages/driver/DriverAnalytics'
@@ -53,6 +57,11 @@ import DriverHotspotAlert from './pages/driver/DriverHotspotAlert'
 import DriverStatusPanel from './pages/driver/DriverStatusPanel'
 import DriverRouteFlow from './pages/driver/DriverRouteFlow'
 import AboutPage from './pages/AboutPage'
+
+import ArrivalLogger from './pages/dumpsite/ArrivalLogger'
+import CollectionLogs from './pages/dumpsite/CollectionLogs'
+import TruckQueue from './pages/dumpsite/TruckQueue'
+import BarangayBreakdown from './pages/dumpsite/BarangayBreakdown'
 
 function AuthOverlay({ mode }) {
   const navigate = useNavigate()
@@ -68,6 +77,7 @@ export default function App() {
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
+        <ShiftStatusBanner />
         <Routes>
 
           {/* ── PUBLIC — no auth required, offline-capable ── */}
@@ -109,6 +119,10 @@ export default function App() {
             <PrivateRoute><Profile /></PrivateRoute>
           } />
 
+          <Route path="/notifications" element={
+            <PrivateRoute><NotificationsPage /></PrivateRoute>
+          } />
+
           <Route path="/analytics" element={
             <PrivateRoute><AnalyticsTabs /></PrivateRoute>
           } />
@@ -123,6 +137,14 @@ export default function App() {
           } />
 
           {/* ADMIN PAGE */}
+          <Route path="/admin/barangays" element={
+            <PrivateRoute><BarangayManagement /></PrivateRoute>
+          } />
+
+          <Route path="/admin/barangays/:barangayId" element={
+            <PrivateRoute><BarangayDetail /></PrivateRoute>
+          } />
+
           <Route path="/admin/trucks" element={
             <PrivateRoute><TruckManagement /></PrivateRoute>
           } />
@@ -143,6 +165,18 @@ export default function App() {
             <PrivateRoute><EscalationManagement /></PrivateRoute>
           } />
 
+          <Route path="/admin/escalations/:id" element={
+            <PrivateRoute><EscalationDetail /></PrivateRoute>
+          } />
+
+          <Route path="/admin/reports/:id" element={
+            <PrivateRoute><ReportDetail /></PrivateRoute>
+          } />
+
+          <Route path="/admin/reports" element={
+            <PrivateRoute><AdminReports /></PrivateRoute>
+          } />
+
           <Route path="/admin/analytics" element={
             <PrivateRoute><PerformanceAnalytics /></PrivateRoute>
           } />
@@ -159,9 +193,6 @@ export default function App() {
             <PrivateRoute><ActivityLog /></PrivateRoute>
           } />
 
-          <Route path="/admin/reports" element={
-            <PrivateRoute roles={['admin']}><AdminReports /></PrivateRoute>
-          } />
 
           {/* ── DRIVER MODULE ── */}
           <Route path="/driver/flow" element={
@@ -214,17 +245,33 @@ export default function App() {
 
           } />
 
-          <Route path="/report/submit" element={
-            <PrivateRoute>
-              <ReportForm />
+          {/* ── DUMPSITE MODULE ── */}
+          <Route path="/dumpsite/log-arrival" element={
+            <PrivateRoute roles={['dumpsite', 'admin']}>
+              <DashboardLayout><ArrivalLogger /></DashboardLayout>
             </PrivateRoute>
           } />
 
-          <Route path="/collection/confirm" element={
-            <PrivateRoute>
-              <ConfirmCollection />
+          <Route path="/dumpsite/queue" element={
+            <PrivateRoute roles={['dumpsite', 'admin']}>
+              <DashboardLayout><TruckQueue /></DashboardLayout>
             </PrivateRoute>
           } />
+
+          <Route path="/dumpsite/logs" element={
+            <PrivateRoute roles={['dumpsite', 'admin']}>
+              <DashboardLayout><CollectionLogs /></DashboardLayout>
+            </PrivateRoute>
+          } />
+
+          <Route path="/dumpsite/barangay" element={
+            <PrivateRoute roles={['dumpsite', 'admin']}>
+              <DashboardLayout><BarangayBreakdown /></DashboardLayout>
+            </PrivateRoute>
+          } />
+
+
+
 
           {/* ── 404 ── */}
           <Route path="*" element={

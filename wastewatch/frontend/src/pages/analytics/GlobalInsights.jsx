@@ -8,10 +8,10 @@
  */
 
 import { useState, useEffect } from 'react'
-import { useAuth } from '../../context/AuthContext'
 import BarangayRankingCard from './BarangayRankingCard'
 import HotspotMap from './HotspotMap'
 import api from '../../api/client'
+import { Trash2, CheckCircle2, Truck, Flame, AlertTriangle, Building2, BarChart2, LineChart, ClipboardCheck, Clock, XCircle, TrendingUp, MapPin, PieChart, BarChart3, Flag, Hourglass, Users, Trophy, Map } from 'lucide-react'
 
 // ─── Reusable primitives ──────────────────────────────────────────────────────
 
@@ -28,7 +28,7 @@ function SHead({ icon, title, subtitle, right }) {
     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--accent)', marginBottom: 3 }}>
-          <span className="msi" style={{ fontSize: 16 }}>{icon}</span>
+          {icon}
           {title}
         </div>
         {subtitle && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{subtitle}</div>}
@@ -53,6 +53,16 @@ function PeriodToggle({ value, onChange, options }) {
       ))}
     </div>
   )
+}
+
+function asList(payload) {
+  if (Array.isArray(payload)) return payload
+  if (payload && Array.isArray(payload.results)) return payload.results
+  return []
+}
+
+function normalizePeriod(period) {
+  return (period || '').trim().toLowerCase()
 }
 
 // ─── Mini bar chart ───────────────────────────────────────────────────────────
@@ -214,34 +224,37 @@ const PLACEHOLDER = {
 // ─── Overview KPIs ────────────────────────────────────────────────────────────
 function OverviewKPIs({ kpi }) {
   const CARDS = [
-    { label: 'Waste Collected Today', value: `${kpi.collected_kg?.toLocaleString() ?? '—'} kg`, delta: kpi.collected_kg_delta, icon: 'delete_sweep', color: 'var(--accent)' },
-    { label: 'Collection Rate', value: `${kpi.collection_rate ?? '—'}%`, delta: kpi.collection_rate_delta, icon: 'check_circle', color: 'var(--accent)' },
-    { label: 'Active Trucks', value: kpi.active_trucks ?? '—', delta: null, icon: 'local_shipping', color: 'var(--info)' },
-    { label: 'Open Hotspots', value: kpi.open_hotspots ?? '—', delta: kpi.hotspots_delta, icon: 'local_fire_department', color: 'var(--danger)' },
-    { label: 'Escalations', value: kpi.escalations ?? '—', delta: null, icon: 'warning', color: 'var(--warning)' },
-    { label: 'Barangays Served', value: kpi.barangays_served ?? '—', delta: null, icon: 'location_city', color: 'var(--accent)' },
+    { label: 'Waste Collected Today', value: `${kpi.collected_kg?.toLocaleString() ?? '—'} kg`, delta: kpi.collected_kg_delta, icon: Trash2, color: 'var(--accent)' },
+    { label: 'Collection Rate', value: `${kpi.collection_rate ?? '—'}%`, delta: kpi.collection_rate_delta, icon: CheckCircle2, color: 'var(--accent)' },
+    { label: 'Active Trucks', value: kpi.active_trucks ?? '—', delta: null, icon: Truck, color: 'var(--info)' },
+    { label: 'Open Hotspots', value: kpi.open_hotspots ?? '—', delta: kpi.hotspots_delta, icon: Flame, color: 'var(--danger)' },
+    { label: 'Escalations', value: kpi.escalations ?? '—', delta: null, icon: AlertTriangle, color: 'var(--warning)' },
+    { label: 'Barangays Served', value: kpi.barangays_served ?? '—', delta: null, icon: Building2, color: 'var(--accent)' },
   ]
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, marginBottom: 16 }}>
-      {CARDS.map(c => (
-        <div key={c.label} style={{
-          background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 'var(--radius)', padding: '14px 12px',
-        }}>
-          <span className="msi" style={{ fontSize: 20, color: c.color, display: 'block', marginBottom: 8 }}>{c.icon}</span>
-          <div style={{ fontWeight: 700, fontSize: 20, color: 'var(--text)', lineHeight: 1 }}>{c.value}</div>
-          {c.delta && (
-            <div style={{
-              fontSize: 10, fontWeight: 700, marginTop: 4,
-              color: c.delta.startsWith('+') ? 'var(--accent)' : c.delta.startsWith('-') ? 'var(--danger)' : 'var(--text-muted)',
-            }}>{c.delta} vs yesterday</div>
-          )}
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '.04em', marginTop: 4 }}>
-            {c.label.toUpperCase()}
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 140px), 1fr))', gap: 10, marginBottom: 16 }}>
+      {CARDS.map(c => {
+        const Icon = c.icon;
+        return (
+          <div key={c.label} style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius)', padding: '14px 12px',
+          }}>
+            <Icon size={20} color={c.color} style={{ display: 'block', marginBottom: 8 }} />
+            <div style={{ fontWeight: 700, fontSize: 20, color: 'var(--text)', lineHeight: 1 }}>{c.value}</div>
+            {c.delta && (
+              <div style={{
+                fontSize: 10, fontWeight: 700, marginTop: 4,
+                color: c.delta.startsWith('+') ? 'var(--accent)' : c.delta.startsWith('-') ? 'var(--danger)' : 'var(--text-muted)',
+              }}>{c.delta} vs yesterday</div>
+            )}
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '.04em', marginTop: 4 }}>
+              {c.label.toUpperCase()}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -254,7 +267,7 @@ function WasteCollectionChart({ data }) {
   return (
     <GCard>
       <SHead
-        icon="delete_sweep"
+        icon={<Trash2 size={16} />}
         title="Waste Collected per Barangay"
         subtitle="Daily totals tracked from dumpsite weighing"
         right={
@@ -265,21 +278,24 @@ function WasteCollectionChart({ data }) {
         }
       />
 
-      <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 12 }}>
         {[
-          { key: 'bar', icon: 'bar_chart', label: 'Bar' },
-          { key: 'line', icon: 'show_chart', label: 'Trend' },
-        ].map(t => (
-          <button key={t.key} onClick={() => setChartType(t.key)} style={{
-            display: 'flex', alignItems: 'center', gap: 4,
-            padding: '4px 10px', borderRadius: 20, border: `1px solid ${chartType === t.key ? 'var(--accent)' : 'var(--border)'}`,
-            fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
-            color: chartType === t.key ? 'var(--accent)' : 'var(--text-muted)', background: 'transparent',
-          }}>
-            <span className="msi" style={{ fontSize: 13 }}>{t.icon}</span>
-            {t.label}
-          </button>
-        ))}
+          { key: 'bar', icon: BarChart2, label: 'Bar' },
+          { key: 'line', icon: LineChart, label: 'Trend' },
+        ].map((t, idx) => {
+          const Icon = t.icon;
+          return (
+            <button key={t.key || idx} onClick={() => setChartType(t.key)} style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '4px 10px', borderRadius: 20, border: `1px solid ${chartType === t.key ? 'var(--accent)' : 'var(--border)'}`,
+              fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              color: chartType === t.key ? 'var(--accent)' : 'var(--text-muted)', background: 'transparent',
+            }}>
+              <Icon size={13} />
+              {t.label}
+            </button>
+          )
+        })}
       </div>
 
       {chartType === 'bar' && <MiniBar data={data} valueKey="value" color="var(--accent)" height={100} />}
@@ -307,7 +323,7 @@ function CollectionEfficiency({ kpi }) {
 
   return (
     <GCard>
-      <SHead icon="fact_check" title="Collection Efficiency" subtitle="Scheduled vs. completed routes this week" />
+      <SHead icon={<ClipboardCheck size={16} />} title="Collection Efficiency" subtitle="Scheduled vs. completed routes this week" />
 
       {/* Big efficiency number */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
@@ -331,19 +347,22 @@ function CollectionEfficiency({ kpi }) {
 
         <div style={{ flex: 1 }}>
           {[
-            { label: 'Scheduled', value: scheduled, color: 'var(--text-muted)', icon: 'schedule' },
-            { label: 'Completed', value: completed, color: 'var(--accent)', icon: 'check_circle' },
-            { label: 'Missed', value: missed, color: missed > 0 ? 'var(--danger)' : 'var(--text-muted)', icon: 'cancel' },
-          ].map(r => (
-            <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <span className="msi" style={{ fontSize: 14, color: r.color, flexShrink: 0 }}>{r.icon}</span>
-              <div style={{ flex: 1, height: 4, borderRadius: 20, background: 'var(--border)', overflow: 'hidden' }}>
-                <div style={{ width: `${(r.value / scheduled) * 100}%`, height: '100%', background: r.color, borderRadius: 20 }} />
+            { label: 'Scheduled', value: scheduled, color: 'var(--text-muted)', icon: Clock },
+            { label: 'Completed', value: completed, color: 'var(--accent)', icon: CheckCircle2 },
+            { label: 'Missed', value: missed, color: missed > 0 ? 'var(--danger)' : 'var(--text-muted)', icon: XCircle },
+          ].map((r, idx) => {
+            const Icon = r.icon;
+            return (
+              <div key={r.label || idx} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <Icon size={14} color={r.color} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, height: 4, borderRadius: 20, background: 'var(--border)', overflow: 'hidden' }}>
+                  <div style={{ width: `${(r.value / scheduled) * 100}%`, height: '100%', background: r.color, borderRadius: 20 }} />
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: r.color, width: 22, textAlign: 'right' }}>{r.value}</span>
+                <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 54 }}>{r.label.toUpperCase()}</span>
               </div>
-              <span style={{ fontSize: 11, fontWeight: 700, color: r.color, width: 22, textAlign: 'right' }}>{r.value}</span>
-              <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 54 }}>{r.label.toUpperCase()}</span>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
     </GCard>
@@ -358,7 +377,7 @@ function TruckPerformanceSection({ trucks }) {
   return (
     <GCard>
       <SHead
-        icon="local_shipping"
+        icon={<Truck size={16} />}
         title="Truck & Driver Performance"
         subtitle="Routes completed · Efficiency rankings"
         right={
@@ -386,7 +405,7 @@ function TruckPerformanceSection({ trucks }) {
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
                 {isTop
-                  ? <span className="msi" style={{ fontSize: 18, color: '#f59e0b' }}>emoji_events</span>
+                  ? <Trophy size={18} color="#f59e0b" />
                   : <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)' }}>#{i + 1}</span>
                 }
               </div>
@@ -424,7 +443,7 @@ function IssueTrendsSection({ trends, hotspots }) {
   const topToday = hotspots[0]
   return (
     <GCard>
-      <SHead icon="trending_up" title="Daily Issue Trends" subtitle="Reports filed per day · Most reported barangay today" />
+      <SHead icon={<TrendingUp size={16} />} title="Daily Issue Trends" subtitle="Reports filed per day · Most reported barangay today" />
 
       {topToday && (
         <div style={{
@@ -432,7 +451,7 @@ function IssueTrendsSection({ trends, hotspots }) {
           borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: 14,
           display: 'flex', alignItems: 'center', gap: 10,
         }}>
-          <span className="msi" style={{ fontSize: 22, color: 'var(--danger)', flexShrink: 0 }}>location_on</span>
+          <MapPin size={22} color="var(--danger)" style={{ flexShrink: 0 }} />
           <div>
             <div style={{ fontWeight: 700, fontSize: 12, color: 'var(--danger)', marginBottom: 2 }}>Most Reported Today</div>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{topToday.location}</div>
@@ -459,9 +478,9 @@ function HotspotsSection({ hotspots, stats }) {
 
   return (
     <GCard>
-      <SHead icon="local_fire_department" title="Hotspot Monitoring" subtitle="Illegal dumping & recurring violation areas" />
+      <SHead icon={<Flame size={16} />} title="Hotspot Monitoring" subtitle="Illegal dumping & recurring violation areas" />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 90px), 1fr))', gap: 8, marginBottom: 14 }}>
         {[
           { label: 'This Week', value: stats.reportsThisWeek, color: 'var(--danger)' },
           { label: 'Resolved', value: `${stats.resolutionRate}%`, color: 'var(--accent)' },
@@ -520,10 +539,10 @@ function WasteComposition({ segments }) {
   const total = segments.reduce((s, c) => s + c.value, 0) || 1
   return (
     <GCard>
-      <SHead icon="pie_chart" title="Waste Composition" subtitle="Classification breakdown from dumpsite data" />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+      <SHead icon={<PieChart size={16} />} title="Waste Composition" subtitle="Classification breakdown from dumpsite data" />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 20 }}>
         <Donut segments={segments} size={90} />
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: '1 1 200px' }}>
           {segments.map(s => (
             <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
               <div style={{ width: 10, height: 10, borderRadius: 2, background: s.color, flexShrink: 0 }} />
@@ -545,24 +564,27 @@ function RankingsSection({ rankings, problematic, userBarangay }) {
   const [showProb, setShowProb] = useState(false)
   return (
     <GCard>
-      <SHead icon="leaderboard" title="Barangay Cleanliness Rankings" subtitle="Ranked by compliance ratio · Updated daily" />
-      <div style={{ display: 'flex', gap: 3, background: 'var(--bg)', borderRadius: 8, padding: 3, width: 'fit-content', marginBottom: 14 }}>
+      <SHead icon={<BarChart3 size={16} />} title="Barangay Cleanliness Rankings" subtitle="Ranked by compliance ratio · Updated daily" />
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, background: 'var(--bg)', borderRadius: 8, padding: 3, width: 'fit-content', marginBottom: 14 }}>
         {[
-          { key: false, label: 'Top Cleanest', icon: 'emoji_events' },
-          { key: true, label: 'Problematic Areas', icon: 'warning' },
-        ].map(t => (
-          <button key={String(t.key)} onClick={() => setShowProb(t.key)} style={{
-            display: 'flex', alignItems: 'center', gap: 5,
-            padding: '5px 11px', borderRadius: 6, border: 'none', cursor: 'pointer',
-            fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)',
-            background: showProb === t.key ? 'var(--surface)' : 'transparent',
-            color: showProb === t.key ? 'var(--text)' : 'var(--text-muted)',
-            borderBottom: showProb === t.key ? '2px solid var(--accent)' : '2px solid transparent',
-          }}>
-            <span className="msi" style={{ fontSize: 13 }}>{t.icon}</span>
-            {t.label}
-          </button>
-        ))}
+          { key: false, label: 'Top Cleanest', icon: Trophy },
+          { key: true, label: 'Problematic Areas', icon: AlertTriangle },
+        ].map(t => {
+          const Icon = t.icon;
+          return (
+            <button key={String(t.key)} onClick={() => setShowProb(t.key)} style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              padding: '5px 11px', borderRadius: 6, border: 'none', cursor: 'pointer',
+              fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)',
+              background: showProb === t.key ? 'var(--surface)' : 'transparent',
+              color: showProb === t.key ? 'var(--text)' : 'var(--text-muted)',
+              borderBottom: showProb === t.key ? '2px solid var(--accent)' : '2px solid transparent',
+            }}>
+              <Icon size={13} />
+              {t.label}
+            </button>
+          )
+        })}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {(showProb ? problematic : rankings).map((b, i) => (
@@ -578,31 +600,125 @@ function RankingsSection({ rankings, problematic, userBarangay }) {
   )
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function daysDiff(dateFrom, dateTo) {
+  const a = new Date(dateFrom), b = new Date(dateTo)
+  return Math.max(1, Math.round((b - a) / 86400000) + 1)
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
-export default function GlobalInsights({ selectedBarangay, dateFrom, dateTo }) {
-  const { user } = useAuth()
-  const [data, setData] = useState(null)
+export default function GlobalInsights({ userBarangay, selectedBarangay, dateFrom, dateTo, selectedPeriod }) {
+  const [data, setData] = useState(PLACEHOLDER)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
-    async function fetchDashboard() {
-      setLoading(true)
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+
+    async function fetchLive() {
       try {
-        const res = await api.get('/api/analytics/dashboard/', {
-          params: {
-            barangay_id: selectedBarangay,
-            date_from: dateFrom,
-            date_to: dateTo
-          }
-        })
-        setData(res.data)
+        const params = new URLSearchParams()
+        if (selectedBarangay && selectedBarangay !== 'all') {
+          params.set('barangay_id', selectedBarangay)
+        }
+        if (dateFrom && dateTo) {
+          params.set('days', String(daysDiff(dateFrom, dateTo)))
+        }
+
+        const res = await api.get(`/api/analytics/live/?${params}`)
+        if (cancelled) return
+        const d = res.data
+
+        // ── Map summary → KPI cards ──────────────────────────────────────────
+        const s = d.summary || {}
+        const completionPct = Math.round((s.completion_rate ?? 0) * 100)
+        const kpi = {
+          ...PLACEHOLDER.kpi,
+          collected_kg: Math.round(s.total_weight_kg ?? 0),
+          collection_rate: completionPct,
+          active_trucks: (d.fleet || []).length,
+          barangays_served: (d.barangay_breakdown || []).length,
+          total_routes: s.stops_total ?? 0,
+          completed_routes: s.stops_completed ?? 0,
+          missed_stops: s.stops_missed ?? 0,
+          completion_rate: completionPct,
+          collected_kg_delta: null,
+          collection_rate_delta: null,
+          hotspots_delta: null,
+        }
+
+        // ── Map weight_over_time → daily bar/line chart ───────────────────────
+        const wasteDaily = (d.weight_over_time || []).map(row => ({
+          label: new Date(row.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }),
+          value: Math.round(row.weight_kg),
+          deliveries: row.deliveries,
+        }))
+
+        // ── Map barangay_breakdown → rankings ─────────────────────────────────
+        const mappedRankings = (d.barangay_breakdown || [])
+          .map(row => {
+            const rate = row.completion_rate ?? 0
+            const score = Math.min(100, Math.round(rate * 70 + Math.min(row.weight_kg / 50, 30)))
+            const trend = rate >= 0.9 ? 'up' : rate >= 0.6 ? 'same' : 'down'
+            return {
+              name: row.name,
+              score,
+              compliance: Math.round(rate * 100),
+              trend,
+              weight_kg: row.weight_kg,
+              deliveries: row.deliveries,
+              stops_completed: row.stops_completed,
+              stops_missed: row.stops_missed,
+              hotspots: 0,
+              reports: row.stops_completed + row.stops_missed,
+            }
+          })
+          .sort((a, b) => b.score - a.score)
+
+        const mappedProblematic = [...mappedRankings]
+          .filter(r => r.score < 60)
+          .sort((a, b) => a.score - b.score)
+
+        // ── Map fleet → truck performance ─────────────────────────────────────
+        const mappedTrucks = (d.fleet || []).map(row => ({
+          truck_id: row.plate_number,
+          driver_name: row.driver_name,
+          routes: row.stops_total,
+          completed: row.stops_completed,
+          missed: row.stops_missed,
+          avg_fill: 0,
+          total_km: row.total_weight_kg
+            ? `${(row.total_weight_kg / 1000).toFixed(1)}t`
+            : '—',
+        }))
+
+        // ── Issue trends from weight_over_time (deliveries per day) ───────────
+        const issueTrends = (d.weight_over_time || []).map(row => ({
+          label: new Date(row.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }),
+          value: row.deliveries,
+        }))
+
+        setData(prev => ({
+          ...prev,
+          kpi,
+          wasteDaily: wasteDaily.length ? wasteDaily : prev.wasteDaily,
+          rankings: mappedRankings.length ? mappedRankings : prev.rankings,
+          problematic: mappedProblematic.length ? mappedProblematic : prev.problematic,
+          trucks: mappedTrucks.length ? mappedTrucks : prev.trucks,
+          issueTrends: issueTrends.length ? issueTrends : prev.issueTrends,
+        }))
       } catch (err) {
-        console.error("Failed to fetch analytics:", err)
+        if (!cancelled) setError('Could not load live data — showing cached figures.')
+        // keep PLACEHOLDER intact
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }
-    fetchDashboard()
+
+    fetchLive()
+    return () => { cancelled = true }
   }, [selectedBarangay, dateFrom, dateTo])
 
   if (loading) return (
@@ -612,129 +728,44 @@ export default function GlobalInsights({ selectedBarangay, dateFrom, dateTo }) {
     </div>
   )
 
-  if (!data) return (
-    <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-      No data available for the selected filters.
-    </div>
-  )
-
-  const { summary, charts, insights } = data
-  const role = user?.role?.toLowerCase()
-
   return (
     <>
+      {error && (
+        <div style={{
+          background: 'rgba(231,76,60,.08)', border: '1px solid rgba(231,76,60,.25)',
+          borderRadius: 8, padding: '10px 14px', marginBottom: 14,
+          fontSize: 12, color: 'var(--danger)', fontWeight: 600,
+        }}>
+          ⚠ {error}
+        </div>
+      )}
+
       {/* ── Overview KPIs ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10, marginBottom: 16 }}>
-        <div className="ac-kpi-card">
-          <span className="msi" style={{ color: 'var(--accent)' }}>flag</span>
-          <div className="ac-kpi-value">{summary.total_reports}</div>
-          <div className="ac-kpi-label">Total Reports</div>
+      <OverviewKPIs kpi={data.kpi} />
+
+      {/* ── Two-column mid section ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 16, alignItems: 'start' }}>
+        <div>
+          <WasteCollectionChart data={data.wasteDaily} />
+          <CollectionEfficiency kpi={data.kpi} />
         </div>
-        <div className="ac-kpi-card">
-          <span className="msi" style={{ color: 'var(--accent)' }}>check_circle</span>
-          <div className="ac-kpi-value">{summary.resolved_reports}</div>
-          <div className="ac-kpi-label">Resolved</div>
+        <div>
+          <RankingsSection rankings={data.rankings} problematic={data.problematic} userBarangay={userBarangay} />
         </div>
-        <div className="ac-kpi-card">
-          <span className="msi" style={{ color: 'var(--warning)' }}>pending</span>
-          <div className="ac-kpi-value">{summary.pending_reports}</div>
-          <div className="ac-kpi-label">Pending</div>
-        </div>
-        <div className="ac-kpi-card">
-          <span className="msi" style={{ color: 'var(--info)' }}>trending_up</span>
-          <div className="ac-kpi-value">{summary.resolution_rate}%</div>
-          <div className="ac-kpi-label">Resolution Rate</div>
-        </div>
-        {role === 'admin' && (
-          <>
-            <div className="ac-kpi-card">
-              <span className="msi" style={{ color: 'var(--info)' }}>group</span>
-              <div className="ac-kpi-value">{summary.total_users}</div>
-              <div className="ac-kpi-label">Total Users</div>
-            </div>
-            <div className="ac-kpi-card">
-              <span className="msi" style={{ color: 'var(--danger)' }}>local_fire_department</span>
-              <div className="ac-kpi-value">{summary.active_hotspots}</div>
-              <div className="ac-kpi-label">Active Hotspots</div>
-            </div>
-          </>
-        )}
       </div>
 
-      {/* ── Insights Section ── */}
-      {insights.length > 0 && (
-        <GCard style={{ background: 'rgba(46,204,113,.05)', border: '1px solid rgba(46,204,113,.2)' }}>
-          <SHead icon="tips_and_updates" title="Dynamic Insights" subtitle="Automated intelligence based on current data" />
-          <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: 'var(--text)' }}>
-            {insights.map((insight, idx) => (
-              <li key={idx} style={{ marginBottom: 6 }}>{insight}</li>
-            ))}
-          </ul>
-        </GCard>
-      )}
+      {/* ── Lower sections ── */}
+      <IssueTrendsSection trends={data.issueTrends} hotspots={data.hotspots} />
+      <HotspotsSection hotspots={data.hotspots} stats={data.stats} />
+      <TruckPerformanceSection trucks={data.trucks} />
 
-      {/* ── Charts Section ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16, marginBottom: 16 }}>
-        <GCard>
-          <SHead icon="show_chart" title="Reporting Trend" subtitle="Daily reports submitted over time" />
-          <MiniLine 
-            data={charts.report_trend.map(d => ({ label: d.day, value: d.count }))} 
-            valueKey="value" 
-            color="var(--accent)" 
-          />
-        </GCard>
-        <GCard>
-          <SHead icon="pie_chart" title="Waste Categories" subtitle="Distribution of reported issues" />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-            <Donut 
-              segments={charts.waste_categories.map((c, i) => ({
-                label: c.issue_type,
-                value: c.value,
-                color: ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444'][i % 4]
-              }))} 
-              size={100} 
-            />
-            <div style={{ flex: 1 }}>
-              {charts.waste_categories.map((c, i) => (
-                <div key={c.issue_type} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 11 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: 2, background: ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444'][i % 4] }} />
-                  <span style={{ flex: 1 }}>{c.issue_type.replace('_', ' ').toUpperCase()}</span>
-                  <span style={{ fontWeight: 700 }}>{c.value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </GCard>
-      </div>
-
-      {/* ── Admin Specific: Barangay Comparison ── */}
-      {role === 'admin' && charts.barangay_comparison && (
-        <GCard>
-          <SHead icon="leaderboard" title="Barangay Performance Comparison" subtitle="Ranking based on reporting activity and resolution" />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {charts.barangay_comparison.map((b, i) => (
-              <div key={b.name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', width: 20 }}>#{i + 1}</span>
-                <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{b.name}</span>
-                <div style={{ flex: 2, height: 8, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
-                  <div style={{ 
-                    width: `${(b.report_count / Math.max(...charts.barangay_comparison.map(x => x.report_count), 1)) * 100}%`, 
-                    height: '100%', 
-                    background: 'var(--accent)' 
-                  }} />
-                </div>
-                <span style={{ fontSize: 12, fontWeight: 700, width: 40, textAlign: 'right' }}>{b.report_count}</span>
-              </div>
-            ))}
-          </div>
-        </GCard>
-      )}
-
-      {/* ── Map (Existing) ── */}
+      {/* ── Map ── */}
       <GCard>
-        <SHead icon="map" title="Barangay Cleanliness Map" subtitle="Color-coded by compliance score · Red = active hotspots" />
-        <HotspotMap mapData={data.map_data} userBarangay={user?.barangay_name} />
+        <SHead icon={<Map size={16} />} title="Barangay Cleanliness Map" subtitle="Color-coded by completion rate · Sourced from live delivery data" />
+        <HotspotMap userBarangay={userBarangay} />
       </GCard>
     </>
   )
 }
+
+

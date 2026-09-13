@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useNotification } from '../context/NotificationContext'
 import api from '../api/client'
 import {
   buildStopMarkerHtml,
@@ -17,6 +18,13 @@ import {
   STOP_STATUS_COLORS,
   STOP_STATUS_LABELS,
 } from '../utils/pickupStatusSync'
+import { getApiErrorMessage } from '../utils/notificationHelpers'
+import {
+  filterBarangayItems,
+  getBarangayCenter,
+  getUserBarangayName,
+  isAdminRole,
+} from '../utils/barangayScope'
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -96,7 +104,7 @@ function injectStopStyles() {
 // ─── ROLES ───────────────────────────────────────────────────────────────────
 
 const MODERATOR_ROLES = ['brgy_official', 'watcher', 'admin']
-const CAN_SEE_ALL_ROLES = ['brgy_official', 'watcher', 'admin', 'superadmin']
+const CAN_SEE_ALL_ROLES = ['admin', 'superadmin']
 
 // ─── PANEL SUB-COMPONENTS ────────────────────────────────────────────────────
 
@@ -269,10 +277,13 @@ function ReportPanel({ report, canModerate, onAction, onClose }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
-export default function MiniMap({ height = 260 }) {
+export default function MiniMap({ height = 260, focusCoordinate = null }) {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { notify } = useNotification()
   const role = user?.role?.toLowerCase() || 'citizen'
+  const barangayName = getUserBarangayName(user)
+  const isAdmin = isAdminRole(user)
 
   const canSeeAll = CAN_SEE_ALL_ROLES.includes(role)
   const canModerate = MODERATOR_ROLES.includes(role)
@@ -290,6 +301,7 @@ export default function MiniMap({ height = 260 }) {
   const [activeTrucks, setActiveTrucks] = useState([])
   const [reports, setReports] = useState([])
   const [schedules, setSchedules] = useState([])
+  const [barangayStops, setBarangayStops] = useState([])
   const [stopStatusMap, setStopStatusMap] = useState(new Map())
   const [stopDetailsMap, setStopDetailsMap] = useState(new Map())
 
@@ -301,11 +313,13 @@ export default function MiniMap({ height = 260 }) {
   const activeTrucksRef = useRef(activeTrucks)
   const reportsRef = useRef(reports)
   const schedulesRef = useRef(schedules)
+  const barangayStopsRef = useRef(barangayStops)
   const stopStatusMapRef = useRef(stopStatusMap)
   const stopDetailsMapRef = useRef(stopDetailsMap)
   useEffect(() => { activeTrucksRef.current = activeTrucks }, [activeTrucks])
   useEffect(() => { reportsRef.current = reports }, [reports])
   useEffect(() => { schedulesRef.current = schedules }, [schedules])
+  useEffect(() => { barangayStopsRef.current = barangayStops }, [barangayStops])
   useEffect(() => { stopStatusMapRef.current = stopStatusMap }, [stopStatusMap])
   useEffect(() => { stopDetailsMapRef.current = stopDetailsMap }, [stopDetailsMap])
 
@@ -340,6 +354,16 @@ export default function MiniMap({ height = 260 }) {
     return () => { obs.disconnect(); map.remove(); mapInstanceRef.current = null }
   }, [leafletReady])
 
+  useEffect(() => {
+    const map = mapInstanceRef.current
+    if (!map || !barangayName || isAdmin) return
+    let alive = true
+    getBarangayCenter(barangayName).then(center => {
+      if (alive && mapInstanceRef.current) mapInstanceRef.current.setView(center, 15)
+    })
+    return () => { alive = false }
+  }, [barangayName, isAdmin, leafletReady])
+
   // ── Poll live data ──
   useEffect(() => {
     const fetchAll = () => {
@@ -348,22 +372,34 @@ export default function MiniMap({ height = 260 }) {
         ? '/api/driver/shift/my_active_shift/'
         : '/api/driver/shift/active_shifts/'
 
-      api.get(shiftsUrl)
-        .then(res => {
-          const raw = res.data
-          setActiveTrucks(Array.isArray(raw) ? raw : raw ? [raw] : [])
-        })
-        .catch(() => { })
+      if (!isDriver && !isAdmin && barangayName) {
+        api.get(`/api/driver/shift/barangay_stops/?barangay_name=${encodeURIComponent(barangayName)}`)
+          .then(res => {
+            setActiveTrucks(res.data?.trucks || [])
+            setBarangayStops(res.data?.stops || [])
+          })
+          .catch(() => {
+            setActiveTrucks([])
+            setBarangayStops([])
+          })
+      } else {
+        api.get(shiftsUrl)
+          .then(res => {
+            const raw = res.data
+            setActiveTrucks(Array.isArray(raw) ? raw : raw ? [raw] : [])
+          })
+          .catch(() => { })
+      }
 
       // Reports — moderators + citizens see approved pins
       api.get('/api/watcher/reports/map_pins/')
-        .then(res => setReports(res.data || []))
+        .then(res => setReports(filterBarangayItems(res.data || [], user)))
         .catch(() => { })
 
       // Schedules + stop validations — only for roles that show stops
       if (!isDriver) {
         api.get('/api/driver/collection-schedules/')
-          .then(res => setSchedules(res.data || []))
+          .then(res => setSchedules(filterBarangayItems(res.data || [], user)))
           .catch(() => { })
 
         api.get('/api/watcher/stop-validations/')
@@ -447,6 +483,8 @@ export default function MiniMap({ height = 260 }) {
 
     // ── 1. Truck markers ──
     activeTrucksRef.current.forEach(truck => {
+      if (truck.lat == null || truck.lng == null) return
+
       const color = STATUS_COLORS[truck.status] || '#14b8a6'
       const icon = L.divIcon({
         html: makeTruckIconHtml(color, truck.truckId, truck.status),
@@ -490,9 +528,9 @@ export default function MiniMap({ height = 260 }) {
           if (!wp.lat || !wp.lng) return
           const stopOrder = i + 1
           const statusKey = `${schedule.id}:${stopOrder}`
-          if (!stopStatusMapRef.current.has(statusKey)) return
-
-          const stopStatus = normalizeStopStatus(stopStatusMapRef.current.get(statusKey))
+          // Fall back to PENDING_INSPECTION if no record exists yet
+          const rawStatus = stopStatusMapRef.current.get(statusKey)
+          const stopStatus = normalizeStopStatus(rawStatus ?? 'PENDING_INSPECTION')
           const details = stopDetailsMapRef.current.get(statusKey)
           const existing = stopMarkersRef.current.get(statusKey)
 
@@ -524,6 +562,7 @@ export default function MiniMap({ height = 260 }) {
                 ${STOP_STATUS_LABELS[stopStatus] || stopStatus}
               </span><br/>
               ${details?.collectedAt ? `<div style="font-size:10px;color:#10b981;margin-top:4px;">✓ ${details.collectedAt}</div>` : ''}
+              ${!rawStatus ? `<div style="font-size:10px;color:#94a3b8;margin-top:4px;">No watcher data yet</div>` : ''}
             </div>`)
 
           stopMarkersRef.current.set(statusKey, { marker, status: stopStatus })
@@ -558,17 +597,17 @@ export default function MiniMap({ height = 260 }) {
     if (action === 'approve') {
       api.post(`/api/watcher/reports/${id}/approve/`)
         .then(() => { setPanelType(null); fetchReportsFresh() })
-        .catch(err => alert(err.response?.data?.error || 'Failed'))
+        .catch(err => notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed') }))
     } else if (action === 'reject') {
       const reason = prompt('Reason for rejection:')
       if (!reason?.trim()) return
       api.post(`/api/watcher/reports/${id}/reject/`, { rejection_reason: reason })
         .then(() => { setPanelType(null); fetchReportsFresh() })
-        .catch(err => alert(err.response?.data?.error || 'Failed'))
+        .catch(err => notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed') }))
     } else if (action === 'resolve') {
       api.post('/api/watcher/confirmations/', { report: id })
         .then(() => { setPanelType(null); fetchReportsFresh() })
-        .catch(() => alert('Failed to resolve'))
+        .catch(err => notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed to resolve') }))
     }
   }
 
@@ -579,6 +618,13 @@ export default function MiniMap({ height = 260 }) {
   }
 
   function closePanel() { setPanelType(null); setSelectedTruck(null); setSelectedReport(null) }
+
+  useEffect(() => {
+    if (focusCoordinate && focusCoordinate.lat && focusCoordinate.lng && mapInstanceRef.current) {
+      mapInstanceRef.current.setView([focusCoordinate.lat, focusCoordinate.lng], focusCoordinate.zoom || 16)
+    }
+  }, [focusCoordinate])
+
 
   // ─── RENDER ───────────────────────────────────────────────────────────────
 

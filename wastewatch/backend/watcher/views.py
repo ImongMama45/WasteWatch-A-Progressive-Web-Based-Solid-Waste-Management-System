@@ -1,5 +1,6 @@
 from django.utils import timezone
 from rest_framework import viewsets, permissions, status, filters
+from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -12,6 +13,9 @@ from .models import (
     StopValidation,
     StopValidationStatus,
 )
+from notifications.models import Notification, NotificationType
+from django.db import transaction
+import json
 from .serializers import (
     GarbageReportSerializer,
     CollectionConfirmationSerializer,
@@ -40,6 +44,13 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
     filterset_fields = ['barangay', 'status', 'issue_type', 'severity']
     search_fields = ['address', 'description']
     ordering_fields = ['created_at', 'severity']
+    throttle_scope = 'report_submission'
+
+    def get_throttles(self):
+        # Only throttle the creation of new reports to prevent spam
+        if self.action == 'create':
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
 
     def get_queryset(self):
         user = self.request.user
@@ -172,14 +183,17 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
         hotspots = GarbageHotspot.objects.select_related('barangay').all()
 
         data = []
+        import re
         for h in hotspots:
             # Try to find the originating report by the sentinel name pattern
             report = None
-            if h.name.startswith('Report #'):
+            if h.name and h.name.startswith('Report #'):
                 try:
-                    report_id = int(h.name.split('Report #')[1].split(' —')[0])
-                    report = GarbageReport.objects.filter(id=report_id).select_related('barangay').first()
-                except (ValueError, IndexError):
+                    match = re.search(r'Report #(\d+)', h.name)
+                    if match:
+                        report_id = int(match.group(1))
+                        report = GarbageReport.objects.filter(id=report_id).select_related('barangay').first()
+                except Exception:
                     pass
 
             data.append({
@@ -194,7 +208,8 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
                 'address':       report.address if report else h.name,
                 'reported':      report.created_at.isoformat() if report else None,
                 'description':   report.description if report else '',
-                'image':         report.image.url if report and report.image else None,
+                'images':        [img.url for img in [report.image, report.image_2, report.image_3, report.image_4] if report and img] if report else [],
+                'user_name':     (report.user.get_full_name() or report.user.username) if report and report.user else None,
                 'rejection_reason': None,
             })
 
@@ -210,6 +225,46 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
             'resolved': qs.filter(status=ReportStatus.RESOLVED).count(),
             'rejected': qs.filter(status=ReportStatus.REJECTED).count(),
         })
+
+    @action(detail=False, methods=['get'])
+    def leaderboard(self, request):
+        """
+        Returns the top barangays based on the number of resolved reports and resolution rate.
+        Used for the Cleanest Barangay Leaderboard widget.
+        """
+        from django.db.models import Count, Q
+        
+        stats = GarbageReport.objects.exclude(barangay__isnull=True).values(
+            'barangay__name'
+        ).annotate(
+            total=Count('id'),
+            resolved=Count('id', filter=Q(status=ReportStatus.RESOLVED))
+        )
+        
+        leaderboard_data = []
+        for item in stats:
+            total = item['total']
+            resolved = item['resolved']
+            rate = int((resolved / total) * 100) if total > 0 else 0
+            
+            # Simple scoring metric: heavily weight resolutions, lightly weight rate
+            score = (resolved * 10) + rate
+            
+            leaderboard_data.append({
+                'barangay': item['barangay__name'],
+                'resolved': resolved,
+                'total': total,
+                'rate': rate,
+                'score': score
+            })
+            
+        # Sort by score descending and return top 5
+        leaderboard_data.sort(key=lambda x: x['score'], reverse=True)
+        
+        for i, entry in enumerate(leaderboard_data):
+            entry['rank'] = i + 1
+            
+        return Response(leaderboard_data[:5])
 
 class CollectionConfirmationViewSet(viewsets.ModelViewSet):
     queryset = CollectionConfirmation.objects.all()
@@ -240,6 +295,10 @@ class GarbageHotspotViewSet(viewsets.ModelViewSet):
         """
         import math
 
+        def fmt_time(dt):
+            """Cross-platform 12-hour time without leading zero (works on Windows & Linux)."""
+            return dt.strftime('%I:%M %p').lstrip('0') if dt else ''
+
         def haversine_km(lat1, lon1, lat2, lon2):
             R = 6371
             phi1, phi2 = math.radians(lat1), math.radians(lat2)
@@ -263,37 +322,93 @@ class GarbageHotspotViewSet(viewsets.ModelViewSet):
             qs = GarbageHotspot.objects.filter(
                 latitude__range=(drv_lat - lat_delta, drv_lat + lat_delta),
                 longitude__range=(drv_lng - lng_delta, drv_lng + lng_delta),
-            ).select_related('barangay')
+            ).select_related('barangay', 'assigned_truck')
         else:
-            qs = GarbageHotspot.objects.select_related('barangay').all()[:50]
+            qs = GarbageHotspot.objects.select_related('barangay', 'assigned_truck').all()[:50]
 
         data = []
         for h in qs:
             dist_km = haversine_km(drv_lat, drv_lng, float(h.latitude), float(h.longitude)) if has_coords else 0
             data.append({
-                'id':          h.id,
-                'severity':    h.severity,
-                'barangay':    h.barangay.name if h.barangay else 'Unknown',
-                'address':     h.name,
-                'description': '',
-                'distanceKm':  round(dist_km, 2),
-                'reportedAt':  h.created_at.strftime('%-I:%M %p') if h.created_at else '',
-                'type':        'overflow',
-                'latitude':    float(h.latitude),
-                'longitude':   float(h.longitude),
+                'id':                  h.id,
+                'severity':            h.severity,
+                'barangay':            h.barangay.name if h.barangay else 'Unknown',
+                'address':             h.name,
+                'description':         '',
+                'distanceKm':          round(dist_km, 2),
+                'reportedAt':          fmt_time(h.created_at),
+                'type':                'overflow',
+                'latitude':            float(h.latitude),
+                'longitude':           float(h.longitude),
+                'assigned_truck_id':   h.assigned_truck_id,
+                'assigned_truck_plate':h.assigned_truck.plate_number if h.assigned_truck else None,
             })
         data.sort(key=lambda x: x['distanceKm'])
         return Response(data)
+
+    @action(detail=False, methods=['get'], url_path='assigned')
+    def assigned(self, request):
+        """
+        Returns hotspots assigned to the requesting driver's truck.
+        The driver must have an active shift with an associated truck.
+        """
+        from driver.models import DriverShift
+        shift = DriverShift.objects.filter(driver=request.user, is_active=True).select_related('truck').first()
+        if not shift or not shift.truck:
+            return Response([])
+        qs = GarbageHotspot.objects.filter(
+            assigned_truck=shift.truck
+        ).select_related('barangay', 'assigned_truck')
+        data = []
+        for h in qs:
+            data.append({
+                'id':                  h.id,
+                'severity':            h.severity,
+                'barangay':            h.barangay.name if h.barangay else 'Unknown',
+                'address':             h.name,
+                'description':         '',
+                'distanceKm':          None,
+                'reportedAt':          fmt_time(h.created_at),
+                'type':                'overflow',
+                'latitude':            float(h.latitude),
+                'longitude':           float(h.longitude),
+                'assigned_truck_id':   h.assigned_truck_id,
+                'assigned_truck_plate':h.assigned_truck.plate_number if h.assigned_truck else None,
+            })
+        return Response(data)
+
+    @action(detail=True, methods=['post'], url_path='assign-truck')
+    def assign_truck(self, request, pk=None):
+        """
+        Admin assigns a truck to a hotspot for direct collection.
+        Body: { truck_id: <int> }  — pass null to un-assign.
+        """
+        from driver.models import Truck
+        if request.user.role not in ('admin', 'brgy_official'):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('Only admins can assign trucks to hotspots.')
+        hotspot = self.get_object()
+        truck_id = request.data.get('truck_id')
+        if truck_id:
+            try:
+                truck = Truck.objects.get(id=truck_id)
+                hotspot.assigned_truck = truck
+            except Truck.DoesNotExist:
+                return Response({'error': 'Truck not found.'}, status=404)
+        else:
+            hotspot.assigned_truck = None
+        hotspot.save(update_fields=['assigned_truck'])
+        return Response({
+            'status': 'ok',
+            'id': hotspot.id,
+            'assigned_truck_id': hotspot.assigned_truck_id,
+            'assigned_truck_plate': hotspot.assigned_truck.plate_number if hotspot.assigned_truck else None,
+        })
 
     @action(detail=True, methods=['post'], url_path='noted')
     def noted(self, request, pk=None):
         """Mark that the driver has noted this hotspot. No model changes needed — returns 200."""
         return Response({'status': 'noted', 'id': pk})
-
-    @action(detail=True, methods=['post'], url_path='add-to-route')
-    def add_to_route(self, request, pk=None):
-        """Placeholder: driver requests to add this hotspot to their current route."""
-        return Response({'status': 'added', 'id': pk})
 
 class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -314,6 +429,10 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         today = timezone.localdate()
         qs = super().get_queryset().filter(collection_date=today)
 
+        user = self.request.user
+        if user.role == 'watcher' and user.barangay:
+            qs = qs.filter(barangay=user.barangay)
+
         status_param = self.request.query_params.get('status')
         if status_param:
             qs = qs.filter(current_status=status_param)
@@ -328,13 +447,110 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
     def _get_validation(self, schedule_id, stop_order):
         today = timezone.localdate()
         try:
-            return StopValidation.objects.select_related('schedule').get(
+            return StopValidation.objects.select_related('schedule', 'schedule__truck', 'schedule__driver').get(
                 schedule_id=schedule_id,
                 stop_order=stop_order,
                 collection_date=today,
             )
         except StopValidation.DoesNotExist:
             return None
+
+    def _update_driver_timeline(self, validation):
+        driver = validation.schedule.driver
+        if not driver:
+            return
+
+        # Check if all stops in schedule are completed
+        all_stops = StopValidation.objects.filter(schedule=validation.schedule, collection_date=validation.collection_date)
+        pending = all_stops.exclude(current_status__in=[
+            StopValidationStatus.VERIFIED_COLLECTED, 
+            StopValidationStatus.COLLECTION_DISPUTED,
+            StopValidationStatus.EMPTY_STOP
+        ])
+        
+        is_completed = not pending.exists() and all_stops.exists()
+
+        # Build full timeline
+        timeline = []
+        for stop in all_stops.order_by('stop_order'):
+            if stop.current_status == StopValidationStatus.PENDING_INSPECTION:
+                continue
+                
+            # Formulate the string based on status
+            st = stop.current_status
+            val_text = "Verified"
+            if st == StopValidationStatus.EMPTY_STOP:
+                val_text = "Empty"
+            elif st == StopValidationStatus.VERIFIED_COLLECTED:
+                if stop.pre_validation_remarks or stop.dispute_reason:
+                    val_text = "Present"
+                else:
+                    val_text = "Collected"
+            elif st == StopValidationStatus.COLLECTION_DISPUTED:
+                val_text = "Missed"
+            elif st == StopValidationStatus.READY_FOR_COLLECTION:
+                if stop.pre_validation_remarks or stop.pre_validation_photo:
+                    val_text = "Present"
+                else:
+                    val_text = "Inspected"
+                    
+            # Get image
+            img_url = None
+            if stop.post_validation_photo:
+                img_url = stop.post_validation_photo.url
+            elif stop.pre_validation_photo:
+                img_url = stop.pre_validation_photo.url
+                
+            # Get timestamp
+            ts = stop.post_validation_timestamp or stop.pre_validation_timestamp or timezone.now()
+                
+            timeline.append({
+                "stop_order": stop.stop_order,
+                "status": val_text,
+                "image": img_url,
+                "timestamp": ts.isoformat()
+            })
+            
+        if not timeline:
+            return
+
+        today = timezone.localdate()
+        notif = Notification.objects.filter(
+            user=driver,
+            type=NotificationType.WATCHER_ROUTE_SUMMARY,
+            created_at__date=today
+        ).first()
+        
+        msg_data = {
+            "type": "summary",
+            "watcher_name": self.request.user.full_name,
+            "truck_name": validation.schedule.truck.plate_number if validation.schedule.truck else "Truck",
+            "timeline": timeline,
+        }
+        
+        title = "Route Confirmation Complete" if is_completed else "Watcher Route updates"
+        
+        if notif:
+            notif.title = title
+            notif.message = json.dumps(msg_data)
+            notif.created_at = timezone.now()
+            notif.is_read = False
+            notif.save()
+        else:
+            Notification.objects.create(
+                user=driver,
+                title=title,
+                message=json.dumps(msg_data),
+                type=NotificationType.WATCHER_ROUTE_SUMMARY
+            )
+            
+        self._send_driver_notification(driver, title, msg_data)
+
+    def _send_driver_notification(self, driver, title, msg_data):
+        # External calls like WebSockets or Push Notifications go here.
+        # This executes outside the atomic block in the views.
+        pass
+
 
     @action(detail=False, methods=['post'], url_path='pre-inspect')
     def pre_inspect(self, request):
@@ -376,6 +592,13 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         validation = self._get_validation(schedule_id, stop_order)
         if not validation:
             return Response({'error': 'Stop validation not found for today.'}, status=status.HTTP_404_NOT_FOUND)
+            
+        if validation.current_status == StopValidationStatus.READY_FOR_COLLECTION:
+            return Response(
+                StopValidationSerializer(validation, context={'request': request}).data,
+                status=status.HTTP_200_OK
+            )
+            
         if validation.current_status != StopValidationStatus.PENDING_INSPECTION:
             return Response({'error': 'Stop is not pending inspection.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -386,21 +609,25 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         if not ok:
             return Response({'error': err}, status=status.HTTP_403_FORBIDDEN)
 
-        validation.pre_validation_watcher = request.user
-        validation.pre_validation_timestamp = timezone.now()
-        validation.pre_validation_latitude = lat
-        validation.pre_validation_longitude = lng
-        validation.pre_validation_remarks = remarks
-        if photo: validation.pre_validation_photo = photo
-        if photo_2: validation.pre_validation_photo_2 = photo_2
-        if photo_3: validation.pre_validation_photo_3 = photo_3
-        if photo_4: validation.pre_validation_photo_4 = photo_4
-        validation.current_status = (
-            StopValidationStatus.READY_FOR_COLLECTION
-            if outcome == 'garbage_present'
-            else StopValidationStatus.EMPTY_STOP
-        )
-        validation.save()
+        with transaction.atomic():
+            validation.pre_validation_watcher = request.user
+            validation.pre_validation_timestamp = timezone.now()
+            validation.pre_validation_latitude = lat
+            validation.pre_validation_longitude = lng
+            validation.pre_validation_remarks = remarks
+            if photo: validation.pre_validation_photo = photo
+            if photo_2: validation.pre_validation_photo_2 = photo_2
+            if photo_3: validation.pre_validation_photo_3 = photo_3
+            if photo_4: validation.pre_validation_photo_4 = photo_4
+            validation.current_status = (
+                StopValidationStatus.READY_FOR_COLLECTION
+                if outcome == 'garbage_present'
+                else StopValidationStatus.EMPTY_STOP
+            )
+            validation.save()
+
+            # Update the driver timeline inside atomic
+            self._update_driver_timeline(validation)
 
         return Response(
             StopValidationSerializer(validation, context={'request': request}).data,
@@ -437,13 +664,24 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         if outcome not in ('success', 'failed'):
             return Response({'error': 'outcome must be success or failed.'}, status=status.HTTP_400_BAD_REQUEST)
         if outcome == 'failed' and not dispute_reason:
-            return Response({'error': 'dispute_reason is required when collection failed.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'A reason is required when collection is marked as missed.'}, status=status.HTTP_400_BAD_REQUEST)
 
         validation = self._get_validation(schedule_id, stop_order)
         if not validation:
             return Response({'error': 'Stop validation not found for today.'}, status=status.HTTP_404_NOT_FOUND)
-        if validation.current_status != StopValidationStatus.COLLECTION_REPORTED:
-            return Response({'error': 'Stop does not have a reported collection.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if validation.current_status in (StopValidationStatus.VERIFIED_COLLECTED, StopValidationStatus.COLLECTION_DISPUTED):
+            return Response(
+                StopValidationSerializer(validation, context={'request': request}).data,
+                status=status.HTTP_200_OK
+            )
+            
+        if validation.current_status not in (
+            StopValidationStatus.COLLECTION_REPORTED, 
+            StopValidationStatus.READY_FOR_COLLECTION, 
+            StopValidationStatus.PENDING_INSPECTION,
+        ):
+            return Response({'error': 'Stop cannot be verified.'}, status=status.HTTP_400_BAD_REQUEST)
 
         coords = get_stop_coordinates(validation.schedule, stop_order)
         if not coords:
@@ -452,21 +690,24 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         if not ok:
             return Response({'error': err}, status=status.HTTP_403_FORBIDDEN)
 
-        validation.post_validation_watcher = request.user
-        validation.post_validation_timestamp = timezone.now()
-        validation.post_validation_latitude = lat
-        validation.post_validation_longitude = lng
-        validation.dispute_reason = dispute_reason if outcome == 'failed' else ''
-        if photo: validation.post_validation_photo = photo
-        if photo_2: validation.post_validation_photo_2 = photo_2
-        if photo_3: validation.post_validation_photo_3 = photo_3
-        if photo_4: validation.post_validation_photo_4 = photo_4
-        validation.current_status = (
-            StopValidationStatus.VERIFIED_COLLECTED
-            if outcome == 'success'
-            else StopValidationStatus.COLLECTION_DISPUTED
-        )
-        validation.save()
+        with transaction.atomic():
+            validation.post_validation_watcher = request.user
+            validation.post_validation_timestamp = timezone.now()
+            validation.post_validation_latitude = lat
+            validation.post_validation_longitude = lng
+            validation.dispute_reason = dispute_reason if outcome == 'failed' else ''
+            if photo: validation.post_validation_photo = photo
+            if photo_2: validation.post_validation_photo_2 = photo_2
+            if photo_3: validation.post_validation_photo_3 = photo_3
+            if photo_4: validation.post_validation_photo_4 = photo_4
+            validation.current_status = (
+                StopValidationStatus.VERIFIED_COLLECTED
+                if outcome == 'success'
+                else StopValidationStatus.COLLECTION_DISPUTED
+            )
+            validation.save()
+
+            self._update_driver_timeline(validation)
 
         return Response(
             StopValidationSerializer(validation, context={'request': request}).data,

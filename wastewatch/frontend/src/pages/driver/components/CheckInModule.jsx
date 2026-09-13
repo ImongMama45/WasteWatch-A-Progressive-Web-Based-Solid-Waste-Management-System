@@ -54,7 +54,7 @@ const STEPS = [
   { key: 'ready', label: 'All systems ready!' },
 ]
 
-export default function CheckInModule({ setRouteState }) {
+export default function CheckInModule({ onAdvance, shift }) {
   const { user } = useAuth()
   const { startShift } = useShiftTimer()
 
@@ -255,10 +255,10 @@ export default function CheckInModule({ setRouteState }) {
       var lat = sessionStorage.getItem('ww_gps_lat')
       var lng = sessionStorage.getItem('ww_gps_lng')
 
-      const alreadyActive = !!localStorage.getItem('ww_shift_start')
+      const alreadyActive = !!localStorage.getItem(`ww_shift_start_${user?.id || 'anon'}`)
       if (!alreadyActive) {
         try {
-          await api.post('/api/driver/shift/start/', {   // ← response NOT captured
+          const res = await api.post('/api/driver/shift/start/', {
             duty_type: dutyType,
             started_at: shiftTs,
             latitude: lat,
@@ -266,17 +266,17 @@ export default function CheckInModule({ setRouteState }) {
           })
           startShift()
           sessionStorage.setItem('ww_shift_started_at', shiftTs)
-          console.log('Shift started:', res.data)        // ← ReferenceError: res is not defined
+          console.log('Shift started:', res.data)
         } catch (err) {
-          // Both HTTP errors AND the ReferenceError land here
-          console.error(err.response?.status)            // undefined for a ReferenceError
-          console.error(err.response?.data)              // undefined for a ReferenceError
+          console.error(err.response?.status)
+          console.error(err.response?.data)
           if (err.response?.status === 400 && err.response?.data?.error?.includes('active shift')) {
+            // Already active on backend — sync local timer
             startShift()
           } else {
             setGpsStatus('error')
             const errMsg = err.response?.data?.error || 'Failed to start shift. Please try again.'
-            setInitError(errMsg)   // ← blocks flow; shows generic message
+            setInitError(errMsg)
             return
           }
         }
@@ -292,7 +292,7 @@ export default function CheckInModule({ setRouteState }) {
       setCompleted(c => [...c, 'ready'])
       await delay(600)
       if (cancelled) return
-      setRouteState('shiftroute')
+      onAdvance('shiftroute')
     }
 
     runInit()
@@ -541,7 +541,7 @@ export default function CheckInModule({ setRouteState }) {
                 </button>
                 <button
                   id="back-to-assignment-btn"
-                  onClick={() => setRouteState('assignment')}
+                  onClick={() => onAdvance('assignment')}
                   style={{
                     padding: '12px 16px', borderRadius: 20,
                     background: '#fff', color: '#475569', border: '1px solid #cbd5e1',
@@ -555,14 +555,14 @@ export default function CheckInModule({ setRouteState }) {
                   <button
                     onClick={() => {
                       console.warn('Developer bypass activated')
-
+                      // Must call startShift() so shiftActive=true before ShiftRouteModule mounts
+                      startShift()
                       sessionStorage.setItem(
                         'ww_shift_started_at',
                         new Date().toISOString()
                       )
-
                       setCompleted(['session', 'gps', 'ready'])
-                      setRouteState('shiftroute')
+                      onAdvance('shiftroute')
                     }}
                     style={{
                       padding: '12px 14px',

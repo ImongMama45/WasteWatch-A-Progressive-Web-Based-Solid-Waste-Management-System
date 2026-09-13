@@ -12,14 +12,17 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useHeartbeat } from '../hooks/useHeartbeat'
 import Navbar from './Navbar'
 import { useOnline } from '../hooks/useOnline'
 import BottomNav from './BottomNav'
 import { ICONS, getRoleNavItems } from '../api/navConfig'
 import { DriverGpsProvider } from '../context/DriverGpsContext'
+import { useNotifications } from '../hooks/useNotifications'
+import DumpsiteArrivalAlert from '../pages/dumpsite/components/DumpsiteArrivalAlert'
 
 // ─── NavGroup: collapsible sidebar section ────────────────────────────────────
-function NavGroup({ group, currentPath, onNavigate }) {
+function NavGroup({ group, currentPath, onNavigate, onExpandSidebar }) {
   const hasActive = group.items?.some(item => item.path === currentPath)
   const [open, setOpen] = useState(hasActive)
 
@@ -29,7 +32,7 @@ function NavGroup({ group, currentPath, onNavigate }) {
     <div className="ww-nav-group" data-open={open}>
       <button
         className={`ww-group-toggle ${hasActive ? 'has-active' : ''}`}
-        onClick={() => setOpen(o => !o)}
+        onClick={() => { setOpen(o => !o); if (onExpandSidebar) onExpandSidebar(); }}
         aria-expanded={open}
       >
         <span className="ww-group-icon">{ICONS[group.icon]}</span>
@@ -269,7 +272,8 @@ const SIDEBAR_CSS = `
   left: var(--sb-width); right: 0;
   height: var(--topbar-h);
   background: #fff;
-  border-bottom: 1px solid rgba(0,0,0,0.07);
+  border-bottom: 4px solid #16a34a !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 24px;
   z-index: 100; gap: 16px;
@@ -347,6 +351,63 @@ const SIDEBAR_CSS = `
   }
 }
 
+
+/* ── Sidebar Collapse ── */
+.layout-desktop.sidebar-collapsed {
+  --sb-width: 76px;
+}
+
+.layout-desktop.sidebar-collapsed .sidebar-brand-name,
+.layout-desktop.sidebar-collapsed .sidebar-brand-tag,
+.layout-desktop.sidebar-collapsed .ww-nav-section,
+.layout-desktop.sidebar-collapsed .ww-group-label,
+.layout-desktop.sidebar-collapsed .ww-group-chevron,
+.layout-desktop.sidebar-collapsed .ww-nav-item span:nth-child(2),
+.layout-desktop.sidebar-collapsed .ww-nav-child span:nth-child(2) {
+  display: none;
+}
+
+.layout-desktop.sidebar-collapsed .ww-nav-item,
+.layout-desktop.sidebar-collapsed .ww-group-toggle {
+  justify-content: center;
+  padding: 12px 0;
+  width: 44px;
+  margin: 0 auto 4px auto;
+}
+
+.layout-desktop.sidebar-collapsed .desktop-sidebar-logo {
+  padding: 0;
+  justify-content: center;
+}
+
+.layout-desktop.sidebar-collapsed .ww-group-items {
+  display: none !important;
+}
+
+.layout-desktop.sidebar-collapsed .ww-item-icon,
+.layout-desktop.sidebar-collapsed .ww-group-icon {
+  margin: 0;
+  opacity: 0.9;
+}
+
+.desktop-sidebar, .desktop-topbar, .dashboard-main {
+  transition: width 0.25s ease, left 0.25s ease, margin-left 0.25s ease;
+}
+
+.desktop-topbar-left {
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-toggle-btn {
+  background: none; border: none; cursor: pointer;
+  color: rgba(0,0,0,0.6); padding: 8px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s;
+  margin-left: -8px;
+}
+.sidebar-toggle-btn:hover { background: rgba(0,0,0,0.05); color: #000; }
+
 /* ── Notification dropdown ── */
 .notif-dropdown {
   position: fixed;
@@ -379,6 +440,7 @@ const SIDEBAR_CSS = `
   padding: 12px 16px;
   border-bottom: 1px solid rgba(0,0,0,0.06);
   font-size: 13px; transition: background 0.12s;
+  cursor: pointer;
 }
 .notif-item:last-of-type { border-bottom: none; }
 .notif-item:hover { background: rgba(0,0,0,0.03); }
@@ -406,6 +468,15 @@ function injectSidebarCSS() {
   document.head.appendChild(el)
 }
 
+
+const MenuIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="3" y1="12" x2="21" y2="12"></line>
+    <line x1="3" y1="6" x2="21" y2="6"></line>
+    <line x1="3" y1="18" x2="21" y2="18"></line>
+  </svg>
+)
+
 const LeafIcon = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
     <path d="M17 8C8 10 5.9 16.17 3.82 21.34L5.71 22l1-2.3A4.49 4.49 0 0 0 8 20C19 20 22 3 22 3c-1 2-8 5.25-8 5.25S17.7 9.08 17 8z" />
@@ -415,7 +486,7 @@ const LeafIcon = () => (
 // ─── Section label rendering ──────────────────────────────────────────────────
 // nav items can optionally carry a `section` key to inject a label above them.
 // We detect the first item of each new section and render the label before it.
-function renderNavItems(navItems, currentPath, navigate) {
+function renderNavItems(navItems, currentPath, navigate, onExpandSidebar) {
   const rendered = []
   let lastSection = null
 
@@ -437,6 +508,7 @@ function renderNavItems(navItems, currentPath, navigate) {
           group={item}
           currentPath={currentPath}
           onNavigate={navigate}
+          onExpandSidebar={onExpandSidebar}
         />
       )
     } else {
@@ -444,7 +516,7 @@ function renderNavItems(navItems, currentPath, navigate) {
         <button
           key={item.path + idx}
           className={`ww-nav-item ${currentPath === item.path ? 'active' : ''}`}
-          onClick={() => navigate(item.path)}
+          onClick={() => { navigate(item.path); if (onExpandSidebar) onExpandSidebar(); }}
           aria-current={currentPath === item.path ? 'page' : undefined}
         >
           <span className="ww-item-icon">{ICONS[item.icon]}</span>
@@ -463,8 +535,15 @@ export default function DashboardLayout({ children }) {
   const navigate = useNavigate()
   const location = useLocation()
   const isOnline = useOnline()
+  const { notifications, unreadCount, markRead } = useNotifications()
 
-  const [searchVal, setSearchVal] = useState('')
+  useHeartbeat();
+
+  const [isPinned, setIsPinned] = useState(false)
+  const [isHovered, setIsHovered] = useState(false)
+  const [logoutWarning, setLogoutWarning] = useState(false)
+
+  const isCollapsed = !(isPinned || isHovered)
   const [notifOpen, setNotifOpen] = useState(false)
 
   useEffect(() => { injectSidebarCSS() }, [])
@@ -473,27 +552,54 @@ export default function DashboardLayout({ children }) {
   const navItems = getRoleNavItems(role)
 
   async function handleLogout() {
+    setLogoutWarning(true)
+  }
+
+  async function confirmLogout() {
     await logout()
     navigate('/login')
   }
 
+  const getPreviewMessage = (n) => {
+    try {
+      if (n.type && n.type.startsWith('WATCHER_')) {
+        const data = JSON.parse(n.message)
+        if (n.type === 'WATCHER_STOP_VERIFIED') return `Watcher (${data.watcher_name}): ${data.text}`
+        if (n.type === 'WATCHER_ROUTE_SUMMARY') {
+          return n.title === 'Route Confirmation Complete'
+            ? `Route finished. Driver: ${data.truck_name}`
+            : `Live updates from Watcher (${data.watcher_name})`
+        }
+      }
+    } catch (e) { }
+    return n.message
+  }
+
   return (
-    <>
+    <div
+      className="dashboard-root"
+      style={{ '--sb-width': isCollapsed ? '76px' : '240px', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}
+      onClick={() => {
+        // Tapping somewhere in the page tucks the sidebar in
+        if (isPinned) setIsPinned(false);
+      }}
+    >
+      <DumpsiteArrivalAlert />
       {/* ── MOBILE: top navbar only ── */}
       <div className="layout-mobile">
         <Navbar />
       </div>
 
       {/* ── DESKTOP: sidebar + topbar ── */}
-      <div className="layout-desktop">
+      <div className={`layout-desktop ${isCollapsed ? 'sidebar-collapsed' : ''}`}>
 
         {/* ─── Left Sidebar ─── */}
-        <aside className="desktop-sidebar" role="navigation" aria-label="Main sidebar">
+        <aside className="desktop-sidebar" role="navigation" aria-label="Main sidebar" onMouseEnter={() => setIsHovered(true)} onMouseLeave={() => setIsHovered(false)} onClick={e => e.stopPropagation()}>
 
           {/* Brand / Logo — same height as topbar */}
           <div
             className="desktop-sidebar-logo"
-            onClick={() => navigate('/dashboard')}
+            onClick={() => isCollapsed ? setIsPinned(true) : navigate('/dashboard')}
             role="button" tabIndex={0}
             onKeyDown={e => e.key === 'Enter' && navigate('/dashboard')}
             aria-label="Go to dashboard"
@@ -509,7 +615,7 @@ export default function DashboardLayout({ children }) {
 
           {/* Nav Items with section labels */}
           <nav className="desktop-sidebar-nav">
-            {renderNavItems(navItems, location.pathname, (path) => navigate(path))}
+            {renderNavItems(navItems, location.pathname, (path) => navigate(path), () => !isPinned && setIsPinned(true))}
           </nav>
 
           {/* Footer */}
@@ -533,16 +639,9 @@ export default function DashboardLayout({ children }) {
         </aside>
 
         {/* ─── Top Bar ─── */}
-        <header className="desktop-topbar">
-          <div className="desktop-topbar-search">
-            {ICONS.search}
-            <input
-              type="text"
-              placeholder="Search..."
-              value={searchVal}
-              onChange={e => setSearchVal(e.target.value)}
-              aria-label="Search"
-            />
+        <header className="desktop-topbar" onClick={e => e.stopPropagation()}>
+          <div className="desktop-topbar-left">
+
           </div>
 
           <div className="desktop-topbar-right">
@@ -564,7 +663,9 @@ export default function DashboardLayout({ children }) {
               aria-expanded={notifOpen}
             >
               {ICONS.bell}
-              <span className="notif-dot" style={{ background: isOnline ? '#ef4444' : '#f97316' }} />
+              {unreadCount > 0 && (
+                <span className="notif-dot" style={{ background: '#ef4444' }} />
+              )}
             </button>
 
             <div
@@ -574,9 +675,13 @@ export default function DashboardLayout({ children }) {
               onKeyDown={e => e.key === 'Enter' && navigate('/profile')}
               aria-label="View profile"
             >
-              <div className="desktop-topbar-avatar">
-                {user?.full_name?.[0]?.toUpperCase() || '?'}
-              </div>
+              {user?.profile_pic ? (
+                <img src={user.profile_pic} alt="Avatar" className="desktop-topbar-avatar" style={{ objectFit: 'cover', background: '#fff' }} />
+              ) : (
+                <div className="desktop-topbar-avatar">
+                  {user?.full_name?.[0]?.toUpperCase() || '?'}
+                </div>
+              )}
               <div>
                 <div className="desktop-topbar-username">
                   {user?.full_name?.split(' ')[0] || 'User'}
@@ -594,36 +699,74 @@ export default function DashboardLayout({ children }) {
       {notifOpen && (
         <div className="notif-dropdown" role="dialog" aria-label="Notifications">
           <div className="notif-header">
-            <span>Notifications</span>
+            <span>
+              Notifications
+              {unreadCount > 0 && (
+                <span style={{
+                  marginLeft: 8, background: '#ef4444', color: '#fff',
+                  fontSize: 10, fontWeight: 800, padding: '1px 7px',
+                  borderRadius: 20,
+                }}>{unreadCount}</span>
+              )}
+            </span>
             <button
               onClick={() => setNotifOpen(false)}
               style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, lineHeight: 1, color: 'rgba(0,0,0,0.4)' }}
               aria-label="Close notifications"
             >×</button>
           </div>
-          <div className="notif-item unread">
-            <div className="notif-dot-inline" />
-            <div>
-              <div style={{ fontWeight: 600 }}>Report #3 resolved</div>
-              <div style={{ fontSize: 11, color: 'rgba(0,0,0,0.4)', marginTop: 2 }}>2 hours ago</div>
+
+          {notifications.length === 0 ? (
+            <div style={{ padding: '24px 16px', textAlign: 'center', color: 'rgba(0,0,0,0.4)', fontSize: 13 }}>
+              No new notifications
             </div>
-          </div>
-          <div className="notif-item">
-            <div style={{ width: 8 }} />
-            <div>
-              <div style={{ fontWeight: 600 }}>Welcome to WasteWatch!</div>
-              <div style={{ fontSize: 11, color: 'rgba(0,0,0,0.4)', marginTop: 2 }}>3 days ago</div>
-            </div>
-          </div>
-          <div style={{ padding: '10px 16px', borderTop: '1px solid rgba(0,0,0,0.07)' }}>
-            <button style={{ width: '100%', background: 'none', border: 'none', color: '#16a34a', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+          ) : (
+            notifications.slice(0, 5).map(n => (
+              <div
+                key={n.id}
+                className={`notif-item ${!n.is_read ? 'unread' : ''}`}
+                onClick={() => { navigate('/notifications'); setNotifOpen(false); }}
+              >
+                {!n.is_read
+                  ? <div className="notif-dot-inline" />
+                  : <div style={{ width: 8, flexShrink: 0 }} />
+                }
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{n.title}</div>
+                  <div style={{
+                    fontSize: 11, color: 'rgba(0,0,0,0.4)', marginTop: 2,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {getPreviewMessage(n)}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'rgba(0,0,0,0.4)', marginTop: 2 }}>
+                    {new Date(n.created_at).toLocaleString('en-PH', {
+                      month: 'short', day: 'numeric',
+                      hour: '2-digit', minute: '2-digit',
+                    })}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+
+          <div style={{ padding: '10px 16px', borderTop: '1px solid rgba(0,0,0,0.07)', display: 'flex', gap: '10px' }}>
+            <button
+              onClick={() => { navigate('/notifications'); setNotifOpen(false); }}
+              style={{ flex: 1, background: 'none', border: 'none', color: '#1a2e1a', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              View all
+            </button>
+            <button
+              onClick={() => markRead()}
+              style={{ flex: 1, background: 'none', border: 'none', color: '#16a34a', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+            >
               Mark all as read
             </button>
           </div>
         </div>
       )}
 
-      {/* ── Main Content ── */}
       <main className="dashboard-main">
         {role === 'driver' ? (
           <DriverGpsProvider>{children}</DriverGpsProvider>
@@ -638,6 +781,45 @@ export default function DashboardLayout({ children }) {
       {notifOpen && (
         <div className="nav-backdrop" onClick={() => setNotifOpen(false)} aria-hidden="true" />
       )}
-    </>
+
+      {logoutWarning && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+          zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }} onClick={() => setLogoutWarning(false)}>
+          <div style={{
+            background: '#ffffff', borderRadius: 16, padding: '24px 20px',
+            width: '100%', maxWidth: 360, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            textAlign: 'center',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+            <h3 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 8px 0', color: '#1a2e1a' }}>
+              Sign Out?
+            </h3>
+            <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.6)', marginBottom: 24, lineHeight: 1.4 }}>
+              Are you sure you want to sign out of WasteWatch?
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => setLogoutWarning(false)}
+                style={{ flex: 1, padding: '10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.1)', background: '#f8fdf8', color: '#1a2e1a', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
+                onMouseEnter={e => e.target.style.opacity = 0.8}
+                onMouseLeave={e => e.target.style.opacity = 1}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmLogout}
+                style={{ flex: 1, padding: '10px', borderRadius: 8, border: 'none', background: '#e74c3c', color: '#fff', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
+                onMouseEnter={e => e.target.style.opacity = 0.8}
+                onMouseLeave={e => e.target.style.opacity = 1}
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

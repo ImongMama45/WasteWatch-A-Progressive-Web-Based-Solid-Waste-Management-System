@@ -16,6 +16,9 @@ Why AbstractUser instead of AbstractBaseUser?
 
 from django.db import models
 from django.contrib.auth.models import AbstractUser
+from cloudinary.models import CloudinaryField
+from django.utils import timezone
+from datetime import timedelta
 
 
 # ---------------------------------------------------------------------------
@@ -23,7 +26,13 @@ from django.contrib.auth.models import AbstractUser
 #    Simple lookup table.  Add more fields later (e.g. coordinates, zone).
 # ---------------------------------------------------------------------------
 class Barangay(models.Model):
-    name = models.CharField(max_length=100, unique=True)
+    name       = models.CharField(max_length=100, unique=True)
+    population = models.PositiveIntegerField(default=0)
+    
+    # Geographic data for map rendering
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+    boundary_geojson = models.JSONField(null=True, blank=True, help_text="GeoJSON representation of the barangay boundary")
 
     class Meta:
         verbose_name_plural = 'Barangays'
@@ -31,6 +40,42 @@ class Barangay(models.Model):
 
     def __str__(self):
         return self.name
+
+    def get_establishments_dict(self):
+        """Returns {'Hospital': 3, 'Store': 10} — useful for analytics."""
+        return {
+            e.name: e.count
+            for e in self.establishments.all()
+        }
+
+
+class BarangayEstablishment(models.Model):
+    """
+    Flexible key-value store for establishment counts per barangay.
+    Admin can add any type: Hospital, Clinic, School, Store, Church, etc.
+    """
+    barangay = models.ForeignKey(
+        Barangay,
+        on_delete=models.CASCADE,
+        related_name='establishments',
+    )
+    name  = models.CharField(
+        max_length=100,
+        help_text="Type of establishment, e.g. Hospital, School, Store"
+    )
+    count = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of this establishment type in the barangay"
+    )
+
+    class Meta:
+        ordering = ['name']
+        unique_together = ['barangay', 'name']  # No duplicate types per barangay
+        verbose_name        = 'Establishment'
+        verbose_name_plural = 'Establishments'
+
+    def __str__(self):
+        return f"{self.barangay.name} — {self.name}: {self.count}"
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +134,7 @@ class User(AbstractUser):
     )
 
     dumpsite = models.ForeignKey(
-        'driver.Dumpsite',
+        'dumpsite.Dumpsite',
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -103,6 +148,15 @@ class User(AbstractUser):
         blank=True,
         help_text="Set to 'crew_member' for citizens who serve on collection trucks.",
     )
+
+    profile_pic = CloudinaryField(
+        'image',
+        null=True,
+        blank=True,
+        help_text="User's profile picture."
+    )
+
+    last_activity = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -152,6 +206,23 @@ class User(AbstractUser):
     def is_admin_role(self):
         """Separate from Django's is_staff/is_superuser — app-level admin."""
         return self.role == UserRole.ADMIN
+
+    # -----------------------------------------------------------------------
+    # Presence status tracking
+    # -----------------------------------------------------------------------
+    ONLINE_THRESHOLD  = timedelta(minutes=2)
+    IDLE_THRESHOLD    = timedelta(minutes=5)
+
+    @property
+    def presence_status(self):
+        if not self.last_activity:
+            return 'offline'
+        delta = timezone.now() - self.last_activity
+        if delta <= self.ONLINE_THRESHOLD:
+            return 'online'
+        if delta <= self.IDLE_THRESHOLD:
+            return 'idle'
+        return 'offline'
 
     # -----------------------------------------------------------------------
     # Override save() to auto-generate a username from email so AbstractUser

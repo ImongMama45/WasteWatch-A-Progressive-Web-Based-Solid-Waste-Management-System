@@ -40,6 +40,11 @@
 import { useState, useEffect } from 'react'
 import api from '../../../api/client'
 import { broadcastPickupStatusSync } from '../../../utils/pickupStatusSync'
+import { ICONS } from '../../../api/navConfig'
+import { useOnline } from '../../../hooks/useOnline'
+import { getQueue } from '../../../hooks/useOfflineQueue'
+import { useAuth } from '../../../context/AuthContext'
+import { blobToBase64, estimateQueueStorageMB, isNearStorageLimit } from '../../../utils/photoStorage'
 
 export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete, onBack, MultiPhotoPicker }) {
   const [outcome, setOutcome] = useState('')     // 'present' | 'empty'
@@ -47,32 +52,92 @@ export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete
   const [photos, setPhotos] = useState([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const isOnline = useOnline()
+  const inspectQueue = getQueue('inspection_submissions')
+  const { user } = useAuth()
 
   useEffect(() => {
-    if (visible) { setOutcome(''); setNotes(''); setPhotos([]); setError('') }
+    if (visible) { setOutcome(''); setNotes(''); setPhotos([]); setError(''); setSubmitting(false); }
   }, [visible, task?.id])
 
   async function handleSubmit() {
+    if (!user?.id) {
+      setError('You must be logged in to submit an inspection.')
+      return
+    }
     if (!outcome) { setError('Please select an inspection outcome.'); return }
     if (photos.length === 0) { setError('At least one photo is required.'); return }
     if (!gpsPos) { setError('GPS location required.'); return }
 
     setSubmitting(true); setError('')
+
+    const payload = {
+      ownerId: String(user.id),   // always a real watcher ID, never anonymous
+      schedule_id: task.schedule_id,
+      stop_order: task.stop_order,
+      lat: gpsPos.lat,
+      lng: gpsPos.lng,
+      outcome,
+      notes: notes.trim(),
+      photos,
+    }
+
+    if (isOnline) {
+      // ── ONLINE PATH ───────────────────────────────────────────────────────
+      try {
+        const form = new FormData()
+        form.append('schedule_id', payload.schedule_id)
+        form.append('stop_order', payload.stop_order)
+        form.append('lat', payload.lat)
+        form.append('lng', payload.lng)
+        form.append('outcome', payload.outcome)
+        form.append('notes', payload.notes)
+        photos.forEach((file, i) =>
+          form.append(i === 0 ? 'photo' : `photo_${i + 1}`, file)
+        )
+        await api.post('/api/watcher/stop-validations/pre-inspect/', form)
+        broadcastPickupStatusSync()
+        onComplete()
+        return
+      } catch (err) {
+        if (err.response?.status === 400) {
+          setError(err.response?.data?.error || 'Stop already submitted')
+          setTimeout(() => onComplete(), 2500)
+          return
+        } else if (!err.response) {
+          // Network blip → fall through to queue
+        } else {
+          setError('Server error. Please try again.')
+          setSubmitting(false)
+          return
+        }
+      }
+    }
+
+    // ── OFFLINE PATH ──────────────────────────────────────────────────────
     try {
-      const form = new FormData()
-      form.append('schedule_id', task.schedule_id)
-      form.append('stop_order', task.stop_order)
-      form.append('lat', gpsPos.lat)
-      form.append('lng', gpsPos.lng)
-      form.append('outcome', outcome)
-      form.append('notes', notes.trim())
-      photos.forEach((file, i) => form.append(i === 0 ? 'photo' : `photo_${i + 1}`, file))
-      await api.post('/api/watcher/stop-validations/pre-inspect/', form)
+      const estimatedMB = await estimateQueueStorageMB(inspectQueue)
+      if (isNearStorageLimit(estimatedMB)) {
+        setError(`Offline storage is getting full (${estimatedMB.toFixed(1)}MB used). Please reconnect to sync your pending inspections before continuing.`)
+        setSubmitting(false)
+        return
+      }
+
+      // Convert photos to base64 before enqueuing
+      const serializedPhotos = await Promise.all(
+        photos.map(file => blobToBase64(file))
+      )
+
+      const offlinePayload = {
+        ...payload,
+        photos: serializedPhotos
+      }
+
+      await inspectQueue.enqueue(offlinePayload, 1 /* high priority */)
       broadcastPickupStatusSync()
-      onComplete()
-    } catch (err) {
-      setError(err.response?.data?.error || 'Submission failed.')
-    } finally {
+      onComplete()   // let watcher proceed immediately
+    } catch (qErr) {
+      setError('Failed to save offline. Storage may be full.')
       setSubmitting(false)
     }
   }
@@ -97,27 +162,28 @@ export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete
         <div style={{ padding: '18px 20px' }}>
 
           {/* GPS indicator */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: 10, marginBottom: 16, background: gpsPos ? 'rgba(22,163,74,0.06)' : 'rgba(245,158,11,0.06)', border: `1px solid ${gpsPos ? 'rgba(22,163,74,0.25)' : 'rgba(245,158,11,0.3)'}` }}>
-            <span style={{ fontSize: 14 }}>{gpsPos ? '📍' : '📡'}</span>
-            <span style={{ fontSize: 12, fontWeight: 700, color: gpsPos ? '#16a34a' : '#f59e0b' }}>
-              {gpsPos ? `GPS verified · ${gpsPos.lat.toFixed(4)}, ${gpsPos.lng.toFixed(4)}` : 'Waiting for GPS fix…'}
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: gpsPos ? 'rgba(20,184,166,0.1)' : 'rgba(245,158,11,0.1)', color: gpsPos ? '#14b8a6' : '#f59e0b', padding: '6px 12px', borderRadius: 20 }}>
+            <div style={{ width: 14, height: 14 }}>{gpsPos ? ICONS.pin : ICONS.warning}</div>
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.04em' }}>{gpsPos ? 'GPS ACQUIRED' : 'LOCATING...'}</span>
           </div>
 
           {/* Outcome */}
           <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.07em', marginBottom: 8 }}>INSPECTION OUTCOME *</div>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
             {[
-              { key: 'present', label: '🗑️ Garbage Present', color: '#f59e0b' },
-              { key: 'empty', label: '✅ Empty / Clean', color: '#16a34a' },
+              { key: 'present', label: 'Garbage Present', icon: ICONS.trash, color: '#f59e0b' },
+              { key: 'empty', label: 'Empty / Clean', icon: ICONS.check, color: '#16a34a' },
             ].map(opt => (
               <button key={opt.key} onClick={() => setOutcome(opt.key)} style={{
-                flex: 1, padding: '12px 8px', borderRadius: 10,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '12px 8px', borderRadius: 10,
                 border: `1.5px solid ${outcome === opt.key ? opt.color : '#e2e8f0'}`,
                 background: outcome === opt.key ? `${opt.color}10` : '#fff',
                 color: outcome === opt.key ? opt.color : '#475569',
                 fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all .15s',
-              }}>{opt.label}</button>
+              }}>
+                <div style={{ width: 18, height: 18 }}>{opt.icon}</div>
+                <div>{opt.label}</div>
+              </button>
             ))}
           </div>
 
@@ -153,10 +219,9 @@ export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete
               boxShadow: canSubmit ? '0 4px 16px rgba(15,23,42,.25)' : 'none',
               transition: 'all .2s',
             }}>
-              {submitting ? 'Submitting…'
-                : !gpsPos ? '📡 Awaiting GPS…'
-                  : photos.length === 0 ? '📷 Add photo first'
-                    : '🔍 Submit Inspection'}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                {submitting ? 'Submitting...' : <><div style={{ width: 18, height: 18 }}>{ICONS.search}</div> Submit Inspection</>}
+              </div>
             </button>
           </div>
           <div style={{ height: 20 }} />

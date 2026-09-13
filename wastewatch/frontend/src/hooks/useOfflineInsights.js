@@ -15,7 +15,7 @@
 import { useState, useEffect } from 'react'
 
 const LS_REPORTS = 'ww_reports'
-const LS_STATS   = 'ww_public_stats'
+const LS_STATS = 'ww_public_stats'
 
 export function useOfflineInsights() {
   const [result, setResult] = useState({
@@ -33,7 +33,7 @@ export function useOfflineInsights() {
       let stats = { total_reports: 0, resolved_reports: 0, active_trucks: 0, hotspots: 0 }
       try {
         reports = JSON.parse(localStorage.getItem(LS_REPORTS) || '[]')
-        stats   = JSON.parse(localStorage.getItem(LS_STATS)   || '{}')
+        stats = JSON.parse(localStorage.getItem(LS_STATS) || '{}')
       } catch { }
 
       // 2. Identify spikes (upcoming weekend or market days)
@@ -42,15 +42,15 @@ export function useOfflineInsights() {
 
       // 3. Risk calculation
       const pending = reports.filter(r => r.status === 'pending' || !r.status).length
-      const failed  = reports.filter(r => r.syncStatus === 'failed').length
-      
+      const failed = reports.filter(r => r.syncStatus === 'failed').length
+
       let overallRiskLevel = 'low'
       if (stats.hotspots > 5 || failed > 3) overallRiskLevel = 'high'
       else if (stats.hotspots > 2 || pending > 5) overallRiskLevel = 'medium'
 
       // 4. Generate automated insights
       const insights = []
-      
+
       if (stats.hotspots > 0) {
         insights.push({
           icon: '🔥',

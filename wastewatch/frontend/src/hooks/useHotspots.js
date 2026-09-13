@@ -16,7 +16,22 @@ export function useHotspots() {
     setLoading(true)
     try {
       const res = await api.get('/api/watcher/hotspots/')
-      setItems(res.data)
+      const mapped = res.data.map(h => {
+        let pType = 'Mixed';
+        if (h.name) {
+          if (h.name.includes('—')) pType = h.name.split('—')[1].trim();
+          else if (h.name.includes('-')) pType = h.name.split('-')[1].trim();
+          else pType = h.name;
+        }
+        return {
+          ...h,
+          count: h.report_count || 0,
+          type: pType,
+          status: h.severity || 'low',
+          ago: new Date(h.created_at).toLocaleDateString()
+        }
+      })
+      setItems(mapped)
       setError(null)
     } catch (err) {
       setError('Failed to fetch hotspots')

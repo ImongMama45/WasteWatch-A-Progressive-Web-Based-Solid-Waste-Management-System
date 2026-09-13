@@ -8,16 +8,33 @@ Three serializers:
 """
 
 from rest_framework import serializers
-from .models import User, Barangay, UserRole
+from .models import User, Barangay, UserRole, BarangayEstablishment
 
 
 # ---------------------------------------------------------------------------
 # Barangay
 # ---------------------------------------------------------------------------
+class EstablishmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = BarangayEstablishment
+        fields = ['id', 'name', 'count']
+
+
 class BarangaySerializer(serializers.ModelSerializer):
+    establishments = EstablishmentSerializer(many=True, read_only=True)
+    users_count = serializers.SerializerMethodField()
+    brgy_officials = serializers.SerializerMethodField()
+
     class Meta:
         model  = Barangay
-        fields = ['id', 'name']
+        fields = ['id', 'name', 'population', 'establishments', 'users_count', 'brgy_officials']
+
+    def get_users_count(self, obj):
+        return obj.residents.count()
+
+    def get_brgy_officials(self, obj):
+        officials = obj.residents.filter(role=UserRole.BRGY_OFFICIAL)
+        return [off.full_name for off in officials]
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +47,8 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model  = User
         fields = [
-            'id', 'email', 'full_name', 'role', 'employee_type',
+            'id', 'username', 'email', 'full_name', 'first_name', 'last_name', 'role', 'employee_type',
+            'profile_pic',
             'barangay', 'barangay_name',
             'dumpsite', 'dumpsite_name',
             'is_active', 'created_at',
@@ -54,7 +72,8 @@ class AdminUserSerializer(serializers.ModelSerializer):
     class Meta:
         model  = User
         fields = [
-            'id', 'email', 'full_name', 'role', 'employee_type',
+            'id', 'username', 'email', 'full_name', 'first_name', 'last_name', 'role', 'employee_type',
+            'profile_pic',
             'barangay', 'barangay_name',
             'dumpsite', 'dumpsite_name',
             'is_active', 'password', 'created_at',
@@ -100,10 +119,22 @@ class RegisterSerializer(serializers.Serializer):
     barangay is required for valid citizens.
     """
 
-    full_name = serializers.CharField(
-        max_length=255, 
+    username = serializers.CharField(
+        max_length=150, 
         required=True,
-        error_messages={'required': 'Mangyaring ilagay ang iyong buong pangalan.'}
+        error_messages={'required': 'Mangyaring ilagay ang iyong username.'}
+    )
+    profile_pic = serializers.ImageField(required=False, allow_null=True)
+
+    first_name = serializers.CharField(
+        max_length=150, 
+        required=True,
+        error_messages={'required': 'Mangyaring ilagay ang iyong unang pangalan (First Name).'}
+    )
+    last_name = serializers.CharField(
+        max_length=150, 
+        required=True,
+        error_messages={'required': 'Mangyaring ilagay ang iyong huling pangalan (Last Name).'}
     )
     email     = serializers.EmailField(
         required=True,
@@ -132,6 +163,11 @@ class RegisterSerializer(serializers.Serializer):
 
     # ── Validation ──────────────────────────────────────────────────────────
 
+    def validate_username(self, value):
+        if User.objects.filter(username__iexact=value).exists():
+            raise serializers.ValidationError('Ang username na ito ay ginagamit na.')
+        return value.lower()
+
     def validate_email(self, value):
         if User.objects.filter(email__iexact=value).exists():
             raise serializers.ValidationError('Ang email na ito ay may account na.')
@@ -156,6 +192,11 @@ class RegisterSerializer(serializers.Serializer):
         # Public registration is ALWAYS citizen.
         role     = UserRole.CITIZEN
 
+        # Auto-generate full_name for backend models
+        first_name = validated_data.get('first_name', '')
+        last_name = validated_data.get('last_name', '')
+        validated_data['full_name'] = f"{first_name} {last_name}".strip()
+
         user = User(
             role=role,
             barangay=barangay,
@@ -164,3 +205,106 @@ class RegisterSerializer(serializers.Serializer):
         user.set_password(password)
         user.save()
         return user
+
+# ---------------------------------------------------------------------------
+# Barangay Management
+# ---------------------------------------------------------------------------
+class BarangayListSerializer(serializers.ModelSerializer):
+    official_count     = serializers.IntegerField(read_only=True)
+    watcher_count      = serializers.IntegerField(read_only=True)
+    driver_count       = serializers.IntegerField(read_only=True)
+    pending_concerns   = serializers.IntegerField(read_only=True)
+    active_hotspots    = serializers.IntegerField(read_only=True)
+    open_escalations   = serializers.IntegerField(read_only=True)
+    has_unassigned_roles = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = Barangay
+        fields = [
+            'id', 'name', 'population', 'official_count', 'watcher_count',
+            'driver_count', 'pending_concerns', 'active_hotspots',
+            'open_escalations', 'has_unassigned_roles',
+        ]
+
+class PersonnelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'full_name', 'email', 'profile_pic', 'role', 'is_active']
+
+# Dynamic import to prevent circular dependency
+def get_hotspot_serializer():
+    from watcher.serializers import GarbageHotspotSerializer
+    return GarbageHotspotSerializer
+
+def get_escalation_serializer():
+    from watcher.serializers import EscalationSerializer
+    return EscalationSerializer
+
+def get_report_serializer():
+    from watcher.serializers import GarbageReportSerializer
+    return GarbageReportSerializer
+
+class BarangayDetailSerializer(serializers.ModelSerializer):
+    officials        = serializers.SerializerMethodField()
+    watchers         = serializers.SerializerMethodField()
+    drivers          = serializers.SerializerMethodField()
+    hotspots         = serializers.SerializerMethodField()
+    escalations      = serializers.SerializerMethodField()
+    pending_concerns = serializers.SerializerMethodField()
+
+    pending_concern_count = serializers.SerializerMethodField()
+    active_hotspot_count = serializers.SerializerMethodField()
+    open_escalation_count = serializers.SerializerMethodField()
+
+    has_unassigned_roles = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Barangay
+        fields = [
+            'id', 'name', 'population', 'latitude', 'longitude', 'boundary_geojson',
+            'officials', 'watchers', 'drivers',
+            'hotspots', 'escalations', 'pending_concerns',
+            'pending_concern_count', 'active_hotspot_count', 'open_escalation_count',
+            'has_unassigned_roles',
+        ]
+
+    def get_officials(self, obj):
+        return PersonnelSerializer(obj.residents.filter(role=UserRole.BRGY_OFFICIAL), many=True).data
+
+    def get_watchers(self, obj):
+        return PersonnelSerializer(obj.residents.filter(role=UserRole.WATCHER), many=True).data
+
+    def get_drivers(self, obj):
+        return PersonnelSerializer(obj.residents.filter(role=UserRole.DRIVER), many=True).data
+
+    def get_hotspots(self, obj):
+        SerializerClass = get_hotspot_serializer()
+        return SerializerClass(obj.hotspots.all(), many=True).data
+
+    def get_escalations(self, obj):
+        SerializerClass = get_escalation_serializer()
+        return SerializerClass(obj.escalations.all(), many=True).data
+
+    def get_pending_concerns(self, obj):
+        SerializerClass = get_report_serializer()
+        # Filter for pending reports
+        from watcher.models import ReportStatus
+        reports = obj.reports.filter(status=ReportStatus.PENDING)
+        return SerializerClass(reports, many=True).data
+
+    def get_pending_concern_count(self, obj):
+        from watcher.models import ReportStatus
+        return obj.reports.filter(status=ReportStatus.PENDING).count()
+
+    def get_active_hotspot_count(self, obj):
+        return obj.hotspots.count() # assuming all returned hotspots are active or is_active isn't filtered here. We can use count.
+
+    def get_open_escalation_count(self, obj):
+        return obj.escalations.filter(status='pending').count()
+
+    def get_has_unassigned_roles(self, obj):
+        return (
+            obj.residents.filter(role=UserRole.BRGY_OFFICIAL).count() == 0 or
+            obj.residents.filter(role=UserRole.WATCHER).count() == 0 or
+            obj.residents.filter(role=UserRole.DRIVER).count() == 0
+        )

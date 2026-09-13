@@ -7,6 +7,7 @@
    ============================================================ */
 
 @import url('https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100..900;1,100..900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
 /* Material Symbols utility */
 .msi {
@@ -185,8 +186,10 @@ a {
   justify-content: space-between;
   padding: 14px 20px;
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 3px solid var(--accent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
   position: fixed;
+  width: 100%;
   top: 0;
   z-index: 100;
 }
@@ -1704,8 +1707,6 @@ select.form-input {
     width: 200px;
   }
 
-
-  /* Override .page inside dashboard-main to fill available space */
   .dashboard-main .page {
     max-width: 1400px;
     padding: 28px 32px 40px;
@@ -1715,4 +1716,24 @@ select.form-input {
 .desktop-sidebar-item--nested {
   padding-left: 12px;
   font-size: 13px;
+}
+
+@keyframes pulseGreen {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+
+.pulse-green {
+  animation: pulseGreen 1.5s infinite;
+}
+
+@keyframes pulseBlue {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(59, 130, 246, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+}
+
+.pulse-blue {
+  animation: pulseBlue 1.5s infinite;
 }

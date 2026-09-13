@@ -40,16 +40,19 @@ self.addEventListener('fetch', event => {
     const { request } = event
     const url = new URL(request.url)
 
-    // Skip non-GET and chrome-extension requests
-    if (request.method !== 'GET' || url.protocol === 'chrome-extension:') return
+    // Skip non-GET, chrome-extension, and cross-origin requests
+    if (request.method !== 'GET' || url.protocol === 'chrome-extension:' || url.origin !== self.location.origin) return
 
     if (url.pathname.startsWith('/api/')) {
         // Network-first for API
         event.respondWith(
             fetch(request)
                 .then(response => {
+                    if (!response || response.status !== 200 || response.type !== 'basic') return response
                     const clone = response.clone()
-                    caches.open(CACHE_NAME).then(c => c.put(request, clone))
+                    caches.open(CACHE_NAME)
+                      .then(c => c.put(request, clone))
+                      .catch(e => console.warn('SW Cache Put Failed:', e))
                     return response
                 })
                 .catch(() => caches.match(request))
@@ -59,8 +62,11 @@ self.addEventListener('fetch', event => {
         event.respondWith(
             caches.match(request)
                 .then(cached => cached || fetch(request).then(response => {
+                    if (!response || response.status !== 200 || response.type !== 'basic') return response
                     const clone = response.clone()
-                    caches.open(CACHE_NAME).then(c => c.put(request, clone))
+                    caches.open(CACHE_NAME)
+                      .then(c => c.put(request, clone))
+                      .catch(e => console.warn('SW Cache Put Failed:', e))
                     return response
                 }))
                 .catch(() => caches.match('/index.html'))   // SPA fallback

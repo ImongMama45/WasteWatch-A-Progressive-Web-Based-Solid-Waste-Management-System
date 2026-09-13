@@ -8,6 +8,7 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { ICONS } from '../api/navConfig'
 
 export default function Login() {
   const { login } = useAuth()
@@ -18,6 +19,7 @@ export default function Login() {
   const [form, setForm] = useState({ email: '', password: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
 
   function handleChange(e) {
     setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
@@ -38,8 +40,12 @@ export default function Login() {
   }
 
   return (
-    <div className="auth-page">
-      <div className="auth-card">
+    <div className="auth-page" style={{
+      backgroundImage: `linear-gradient(rgba(10, 25, 15, 0.6), rgba(10, 25, 15, 0.8)), url('/lucena_cleaning_bg.png')`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+    }}>
+      <div className="auth-card" style={{ backdropFilter: 'blur(10px)', backgroundColor: 'rgba(255, 255, 255, 0.95)' }}>
 
         {/* Back to home — don't trap users */}
         <button
@@ -54,7 +60,9 @@ export default function Login() {
         </button>
 
         <div className="auth-logo">
-          <div className="logo-icon">🗑️</div>
+          <div className="logo-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 28, height: 28 }}>{ICONS.trash}</div>
+          </div>
           <h1>WasteWatch</h1>
           <p>Sign in to your account</p>
         </div>
@@ -74,12 +82,26 @@ export default function Login() {
 
           <div className="form-group">
             <label className="form-label">Password</label>
-            <input
-              className="form-input"
-              type="password" name="password"
-              value={form.password} onChange={handleChange}
-              placeholder="••••••••" required
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                className="form-input"
+                type={showPassword ? "text" : "password"} name="password"
+                value={form.password} onChange={handleChange}
+                placeholder="••••••••" required
+                style={{ paddingRight: '40px' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+                  background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}
+              >
+                {showPassword ? ICONS.eyeOff : ICONS.eye}
+              </button>
+            </div>
           </div>
 
           <button

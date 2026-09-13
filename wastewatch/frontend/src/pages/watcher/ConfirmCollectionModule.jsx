@@ -11,7 +11,9 @@
  */
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import Navbar from '../../components/Navbar'
+import CelebrationScreen from '../../components/CelebrationScreen'
 import api from '../../api/client'
 import { useAuth } from '../../context/AuthContext'
 import {
@@ -23,7 +25,10 @@ import {
     subscribePickupStatusSync,
 } from '../../utils/pickupStatusSync'
 import PostCollectionOverlay from './components/PostCollectionOverlay'
+import StopCompletedOverlay from './components/StopCompletedOverlay'
 import { ICONS } from '../../api/navConfig'
+import { compressImage } from '../../utils/imageCompressor'
+import CameraCaptureModal from '../../components/CameraCaptureModal'
 
 const ARRIVAL_RADIUS_M = 30
 const LUCENA_CENTER = [13.9373, 121.617]
@@ -93,6 +98,18 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
+function calculateBearing(lat1, lon1, lat2, lon2) {
+    const toRad = d => d * Math.PI / 180
+    const toDeg = r => r * 180 / Math.PI
+    const dLon = toRad(lon2 - lon1)
+    const y = Math.sin(dLon) * Math.cos(toRad(lat2))
+    const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon)
+    return (toDeg(Math.atan2(y, x)) + 360) % 360
+}
+
+const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+const bearingToCompass = deg => deg != null ? COMPASS[Math.round(((deg % 360) + 360) % 360 / 45) % 8] : ''
+
 // ─── SUB-COMPONENTS ──────────────────────────────────────────────────────────
 function GpsStatusPill({ isTracking, error, accuracy }) {
     const isPoor = accuracy != null && accuracy >= 50
@@ -152,13 +169,15 @@ function MapLegend() {
 
 // ─── MULTI-PHOTO PICKER ───────────────────────────────────────────────────────
 function MultiPhotoPicker({ photos, onChange }) {
-    function handleAdd(e) {
-        const files = Array.from(e.target.files || [])
-        if (!files.length) return
-        const next = [...photos, ...files].slice(0, MAX_PHOTOS)
+    const [isCameraOpen, setIsCameraOpen] = useState(false)
+
+    async function handleCapture(file) {
+        if (!file) return
+        const compressedFile = await compressImage(file)
+        const next = [...photos, compressedFile].slice(0, MAX_PHOTOS)
         onChange(next)
-        e.target.value = ''
     }
+
     function removePhoto(idx) {
         onChange(photos.filter((_, i) => i !== idx))
     }
@@ -192,12 +211,12 @@ function MultiPhotoPicker({ photos, onChange }) {
                 ))}
 
                 {photos.length < MAX_PHOTOS && (
-                    <label style={{
+                    <button type="button" onClick={() => setIsCameraOpen(true)} style={{
                         width: 72, height: 72, borderRadius: 10,
                         border: `2px dashed ${photos.length === 0 ? '#ef4444' : '#cbd5e1'}`,
                         background: photos.length === 0 ? 'rgba(239,68,68,0.04)' : '#fafafa',
                         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                        cursor: 'pointer', gap: 4,
+                        cursor: 'pointer', gap: 4, padding: 0,
                     }}>
                         <svg viewBox="0 0 24 24" fill="none" stroke={photos.length === 0 ? '#ef4444' : '#94a3b8'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
                             <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
@@ -206,8 +225,7 @@ function MultiPhotoPicker({ photos, onChange }) {
                         <span style={{ fontSize: 8, fontWeight: 700, color: photos.length === 0 ? '#ef4444' : '#94a3b8' }}>
                             {photos.length === 0 ? 'REQUIRED' : 'ADD'}
                         </span>
-                        <input type="file" accept="image/*" capture="environment" multiple style={{ display: 'none' }} onChange={handleAdd} />
-                    </label>
+                    </button>
                 )}
             </div>
 
@@ -216,6 +234,12 @@ function MultiPhotoPicker({ photos, onChange }) {
                     At least one photo is required to submit.
                 </p>
             )}
+
+            <CameraCaptureModal
+                isOpen={isCameraOpen}
+                onClose={() => setIsCameraOpen(false)}
+                onCapture={handleCapture}
+            />
         </div>
     )
 }
@@ -232,18 +256,19 @@ function NoScheduleBanner({ barangayName }) {
             <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2, margin: '12px auto' }} />
             <div style={{ textAlign: 'center', padding: '18px 24px' }}>
                 <div style={{
-                    width: 56, height: 56, borderRadius: '50%',
-                    background: 'rgba(245,158,11,0.1)', border: '1.5px solid rgba(245,158,11,0.3)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 28, margin: '0 auto 14px',
-                }}>📅</div>
+                    width: 50, height: 50, borderRadius: 14, background: 'rgba(59,130,246,.15)', border: '1px solid rgba(59,130,246,.3)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3b82f6', marginBottom: 12,
+                    boxShadow: '0 4px 12px rgba(59,130,246,.1)'
+                }}>
+                    <div style={{ width: 24, height: 24 }}>{ICONS.schedule}</div>
+                </div>
                 <div style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 900, color: '#0f172a', marginBottom: 6 }}>
-                    No Scheduled Verification Today
+                    No Scheduled Collections Today
                 </div>
                 <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.6, maxWidth: 280, margin: '0 auto 16px' }}>
                     {barangayName
-                        ? `There are no collection routes scheduled for ${barangayName} today.`
-                        : 'There are no collection routes scheduled for your barangay today.'}
+                        ? `There are no collections to confirm for ${barangayName} today.`
+                        : 'There are no collections to confirm for your barangay today.'}
                     {' '}Check back on your next scheduled collection day.
                 </div>
                 <div style={{
@@ -252,7 +277,7 @@ function NoScheduleBanner({ barangayName }) {
                     borderRadius: 20, padding: '6px 14px',
                 }}>
                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b' }} />
-                    <span style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b' }}>No stops to inspect</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b' }}>No collections to confirm</span>
                 </div>
             </div>
         </div>
@@ -260,8 +285,9 @@ function NoScheduleBanner({ barangayName }) {
 }
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
-export default function VerificationTasksModule() {
+export default function ConfirmCollectionModule() {
     const { user } = useAuth()
+    const navigate = useNavigate()
 
     // ── GPS state ──
     const [gpsPos, setGpsPos] = useState(null)
@@ -282,6 +308,9 @@ export default function VerificationTasksModule() {
     const userMarkerRef = useRef(null)
     const stopMarkersRef = useRef(new Map())
     const routeLayerRef = useRef(null)
+    const orsAbortRef = useRef(null)       // cancel stale ORS requests
+    const lastFetchPosRef = useRef(null)   // throttle ORS re-fetch — watcher walks, threshold 30m
+    const lastFetchStopRef = useRef(null)  // track target stop to force re-fetch when stop changes
 
     // ── Data state ──
     const [stops, setStops] = useState([])   // filtered stops
@@ -289,6 +318,7 @@ export default function VerificationTasksModule() {
     const [loading, setLoading] = useState(true)
     const [hasScheduleToday, setHasScheduleToday] = useState(true)
     const [selectedTask, setSelectedTask] = useState(null)
+    const [completedTask, setCompletedTask] = useState(null)
     const [orsRoute, setOrsRoute] = useState(null)
 
     useEffect(() => { injectStopMarkerStyles() }, [])
@@ -309,7 +339,7 @@ export default function VerificationTasksModule() {
         const filtered = allStops.filter(stop => {
             // Match by barangay id or name (API may return either)
             const stopBrgy = stop.barangay_id ?? stop.barangay
-            const stopName = stop.barangay_name?.toLowerCase() ?? ''
+            const stopName = stop.barangay_names?.toLowerCase() ?? ''
             if (barangayId && stopBrgy != null) return String(stopBrgy) === String(barangayId)
             if (barangayName) return stopName.includes(barangayName) || barangayName.includes(stopName)
             return false
@@ -325,7 +355,7 @@ export default function VerificationTasksModule() {
 
     // ── Derived: nearest pending stop ──
     const nearestStop = (() => {
-        const pending = stops.filter(s => normalizeStopStatus(s.current_status) === 'PENDING_INSPECTION' && s.lat && s.lng)
+        const pending = stops.filter(s => normalizeStopStatus(s.current_status) === 'COLLECTION_REPORTED' && s.lat && s.lng)
         if (!gpsPos || pending.length === 0) return pending[0] || null
         return pending.reduce((best, s) => {
             const d = haversineDistance(gpsPos.lat, gpsPos.lng, s.lat, s.lng)
@@ -336,7 +366,7 @@ export default function VerificationTasksModule() {
 
     const distToStop = gpsPos && nearestStop?.lat ? haversineDistance(gpsPos.lat, gpsPos.lng, nearestStop.lat, nearestStop.lng) : null
     const isNearStop = distToStop != null && distToStop <= ARRIVAL_RADIUS_M
-    const pendingCount = stops.filter(s => normalizeStopStatus(s.current_status) === 'PENDING_INSPECTION').length
+    const pendingCount = stops.filter(s => normalizeStopStatus(s.current_status) === 'COLLECTION_REPORTED').length
 
     // ── Load stops ──
     async function loadStops() {
@@ -419,7 +449,23 @@ export default function VerificationTasksModule() {
         }).addTo(map)
         L.control.zoom({ position: 'topright' }).addTo(map)
         mapInstance.current = map
+        setTimeout(() => map.invalidateSize(), 250)
     }, [leafletReady])
+
+    // ── Map Resize Handler ──
+    useEffect(() => {
+        const onResize = () => {
+            if (mapInstance.current) mapInstance.current.invalidateSize()
+        }
+        window.addEventListener('resize', onResize)
+        return () => window.removeEventListener('resize', onResize)
+    }, [])
+
+    useEffect(() => {
+        if (mapInstance.current) {
+            setTimeout(() => mapInstance.current.invalidateSize(), 150)
+        }
+    }, [selectedTask])
 
     // ── Draw stop markers ──
     useEffect(() => {
@@ -431,14 +477,14 @@ export default function VerificationTasksModule() {
         stops.forEach((stop, idx) => {
             if (!stop.lat || !stop.lng) return
             const status = normalizeStopStatus(stop.current_status)
-            const isActive = nearestStop && stop.id === nearestStop.id && status === 'PENDING_INSPECTION'
+            const isActive = nearestStop && stop.id === nearestStop.id && status === 'COLLECTION_REPORTED'
             const html = buildStopMarkerHtml(stop.stop_order ?? idx + 1, status, null, isActive)
             const marker = L.marker([stop.lat, stop.lng], {
                 icon: L.divIcon({ html, className: 'ww-stop-div-icon', iconSize: isActive ? [28, 28] : [24, 24], iconAnchor: isActive ? [14, 14] : [12, 12] }),
                 zIndexOffset: isActive ? 100 : 0,
             }).addTo(mapInstance.current)
                 .bindPopup(`<b>${stop.label}</b><br/><span style="font-size:11px;font-weight:700;color:${STOP_STATUS_COLORS[status]?.bg || '#94a3b8'}">${STOP_STATUS_LABELS[status] || status}</span>`)
-            marker.on('click', () => { if (status === 'PENDING_INSPECTION') setSelectedTask(stop) })
+            marker.on('click', () => { if (status === 'COLLECTION_REPORTED') setSelectedTask(stop) })
             stopMarkersRef.current.set(stop.id, marker)
         })
     }, [stops, leafletReady, nearestStop])
@@ -460,32 +506,102 @@ export default function VerificationTasksModule() {
         }
     }, [gpsPos, heading, leafletReady])
 
-    // ── ORS route to nearest stop ──
+    // ── ORS route to nearest stop (foot-walking, resilient) ──
+    // Strategy (mirrors VerificationTasksModule / NavigateToDumpsiteModule):
+    //   1. Always draw a dashed straight-line fallback immediately — watcher always
+    //      sees a route even when offline or the ORS key is missing.
+    //   2. Overlay the ORS road-snapped walking route on top when available.
+    //   3. Movement throttle: skip re-fetch if same target and user < 30 m from
+    //      last fetch position (avoids quota burn while standing still).
+    //   4. AbortController cancels in-flight requests on stop change / unmount.
     useEffect(() => {
-        if (!gpsPos || !nearestStop?.lat || !nearestStop?.lng || !ORS_KEY) { setOrsRoute(null); return }
+        const L = window.L
+        if (!gpsPos || !nearestStop?.lat || !nearestStop?.lng) {
+            // Clear route layer when there's no valid target
+            if (routeLayerRef.current && mapInstance.current) {
+                try { mapInstance.current.removeLayer(routeLayerRef.current) } catch { }
+            }
+            routeLayerRef.current = null
+            setOrsRoute(null)
+            return
+        }
+
+        // Cancel any in-flight ORS request
+        if (orsAbortRef.current) orsAbortRef.current.abort()
         const ctrl = new AbortController()
+        orsAbortRef.current = ctrl
+
+        // ── Layer 1: straight-line fallback (always drawn immediately) ─────────
+        if (L && mapInstance.current) {
+            if (routeLayerRef.current) {
+                try { mapInstance.current.removeLayer(routeLayerRef.current) } catch { }
+            }
+            routeLayerRef.current = L.polyline(
+                [[gpsPos.lat, gpsPos.lng], [nearestStop.lat, nearestStop.lng]],
+                { color: '#14b8a6', weight: 3, opacity: 0.5, dashArray: '8,6' }
+            ).addTo(mapInstance.current)
+        }
+        setOrsRoute([[gpsPos.lat, gpsPos.lng], [nearestStop.lat, nearestStop.lng]])
+
+        // ── Movement throttle: skip ORS if target identical and < 30 m moved ──
+        if (lastFetchPosRef.current && lastFetchStopRef.current === nearestStop.id) {
+            const moved = haversineDistance(
+                lastFetchPosRef.current.lat, lastFetchPosRef.current.lng,
+                gpsPos.lat, gpsPos.lng,
+            )
+            if (moved < 30) return
+        }
+
+        // ── Layer 2: ORS road-snapped walking route (overlaid when available) ──
+        if (!ORS_KEY) return   // no key — straight-line fallback stays
+
+        lastFetchPosRef.current = { lat: gpsPos.lat, lng: gpsPos.lng }
+        lastFetchStopRef.current = nearestStop.id
+
         fetch(
             `https://api.openrouteservice.org/v2/directions/foot-walking?api_key=${ORS_KEY}&start=${gpsPos.lng},${gpsPos.lat}&end=${nearestStop.lng},${nearestStop.lat}`,
             { signal: ctrl.signal }
-        ).then(r => r.json()).then(data => {
-            const geometry = data?.features?.[0]?.geometry
-            if (geometry?.coordinates) setOrsRoute(geometry.coordinates.map(([lng, lat]) => [lat, lng]))
-            else setOrsRoute([[gpsPos.lat, gpsPos.lng], [nearestStop.lat, nearestStop.lng]])
-        }).catch(() => setOrsRoute(null))
-        return () => ctrl.abort()
-    }, [gpsPos?.lat, gpsPos?.lng, nearestStop?.id])
+        )
+            .then(r => {
+                if (!r.ok) throw new Error(`ORS ${r.status}`)
+                return r.json()
+            })
+            .then(data => {
+                const coords = data?.features?.[0]?.geometry?.coordinates
+                if (!coords) return   // keep fallback
+                const pts = coords.map(([lng, lat]) => [lat, lng])
+                setOrsRoute(pts)
+                // Replace fallback with solid road-snapped route
+                if (L && mapInstance.current) {
+                    if (routeLayerRef.current) {
+                        try { mapInstance.current.removeLayer(routeLayerRef.current) } catch { }
+                    }
+                    routeLayerRef.current = L.polyline(pts, {
+                        color: '#14b8a6', weight: 4, opacity: 0.85,
+                    }).addTo(mapInstance.current)
+                }
+            })
+            .catch(err => {
+                if (err.name === 'AbortError') return   // intentional — ignore
+                console.warn('ConfirmCollectionModule: ORS unavailable, using straight-line fallback.', err.message)
+                // Straight-line already visible — nothing more to do
+            })
 
-    // ── Draw polyline ──
+        return () => { ctrl.abort() }
+    }, [gpsPos?.lat, gpsPos?.lng, nearestStop?.id, leafletReady])
+
+    // ── GPS anchor: update polyline start point as user walks (between ORS re-fetches) ──
+    // Keeps the teal line visually anchored to the watcher's dot even without
+    // a fresh ORS call, preventing the stale "start" artefact.
     useEffect(() => {
         const L = window.L
-        if (!L || !mapInstance.current) return
-        routeLayerRef.current?.remove(); routeLayerRef.current = null
-        if (!orsRoute || orsRoute.length < 2) return
-        routeLayerRef.current = L.polyline(orsRoute, {
-            color: '#14b8a6', weight: 4, opacity: 0.85,
-            dashArray: orsRoute.length === 2 ? '8,6' : null,
-        }).addTo(mapInstance.current)
-    }, [orsRoute, leafletReady])
+        if (!L || !mapInstance.current || !gpsPos || !orsRoute || orsRoute.length < 2) return
+        if (routeLayerRef.current) {
+            try {
+                routeLayerRef.current.setLatLngs([[gpsPos.lat, gpsPos.lng], ...orsRoute.slice(1)])
+            } catch { }
+        }
+    }, [gpsPos?.lat, gpsPos?.lng])
 
     // ── Dev teleport ──
     function teleportTo(stop) {
@@ -497,13 +613,43 @@ export default function VerificationTasksModule() {
     }
     function clearMock() { mockPosRef.current = null; setIsMock(false); setGpsPos(null); setIsTracking(false) }
 
-    const pendingStops = stops.filter(s => normalizeStopStatus(s.current_status) === 'PENDING_INSPECTION')
+    const showCelebration = !loading && hasScheduleToday && stops.length > 0 && pendingCount === 0;
+
+    // ── Cleanup map when Celebration Screen is shown ──
+    useEffect(() => {
+        if (showCelebration) {
+            if (mapInstance.current) {
+                mapInstance.current.remove()
+                mapInstance.current = null
+            }
+        }
+    }, [showCelebration])
+
+    const pendingStops = stops.filter(s => normalizeStopStatus(s.current_status) === 'COLLECTION_REPORTED')
+
+    if (showCelebration) {
+        return (
+            <>
+                <Navbar />
+                <CelebrationScreen
+                    title={`Great job, ${user?.full_name?.split(' ')[0] || 'Watcher'}! 🎉`}
+                    subtitle="You've completed all collection confirmations for today."
+                    stats={[
+                        { icon: '📍', label: 'Collections Confirmed', value: `${stops.length} / ${stops.length}` },
+                        { icon: '✅', label: 'Completion', value: '100%' },
+                        { icon: '📅', label: 'Date', value: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) }
+                    ]}
+                    onDone={() => navigate('/dashboard')}
+                />
+            </>
+        )
+    }
 
     return (
         <>
             <Navbar />
 
-            <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+            <div style={{ height: 'calc(100vh - 64px)', marginTop: 64, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
 
                 {/* MAP */}
                 <div style={{ position: 'absolute', inset: 0, zIndex: 0, background: '#e8f0e8' }}>
@@ -538,15 +684,17 @@ export default function VerificationTasksModule() {
                         <ConnPill />
                         {isMock && (
                             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(245,158,11,.15)', border: '1px solid rgba(245,158,11,.5)', borderRadius: 20, padding: '3px 10px' }}>
-                                <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: '.04em' }}>📍 MOCK GPS</span>
+                                <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: '.04em', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                    <div style={{ width: 12, height: 12 }}>{ICONS.pin}</div> MOCK GPS
+                                </span>
                             </div>
                         )}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div>
                             <div style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 900, letterSpacing: '.02em' }}>Verification Tasks</div>
-                            <div style={{ fontSize: 12, color: 'rgba(255,255,255,.55)', marginTop: 2 }}>
-                                {user?.barangay_name ? `📍 ${user.barangay_name}` : 'No barangay assigned'} ·{' '}
+                            <div style={{ fontSize: 12, color: 'rgba(255,255,255,.55)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <div style={{ width: 14, height: 14 }}>{ICONS.pin}</div> {user?.barangay_name || 'No barangay assigned'} ·{' '}
                                 {loading ? 'Loading…' : `${pendingCount} pending`}
                             </div>
                         </div>
@@ -556,6 +704,27 @@ export default function VerificationTasksModule() {
                         </div>
                     </div>
                 </div>
+
+                {/* DIRECTION CARD */}
+                {!loading && hasScheduleToday && nearestStop && gpsPos && haversineDistance(gpsPos.lat, gpsPos.lng, nearestStop.lat, nearestStop.lng) > 30 && (
+                    <div style={{ position: 'absolute', top: 95, left: 14, right: 14, zIndex: 10, background: 'rgba(255,255,255,0.97)', borderRadius: 16, overflow: 'hidden', display: 'flex', alignItems: 'stretch', boxShadow: '0 6px 28px rgba(0,0,0,.18)', backdropFilter: 'blur(6px)', transition: 'top .3s ease' }}>
+                        <div style={{ width: 76, flexShrink: 0, background: 'rgba(20,184,166,0.12)', borderRight: '3px solid rgba(20,184,166,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0', color: '#14b8a6' }}>
+                            <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: `rotate(${calculateBearing(gpsPos.lat, gpsPos.lng, nearestStop.lat, nearestStop.lng) - (heading || 0)}deg)`, transition: 'transform 0.3s ease' }}>
+                                <path d="M12 19V5M5 12l7-7 7 7"/>
+                            </svg>
+                        </div>
+                        <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                            <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, color: '#0f172a', lineHeight: 1.2, marginBottom: 5 }}>
+                                Head {bearingToCompass(calculateBearing(gpsPos.lat, gpsPos.lng, nearestStop.lat, nearestStop.lng)).toLowerCase()} on {nearestStop.label || nearestStop.address || nearestStop.name || 'next stop'}
+                            </div>
+                            <div style={{ fontSize: 13, color: '#16a34a', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                {haversineDistance(gpsPos.lat, gpsPos.lng, nearestStop.lat, nearestStop.lng) > 1000
+                                    ? (haversineDistance(gpsPos.lat, gpsPos.lng, nearestStop.lat, nearestStop.lng) / 1000).toFixed(1) + ' km to stop'
+                                    : Math.round(haversineDistance(gpsPos.lat, gpsPos.lng, nearestStop.lat, nearestStop.lng)) + ' m to stop'}
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* BOTTOM PANEL or NO-SCHEDULE BANNER */}
                 {!loading && !hasScheduleToday ? (
@@ -568,8 +737,10 @@ export default function VerificationTasksModule() {
                             <div style={{ textAlign: 'center', padding: '20px 0', color: '#64748b', fontSize: 13 }}>Loading…</div>
                         ) : pendingCount === 0 ? (
                             <div style={{ textAlign: 'center', padding: '20px 20px', color: '#64748b' }}>
-                                <div style={{ fontSize: 36, marginBottom: 8 }}>✅</div>
-                                <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a', marginBottom: 4 }}>All stops inspected!</div>
+                                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8, color: '#10b981' }}>
+                                    <div style={{ width: 36, height: 36 }}>{ICONS.check}</div>
+                                </div>
+                                <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a', marginBottom: 4 }}>All stops verified!</div>
                                 <div style={{ fontSize: 12, color: '#94a3b8' }}>No pending inspection stops remaining today.</div>
                             </div>
                         ) : nearestStop ? (
@@ -590,7 +761,7 @@ export default function VerificationTasksModule() {
                                 </div>
 
                                 {isNearStop
-                                    ? <p style={{ fontSize: 12, color: '#14b8a6', fontWeight: 700, marginBottom: 12, textAlign: 'center' }}>📍 You have arrived — ready to inspect!</p>
+                                    ? <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, color: '#14b8a6', marginBottom: 12 }}><div style={{ width: 16, height: 16 }}>{ICONS.pin}</div><p style={{ fontSize: 12, fontWeight: 700, margin: 0 }}>You have arrived — ready to inspect!</p></div>
                                     : distToStop != null
                                         ? <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12, textAlign: 'center' }}>Walk {distToStop > 1000 ? `${(distToStop / 1000).toFixed(1)} km` : `${Math.round(distToStop)} m`} to reach this stop</p>
                                         : <p style={{ fontSize: 12, color: '#f59e0b', marginBottom: 12, textAlign: 'center' }}>📡 Waiting for GPS signal…</p>
@@ -607,24 +778,38 @@ export default function VerificationTasksModule() {
                                         background: isNearStop ? '#0f172a' : '#e2e8f0',
                                         color: isNearStop ? '#fff' : '#94a3b8',
                                         boxShadow: isNearStop ? '0 6px 20px rgba(15,23,42,.3)' : 'none',
-                                    }}
-                                >
-                                    {isNearStop ? '🔍 Inspect Stop' : 'Confirm on Arrival'}
+                                    }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                                        {isNearStop ? <><div style={{ width: 18, height: 18 }}>{ICONS.search}</div> Inspect Stop</> : 'Confirm on Arrival'}
+                                    </div>
                                 </button>
                             </div>
                         ) : null}
                     </div>
                 )}
-            </div>
+            </div >
 
             {/* INSPECTION OVERLAY — passes MultiPhotoPicker requirement down */}
-            <PostCollectionOverlay
-                visible={!!selectedTask}
+            < PostCollectionOverlay
+                visible={!!selectedTask
+                }
                 task={selectedTask}
                 gpsPos={gpsPos}
-                onComplete={() => { setSelectedTask(null); loadStops() }}
+                onComplete={() => {
+                    setCompletedTask(selectedTask);
+                    setSelectedTask(null);
+                    loadStops()
+                }}
                 onBack={() => setSelectedTask(null)}
                 MultiPhotoPicker={MultiPhotoPicker}
+            />
+
+            <StopCompletedOverlay
+                task={completedTask}
+                onNext={() => setCompletedTask(null)}
+                totalStops={stops.length}
+                pendingCount={pendingCount}
+                type="post"
             />
         </>
     )

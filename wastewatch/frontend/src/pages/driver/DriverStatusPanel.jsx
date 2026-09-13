@@ -17,6 +17,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { useNotification } from '../../context/NotificationContext'
 import api from '../../api/client'
 import useShiftTimer from '../../hooks/useShiftTimer'
 
@@ -117,6 +118,7 @@ function RouteProgress({ completed, total }) {
 
 export default function DriverStatusPanel() {
   const { user } = useAuth()
+  const { notify } = useNotification()
   const navigate = useNavigate()
 
   const [driver, setDriver] = useState(MOCK_DRIVER)
@@ -167,7 +169,7 @@ export default function DriverStatusPanel() {
       endShift()
       setOpStatus('off_shift')
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to end shift. Please try again.')
+      notify({ variant: 'error-dark', message: err.response?.data?.error || 'Failed to end shift. Please try again.' })
     } finally {
       setEnding(false)
     }

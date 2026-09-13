@@ -17,13 +17,19 @@
  *    Celebration screen: fireworks + shift summary → Done or extended mode.
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
+import { useNotification } from '../../../context/NotificationContext'
 import useShiftTimer from '../../../hooks/useShiftTimer'
 import useGpsTracking from '../../../hooks/useGpsTracking'
 import api from '../../../api/client'
 import Navbar from '../../../components/Navbar'
+import NavigateToDumpsiteModule from './NavigateToDumpsiteModule'
+import CalibrationCelebrationModule from './CalibrationCelebrationModule'
+import RouteCompletionMiniMap from './RouteCompletionMiniMap'
+import { buildStopValidationSnapshot, isMissedStopStatus, isCompletedStopStatus, normalizeStopStatus } from '../../../utils/pickupStatusSync'
+
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -38,6 +44,7 @@ const ROUTE_SESSION_KEYS = [
   'ww_extended_mode',
   'ww_completed_stops',
   'ww_total_stops',
+  'ww_endshift_phase',   // ← EndShiftModule sub-phase persistence
 ]
 
 function clearRouteSession() {
@@ -142,6 +149,36 @@ function SummaryRow({ icon, label, value }) {
   )
 }
 
+// ─── SVG ICONS ────────────────────────────────────────────────────────────────
+
+const TimerIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: -1 }}>
+    <circle cx="12" cy="12" r="10"></circle>
+    <polyline points="12 6 12 12 16 14"></polyline>
+  </svg>
+)
+
+const HomeIcon = ({ size = 22, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+    <polyline points="9 22 9 12 15 12 15 22"></polyline>
+  </svg>
+)
+
+const RadarIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: -2 }}>
+    <path d="M12 2v2"></path>
+    <path d="M12 20v2"></path>
+    <path d="M4.93 4.93l1.41 1.41"></path>
+    <path d="M17.66 17.66l1.41 1.41"></path>
+    <path d="M2 12h2"></path>
+    <path d="M20 12h2"></path>
+    <path d="M6.34 17.66l-1.41 1.41"></path>
+    <path d="M19.07 4.93l-1.41 1.41"></path>
+    <circle cx="12" cy="12" r="4"></circle>
+  </svg>
+)
+
 // ─── STAT CELL ────────────────────────────────────────────────────────────────
 
 function StatCell({ value, label }) {
@@ -155,18 +192,67 @@ function StatCell({ value, label }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
-export default function EndShiftModule({ setRouteState }) {
+
+
+
+export default function EndShiftModule({ onAdvance, shift, schedule: scheduleProp, stopStatuses: stopStatusesProp, currentStopIndex: currentStopIndexProp }) {
+
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { notify } = useNotification()
   const { formattedTime, startTime, endShift } = useShiftTimer()
 
   const isRouteComplete = sessionStorage.getItem('ww_route_complete') === 'true'
   const firstName = user?.full_name?.split(' ')[0] || 'Driver'
 
   // ── Phase gate ────────────────────────────────────────────────────────────
-  // 'returning' → driver navigates back to base
-  // 'at_base'   → driver can proceed to end-shift form
-  const [phase, setPhase] = useState('returning')
+  // 'loading'               → fetching schedule data
+  // 'dump_site'             → driver navigates to dump site (if exists)
+  // 'waiting_dump_confirmation' → waiting for dumpsite operator calibration
+  // 'returning'             → driver navigates back to base
+  // 'at_base'               → driver can proceed to end-shift form
+
+  // Persist sub-phase to the backend on every transition so any device
+  // can resume correctly (sessionStorage is device-local; backend is canonical).
+  const [phase, setPhaseRaw] = useState('loading')
+  function setPhase(p) {
+    if (p !== 'loading') {
+      // Fire-and-forget — non-blocking, won't block UI transition
+      if (shift?.id) {
+        api.patch(`/api/driver/shift/${shift.id}/update-status/`, {
+          status: 'end_shift',
+          end_shift_phase: p,
+        }).catch(() => { /* best-effort */ })
+      }
+      // Also keep sessionStorage as a fast-path fallback (same device, offline)
+      sessionStorage.setItem('ww_endshift_phase', p)
+    }
+    setPhaseRaw(p)
+  }
+  const [calibrationData, setCalibrationData] = useState(null)
+
+  // Seed from ShiftRouteModule props so missedStopOrders is immediately correct
+  const [schedule, setSchedule] = useState(scheduleProp || null)
+
+  // Initialise from the snapshot persisted by ShiftRouteModule just before
+  // advancing phase. This is the source of truth for which stops are missed.
+  const [stopStatuses, setStopStatuses] = useState(() => {
+    if (stopStatusesProp && stopStatusesProp.size > 0) return stopStatusesProp
+    try {
+      const raw = sessionStorage.getItem('ww_stop_statuses_snapshot')
+      if (raw) return new Map(JSON.parse(raw))
+    } catch { }
+    return new Map()
+  })
+
+  // Keep in sync if props update (e.g. rendered inside ShiftRouteModule)
+  useEffect(() => {
+    if (stopStatusesProp && stopStatusesProp.size > 0) setStopStatuses(stopStatusesProp)
+  }, [stopStatusesProp])
+  useEffect(() => {
+    if (scheduleProp) setSchedule(scheduleProp)
+  }, [scheduleProp])
+
 
   // ── GPS ───────────────────────────────────────────────────────────────────
   const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } =
@@ -178,18 +264,86 @@ export default function EndShiftModule({ setRouteState }) {
   // ── Base location (waypoints[0] from driver's schedule) ───────────────────
   const [baseLocation, setBaseLocation] = useState(null)
   const [baseName, setBaseName] = useState('Home Base')
+  const [dumpSiteLocation, setDumpSiteLocation] = useState(null)
+  const [dumpSiteName, setDumpSiteName] = useState('Dump Site')
 
   useEffect(() => {
     if (!user?.id) return
     api.get('/api/driver/collection-schedules/')
-      .then(res => {
+      .then(async res => {
         const match = res.data.find(s => String(s.driver) === String(user.id))
+        if (match) {
+          setSchedule(match)
+          try {
+            const valRes = await api.get(`/api/watcher/stop-validations/?schedule_id=${encodeURIComponent(match.id)}`)
+            const snapshot = buildStopValidationSnapshot(valRes.data?.results || valRes.data || [])
+            const statusMap = new Map()
+            snapshot.statusMap.forEach((status, key) => {
+              const stopOrder = Number(String(key).split(':')[1])
+              if (!Number.isNaN(stopOrder)) statusMap.set(stopOrder, status)
+            })
+
+            // Layer 2: merge sessionStorage snapshot for locally-flagged stops
+            // (e.g. COLLECTION_REPORTED or DRIVER_MISSED that aren't yet in the API)
+            try {
+              const raw = sessionStorage.getItem('ww_stop_statuses_snapshot')
+              if (raw) {
+                const localMap = new Map(JSON.parse(raw))
+                localMap.forEach((localStatus, idx) => {
+                  if (!statusMap.has(idx)) statusMap.set(idx, localStatus)
+                })
+              }
+            } catch { }
+
+            // Layer 3: fill every waypoint index with PENDING_INSPECTION if still missing
+            // so the mini-map renders ALL stops, not just watcher-logged ones
+            if (match.waypoints?.length > 1) {
+              for (let i = 1; i < match.waypoints.length; i++) {
+                if (!statusMap.has(i)) statusMap.set(i, 'PENDING_INSPECTION')
+              }
+            }
+
+            setStopStatuses(statusMap)
+          } catch (e) { console.error('Failed to fetch validations snapshot:', e) }
+        }
+        
         if (match?.waypoints?.length > 0) {
           setBaseLocation(match.waypoints[0])
           setBaseName(match.waypoints[0]?.label || 'Home Base')
         }
+        if (match?.dumpsite_detail) {
+          setDumpSiteLocation(match.dumpsite_detail)
+          setDumpSiteName(match.dumpsite_detail?.name || 'Dump Site')
+
+          // ── Resume logic: backend is canonical, sessionStorage is fallback ──
+          // Priority: server end_shift_phase > sessionStorage > default (dump_site)
+          const serverPhase = shift?.end_shift_phase
+          const localPhase  = sessionStorage.getItem('ww_endshift_phase')
+          const persisted   = serverPhase || localPhase
+          const PAST_DUMP   = ['waiting_dump_confirmation', 'returning', 'at_base', 'early_termination', 'calibration_complete']
+          if (persisted && PAST_DUMP.includes(persisted)) {
+            // Driver already visited dump site — restore to where they were
+            setCalibrationData(match)
+            setPhaseRaw(persisted)
+          } else {
+            // Fresh start or still at/before dump site
+            setPhase('dump_site')
+          }
+          api.patch(`/api/driver/shift/${shift.id}/update-status/`, { status: 'end_shift' }).catch(() => { })
+        } else {
+          setCalibrationData(match)
+          // Restore from server first, sessionStorage second, then default
+          const serverPhase = shift?.end_shift_phase
+          const localPhase  = sessionStorage.getItem('ww_endshift_phase')
+          const persisted   = serverPhase || localPhase
+          setPhaseRaw(persisted || 'calibration_complete')
+          api.patch(`/api/driver/shift/${shift.id}/update-status/`, { status: 'end_shift' }).catch(() => { })
+        }
       })
-      .catch(console.error)
+      .catch((err) => {
+        console.error(err)
+        setPhase('returning')
+      })
   }, [user?.id])
 
   // ── Distance / arrival detection ──────────────────────────────────────────
@@ -211,6 +365,14 @@ export default function EndShiftModule({ setRouteState }) {
   const [leafletReady, setLeafletReady] = useState(false)
   const [orsData, setOrsData] = useState(null)
 
+  const distanceToDump = gpsPos && dumpSiteLocation
+    ? haversineDistance(
+      gpsPos.lat, gpsPos.lng,
+      Number(dumpSiteLocation.latitude), Number(dumpSiteLocation.longitude)
+    )
+    : null
+  const isAtDump = distanceToDump != null && distanceToDump <= BASE_ARRIVAL_RADIUS_M && hasGoodAccuracy
+
   // ── Load Leaflet CDN ──────────────────────────────────────────────────────
   useEffect(() => {
     if (window.L) { setLeafletReady(true); return }
@@ -231,41 +393,32 @@ export default function EndShiftModule({ setRouteState }) {
       : baseLocation
         ? [Number(baseLocation.lat), Number(baseLocation.lng)]
         : [13.9373, 121.617]
-
     const map = L.map(mapRef.current, { center, zoom: 15, zoomControl: false })
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
       { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(map)
     mapInstance.current = map
+    setTimeout(() => map.invalidateSize(), 0)
 
-    // Driver marker — pulsing blue dot
     const driverIcon = L.divIcon({
       html: `<div style="position:relative;width:18px;height:18px;">
-               <span style="position:absolute;inset:-6px;border-radius:50%;
-                 border:2px solid #2563eb;opacity:0.4;animation:esMapPulse 2s ease infinite;"></span>
-               <div style="position:absolute;inset:0;background:#2563eb;border:3px solid white;
-                 border-radius:50%;box-shadow:0 0 12px rgba(37,99,235,0.7);"></div>
-             </div>`,
-      className: '', iconSize: [18, 18], iconAnchor: [9, 9],
+             <span style="position:absolute;inset:-6px;border-radius:50%;border:2px solid #2563eb;opacity:0.4;animation:esmPulse 2s ease infinite;"></span>
+             <div style="position:absolute;inset:0;background:#2563eb;border:3px solid white;border-radius:50%;box-shadow:0 0 12px rgba(37,99,235,0.7);"></div>
+           </div>`,
+      className: '', iconSize: [18, 18], iconAnchor: [9, 9]
     })
     driverMarker.current = L.marker(center, { icon: driverIcon, zIndexOffset: 1000 }).addTo(map)
 
-    // Home base marker — green house icon with outer ring
     if (baseLocation) {
       const baseLat = Number(baseLocation.lat)
       const baseLng = Number(baseLocation.lng)
       const baseIcon = L.divIcon({
         html: `<div style="position:relative;width:40px;height:40px;">
-                 <span style="position:absolute;inset:-6px;border-radius:50%;
-                   border:2px solid #16a34a;opacity:0.45;
-                   animation:esMapPulse 2.2s ease infinite .3s;"></span>
-                 <div style="position:absolute;inset:0;background:#16a34a;
-                   border:3px solid #fff;border-radius:50%;
-                   display:flex;align-items:center;justify-content:center;
-                   box-shadow:0 3px 14px rgba(22,163,74,0.55);font-size:18px;">
-                   🏠
+                 <span style="position:absolute;inset:-6px;border-radius:50%;border:2px solid #16a34a;opacity:0.45;animation:esmPulse 2.2s ease infinite .3s;"></span>
+                 <div style="position:absolute;inset:0;background:#16a34a;border:3px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 14px rgba(22,163,74,0.55);font-size:18px;">
+                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
                  </div>
                </div>`,
-        className: '', iconSize: [40, 40], iconAnchor: [20, 20],
+        className: '', iconSize: [40, 40], iconAnchor: [20, 20]
       })
       L.marker([baseLat, baseLng], { icon: baseIcon })
         .addTo(map)
@@ -351,13 +504,60 @@ export default function EndShiftModule({ setRouteState }) {
     sessionStorage.removeItem('ww_route_state')
   }, [])
 
+  // ── Poll for dumpsite confirmation ──────────────────────────────────────────
+  useEffect(() => {
+    if (phase !== 'waiting_dump_confirmation' || !dumpSiteLocation) return
+
+    const checkDelivery = async () => {
+      try {
+        const res = await api.get('/api/dumpsite/waste-deliveries/')
+        const deliveries = res.data?.results || res.data || []
+        const match = deliveries.find(d => {
+          if (String(d.driver) !== String(user?.id)) return false
+          if (!startTime) return true // fallback
+          return new Date(d.created_at) > new Date(startTime)
+        })
+        if (match) {
+          // Delivery found! Dumpsite operator has calibrated/logged the truck.
+          setCalibrationData(match)
+          setPhase('calibration_complete')
+        }
+      } catch (err) {
+        console.error('Error checking dump confirmation:', err)
+      }
+    }
+
+    checkDelivery()
+    const interval = setInterval(checkDelivery, 5000)
+    return () => clearInterval(interval)
+  }, [phase, dumpSiteLocation, user?.id])
+
   // ── Early termination state ───────────────────────────────────────────────
   const [reason, setReason] = useState('')
   const [customNote, setCustomNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
 
+  // Compute missed stops: only truly unvisited stops.
+  // Excluded: EMPTY_STOP (legitimately empty, driver did visit),
+  //           COLLECTION_DISPUTED (watcher challenge on a collection that happened),
+  //           VERIFIED_COLLECTED / COLLECTION_REPORTED (completed).
+  // This definition aligns with MISSED_STOP_STATUSES in pickupStatusSync.js.
+  const missedStopOrders = useMemo(() => {
+    if (!schedule?.waypoints) return []
+    return schedule.waypoints
+      .slice(1)
+      .map((_, i) => i + 1)
+      .filter(idx => {
+        const s = normalizeStopStatus(stopStatuses?.get(idx))
+        return s === 'DRIVER_MISSED' || s === 'PENDING_INSPECTION' || s === 'READY_FOR_COLLECTION'
+      })
+  }, [schedule, stopStatuses])
+
+  const [extendedModeLoading, setExtendedModeLoading] = useState(false)
+  
   async function handleEarlySubmit() {
+
     if (!reason || submitting) return
     setSubmitting(true)
     try {
@@ -370,13 +570,15 @@ export default function EndShiftModule({ setRouteState }) {
         started_at: startTime ? new Date(startTime).toISOString() : null,
         ended_at: endTime.toISOString(),
         duration_ms: durationMs,
+        missed_stop_orders: missedStopOrders,
+        schedule_id: schedule?.id,
       })
       endShift()
       clearRouteSession()
       setSubmitted(true)
     } catch (err) {
       console.error('shift/end error:', err.response?.data)
-      alert(err.response?.data?.error || 'Failed to end shift. Please try again.')
+      notify({ variant: 'error-dark', message: err.response?.data?.error || 'Failed to end shift. Please try again.' })
     } finally {
       setSubmitting(false)
     }
@@ -393,6 +595,8 @@ export default function EndShiftModule({ setRouteState }) {
         started_at: startTime ? new Date(startTime).toISOString() : null,
         ended_at: endTime.toISOString(),
         duration_ms: durationMs,
+        missed_stop_orders: missedStopOrders,
+        schedule_id: schedule?.id,
       })
       endShift()
       // Clear all route-specific session keys so DriverFlow restarts
@@ -400,16 +604,48 @@ export default function EndShiftModule({ setRouteState }) {
       clearRouteSession()
       navigate('/dashboard', { replace: true })
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to end shift. Please try again.')
+      notify({ variant: 'error-dark', message: err.response?.data?.error || 'Failed to end shift. Please try again.' })
     } finally {
       setSubmitting(false)
     }
   }
 
-  function handleExtendedMode() {
-    sessionStorage.setItem('ww_extended_mode', 'true')
-    sessionStorage.setItem('ww_route_state', 'navigating')
-    setRouteState('navigating')
+  async function handleExtendedMode() {
+    if (extendedModeLoading) return
+    setExtendedModeLoading(true)
+    try {
+      await api.post(`/api/driver/shift/${shift?.id}/extended_mode/`, {
+        missed_stop_orders: missedStopOrders,
+        schedule_id: schedule?.id,
+      })
+      // Only set session flag after confirmed server acknowledgment
+      sessionStorage.setItem('ww_extended_mode', 'true')
+      onAdvance('shiftroute')
+    } catch (err) {
+      notify({
+        variant: 'error-dark',
+        message: err.response?.data?.error || 'Failed to activate extended mode. Please try again.',
+      })
+    } finally {
+      setExtendedModeLoading(false)
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PHASE 0 — LOADING
+  // ══════════════════════════════════════════════════════════════════════════
+
+  if (phase === 'loading') {
+    return (
+      <>
+        <Navbar />
+        <div style={{ height: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', flexDirection: 'column', gap: 12 }}>
+          <div style={{ width: 32, height: 32, borderRadius: '50%', border: '3px solid #e2e8f0', borderTopColor: '#0f172a', animation: 'spin 1s linear infinite' }} />
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          <div style={{ fontSize: 14, color: '#64748b', fontWeight: 600 }}>Loading route data...</div>
+        </div>
+      </>
+    )
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -498,7 +734,7 @@ export default function EndShiftModule({ setRouteState }) {
           <div style={{
             position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
             background: 'rgba(15,23,42,0.93)', backdropFilter: 'blur(8px)',
-            padding: '16px 18px 18px', color: '#fff',
+            padding: '76px 18px 18px', color: '#fff',
             boxShadow: '0 4px 20px rgba(0,0,0,.2)',
           }}>
             {/* Status pills row */}
@@ -533,15 +769,17 @@ export default function EndShiftModule({ setRouteState }) {
                 marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5,
                 background: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: '3px 10px',
               }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.65)', letterSpacing: '.04em' }}>
-                  ⏱ {formattedTime}
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.65)', letterSpacing: '.04em' }}>
+                  <TimerIcon /> {formattedTime}
                 </span>
               </div>
             </div>
 
             {/* Destination title */}
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-              <span style={{ fontSize: 22, marginTop: 1 }}>🏠</span>
+              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, background: 'rgba(255,255,255,0.15)', borderRadius: 8, marginTop: 1 }}>
+                <HomeIcon size={16} color="#fff" />
+              </span>
               <div>
                 <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, marginBottom: 2 }}>
                   {baseName}
@@ -555,7 +793,7 @@ export default function EndShiftModule({ setRouteState }) {
 
           {/* ── TURN INSTRUCTION CARD ── */}
           <div style={{
-            position: 'absolute', top: 122, left: 14, right: 14, zIndex: 10,
+            position: 'absolute', top: 182, left: 14, right: 14, zIndex: 10,
             background: 'rgba(255,255,255,0.97)', borderRadius: 16, overflow: 'hidden',
             display: 'flex', alignItems: 'stretch',
             boxShadow: '0 6px 28px rgba(0,0,0,.18)',
@@ -566,7 +804,7 @@ export default function EndShiftModule({ setRouteState }) {
               borderRight: '3px solid #16a34a28',
               display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0',
             }}>
-              <span style={{ fontSize: 30 }}>🏠</span>
+              <HomeIcon size={32} color="#16a34a" />
             </div>
             <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
               <div style={{
@@ -621,8 +859,8 @@ export default function EndShiftModule({ setRouteState }) {
                 </p>
               )}
               {!isAtBase && distanceToBase == null && (
-                <p style={{ fontSize: 12, color: '#f59e0b', marginBottom: 12 }}>
-                  📡 Waiting for GPS signal…
+                <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#f59e0b', marginBottom: 12 }}>
+                  <RadarIcon /> Waiting for GPS signal…
                 </p>
               )}
 
@@ -646,6 +884,120 @@ export default function EndShiftModule({ setRouteState }) {
 
         </div>
       </>
+    )
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PHASE 3 — DUMP SITE NAVIGATION
+  // ══════════════════════════════════════════════════════════════════════════
+
+  if (phase === 'dump_site') {
+    return (
+      <NavigateToDumpsiteModule
+        gpsPos={gpsPos} gpsError={gpsError} isTracking={isTracking} gpsAccuracy={gpsAccuracy}
+        isMock={isMock} setMockGps={setMockGps}
+        dumpSiteLocation={dumpSiteLocation} dumpSiteName={dumpSiteName}
+        distanceToDump={distanceToDump} isAtDump={isAtDump}
+        formattedTime={formattedTime} setPhase={setPhase}
+        leafletReady={leafletReady}
+      />
+    )
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PHASE 3b — WAITING FOR DUMPSITE CONFIRMATION
+  // ══════════════════════════════════════════════════════════════════════════
+
+  if (phase === 'waiting_dump_confirmation') {
+    return (
+      <>
+        <Navbar />
+        <style>{`
+          @keyframes pulseIcon {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+            100% { transform: scale(1); opacity: 1; }
+          }
+          @keyframes slideUpFade {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+        `}</style>
+        <div style={{
+          height: '100dvh', display: 'flex', flexDirection: 'column',
+          background: '#f8fafc', fontFamily: 'var(--font-body)',
+        }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 24px', textAlign: 'center' }}>
+            <div style={{
+              width: 100, height: 100, borderRadius: '50%', background: '#f59e0b15',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              border: '2px solid #f59e0b40', marginBottom: 32,
+              animation: 'pulseIcon 2s infinite ease-in-out',
+            }}>
+              <span style={{ fontSize: 44 }}>⚖️</span>
+            </div>
+
+            <h2 style={{
+              fontFamily: 'var(--font-head)', fontSize: 24, fontWeight: 900,
+              color: '#0f172a', marginBottom: 12, letterSpacing: '.02em',
+              animation: 'slideUpFade 0.4s ease-out'
+            }}>
+              Waiting for Calibration
+            </h2>
+
+            <p style={{
+              fontSize: 15, color: '#64748b', lineHeight: 1.5, maxWidth: 280,
+              animation: 'slideUpFade 0.4s ease-out 0.1s both'
+            }}>
+              Please hold while the dumpsite operator verifies and logs your truck's weight.
+            </p>
+
+            <div style={{
+              marginTop: 40, padding: '12px 20px', background: '#fff',
+              borderRadius: 12, border: '1px solid #e2e8f0',
+              display: 'flex', alignItems: 'center', gap: 12,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
+              animation: 'slideUpFade 0.4s ease-out 0.2s both'
+            }}>
+              <div style={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid #e2e8f0', borderTopColor: '#f59e0b', animation: 'spin 1s linear infinite' }} />
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#475569' }}>Auto-checking status...</span>
+            </div>
+
+            {import.meta.env.DEV && (
+              <button
+                onClick={() => {
+                  setCalibrationData({ estimated_kg: '250', net_weight: '250', volume_m3: '4.5' })
+                  setPhase('calibration_complete')
+                }}
+                style={{
+                  marginTop: 40, padding: '12px 24px', borderRadius: 20,
+                  background: 'none', border: '1px dashed #cbd5e1',
+                  color: '#94a3b8', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  animation: 'slideUpFade 0.4s ease-out 0.3s both'
+                }}
+              >
+                DEV: Skip to Calibration Summary
+              </button>
+            )}
+          </div>
+        </div>
+      </>
+    )
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PHASE 3c — CALIBRATION CELEBRATION
+  // ══════════════════════════════════════════════════════════════════════════
+
+  if (phase === 'calibration_complete') {
+    return (
+      <CalibrationCelebrationModule
+        calibrationData={calibrationData}
+        schedule={schedule}
+        stopStatuses={stopStatuses}
+        currentStopIndex={1}
+        onContinue={() => setPhase('returning')}
+      />
     )
   }
 
@@ -699,8 +1051,8 @@ export default function EndShiftModule({ setRouteState }) {
         `}</style>
 
         <div style={{
-          minHeight: '100vh', display: 'flex', flexDirection: 'column',
-          background: '#f8fafc', fontFamily: 'var(--font-body)',
+          height: '100dvh', display: 'flex', flexDirection: 'column',
+          background: '#f8fafc', fontFamily: 'var(--font-body)', overflowY: 'auto',
         }}>
           <div style={{ background: '#0f172a', padding: '28px 20px 24px', color: '#fff' }}>
             <div style={{ fontSize: 28, marginBottom: 10 }}>⚠️</div>
@@ -759,6 +1111,30 @@ export default function EndShiftModule({ setRouteState }) {
                 ))}
               </div>
             </div>
+
+            {missedStopOrders.length > 0 && (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{
+                  background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                  borderRadius: 12, padding: '12px 16px', display: 'flex', gap: 12,
+                  alignItems: 'flex-start', marginBottom: 16
+                }}>
+                  <span style={{ fontSize: 18 }}>⚠️</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: '#ef4444', marginBottom: 2 }}>
+                      {missedStopOrders.length} stop{missedStopOrders.length > 1 ? 's' : ''} will be marked missed
+                    </div>
+                    <div style={{ fontSize: 12, color: '#7f1d1d', lineHeight: 1.4 }}>
+                      These uncollected stops will be offered to nearby active drivers.
+                    </div>
+                  </div>
+                </div>
+                
+                <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+                  <RouteCompletionMiniMap schedule={schedule} stopStatuses={stopStatuses} />
+                </div>
+              </div>
+            )}
 
             <div style={{ marginBottom: 28 }}>
               <div style={{
@@ -840,8 +1216,8 @@ export default function EndShiftModule({ setRouteState }) {
       `}</style>
 
       <div style={{
-        minHeight: '100vh', display: 'flex', flexDirection: 'column',
-        background: '#f8fafc', fontFamily: 'var(--font-body)',
+        height: '100dvh', display: 'flex', flexDirection: 'column',
+        background: '#f8fafc', fontFamily: 'var(--font-body)', overflowY: 'auto',
       }}>
         <div style={{ padding: '32px 20px 0', textAlign: 'center' }}>
           <h1 className="es-fade1" style={{
@@ -871,36 +1247,58 @@ export default function EndShiftModule({ setRouteState }) {
           </div>
         </div>
 
+        {schedule && (
+          <div className="es-fade2" style={{ padding: '0 20px', marginBottom: 20 }}>
+            <div style={{
+              fontSize: 11, fontWeight: 800, color: '#94a3b8',
+              letterSpacing: '.06em', marginBottom: 10,
+            }}>ROUTE RECEIPT</div>
+            <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+              <RouteCompletionMiniMap schedule={schedule} stopStatuses={stopStatuses} />
+            </div>
+          </div>
+        )}
+
         <div className="es-fade3" style={{ padding: '0 20px 32px', marginTop: 'auto' }}>
           <button
             id="end-shift-done-btn"
-            onClick={handleDone}
+            disabled={submitting}
+            onClick={() => {
+              if (dumpSiteLocation) {
+                setPhase('dump_site')
+              } else {
+                handleDone()
+              }
+            }}
             style={{
               width: '100%', padding: '17px', borderRadius: 14,
-              background: '#0f172a', color: '#fff', border: 'none',
+              background: submitting ? '#e2e8f0' : '#0f172a',
+              color: submitting ? '#94a3b8' : '#fff', border: 'none',
               fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900,
-              cursor: 'pointer', marginBottom: 10,
+              cursor: submitting ? 'not-allowed' : 'pointer', marginBottom: 10,
               boxShadow: '0 6px 20px rgba(15,23,42,0.25)', letterSpacing: '.04em',
             }}
           >
-            Done
+            {submitting ? 'Ending shift…' : '✓ End Shift'}
           </button>
 
           <p style={{ textAlign: 'center', fontSize: 12, color: '#94a3b8', margin: '0 0 8px' }}>
-            Accept Unclaimed dump site
+            Truck not full? Help collect unclaimed stops nearby.
           </p>
           <button
             id="extended-mode-btn"
+            disabled={extendedModeLoading}
             onClick={handleExtendedMode}
             style={{
               width: '100%', padding: '17px', borderRadius: 14,
-              background: '#0f172a', color: '#fff', border: 'none',
+              background: extendedModeLoading ? '#e2e8f0' : '#0f172a',
+              color: extendedModeLoading ? '#94a3b8' : '#fff', border: 'none',
               fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900,
-              cursor: 'pointer', boxShadow: '0 6px 20px rgba(15,23,42,0.25)',
-              letterSpacing: '.04em',
+              cursor: extendedModeLoading ? 'not-allowed' : 'pointer',
+              boxShadow: '0 6px 20px rgba(15,23,42,0.25)', letterSpacing: '.04em',
             }}
           >
-            My Truck is still not full
+            {extendedModeLoading ? 'Activating…' : '📦 My Truck is still not full'}
           </button>
         </div>
 

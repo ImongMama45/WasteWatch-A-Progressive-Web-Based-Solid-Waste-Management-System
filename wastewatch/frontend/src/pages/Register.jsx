@@ -9,23 +9,33 @@ import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../api/client'
 import BarangaySelect from '../components/BarangaySelect'
+import { ICONS } from '../api/navConfig'
 
 export default function Register() {
   const { register, barangays } = useAuth()
   const navigate = useNavigate()
 
   const [form, setForm] = useState({
-    full_name: '',
+    first_name: '',
+    last_name: '',
+    username: '',
     email: '',
     barangay: '',
     password: '',
     password2: '',
+    profile_pic: null,
   })
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [showPassword2, setShowPassword2] = useState(false)
 
   function handleChange(e) {
-    setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
+    if (e.target.name === 'profile_pic') {
+      setForm(prev => ({ ...prev, profile_pic: e.target.files[0] }))
+    } else {
+      setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
+    }
     // Clear error for the field being edited
     setErrors(prev => ({ ...prev, [e.target.name]: '' }))
   }
@@ -33,7 +43,9 @@ export default function Register() {
   // Client-side validation before hitting the API
   function validate() {
     const errs = {}
-    if (!form.full_name.trim()) errs.full_name = 'Full name is required.'
+    if (!form.first_name.trim()) errs.first_name = 'First name is required.'
+    if (!form.last_name.trim()) errs.last_name = 'Last name is required.'
+    if (!form.username.trim()) errs.username = 'Username is required.'
     if (!form.email.trim()) errs.email = 'Email is required.'
     if (form.password.length < 8) errs.password = 'Password must be at least 8 characters.'
     if (form.password !== form.password2) errs.password2 = 'Passwords do not match.'
@@ -47,7 +59,13 @@ export default function Register() {
 
     setLoading(true)
     try {
-      await register(form)
+      const payload = new FormData()
+      Object.keys(form).forEach(key => {
+        if (form[key] !== null && form[key] !== '') {
+          payload.append(key, form[key])
+        }
+      })
+      await register(payload)
       navigate('/login', { state: { message: 'Account created! Please sign in.' } })
     } catch (err) {
       // Django returns field-level errors as { field: ["message"] }
@@ -63,26 +81,55 @@ export default function Register() {
   }
 
   return (
-    <div className="auth-page">
-      <div className="auth-card">
+    <div className="auth-page" style={{
+      backgroundImage: `linear-gradient(rgba(10, 25, 15, 0.6), rgba(10, 25, 15, 0.8)), url('/lucena_cleaning_bg.png')`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+    }}>
+      <div className="auth-card" style={{ backdropFilter: 'blur(10px)', backgroundColor: 'rgba(255, 255, 255, 0.95)' }}>
 
         <div className="auth-logo">
-          <div className="logo-icon">🗑️</div>
+          <div className="logo-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 28, height: 28 }}>{ICONS.trash}</div>
+          </div>
           <h1>Create Account</h1>
           <p>Join WasteWatch as a Citizen</p>
         </div>
 
         <form onSubmit={handleSubmit} noValidate>
 
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="form-group">
+              <label className="form-label">First Name</label>
+              <input
+                className={`form-input ${errors.first_name ? 'error' : ''}`}
+                type="text" name="first_name"
+                value={form.first_name} onChange={handleChange}
+                placeholder="Juan"
+              />
+              {errors.first_name && <p className="form-error">{errors.first_name}</p>}
+            </div>
+            <div className="form-group">
+              <label className="form-label">Last Name</label>
+              <input
+                className={`form-input ${errors.last_name ? 'error' : ''}`}
+                type="text" name="last_name"
+                value={form.last_name} onChange={handleChange}
+                placeholder="dela Cruz"
+              />
+              {errors.last_name && <p className="form-error">{errors.last_name}</p>}
+            </div>
+          </div>
+
           <div className="form-group">
-            <label className="form-label">Full Name</label>
+            <label className="form-label">Username</label>
             <input
-              className={`form-input ${errors.full_name ? 'error' : ''}`}
-              type="text" name="full_name"
-              value={form.full_name} onChange={handleChange}
-              placeholder="Juan dela Cruz"
+              className={`form-input ${errors.username ? 'error' : ''}`}
+              type="text" name="username"
+              value={form.username} onChange={handleChange}
+              placeholder="juandelacruz99"
             />
-            {errors.full_name && <p className="form-error">{errors.full_name}</p>}
+            {errors.username && <p className="form-error">{errors.username}</p>}
           </div>
 
           <div className="form-group">
@@ -94,6 +141,18 @@ export default function Register() {
               placeholder="juan@example.com"
             />
             {errors.email && <p className="form-error">{errors.email}</p>}
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Profile Picture (Optional)</label>
+            <input
+              className="form-input"
+              type="file" name="profile_pic"
+              accept="image/*"
+              onChange={handleChange}
+              style={{ padding: '8px' }}
+            />
+            {errors.profile_pic && <p className="form-error">{errors.profile_pic}</p>}
           </div>
 
           <div className="form-group">
@@ -109,23 +168,51 @@ export default function Register() {
 
           <div className="form-group">
             <label className="form-label">Password</label>
-            <input
-              className={`form-input ${errors.password ? 'error' : ''}`}
-              type="password" name="password"
-              value={form.password} onChange={handleChange}
-              placeholder="At least 8 characters"
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                className={`form-input ${errors.password ? 'error' : ''}`}
+                type={showPassword ? "text" : "password"} name="password"
+                value={form.password} onChange={handleChange}
+                placeholder="At least 8 characters"
+                style={{ paddingRight: '40px' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+                  background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}
+              >
+                {showPassword ? ICONS.eyeOff : ICONS.eye}
+              </button>
+            </div>
             {errors.password && <p className="form-error">{errors.password}</p>}
           </div>
 
           <div className="form-group">
             <label className="form-label">Confirm Password</label>
-            <input
-              className={`form-input ${errors.password2 ? 'error' : ''}`}
-              type="password" name="password2"
-              value={form.password2} onChange={handleChange}
-              placeholder="••••••••"
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                className={`form-input ${errors.password2 ? 'error' : ''}`}
+                type={showPassword2 ? "text" : "password"} name="password2"
+                value={form.password2} onChange={handleChange}
+                placeholder="••••••••"
+                style={{ paddingRight: '40px' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword2(!showPassword2)}
+                style={{
+                  position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+                  background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}
+              >
+                {showPassword2 ? ICONS.eyeOff : ICONS.eye}
+              </button>
+            </div>
             {errors.password2 && <p className="form-error">{errors.password2}</p>}
           </div>
 

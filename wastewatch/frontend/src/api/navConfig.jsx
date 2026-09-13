@@ -189,6 +189,63 @@ export const ICONS = {
       <line x1="19" y1="12" x2="22" y2="12" />
     </svg>
   ),
+  clock: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
+  ),
+  star: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  ),
+  camera: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx="12" cy="13" r="4" />
+    </svg>
+  ),
+  trash: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </svg>
+  ),
+  box: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+      <line x1="12" y1="22.08" x2="12" y2="12" />
+    </svg>
+  ),
+  warning: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  ),
+  eye: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  ),
+  eyeOff: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  ),
 }
 
 export const NAV_ICONS = {
@@ -228,7 +285,7 @@ export const ROLE_NAV_CONFIG = {
     {
       type: 'group', label: 'Monitoring', icon: 'hotspot',
       items: [
-        { path: '/admin/reports',      label: 'Waste Reports',     icon: 'report' },
+
         { path: '/admin/hotspots',     label: 'Reported Hotspots', icon: 'hotspot' },
         { path: '/admin/escalations',  label: 'Escalations',       icon: 'escalation' },
         { path: '/admin/activity-log', label: 'Activity Logs',     icon: 'activity' },
@@ -244,6 +301,7 @@ export const ROLE_NAV_CONFIG = {
       type: 'group', label: 'Administration', icon: 'users',
       items: [
         { path: '/admin/users', label: 'User Management', icon: 'users' },
+        { path: '/admin/barangays', label: 'Barangay Management', icon: 'map' },
       ],
     },
     { type: 'item', path: '/announcements', label: 'News & Alerts', icon: 'news' },
@@ -340,13 +398,20 @@ export const ROLE_NAV_CONFIG = {
   dumpsite: [
     { type: 'item', path: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
     {
-      type: 'group', label: 'Operations', icon: 'dumpsite',
+      type: 'group', label: 'Operations', icon: 'truck',
       items: [
-        { path: '/dumpsite/inbound',  label: 'Inbound Trucks', icon: 'truck' },
-        { path: '/dumpsite/log',      label: 'Disposal Log',   icon: 'report' },
+        { path: '/dumpsite/log-arrival', label: 'Log Arrival',  icon: 'truck' },
+        { path: '/dumpsite/queue',       label: 'Truck Queue',  icon: 'route' },
       ],
     },
-    { type: 'item', path: '/announcements', label: 'News & Alerts', icon: 'news' },
+    {
+      type: 'group', label: 'Records', icon: 'report',
+      items: [
+        { path: '/dumpsite/logs',      label: 'Collection Logs',    icon: 'report' },
+        { path: '/dumpsite/barangay',  label: 'Barangay Breakdown', icon: 'analytics' },
+      ],
+    },
+    { type: 'item', path: '/announcements',     label: 'News & Alerts', icon: 'news' },
   ],
 }
 
@@ -358,9 +423,10 @@ export const SIDEBAR_NAV = {
     { path: '/announcements', label: 'News & Alerts', icon: '📰' },
     { path: '/schedule', label: 'Schedule', icon: '📅' },
     { path: '/map', label: 'Live Map', icon: '🗺️' },
-    { path: '/admin/reports', label: 'Waste Reports', icon: '📋' },
+
     { path: '/admin/trucks', label: 'Trucks & Drivers', icon: '🚛' },
     { path: '/admin/users', label: 'User Management', icon: '👥' },
+    { path: '/admin/barangays', label: 'Barangay Management', icon: '🗺️' },
     { path: '/admin/dumpsites', label: 'Dumpsites', icon: '🏔️' },
     { path: '/admin/routes', label: 'Routes', icon: '🗺️' },
     { path: '/admin/escalations', label: 'Escalations', icon: '⚠️' },
@@ -409,11 +475,13 @@ export const SIDEBAR_NAV = {
     { path: '/profile', label: 'Profile', icon: '👤' },
   ],
   dumpsite: [
-    { path: '/', label: 'Home', icon: '🏠' },
-    { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-    { path: '/announcements', label: 'News & Alerts', icon: '📰' },
-    { path: '/dumpsite/inbound', label: 'Inbound', icon: '🚛' },
-    { path: '/dumpsite/log', label: 'Disposal Log', icon: '📋' },
+    { path: '/',                   label: 'Home',               icon: '🏠' },
+    { path: '/dashboard',          label: 'Dashboard',          icon: '📊' },
+    { path: '/dumpsite/log-arrival',label: 'Log Arrival',       icon: '🚛' },
+    { path: '/dumpsite/queue',     label: 'Truck Queue',        icon: '📡' },
+    { path: '/dumpsite/logs',      label: 'Collection Logs',    icon: '📋' },
+    { path: '/dumpsite/barangay',  label: 'Barangay Breakdown', icon: '📊' },
+    { path: '/announcements',      label: 'News & Alerts',      icon: '📰' },
   ],
 }
 

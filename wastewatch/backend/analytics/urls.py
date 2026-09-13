@@ -19,5 +19,6 @@ router.register(r'activity-logs', ActivityLogViewSet)
 
 urlpatterns = [
     path('export/', AnalyticsViewSet.as_view({'get': 'export_csv'}), name='analytics-export'),
+    path('live/', AnalyticsViewSet.as_view({'get': 'live_dashboard'}), name='analytics-live'),
     path('', include(router.urls)),
 ]

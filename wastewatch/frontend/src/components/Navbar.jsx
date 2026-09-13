@@ -14,6 +14,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useOnline } from '../hooks/useOnline'
 import { ICONS, NAV_ICONS, getRoleNavItems, flattenNavItems } from '../api/navConfig'
+import { useNotifications } from '../hooks/useNotifications'
 
 // ─── tiny CSS injected once ───────────────────────────────────────────────────
 const NAVBAR_CSS = `
@@ -23,7 +24,8 @@ const NAVBAR_CSS = `
   top: 0; left: 0; right: 0;
   height: 60px;
   background: #ffffff;
-  border-bottom: 2px solid #c8e6c9;
+  border-bottom: 4px solid #16a34a !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -202,6 +204,7 @@ const NAVBAR_CSS = `
   z-index: 999; letter-spacing: .04em;
 }
 
+
 /* ── Notification dropdown ── */
 .ww-notif-drop {
   position: fixed;
@@ -246,6 +249,8 @@ const NAVBAR_CSS = `
   padding: 12px 16px;
   border-bottom: 1px solid rgba(0,0,0,0.06);
   transition: background .1s;
+  cursor: pointer;
+  text-decoration: none;
 }
 .ww-notif-item:last-of-type { border-bottom: none; }
 .ww-notif-item:hover { background: rgba(0,0,0,0.03); }
@@ -263,9 +268,11 @@ const NAVBAR_CSS = `
 .ww-notif-footer {
   padding: 10px 16px;
   border-top: 1px solid rgba(0,0,0,0.07);
+  display: flex;
+  gap: 10px;
 }
 .ww-notif-footer button {
-  width: 100%; background: none; border: none;
+  flex: 1; background: none; border: none;
   color: #16a34a; font-size: 12px; font-weight: 600;
   cursor: pointer; font-family: inherit; padding: 0;
 }
@@ -470,9 +477,12 @@ export default function Navbar() {
   const navigate = useNavigate()
   const location = useLocation()
   const isOnline = useOnline()
+  const { notifications, unreadCount, markRead } = useNotifications()
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
+  const [logoutWarning, setLogoutWarning] = useState(false)
+
 
   useEffect(() => { injectStyles() }, [])
 
@@ -486,9 +496,14 @@ export default function Navbar() {
   }, [menuOpen])
 
   async function handleLogout() {
+    setLogoutWarning(true)
+  }
+
+  async function confirmLogout() {
     await logout()
     navigate('/')
     setMenuOpen(false)
+    setLogoutWarning(false)
   }
 
   const isActive = (path) => location.pathname === path ? 'active' : ''
@@ -519,6 +534,7 @@ export default function Navbar() {
     { path: '/map', label: 'Map' },
     { path: '/schedule', label: 'Schedule' },
     { path: '/about', label: 'About' },
+    { path: '/announcements', label: 'Announcements' },
     ...(user ? [{ path: '/dashboard', label: 'Dashboard' }] : []),
   ]
 
@@ -576,10 +592,12 @@ export default function Navbar() {
             aria-expanded={notifOpen}
           >
             <BellIcon />
-            <span
-              className="ww-bell__dot"
-              style={{ background: isOnline ? '#e74c3c' : '#f57c00' }}
-            />
+            {unreadCount > 0 && (
+              <span
+                className="ww-bell__dot"
+                style={{ background: '#e74c3c' }}
+              />
+            )}
           </button>
 
           {user ? (
@@ -591,9 +609,13 @@ export default function Navbar() {
               onKeyDown={e => e.key === 'Enter' && navTo('/profile')}
               title="Go to profile"
             >
-              <div className="ww-avatar">
-                {user.full_name?.[0]?.toUpperCase() || '?'}
-              </div>
+              {user.profile_pic ? (
+                <img src={user.profile_pic} alt="Avatar" className="ww-avatar" style={{ objectFit: 'cover', background: '#fff' }} />
+              ) : (
+                <div className="ww-avatar">
+                  {user.full_name?.[0]?.toUpperCase() || '?'}
+                </div>
+              )}
               <span className="ww-avatar__name">
                 {user.full_name?.split(' ')[0]}
               </span>
@@ -617,45 +639,65 @@ export default function Navbar() {
         </div>
       </nav>
 
+
       {/* ════════ NOTIFICATION DROPDOWN ════════ */}
       {notifOpen && (
         <div className="ww-notif-drop" role="dialog" aria-label="Notifications">
           <div className="ww-notif-head">
             <span className="ww-notif-head__title">
               Notifications
-              {!isOnline && (
-                <span style={{ fontSize: 10, color: '#e65100', marginLeft: 8, fontWeight: 400 }}>
-                  (cached)
-                </span>
+              {unreadCount > 0 && (
+                <span style={{
+                  marginLeft: 8, background: '#e74c3c', color: '#fff',
+                  fontSize: 10, fontWeight: 800, padding: '1px 7px',
+                  borderRadius: 20,
+                }}>{unreadCount}</span>
               )}
             </span>
             <button
               className="ww-notif-close"
               onClick={() => setNotifOpen(false)}
               aria-label="Close notifications"
-            >
-              ×
-            </button>
+            >×</button>
           </div>
 
-          <div className="ww-notif-item unread">
-            <div className="ww-notif-dot" />
-            <div>
-              <div className="ww-notif-item__title">Report #3 resolved</div>
-              <div className="ww-notif-item__time">2 hours ago</div>
+          {notifications.length === 0 ? (
+            <div style={{ padding: '24px 16px', textAlign: 'center', color: 'rgba(0,0,0,0.4)', fontSize: 13 }}>
+              No new notifications
             </div>
-          </div>
-
-          <div className="ww-notif-item">
-            <div style={{ width: 8, flexShrink: 0 }} />
-            <div>
-              <div className="ww-notif-item__title">Welcome to WasteWatch!</div>
-              <div className="ww-notif-item__time">3 days ago</div>
-            </div>
-          </div>
+          ) : (
+            notifications.slice(0, 5).map(n => (
+              <div
+                key={n.id}
+                className={`ww-notif-item ${!n.is_read ? 'unread' : ''}`}
+                onClick={() => navTo('/notifications')}
+              >
+                {!n.is_read
+                  ? <div className="ww-notif-dot" />
+                  : <div style={{ width: 8, flexShrink: 0 }} />
+                }
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="ww-notif-item__title">{n.title}</div>
+                  <div className="ww-notif-item__time" style={{
+                    fontSize: 11, color: 'rgba(0,0,0,0.4)', marginTop: 2,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {n.message}
+                  </div>
+                  <div className="ww-notif-item__time">
+                    {new Date(n.created_at).toLocaleString('en-PH', {
+                      month: 'short', day: 'numeric',
+                      hour: '2-digit', minute: '2-digit',
+                    })}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
 
           <div className="ww-notif-footer">
-            <button>Mark all as read</button>
+            <button onClick={() => navTo('/notifications')} style={{ color: '#1a2e1a' }}>View all</button>
+            <button onClick={() => markRead()}>Mark all as read</button>
           </div>
         </div>
       )}
@@ -742,9 +784,48 @@ export default function Navbar() {
       {(menuOpen || notifOpen) && (
         <div
           className="ww-backdrop"
-          onClick={() => { setMenuOpen(false); setNotifOpen(false) }}
+          onClick={() => { setMenuOpen(false) }}
           aria-hidden="true"
         />
+      )}
+
+      {logoutWarning && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+          zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }} onClick={() => setLogoutWarning(false)}>
+          <div style={{
+            background: '#ffffff', borderRadius: 16, padding: '24px 20px',
+            width: '100%', maxWidth: 360, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            textAlign: 'center',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+            <h3 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 8px 0', color: '#1a2e1a' }}>
+              Sign Out?
+            </h3>
+            <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.6)', marginBottom: 24, lineHeight: 1.4 }}>
+              Are you sure you want to sign out of WasteWatch?
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => setLogoutWarning(false)}
+                style={{ flex: 1, padding: '10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.1)', background: '#f8fdf8', color: '#1a2e1a', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
+                onMouseEnter={e => e.target.style.opacity = 0.8}
+                onMouseLeave={e => e.target.style.opacity = 1}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmLogout}
+                style={{ flex: 1, padding: '10px', borderRadius: 8, border: 'none', background: '#e74c3c', color: '#fff', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
+                onMouseEnter={e => e.target.style.opacity = 0.8}
+                onMouseLeave={e => e.target.style.opacity = 1}
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   )

@@ -4,12 +4,14 @@
  * Individual ranking card. Material Symbols icons. Matches WasteWatch design tokens.
  */
 
+import { TrendingUp, TrendingDown, Minus, Award } from 'lucide-react'
+
 const TREND = {
-  up:   { icon: 'trending_up',   color: 'var(--accent)'   },
-  down: { icon: 'trending_down', color: 'var(--danger)'   },
-  same: { icon: 'trending_flat', color: 'var(--text-muted)'},
+  up:   { icon: TrendingUp,   color: 'var(--accent)'   },
+  down: { icon: TrendingDown, color: 'var(--danger)'   },
+  same: { icon: Minus, color: 'var(--text-muted)'},
 }
-const RANK_ICONS  = ['looks_one', 'looks_two', 'looks_3']
+const RANK_ICONS  = [Award, Award, Award]
 const RANK_COLORS = ['#f59e0b', '#94a3b8', '#b45309']
 
 export default function BarangayRankingCard({ brgy, rank, isUser = false, style = {} }) {
@@ -35,10 +37,10 @@ export default function BarangayRankingCard({ brgy, rank, isUser = false, style 
         background: 'var(--bg)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
-        {ri < 3
-          ? <span className="msi" style={{ fontSize: 20, color: RANK_COLORS[ri] }}>{RANK_ICONS[ri]}</span>
-          : <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)' }}>#{rank}</span>
-        }
+        {ri < 3 ? (() => {
+          const RankIcon = RANK_ICONS[ri];
+          return <RankIcon size={20} color={RANK_COLORS[ri]} />
+        })() : <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)' }}>#{rank}</span>}
       </div>
 
       {/* Name + bar */}
@@ -75,7 +77,10 @@ export default function BarangayRankingCard({ brgy, rank, isUser = false, style 
       <div style={{ textAlign: 'right', flexShrink: 0 }}>
         <div style={{ fontWeight: 700, fontSize: 15, color: scoreColor }}>{brgy.compliance}%</div>
         <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 2 }}>compliance</div>
-        <span className="msi" style={{ fontSize: 16, color: trend.color }}>{trend.icon}</span>
+        {(() => {
+          const TrendIcon = trend.icon;
+          return <TrendIcon size={16} color={trend.color} />
+        })()}
       </div>
     </div>
   )

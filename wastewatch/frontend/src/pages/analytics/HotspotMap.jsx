@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
+import { Info } from 'lucide-react'
 
 // ─── Score → color (matches existing analytics palette) ──────────────────────
 function scoreColor(s) {
@@ -277,7 +278,7 @@ export default function HotspotMap({ userBarangay, mapData }) {
       </div>
 
       <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-        <span className="msi" style={{ fontSize: 13 }}>info</span>
+        <Info size={13} />
         Red dot = hotspot cluster · White dot = your barangay · Hover or click a zone for details
       </div>
     </div>

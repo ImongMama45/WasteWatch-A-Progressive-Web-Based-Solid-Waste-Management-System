@@ -35,7 +35,10 @@ export function DriverGpsProvider({ children }) {
 
   const trackingActive = shiftActive || backendShiftActive
   const gps = useGpsTracking({
-    enabled: trackingActive,
+    // GPS watch is ALWAYS active for drivers — it is a non-negotiable baseline
+    // requirement for all driver workflow modules.  Backend sync is still
+    // gated on an active shift to avoid spamming the API during idle time.
+    enabled: true,
     syncEnabled: trackingActive,
     intervalMs: 5_000,
   })

@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import DashboardLayout from '../../components/DashboardLayout'
+import api from '../../api/client'
 
 const BARANGAYS = [
   'Isabang', 'Cotta', 'Kanlurang Cotta', 'Ibabang Dupay',
@@ -14,33 +15,12 @@ const TYPES = {
   info: { label: 'Info', color: '#2ecc71', bg: 'rgba(46,204,113,0.08)', border: 'rgba(46,204,113,0.3)', icon: 'ℹ️' },
 }
 
-const INITIAL = [
-  {
-    id: 1, type: 'alert', title: 'Typhoon Preparedness — Suspend Collection',
-    body: 'All garbage collection routes are suspended for today due to Typhoon Signal No. 2. Operations will resume once conditions are safe.',
-    target: 'City-wide', sentBy: 'Admin', sentAt: '2026-05-02 07:30', reach: 1240,
-  },
-  {
-    id: 2, type: 'announcement', title: 'Special Collection Schedule — Fiesta Weekend',
-    body: 'Additional collection trucks will be deployed on May 4–5 for the city fiesta. Residents are encouraged to segregate waste properly.',
-    target: 'City-wide', sentBy: 'Admin', sentAt: '2026-05-01 14:00', reach: 1240,
-  },
-  {
-    id: 3, type: 'reminder', title: 'Collection Day — Cotta Barangay',
-    body: 'Reminder: Garbage collection for Barangay Cotta is scheduled tomorrow (Thursday) at 7:00 AM. Please place your bins outside by 6:45 AM.',
-    target: 'Cotta', sentBy: 'Admin', sentAt: '2026-05-01 09:00', reach: 214,
-  },
-  {
-    id: 4, type: 'info', title: 'New Drop-off Point — Isabang Composting Area',
-    body: 'A new composting drop-off point has been established at the Isabang Barangay Hall. Residents may drop off organic waste Mon–Sat, 8AM–5PM.',
-    target: 'Isabang', sentBy: 'Admin', sentAt: '2026-04-30 11:00', reach: 187,
-  },
-  {
-    id: 5, type: 'alert', title: 'Illegal Dumping Incident — Gulang-Gulang',
-    body: 'An illegal dumping site has been reported near Gulang-Gulang crossing. Residents are advised to refrain from adding waste. CENRO team is responding.',
-    target: 'Gulang-Gulang', sentBy: 'Admin', sentAt: '2026-04-30 08:15', reach: 198,
-  },
-]
+const TYPE_TO_NOTIF = {
+  alert: 'ANNOUNCEMENT',
+  announcement: 'ANNOUNCEMENT',
+  reminder: 'SCHEDULE_CHANGE',
+  info: 'COLLECTION_DONE',
+}
 
 const EMPTY = { type: 'announcement', title: '', body: '', target: 'city-wide', barangays: [] }
 
@@ -50,7 +30,8 @@ function TypeBadge({ t }) {
 }
 
 export default function NotificationCenter() {
-  const [notifications, setNotifications] = useState(INITIAL)
+  const [notifications, setNotifications] = useState([])
+  const [loading, setLoading] = useState(true)
   const [form, setForm] = useState({ ...EMPTY })
   const [filterType, setFilterType] = useState('all')
   const [search, setSearch] = useState('')
@@ -62,10 +43,43 @@ export default function NotificationCenter() {
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
+  const fetchAll = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await api.get('/api/notifications/')
+      // Shape the API data to match the existing display format
+      setNotifications(
+        res.data.map(n => ({
+          id: n.id,
+          type: _notifTypeToLocal(n.type),
+          title: n.title,
+          body: n.message,
+          target: n.barangay_name || 'City-wide',
+          sentBy: 'System',
+          sentAt: new Date(n.created_at).toLocaleString('en-PH', {
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit',
+          }),
+          reach: 0,   // not tracked in model; show 0 or omit
+          is_read: n.is_read,
+          barangay: n.barangay,
+        }))
+      )
+    } catch {
+      showToast('⚠️ Could not load notifications.')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchAll() }, [fetchAll])
+
   function toggleBrgy(b) {
     setForm(f => ({
       ...f,
-      barangays: f.barangays.includes(b) ? f.barangays.filter(x => x !== b) : [...f.barangays, b],
+      barangays: f.barangays.includes(b)
+        ? f.barangays.filter(x => x !== b)
+        : [...f.barangays, b],
     }))
   }
 
@@ -84,7 +98,8 @@ export default function NotificationCenter() {
   function validate() {
     if (!form.title.trim()) return 'Title is required.'
     if (!form.body.trim()) return 'Message body is required.'
-    if (form.target === 'barangay' && form.barangays.length === 0) return 'Please select at least one barangay.'
+    if (form.target === 'barangay' && form.barangays.length === 0)
+      return 'Please select at least one barangay.'
     return ''
   }
 
@@ -92,24 +107,51 @@ export default function NotificationCenter() {
     const err = validate()
     if (err) { showToast('⚠️ ' + err); return }
     setSending(true)
-    await new Promise(r => setTimeout(r, 900))  // simulate API call
-    const now = new Date()
-    const pad = n => String(n).padStart(2, '0')
-    const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`
-    const reach = form.target === 'city-wide' ? 1240 : form.barangays.length * 195
-    const newNotif = {
-      id: Date.now(), type: form.type, title: form.title, body: form.body,
-      target: targetLabel(form), sentBy: 'Admin', sentAt: ts, reach,
+    try {
+      const notifType = TYPE_TO_NOTIF[form.type] || 'ANNOUNCEMENT'
+
+      if (form.target === 'city-wide') {
+        // Single system-wide notification (user=null, barangay=null)
+        await api.post('/api/notifications/', {
+          title: form.title,
+          message: form.body,
+          type: notifType,
+          user: null,
+          barangay: null,
+        })
+      } else {
+        // One row per selected barangay — fetch barangay IDs first
+        const brgyRes = await api.get('/api/barangays/')
+        const brgyMap = Object.fromEntries(brgyRes.data.map(b => [b.name, b.id]))
+        await Promise.all(
+          form.barangays.map(name =>
+            api.post('/api/notifications/', {
+              title: form.title,
+              message: form.body,
+              type: notifType,
+              user: null,
+              barangay: brgyMap[name] ?? null,
+            })
+          )
+        )
+      }
+
+      await fetchAll()
+      setForm({ ...EMPTY })
+      showToast('✅ Notification sent successfully!')
+    } catch (e) {
+      showToast('⚠️ Failed to send: ' + (e.response?.data?.detail || e.message))
+    } finally {
+      setSending(false)
     }
-    setNotifications(prev => [newNotif, ...prev])
-    setForm({ ...EMPTY })
-    setSending(false)
-    showToast('✅ Notification sent successfully!')
   }
+
 
   const filtered = notifications.filter(n => {
     const mt = filterType === 'all' || n.type === filterType
-    const mq = !search || n.title.toLowerCase().includes(search.toLowerCase()) || n.target.toLowerCase().includes(search.toLowerCase())
+    const mq = !search ||
+      n.title.toLowerCase().includes(search.toLowerCase()) ||
+      n.target.toLowerCase().includes(search.toLowerCase())
     return mt && mq
   })
 
@@ -370,4 +412,14 @@ export default function NotificationCenter() {
       </div>
     </DashboardLayout>
   )
+}
+
+function _notifTypeToLocal(type) {
+  switch (type) {
+    case 'ANNOUNCEMENT': return 'announcement'
+    case 'SCHEDULE_CHANGE': return 'reminder'
+    case 'TRUCK_NEAR': return 'alert'
+    case 'COLLECTION_DONE': return 'info'
+    default: return 'info'
+  }
 }

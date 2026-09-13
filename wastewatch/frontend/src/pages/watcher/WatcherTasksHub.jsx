@@ -25,7 +25,9 @@ const STATUS_META = {
     EMPTY_STOP: { label: 'Empty Stop', color: '#64748b', bg: 'rgba(100,116,139,0.12)' },
     COLLECTION_REPORTED: { label: 'Collection Reported', color: '#eab308', bg: 'rgba(234,179,8,0.12)' },
     VERIFIED_COLLECTED: { label: 'Verified Collected', color: '#16a34a', bg: 'rgba(22,163,74,0.12)' },
-    COLLECTION_DISPUTED: { label: 'Disputed', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
+    // NOTE: DB constant is COLLECTION_DISPUTED; label intentionally shows 'Missed'.
+    // TODO: Remove this local STATUS_META and import STOP_STATUS_LABELS from pickupStatusSync instead.
+    COLLECTION_DISPUTED: { label: 'Missed', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
 }
 
 function normalizeStatus(raw) {
