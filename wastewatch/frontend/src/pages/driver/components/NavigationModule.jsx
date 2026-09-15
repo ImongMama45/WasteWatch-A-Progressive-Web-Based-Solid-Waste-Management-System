@@ -143,7 +143,7 @@ export default function NavigationModule({ setRouteState }) {
   const { formattedTime, shiftActive } = useShiftTimer()
   // GPS is ALWAYS enabled in the navigation module — position data is required
   // for turn-by-turn routing, geofenced arrival detection, and live map updates.
-  const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } = useGpsTracking({ enabled: true, intervalMs: 5000 })
+  const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } = useGpsTracking({ enabled: true, intervalMs: 30000 })
   const isExtendedMode = sessionStorage.getItem('ww_extended_mode') === 'true'
 
   // Developer Mock GPS — mockGps bypasses real GPS (accuracy check also bypassed for dev)

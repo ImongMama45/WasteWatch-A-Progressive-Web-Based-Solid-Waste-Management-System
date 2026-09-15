@@ -256,7 +256,7 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
 
   // ── GPS ───────────────────────────────────────────────────────────────────
   const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } =
-    useGpsTracking({ enabled: true, intervalMs: 5000 })
+    useGpsTracking({ enabled: true, intervalMs: 30000 })
   const [mockGps, setMockGps] = useState(null)
   const gpsPos = mockGps || realGpsPos
   const isMock = mockGps !== null

@@ -12,13 +12,13 @@ import TruckNotFull from './components/TruckNotFull'
 
 // ─── PHASE METADATA ──────────────────────────────────────────────────────────
 const PHASES = [
-  { key: 'assignment',       label: 'Assignment',         icon: '📋', color: '#6366f1', desc: 'Select truck & schedule' },
-  { key: 'navigate_to_base', label: 'Navigate to Base',   icon: '🏠', color: '#0ea5e9', desc: 'Head to collection base' },
-  { key: 'confirm_start',    label: 'Confirm Start',      icon: '✅', color: '#10b981', desc: 'Confirm shift start' },
-  { key: 'checkin',          label: 'Check-in',           icon: '📍', color: '#f59e0b', desc: 'Driver check-in & briefing' },
-  { key: 'shiftroute',       label: 'On Route',           icon: '🚛', color: '#3b82f6', desc: 'Collecting waste stops' },
-  { key: 'truck_not_full',   label: 'Truck Not Full',     icon: '📦', color: '#f97316', desc: 'Route done — missed stops review', devOnly: true },
-  { key: 'end_shift',        label: 'End Shift',          icon: '🏁', color: '#ef4444', desc: 'Return to dumpsite / end' },
+  { key: 'assignment', label: 'Assignment', icon: '📋', color: '#6366f1', desc: 'Select truck & schedule' },
+  { key: 'navigate_to_base', label: 'Navigate to Base', icon: '🏠', color: '#0ea5e9', desc: 'Head to collection base' },
+  { key: 'confirm_start', label: 'Confirm Start', icon: '✅', color: '#10b981', desc: 'Confirm shift start' },
+  { key: 'checkin', label: 'Check-in', icon: '📍', color: '#f59e0b', desc: 'Driver check-in & briefing' },
+  { key: 'shiftroute', label: 'On Route', icon: '🚛', color: '#3b82f6', desc: 'Collecting waste stops' },
+  { key: 'truck_not_full', label: 'Truck Not Full', icon: '📦', color: '#f97316', desc: 'Route done — missed stops review', devOnly: true },
+  { key: 'end_shift', label: 'End Shift', icon: '🏁', color: '#ef4444', desc: 'Return to dumpsite / end' },
 ]
 
 // ─── DEV PHASE SWITCHER ───────────────────────────────────────────────────────
@@ -192,10 +192,10 @@ function DevStatusBadge({ phase, activeShift }) {
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function DriverRouteFlow() {
   const { user } = useAuth()
-  const [phase, setPhase]               = useState(null)
-  const [activeShift, setActiveShift]   = useState(null)
+  const [phase, setPhase] = useState(null)
+  const [activeShift, setActiveShift] = useState(null)
   const [isCheckingShift, setIsChecking] = useState(true)
-  const [resumeError, setResumeError]   = useState(false)
+  const [resumeError, setResumeError] = useState(false)
 
   // ── On mount: ask backend if an active shift exists ──────────────────────
   useEffect(() => {
@@ -312,12 +312,12 @@ export default function DriverRouteFlow() {
       <DevStatusBadge phase={phase} activeShift={activeShift} />
 
       {/* ── Phase modules ── */}
-      {phase === 'assignment'       && <AssignmentModule    onAdvance={advancePhase} setActiveShift={setActiveShift} />}
+      {phase === 'assignment' && <AssignmentModule onAdvance={advancePhase} setActiveShift={setActiveShift} />}
       {phase === 'navigate_to_base' && <NavigateToBaseModule onAdvance={advancePhase} shift={activeShift} />}
-      {phase === 'confirm_start'    && <ConfirmStartModule  onAdvance={advancePhase} shift={activeShift} />}
-      {phase === 'checkin'          && <CheckInModule       onAdvance={advancePhase} shift={activeShift} />}
-      {phase === 'shiftroute'       && <ShiftRouteModule    onAdvance={advancePhase} shift={activeShift} />}
-      {phase === 'end_shift'        && <EndShiftModule      onAdvance={advancePhase} shift={activeShift} />}
+      {phase === 'confirm_start' && <ConfirmStartModule onAdvance={advancePhase} shift={activeShift} />}
+      {phase === 'checkin' && <CheckInModule onAdvance={advancePhase} shift={activeShift} />}
+      {phase === 'shiftroute' && <ShiftRouteModule onAdvance={advancePhase} shift={activeShift} />}
+      {phase === 'end_shift' && <EndShiftModule onAdvance={advancePhase} shift={activeShift} />}
 
 
 
