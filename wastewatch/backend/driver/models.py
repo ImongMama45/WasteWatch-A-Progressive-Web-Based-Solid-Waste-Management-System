@@ -359,3 +359,53 @@ class CalendarEvent(models.Model):
 
     def __str__(self):
         return f"{self.title} on {self.date}"
+
+# ---------------------------------------------------------------------------
+# Missed Stops & Extended Mode
+# ---------------------------------------------------------------------------
+class MissedStopReason(models.TextChoices):
+    TRUCK_FULL         = 'TRUCK_FULL',         'Truck was full'
+    EXPIRED_TIME       = 'EXPIRED_TIME',       'Time expired without visit'
+    WATCHER_FLAG       = 'WATCHER_FLAG',       'Falsely reported collected (Watcher flagged)'
+    DRIVER_SKIP        = 'DRIVER_SKIP',        'Driver intentionally skipped'
+    SHIFT_ENDED_EARLY  = 'SHIFT_ENDED_EARLY',  'Shift ended early (Breakdown, weather, etc)'
+
+class MissedStopStatus(models.TextChoices):
+    PENDING      = 'PENDING',   'Pending reassignment'
+    RESOLVED     = 'RESOLVED',  'Collected by extended driver'
+    EXPIRED      = 'EXPIRED',   'Not collected (day ended)'
+
+class MissedStop(models.Model):
+    original_schedule  = models.ForeignKey(CollectionSchedule, on_delete=models.CASCADE, related_name='missed_stops')
+    stop_order         = models.PositiveIntegerField()
+    waypoint_data      = models.JSONField(help_text="Stores lat, lng, label, barangay_id, stop_id")
+    reason             = models.CharField(max_length=20, choices=MissedStopReason.choices)
+    early_end_reason   = models.CharField(max_length=255, blank=True, null=True, help_text="Specific reason if SHIFT_ENDED_EARLY")
+    status             = models.CharField(max_length=15, choices=MissedStopStatus.choices, default=MissedStopStatus.PENDING)
+    collection_date    = models.DateField()
+    created_at         = models.DateTimeField(auto_now_add=True)
+    resolved_at        = models.DateTimeField(null=True, blank=True)
+    resolved_by_shift  = models.ForeignKey('DriverShift', null=True, blank=True, on_delete=models.SET_NULL, related_name='resolved_missed_stops')
+    escalation         = models.ForeignKey('watcher.Escalation', null=True, blank=True, on_delete=models.SET_NULL, related_name='missed_stops')
+
+    class Meta:
+        ordering = ['collection_date', 'original_schedule', 'stop_order']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['original_schedule', 'stop_order', 'collection_date'], 
+                name='unique_missed_stop'
+            )
+        ]
+
+    def __str__(self):
+        return f"MissedStop {self.id}: Stop {self.stop_order} on {self.collection_date} ({self.status})"
+
+class DriverPerformance(models.Model):
+    driver = models.OneToOneField(User, on_delete=models.CASCADE, related_name='performance')
+    total_points = models.IntegerField(default=0)
+    missed_stops_recovered = models.IntegerField(default=0)
+    missed_stops_caused = models.IntegerField(default=0, help_text="Increments only for penalized reasons (e.g. WATCHER_FLAG, DRIVER_SKIP)")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Performance for {self.driver.username} - {self.total_points} pts"

@@ -49,6 +49,55 @@ def ensure_stop_validations_for_schedule(schedule, collection_date=None):
     return created
 
 
+def reset_shift_validations(schedule, collection_date=None):
+    """
+    Reset today's StopValidation rows to PENDING_INSPECTION before a new shift starts.
+
+    Called from pre_start_shift() so each new shift begins with a clean slate.
+    Only resets statuses that the DRIVER set during a previous run
+    (COLLECTION_REPORTED, VERIFIED_COLLECTED, COLLECTION_DISPUTED).
+    Watcher-set statuses (READY_FOR_COLLECTION, EMPTY_STOP) are preserved so that
+    pre-inspection work survives a same-day shift restart.
+
+    This prevents stale data from a prior test run or a completed earlier shift from
+    incorrectly triggering is_schedule_complete_today() on a fresh shift start.
+    """
+    if collection_date is None:
+        collection_date = timezone.localdate()
+
+    if not is_schedule_today(schedule, collection_date):
+        return 0
+
+    DRIVER_TERMINAL = [
+        StopValidationStatus.COLLECTION_REPORTED,
+        StopValidationStatus.VERIFIED_COLLECTED,
+        StopValidationStatus.COLLECTION_DISPUTED,
+    ]
+
+    with transaction.atomic():
+        count = StopValidation.objects.filter(
+            schedule=schedule,
+            collection_date=collection_date,
+            current_status__in=DRIVER_TERMINAL,
+        ).update(
+            current_status=StopValidationStatus.PENDING_INSPECTION,
+            driver=None,
+            collection_timestamp=None,
+            collection_photo=None,
+            collection_latitude=None,
+            collection_longitude=None,
+            collection_notes='',
+            post_validation_watcher=None,
+            post_validation_timestamp=None,
+            post_validation_photo=None,
+            dispute_reason='',
+        )
+
+    # Re-run ensure to catch any waypoints added since the original create
+    ensure_stop_validations_for_schedule(schedule, collection_date)
+    return count
+
+
 def ensure_today_stop_validations():
     """Initialize stop validations for all schedules active today."""
     results = []

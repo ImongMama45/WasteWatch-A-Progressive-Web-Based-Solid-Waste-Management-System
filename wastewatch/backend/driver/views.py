@@ -41,6 +41,25 @@ def haversine(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
+def is_schedule_complete_today(schedule):
+    if not schedule or not schedule.waypoints:
+        return False
+    from watcher.models import StopValidation, StopValidationStatus
+    RESOLVED = {
+        StopValidationStatus.COLLECTION_REPORTED,
+        StopValidationStatus.VERIFIED_COLLECTED,
+        StopValidationStatus.COLLECTION_DISPUTED,
+        StopValidationStatus.EMPTY_STOP,
+    }
+    today = timezone.localdate()
+    total = len(schedule.waypoints) - 1
+    if total <= 0:
+        return False
+    resolved = StopValidation.objects.filter(
+        schedule=schedule, collection_date=today, current_status__in=RESOLVED
+    ).values_list('stop_order', flat=True).distinct().count()
+    return resolved >= total
+
 class TruckViewSet(viewsets.ModelViewSet):
     queryset = Truck.objects.all()
     serializer_class = TruckSerializer
@@ -277,6 +296,41 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
             })
         return Response(data)
 
+    @action(detail=False, methods=['get'], url_path='history/week')
+    def history_week(self, request):
+        """
+        Returns all stops the driver completed in the last 7 days.
+        Maps to GET /api/driver/stops/history/week/
+        """
+        from django.utils import timezone
+        import datetime
+        
+        today = timezone.localdate()
+        start_date = today - datetime.timedelta(days=7)
+        
+        stops = PickupStatus.objects.filter(
+            driver=request.user,
+            status='COMPLETED',
+            collected_at__date__gte=start_date,
+            collected_at__date__lte=today,
+        ).select_related('schedule').order_by('-collected_at')
+
+        data = []
+        for s in stops:
+            schedule = s.schedule
+            data.append({
+                'id':          s.id,
+                'order':       s.stop_order,
+                'date':        s.collected_at.strftime('%Y-%m-%d') if s.collected_at else '',
+                'address':     s.address or (schedule.area if schedule else 'Unknown'),
+                'barangay':    ', '.join(b.name for b in schedule.barangays.all()[:1]) if schedule else 'Unknown',
+                'category':    'Mixed Waste',
+                'collectedAt': s.collected_at.strftime('%I:%M %p') if s.collected_at else '',
+                'note':        s.note,
+            })
+        return Response(data)
+
+
     @action(detail=False, methods=['get'], url_path='reassigned')
     def reassigned_stops(self, request):
         """Returns only stops explicitly flagged DRIVER_MISSED that were
@@ -332,6 +386,7 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
         photo        = request.FILES.get('photo')
         note         = request.data.get('note', '').strip()
         collected_at_raw = request.data.get('collected_at')
+        watcher_delayed = request.data.get('watcher_delayed') == 'true'
 
         if not schedule_id:
             return Response({'error': 'schedule_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -365,7 +420,7 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
 
         from django.conf import settings as django_settings
 
-        if validation.current_status != StopValidationStatus.READY_FOR_COLLECTION:
+        if validation.current_status not in [StopValidationStatus.READY_FOR_COLLECTION, StopValidationStatus.PENDING_INSPECTION]:
             if not django_settings.DEBUG:
                 return Response(
                     {'error': 'Stop is not ready for collection. Watcher pre-inspection required.'},
@@ -421,12 +476,23 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
             if driver_lng is not None:
                 validation.collection_longitude = driver_lng
             
-            if photo:
-                photo.seek(0)  # Reset file pointer before saving to second model
-                validation.collection_photo = photo
+            if watcher_delayed:
+                validation.driver_bypassed_watcher = True
                 
             validation.current_status = StopValidationStatus.COLLECTION_REPORTED
             validation.save()
+
+            # Stamp the photo reference directly by public_id — avoids
+            # passing the already-consumed file object a second time, which
+            # causes Cloudinary to raise "Invalid image file".
+            if ps.photo_url:
+                try:
+                    public_id = str(ps.photo_url)  # e.g. "image/upload/v.../file.jpg"
+                    StopValidation.objects.filter(pk=validation.pk).update(
+                        collection_photo=public_id
+                    )
+                except Exception:
+                    pass  # non-fatal — collection is recorded, photo link is cosmetic
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -475,10 +541,12 @@ class TruckLocationViewSet(viewsets.ModelViewSet):
         lng = serializer.validated_data['longitude']
         accuracy = serializer.validated_data.get('accuracy')  # metres, can be None
 
-        ACCURACY_THRESHOLD = 50  # metres — ignore live update if worse than this
+        ACCURACY_THRESHOLD = 150  # metres — only gate TruckLocation history rows, NOT the live map position
 
-        # 2. Update Live Tracking only when GPS accuracy is good enough
-        #    This prevents the dashboard marker from jumping due to a bad fix.
+        # 2. Always update the live map position (current_latitude / current_longitude)
+        #    so the truck marker always appears on the citizen map — even if GPS accuracy
+        #    is poor (common on mobile / indoors). Accuracy-gating is applied to the
+        #    TruckLocation history write below, not to the live position marker.
         MIN_MOVEMENT_M = 10
         last = (
             TruckLocation.objects
@@ -487,30 +555,22 @@ class TruckLocationViewSet(viewsets.ModelViewSet):
             .values('latitude', 'longitude')
             .first()
         )
+
+        # Always write live position so the citizen map always sees the truck
+        active_shift.current_latitude = lat
+        active_shift.current_longitude = lng
+        active_shift.last_location_update = timezone.now()
+        active_shift.save(update_fields=[
+            'current_latitude', 'current_longitude', 'last_location_update'
+        ])
+
         if last:
             dist = haversine(
                 float(last['latitude']), float(last['longitude']),
                 float(lat), float(lng)
             )
             if dist < MIN_MOVEMENT_M:
-                # Update live position on the shift but don't write a new row
-                if accuracy is None or accuracy <= ACCURACY_THRESHOLD:
-                    active_shift.current_latitude = lat
-                    active_shift.current_longitude = lng
-                    active_shift.last_location_update = timezone.now()
-                    active_shift.save(update_fields=[
-                        'current_latitude', 'current_longitude', 'last_location_update'
-                    ])
                 return Response({'skipped': True, 'reason': 'no_movement'}, status=200)
-
-        # Original logic follows — update live position and store the ping
-        if accuracy is None or accuracy <= ACCURACY_THRESHOLD:
-            active_shift.current_latitude = lat
-            active_shift.current_longitude = lng
-            active_shift.last_location_update = timezone.now()
-            active_shift.save(update_fields=[
-                'current_latitude', 'current_longitude', 'last_location_update'
-            ])
 
         # ── TRUCK_NEAR check ──────────────────────────────────────────────────
         # Runs on every qualifying ping. The service handles distance + dedup
@@ -561,6 +621,11 @@ class TruckLocationViewSet(viewsets.ModelViewSet):
         except Exception:
             pass  # TRUCK_NEAR is best-effort — never block GPS recording
 
+        # Only write a TruckLocation history row when accuracy is good enough.
+        # The live position (current_latitude) was already saved above unconditionally.
+        if accuracy is not None and accuracy > ACCURACY_THRESHOLD:
+            return Response({'skipped': True, 'reason': 'poor_accuracy', 'accuracy': accuracy}, status=200)
+
         location = TruckLocation.objects.create(
             driver=driver,
             truck=active_shift.truck,
@@ -571,6 +636,7 @@ class TruckLocationViewSet(viewsets.ModelViewSet):
         )
 
         return Response(TruckLocationSerializer(location).data, status=status.HTTP_201_CREATED)
+
 
 class CompletionReportViewSet(viewsets.ModelViewSet):
     queryset = CompletionReport.objects.all()
@@ -649,6 +715,87 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
     serializer_class = DriverShiftSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def get_permissions(self):
+        # Allow public read access to endpoints used by the citizen map
+        if self.action in ['active_shifts', 'barangay_stops']:
+            return [permissions.AllowAny()]
+        return super().get_permissions()
+
+    @action(detail=False, methods=['post'], url_path='dev-reset')
+    def dev_reset(self, request):
+        from django.conf import settings as django_settings
+        if not django_settings.DEBUG:
+            return Response({'error': 'Not available.'}, status=status.HTTP_403_FORBIDDEN)
+
+        with transaction.atomic():
+            shift = DriverShift.objects.select_for_update().filter(
+                driver=request.user, is_active=True
+            ).first()
+
+            target_phase = request.data.get('phase', 'navigate_to_base')
+            
+            if shift:
+                PHASE_OP_STATUS = {
+                    'navigate_to_base': 'heading_to_start',
+                    'confirm_start': 'heading_to_start',
+                    'checkin': 'heading_to_start',
+                    'shiftroute': 'on_route'
+                }
+                
+                shift.status = target_phase
+                shift.op_status = PHASE_OP_STATUS.get(target_phase, 'heading_to_start')
+                shift.end_shift_phase = ''
+                shift.is_extended_mode = False
+                shift.save(update_fields=['status', 'op_status', 'end_shift_phase', 'is_extended_mode'])
+
+            today = timezone.localdate()
+            schedule = None
+            if shift and shift.schedule:
+                schedule = shift.schedule
+            else:
+                from driver.models import CollectionSchedule, TruckCrewAssignment
+                assignment = TruckCrewAssignment.objects.filter(driver=request.user, date=today, is_active=True).first()
+                if assignment and assignment.schedule:
+                    schedule = assignment.schedule
+                else:
+                    schedule = CollectionSchedule.objects.filter(driver=request.user, date=today).order_by('-id').first()
+                    if not schedule:
+                        schedule = CollectionSchedule.objects.filter(driver=request.user).order_by('-id').first()
+            
+            if schedule:
+                from watcher.models import StopValidation, StopValidationStatus
+                from .models import MissedStop
+
+                # DEV-ONLY intentional DB mutation:
+                # is_schedule_today(schedule) in ensure_stop_validations_for_schedule
+                # returns False when schedule.date != today, so it would return []
+                # and never recreate the deleted validation rows. For one-off test
+                # schedules whose date is a past day, we must pin date to today so
+                # the next ensure_stop_validations_for_schedule call (triggered by the
+                # first API hit after nuking) re-populates the rows correctly.
+                # Recurring schedules (date=None) are unaffected by this condition.
+                # This mutation only runs behind the DEBUG guard on this endpoint.
+                if schedule.date and schedule.date != today:
+                    schedule.date = today
+                    schedule.save(update_fields=['date'])
+
+                # Full wipe — deliberately NOT reset_shift_validations(), whose
+                # selective preservation is correct for production restarts but
+                # wrong for a test nuke. We delete ALL validations for this schedule.
+                # The endpoints will automatically recreate fresh PENDING_INSPECTION rows.
+                StopValidation.objects.filter(schedule=schedule).delete()
+                
+                PickupStatus.objects.filter(
+                    schedule=schedule
+                ).delete()
+                
+                MissedStop.objects.filter(
+                    original_schedule=schedule,
+                    collection_date=today
+                ).delete()
+
+        return Response({'status': 'reset', 'shift_id': shift.id if shift else None, 'phase': target_phase})
+
     @action(detail=False, methods=['get'], url_path='current')
     def current(self, request):
         from datetime import timedelta
@@ -676,6 +823,21 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
 
         if not shift:
             return Response({'active_shift': None})
+
+        # Auto-heal: if the shift is in 'shiftroute' but the schedule is
+        # already 100% resolved today, advance it to 'end_shift' so DriverRouteFlow
+        # never reloads ShiftRouteModule for a finished route on resume.
+        #
+        # IMPORTANT: Only fires when status == 'shiftroute' — not on earlier phases
+        # (navigate_to_base, confirm_start, checkin). Those phases predate any stop
+        # collection; firing there would wrongly skip the driver straight to EndShiftModule
+        # if StopValidation rows happened to be pre-resolved (e.g. from testing).
+        if shift.status == 'shiftroute' and shift.schedule_id:
+            schedule_obj = DriverShift.objects.select_related('schedule').get(pk=shift.pk).schedule
+            if is_schedule_complete_today(schedule_obj):
+                shift.status = 'end_shift'
+                shift.op_status = 'heading_to_dumpsite'
+                shift.save(update_fields=['status', 'op_status'])
 
         return Response({
             'active_shift': DriverShiftSerializer(shift).data
@@ -760,18 +922,22 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
         shift.status = 'shiftroute'
         shift.save(update_fields=['is_extended_mode', 'status'])
 
-        # Process missed stops — same logic as end_shift
+        # Process missed stops
         missed_stop_orders = request.data.get('missed_stop_orders', [])
         schedule_id = request.data.get('schedule_id')
         if schedule_id and missed_stop_orders:
-            from driver.models import PickupStatus
+            from driver.models import PickupStatus, CollectionSchedule
             PickupStatus.objects.filter(
                 schedule_id=schedule_id,
                 stop_order__in=missed_stop_orders,
             ).update(status='DRIVER_MISSED', updated_at=timezone.now())
 
-            from driver.reassignment import trigger_reassignment
-            trigger_reassignment(schedule_id, missed_stop_orders)
+            try:
+                schedule = CollectionSchedule.objects.get(id=schedule_id)
+                from driver.missed_stop_service import create_missed_stops
+                create_missed_stops(schedule, missed_stop_orders, reason='TRUCK_FULL')
+            except CollectionSchedule.DoesNotExist:
+                pass
 
         return Response({'status': 'extended_mode_activated'})
 
@@ -790,6 +956,16 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
             if not schedule:
                 schedule = CollectionSchedule.objects.filter(driver=driver).first()
         truck = assignment.truck if assignment else (schedule.truck if schedule else None)
+
+        if schedule and is_schedule_complete_today(schedule):
+            return Response({'error': 'This route has already been completed today.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        # ── Reset stale StopValidation rows ──────────────────────────────────
+        # (REMOVED) We no longer reset StopValidations on a new shift.
+        # This allows a driver who ends a shift early (e.g. truck full) to start 
+        # a new shift later in the day and resume the route where they left off, 
+        # keeping already collected stops as collected.
 
         with transaction.atomic():
             shift = DriverShift.objects.select_for_update().filter(driver=driver, is_active=True).first()
@@ -928,6 +1104,10 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
             if truck and DriverShift.objects.select_for_update().filter(truck=truck, is_active=True).exists():
                 return Response({'error': 'Truck is currently being used in another active shift.'}, status=status.HTTP_400_BAD_REQUEST)
 
+            if schedule and is_schedule_complete_today(schedule):
+                return Response({'error': 'This route has already been completed today.'},
+                                 status=status.HTTP_400_BAD_REQUEST)
+
             shift = DriverShift.objects.create(
                 driver=driver,
                 truck=truck,
@@ -971,15 +1151,31 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
             shift.save()
 
             effective_schedule_id = schedule_id or shift.schedule_id
+            ended_early = request.data.get('ended_early', False)
+            early_reason = request.data.get('reason', '') or ''
             if effective_schedule_id and missed_stop_orders:
-                from driver.models import PickupStatus
+                from driver.models import PickupStatus, CollectionSchedule
                 PickupStatus.objects.filter(
                     schedule_id=effective_schedule_id,
                     stop_order__in=missed_stop_orders
                 ).update(status='DRIVER_MISSED', updated_at=timezone.now())
 
-                from driver.reassignment import trigger_reassignment
-                trigger_reassignment(effective_schedule_id, missed_stop_orders)
+                try:
+                    schedule_obj = CollectionSchedule.objects.get(id=effective_schedule_id)
+                    from driver.missed_stop_service import create_missed_stops
+                    from driver.models import MissedStopReason
+                    if ended_early:
+                        miss_reason = MissedStopReason.SHIFT_ENDED_EARLY
+                    else:
+                        miss_reason = MissedStopReason.TRUCK_FULL
+                    create_missed_stops(
+                        schedule_obj,
+                        missed_stop_orders,
+                        reason=miss_reason,
+                        early_end_reason=early_reason if ended_early else None,
+                    )
+                except CollectionSchedule.DoesNotExist:
+                    pass
 
         try:
             _thin_shift_locations(shift.id)
@@ -990,10 +1186,77 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
 
         return Response(DriverShiftSerializer(shift).data)
 
+    # ── MISSED STOPS: list & resolve ──────────────────────────────────────────
 
-
-    @action(detail=False, methods=['get'], url_path='active_shifts',
+    @action(detail=False, methods=['get'], url_path='missed-stops',
             permission_classes=[permissions.IsAuthenticated])
+    def missed_stops_list(self, request):
+        """
+        GET /api/driver/shift/missed-stops/
+        Returns today's PENDING missed stops sorted by proximity to the driver's
+        current GPS (passed as ?lat=&lng= query params).
+        Extended-mode drivers call this to populate their work queue.
+        """
+        from driver.models import MissedStop, MissedStopStatus
+        today = timezone.localdate()
+        qs = MissedStop.objects.filter(
+            status=MissedStopStatus.PENDING,
+            collection_date=today,
+        ).select_related('original_schedule').order_by('id')
+
+        driver_lat = request.query_params.get('lat')
+        driver_lng = request.query_params.get('lng')
+
+        stops_data = []
+        for ms in qs:
+            wp = ms.waypoint_data or {}
+            entry = {
+                'id': ms.id,
+                'stop_order': ms.stop_order,
+                'schedule_id': ms.original_schedule_id,
+                'reason': ms.reason,
+                'lat': wp.get('lat'),
+                'lng': wp.get('lng'),
+                'label': wp.get('label') or wp.get('address') or '',
+                'barangay_id': wp.get('barangay_id'),
+                'status': ms.status,
+            }
+            if driver_lat and driver_lng:
+                try:
+                    dist = haversine(float(driver_lat), float(driver_lng),
+                                     float(wp.get('lat', 0)), float(wp.get('lng', 0)))
+                    entry['distance_m'] = round(dist)
+                except (TypeError, ValueError):
+                    entry['distance_m'] = None
+            stops_data.append(entry)
+
+        if driver_lat and driver_lng:
+            stops_data.sort(key=lambda s: s.get('distance_m') or float('inf'))
+
+        return Response(stops_data)
+
+    @action(detail=False, methods=['post'],
+            url_path=r'missed-stops/(?P<missed_stop_id>\d+)/collect',
+            permission_classes=[permissions.IsAuthenticated])
+    def collect_missed_stop(self, request, missed_stop_id=None):
+        """
+        POST /api/driver/shift/missed-stops/<id>/collect/
+        Extended-mode driver marks a missed stop as collected.
+        Awards +50 points via resolve_missed_stop.
+        """
+        from driver.models import DriverShift
+        shift = DriverShift.objects.filter(driver=request.user, is_active=True, is_extended_mode=True).first()
+        if not shift:
+            return Response({'error': 'No active extended-mode shift found.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from driver.missed_stop_service import resolve_missed_stop
+        resolved = resolve_missed_stop(missed_stop_id, shift)
+        if resolved is None:
+            return Response({'error': 'Stop not found or already collected.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'status': 'resolved', 'points_awarded': 50})
+
+
+    @action(detail=False, methods=['get'], url_path='active_shifts')
     def active_shifts(self, request):
         from django.db.models import Q
         today = timezone.localdate()
@@ -1239,32 +1502,71 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
         })
     # ↑ analytics ends here — barangay_stops is a SEPARATE method below
 
-    @action(detail=False, methods=['get'], url_path='barangay_stops',
-            permission_classes=[permissions.IsAuthenticated])
+    @action(detail=False, methods=['get'], url_path='barangay_stops')
     def barangay_stops(self, request):
         """
         Returns active trucks + stop markers for a given barangay.
-        GET /api/driver/shift/barangay_stops/?barangay_name=<name>
+        GET /api/driver/shift/barangay_stops/?barangay_name=<name>&scope=focus|all
+
+        Fix summary:
+          1. Resolves schedule from shift.schedule (stamped at shift creation) instead of
+             guessing via a driver+barangay name filter — which could silently resolve to
+             the wrong schedule or None.
+          2. Truck visibility is decided once, up front, by whether the shift's schedule
+             serves this barangay — NOT by whether the driver's current stop physically
+             sits inside the barangay. This means the truck always shows even when the
+             driver is currently working a stop in a different barangay of the same route.
+          3. scope=focus now returns the GLOBAL current stop (whatever the driver is
+             actually doing right now), regardless of which barangay that stop is in.
+             Each stop carries an `in_focused_barangay` flag so the frontend can treat
+             out-of-zone stops differently (e.g. exclude from fitBounds) without a
+             second round-trip.
         """
+        from watcher.models import StopValidation, StopValidationStatus
+        from watcher.stop_validation_service import ensure_stop_validations_for_schedule
+        from watcher.stop_validation_utils import is_schedule_today, is_validation_visible
+
         barangay_name = request.query_params.get('barangay_name', '').strip()
         scope = request.query_params.get('scope', 'all').strip().lower()
         if not barangay_name:
             return Response({'error': 'barangay_name is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         now = timezone.now()
+        today = timezone.localdate()
         result_trucks, result_stops = [], []
 
-        for shift in DriverShift.objects.filter(is_active=True).select_related('driver', 'truck'):
-            schedule = CollectionSchedule.objects.filter(
-                driver=shift.driver,
-                barangays__name=barangay_name,
-            ).first()
+        active_shifts = (
+            DriverShift.objects
+            .filter(is_active=True)
+            .select_related('driver', 'truck', 'schedule')
+        )
+
+        for shift in active_shifts:
+            # ── Fix 1: Use the shift's explicitly-stamped schedule first ──────────
+            # Shifts created after "schedule stamped at creation" was introduced will
+            # always have this. Older/stale active shifts may still have schedule=None;
+            # fall back to the old name-based guess so those don't vanish from the map.
+            schedule = shift.schedule
             if not schedule:
+                schedule = CollectionSchedule.objects.filter(
+                    driver=shift.driver,
+                    barangays__name=barangay_name,
+                ).first()
+
+            if not schedule:
+                continue
+
+            # Confirm this schedule actually covers the requested barangay.
+            matched_barangay = schedule.barangays.filter(name=barangay_name).first()
+            if not matched_barangay:
                 continue
 
             age = (now - shift.last_location_update).total_seconds() if shift.last_location_update else None
             conn = 'active' if age and age <= 60 else 'weak_signal' if age and age <= 300 else 'offline'
 
+            # ── Fix 2: Add truck unconditionally once we know the schedule serves
+            # this barangay. No longer gated on the driver's current stop being
+            # inside the zone. ─────────────────────────────────────────────────────
             if shift.current_latitude and shift.current_longitude:
                 result_trucks.append({
                     'id': shift.id,
@@ -1282,32 +1584,41 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
                     'barangay_name': barangay_name,
                 })
 
-            from watcher.models import StopValidation, StopValidationStatus
-            from watcher.stop_validation_service import ensure_stop_validations_for_schedule
-            from watcher.stop_validation_utils import is_schedule_today, is_validation_visible
-
             if not is_schedule_today(schedule):
                 continue
 
             ensure_stop_validations_for_schedule(schedule)
-            today = timezone.localdate()
             validations = {
                 sv.stop_order: sv
                 for sv in StopValidation.objects.filter(schedule=schedule, collection_date=today)
                 if is_validation_visible(sv)
             }
 
+            # Pass 1 — prefer the first stop that still needs action (unstarted or ready).
+            # PENDING_INSPECTION is the default state every stop starts in, so this is the
+            # common case: pick the lowest-order stop that hasn't been collected yet.
             current_order = None
             for order in sorted(validations.keys()):
-                if validations[order].current_status == StopValidationStatus.READY_FOR_COLLECTION:
+                if validations[order].current_status in (
+                    StopValidationStatus.PENDING_INSPECTION,
+                    StopValidationStatus.READY_FOR_COLLECTION,
+                ):
                     current_order = order
                     break
+            # Pass 2 — fallback only when every remaining visible stop has already been
+            # collected by the driver but not yet watcher-verified (COLLECTION_REPORTED).
+            # Without this, the truck disappears from the map during the tail-end of a
+            # route where no PENDING/READY stop is left but the shift is still active.
             if current_order is None:
                 for order in sorted(validations.keys()):
                     if validations[order].current_status == StopValidationStatus.COLLECTION_REPORTED:
                         current_order = order
                         break
 
+            # ── Fix 3: scope=focus returns the GLOBAL current stop, not only stops
+            # physically inside the focused barangay. Each stop carries
+            # `in_focused_barangay` so the frontend can optionally exclude out-of-zone
+            # stops from fitBounds without another round-trip. ─────────────────────
             for i, wp in enumerate(schedule.waypoints or []):
                 if i == 0:
                     continue  # skip home base
@@ -1324,6 +1635,7 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
                     'status': st,
                     'current_status': st,
                     'is_current': is_current,
+                    'in_focused_barangay': str(wp.get('barangay_id', '')) == str(matched_barangay.id),
                     'stop_order': i,
                     'schedule_id': schedule.id,
                     'driver_id': shift.driver.id,
@@ -1332,12 +1644,11 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
                     'collected_at': sv.collection_timestamp.isoformat() if sv.collection_timestamp else None,
                 })
 
-        if scope == 'focus':
-            active_driver_ids = {s['driver_id'] for s in result_stops}
-            result_trucks = [
-                t for t in result_trucks
-                if t.get('driver_id') in active_driver_ids
-            ]
+        # NOTE: the old post-loop filter —
+        #   active_driver_ids = {s['driver_id'] for s in result_stops}
+        #   result_trucks = [t for t in result_trucks if t.get('driver_id') in active_driver_ids]
+        # — is intentionally removed. Truck visibility is decided once, up front,
+        # by "does this shift's schedule serve the requested barangay".
 
         return Response({'trucks': result_trucks, 'stops': result_stops})
 

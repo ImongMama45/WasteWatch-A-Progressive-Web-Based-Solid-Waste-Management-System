@@ -20,8 +20,9 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
+import TurnArrow, { TURN_COLOR } from './TurnArrow'
 import { useNotification } from '../../../context/NotificationContext'
-import useShiftTimer from '../../../hooks/useShiftTimer'
+import useShiftTimer, { clearDriverSessionData } from '../../../hooks/useShiftTimer'
 import useGpsTracking from '../../../hooks/useGpsTracking'
 import api from '../../../api/client'
 import Navbar from '../../../components/Navbar'
@@ -35,21 +36,7 @@ import { buildStopValidationSnapshot, isMissedStopStatus, isCompletedStopStatus,
 
 const BASE_ARRIVAL_RADIUS_M = 150   // slightly larger than stop radius
 
-const ROUTE_SESSION_KEYS = [
-  'ww_route_state',
-  'ww_current_stop_index',
-  'ww_stop_statuses',
-  'ww_current_stop',
-  'ww_route_complete',
-  'ww_extended_mode',
-  'ww_completed_stops',
-  'ww_total_stops',
-  'ww_endshift_phase',   // ← EndShiftModule sub-phase persistence
-]
 
-function clearRouteSession() {
-  ROUTE_SESSION_KEYS.forEach(key => sessionStorage.removeItem(key))
-}
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -269,6 +256,10 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
 
   useEffect(() => {
     if (!user?.id) return
+    // Fetch fresh shift state from backend so end_shift_phase is never stale —
+    // the `shift` prop can be a captured value from a prior render cycle.
+    const shiftPromise = api.get('/api/driver/shift/current/').then(r => r.data.active_shift).catch(() => null)
+
     api.get('/api/driver/collection-schedules/')
       .then(async res => {
         const match = res.data.find(s => String(s.driver) === String(user.id))
@@ -284,13 +275,25 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
             })
 
             // Layer 2: merge sessionStorage snapshot for locally-flagged stops
-            // (e.g. COLLECTION_REPORTED or DRIVER_MISSED that aren't yet in the API)
+            // (e.g. COLLECTION_REPORTED or DRIVER_MISSED that aren't yet synced)
+            //
+            // Two cases:
+            //  a) The API has no row for this index → just add it.
+            //  b) The API has the stop as PENDING_INSPECTION or READY_FOR_COLLECTION
+            //     (unresolved) but we have a local completed status → let local win.
+            //     This prevents stops collected offline (photo still in queue) from
+            //     being counted as missed in missedStopOrders.
             try {
               const raw = sessionStorage.getItem('ww_stop_statuses_snapshot')
               if (raw) {
                 const localMap = new Map(JSON.parse(raw))
                 localMap.forEach((localStatus, idx) => {
-                  if (!statusMap.has(idx)) statusMap.set(idx, localStatus)
+                  if (!statusMap.has(idx)) { statusMap.set(idx, localStatus); return }
+                  const apiStatus = normalizeStopStatus(statusMap.get(idx))
+                  const apiUnresolved = apiStatus === 'PENDING_INSPECTION' || apiStatus === 'READY_FOR_COLLECTION'
+                  if (apiUnresolved && isCompletedStopStatus(normalizeStopStatus(localStatus))) {
+                    statusMap.set(idx, localStatus)
+                  }
                 })
               }
             } catch { }
@@ -306,39 +309,51 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
             setStopStatuses(statusMap)
           } catch (e) { console.error('Failed to fetch validations snapshot:', e) }
         }
-        
+
         if (match?.waypoints?.length > 0) {
           setBaseLocation(match.waypoints[0])
           setBaseName(match.waypoints[0]?.label || 'Home Base')
         }
+
+        // Resolve the freshest end_shift_phase:
+        // Priority 1 — live backend (fresh fetch, avoids stale prop closure)
+        // Priority 2 — sessionStorage (same-device fast-path / offline)
+        // Priority 3 — shift prop (initial mount value)
+        const freshShift = await shiftPromise
+        const serverPhase = freshShift?.end_shift_phase || shift?.end_shift_phase
+        const localPhase = sessionStorage.getItem('ww_endshift_phase')
+        const persisted = serverPhase || localPhase
+        const freshShiftId = freshShift?.id || shift?.id
+
         if (match?.dumpsite_detail) {
           setDumpSiteLocation(match.dumpsite_detail)
           setDumpSiteName(match.dumpsite_detail?.name || 'Dump Site')
-
-          // ── Resume logic: backend is canonical, sessionStorage is fallback ──
-          // Priority: server end_shift_phase > sessionStorage > default (dump_site)
-          const serverPhase = shift?.end_shift_phase
-          const localPhase  = sessionStorage.getItem('ww_endshift_phase')
-          const persisted   = serverPhase || localPhase
-          const PAST_DUMP   = ['waiting_dump_confirmation', 'returning', 'at_base', 'early_termination', 'calibration_complete']
-          if (persisted && PAST_DUMP.includes(persisted)) {
-            // Driver already visited dump site — restore to where they were
-            setCalibrationData(match)
-            setPhaseRaw(persisted)
-          } else {
-            // Fresh start or still at/before dump site
-            setPhase('dump_site')
-          }
-          api.patch(`/api/driver/shift/${shift.id}/update-status/`, { status: 'end_shift' }).catch(() => { })
-        } else {
-          setCalibrationData(match)
-          // Restore from server first, sessionStorage second, then default
-          const serverPhase = shift?.end_shift_phase
-          const localPhase  = sessionStorage.getItem('ww_endshift_phase')
-          const persisted   = serverPhase || localPhase
-          setPhaseRaw(persisted || 'calibration_complete')
-          api.patch(`/api/driver/shift/${shift.id}/update-status/`, { status: 'end_shift' }).catch(() => { })
         }
+        setCalibrationData(match)
+
+        const KNOWN_PHASES = ['dump_site', 'waiting_dump_confirmation', 'returning', 'calibration_complete', 'route_complete_decision', 'early_termination']
+
+        if (persisted && KNOWN_PHASES.includes(persisted)) {
+          setPhaseRaw(persisted)
+        } else {
+          const isRouteCompleteSession = sessionStorage.getItem('ww_route_complete') === 'true'
+          const endReason = sessionStorage.getItem('ww_end_reason')
+
+          if (isRouteCompleteSession) {
+            // Driver finished all stops normally — show the celebration screen.
+            setPhase('route_complete_decision')
+          } else if (endReason === 'truck_full') {
+            // Truck full mid-route: this is a routine, expected end — route to dumpsite
+            // (or directly to calibration_complete if no dumpsite is assigned).
+            // Do NOT show the emergency incident-report form.
+            setPhase(match?.dumpsite_detail ? 'dump_site' : 'calibration_complete')
+          } else {
+            // A genuine early termination (breakdown, medical, etc.) — show reason form.
+            setPhase('early_termination')
+          }
+        }
+
+        if (freshShiftId) api.patch(`/api/driver/shift/${freshShiftId}/update-status/`, { status: 'end_shift' }).catch(() => { })
       })
       .catch((err) => {
         console.error(err)
@@ -485,11 +500,16 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
   let etaMinutes = '--'
   let arrivalTimeStr = '--:--'
   let distanceKmStr = '--'
+  let stepType = 6
+  let stepBearing = null
 
   if (orsData) {
     const seg = orsData.segments?.[0]
     if (seg?.steps?.length) {
-      instructionText = seg.steps[0].instruction || 'Follow the road to base'
+      const step = seg.steps[0]
+      instructionText = step.instruction || 'Follow the road to base'
+      stepType = step.type !== undefined ? step.type : 6
+      stepBearing = step.bearing_after !== undefined ? step.bearing_after : null
     }
     if (seg) {
       etaMinutes = Math.ceil(seg.duration / 60)
@@ -498,6 +518,8 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
       distanceKmStr = (seg.distance / 1000).toFixed(1)
     }
   }
+
+  const accentColor = TURN_COLOR[stepType] || '#16a34a'
 
   // ── Clean up route session key on mount ───────────────────────────────────
   useEffect(() => {
@@ -555,26 +577,20 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
   }, [schedule, stopStatuses])
 
   const [extendedModeLoading, setExtendedModeLoading] = useState(false)
-  
+
   async function handleEarlySubmit() {
 
     if (!reason || submitting) return
     setSubmitting(true)
     try {
-      const endTime = new Date()
-      const durationMs = startTime ? (endTime.getTime() - new Date(startTime).getTime()) : 0
-      await api.post('/api/driver/shift/end/', {
+      await endShift({
+        scheduleId: schedule?.id,
+        missedStopOrders,
         ended_early: true,
         reason,
         notes: customNote.trim() || null,
-        started_at: startTime ? new Date(startTime).toISOString() : null,
-        ended_at: endTime.toISOString(),
-        duration_ms: durationMs,
-        missed_stop_orders: missedStopOrders,
-        schedule_id: schedule?.id,
       })
-      endShift()
-      clearRouteSession()
+      clearDriverSessionData()
       setSubmitted(true)
     } catch (err) {
       console.error('shift/end error:', err.response?.data)
@@ -588,20 +604,14 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
     if (submitting) return
     setSubmitting(true)
     try {
-      const endTime = new Date()
-      const durationMs = startTime ? (endTime - new Date(startTime)) : 0
-      await api.post('/api/driver/shift/end/', {
+      await endShift({
+        scheduleId: schedule?.id,
+        missedStopOrders,
         ended_early: false,
-        started_at: startTime ? new Date(startTime).toISOString() : null,
-        ended_at: endTime.toISOString(),
-        duration_ms: durationMs,
-        missed_stop_orders: missedStopOrders,
-        schedule_id: schedule?.id,
       })
-      endShift()
       // Clear all route-specific session keys so DriverFlow restarts
       // from AssignmentModule (the first step) on next entry.
-      clearRouteSession()
+      clearDriverSessionData()
       navigate('/dashboard', { replace: true })
     } catch (err) {
       notify({ variant: 'error-dark', message: err.response?.data?.error || 'Failed to end shift. Please try again.' })
@@ -800,11 +810,11 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
             animation: 'esNavFadeUp .25s ease',
           }}>
             <div style={{
-              width: 76, flexShrink: 0, background: '#16a34a12',
-              borderRight: '3px solid #16a34a28',
+              width: 76, flexShrink: 0, background: `${accentColor}12`,
+              borderRight: `3px solid ${accentColor}28`,
               display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0',
             }}>
-              <HomeIcon size={32} color="#16a34a" />
+              <TurnArrow type={stepType} bearing={stepBearing} color={accentColor} size={48} />
             </div>
             <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
               <div style={{
@@ -813,7 +823,7 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
               }}>
                 {instructionText}
               </div>
-              <div style={{ fontSize: 13, color: '#16a34a', fontWeight: 700 }}>
+              <div style={{ fontSize: 13, color: accentColor, fontWeight: 700 }}>
                 {distLabel}
               </div>
             </div>
@@ -865,19 +875,19 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
               )}
 
               <button
-                disabled={!isAtBase}
-                onClick={() => setPhase('at_base')}
+                disabled={!isAtBase || submitting}
+                onClick={handleDone}
                 style={{
                   width: '100%', maxWidth: 320, padding: '18px', borderRadius: 30, border: 'none',
                   fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, letterSpacing: '.06em',
                   transition: 'all .35s ease',
-                  cursor: isAtBase ? 'pointer' : 'not-allowed',
-                  background: isAtBase ? '#16a34a' : '#e2e8f0',
-                  color: isAtBase ? '#fff' : '#94a3b8',
-                  boxShadow: isAtBase ? '0 6px 20px rgba(22,163,74,0.35)' : 'none',
+                  cursor: isAtBase && !submitting ? 'pointer' : 'not-allowed',
+                  background: isAtBase && !submitting ? '#16a34a' : '#e2e8f0',
+                  color: isAtBase && !submitting ? '#fff' : '#94a3b8',
+                  boxShadow: isAtBase && !submitting ? '0 6px 20px rgba(22,163,74,0.35)' : 'none',
                 }}
               >
-                {isAtBase ? '✓ Confirm Return to Base' : 'Confirm on Arrival'}
+                {submitting ? 'Ending Shift...' : isAtBase ? '✓ Confirm Return to Base' : 'Confirm on Arrival'}
               </button>
             </div>
           </div>
@@ -1005,7 +1015,7 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
   // PHASE 2a — EARLY TERMINATION
   // ══════════════════════════════════════════════════════════════════════════
 
-  if (!isRouteComplete) {
+  if (phase === 'early_termination') {
     if (submitted) {
       return (
         <>
@@ -1129,7 +1139,7 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
                     </div>
                   </div>
                 </div>
-                
+
                 <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
                   <RouteCompletionMiniMap schedule={schedule} stopStatuses={stopStatuses} />
                 </div>
@@ -1189,13 +1199,18 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
   // PHASE 2b — ROUTE COMPLETED — celebration screen
   // ══════════════════════════════════════════════════════════════════════════
 
-  const completedStops = parseInt(sessionStorage.getItem('ww_completed_stops') || '10', 10)
-  const totalStops = parseInt(sessionStorage.getItem('ww_total_stops') || '10', 10)
+  // Derive from live state, not sessionStorage fallbacks that default to '10'.
+  // A false auto-completion will show 0/10 0% instead of looking like success.
+  const totalStops = Math.max((schedule?.waypoints?.length ?? 1) - 1, 0)
+  const completedStops = [...stopStatuses.values()]
+    .filter(s => isCompletedStopStatus(normalizeStopStatus(s)) || normalizeStopStatus(s) === 'EMPTY_STOP').length
+  const completionPct = totalStops > 0 ? Math.round((completedStops / totalStops) * 100) : 0
 
-  return (
-    <>
-      <Navbar />
-      <style>{`
+  if (phase === 'route_complete_decision') {
+    return (
+      <>
+        <Navbar />
+        <style>{`
         @keyframes fwBurst {
           0%   { transform: translate(-50%,-50%) scale(1); opacity:1; }
           100% { transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))) scale(0); opacity:0; }
@@ -1215,102 +1230,105 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
         .es-fade3 { animation: esFadeUp .3s ease .6s both; }
       `}</style>
 
-      <div style={{
-        height: '100dvh', display: 'flex', flexDirection: 'column',
-        background: '#f8fafc', fontFamily: 'var(--font-body)', overflowY: 'auto',
-      }}>
-        <div style={{ padding: '32px 20px 0', textAlign: 'center' }}>
-          <h1 className="es-fade1" style={{
-            fontFamily: 'var(--font-head)', fontSize: 26, fontWeight: 900,
-            color: '#0f172a', marginBottom: 6,
-          }}>
-            Route Complete, {firstName}! 🎉
-          </h1>
-          <p className="es-fade1" style={{ color: '#64748b', fontSize: 14, marginBottom: 0 }}>
-            You've completed all {totalStops} stops on your route today.
-          </p>
-        </div>
-
-        <div style={{ padding: '24px 20px', textAlign: 'center' }}>
-          <Fireworks />
-        </div>
-
-        <div className="es-fade2" style={{ padding: '0 20px', marginBottom: 24 }}>
-          <div style={{
-            background: '#fff', borderRadius: 16, padding: '4px 16px',
-            border: '1px solid #e2e8f0', boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
-          }}>
-            <SummaryRow icon="⏱" label="Shift Duration" value={formattedTime} />
-            <SummaryRow icon="📍" label="Stops Completed" value={`${completedStops} / ${totalStops}`} />
-            <SummaryRow icon="✅" label="Completion" value="100%" />
-            <SummaryRow icon="📅" label="Date" value={new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} />
+        <div style={{
+          height: '100dvh', display: 'flex', flexDirection: 'column',
+          background: '#f8fafc', fontFamily: 'var(--font-body)', overflowY: 'auto',
+        }}>
+          <div style={{ padding: '32px 20px 0', textAlign: 'center' }}>
+            <h1 className="es-fade1" style={{
+              fontFamily: 'var(--font-head)', fontSize: 26, fontWeight: 900,
+              color: '#0f172a', marginBottom: 6,
+            }}>
+              Route Complete, {firstName}! 🎉
+            </h1>
+            <p className="es-fade1" style={{ color: '#64748b', fontSize: 14, marginBottom: 0 }}>
+              You've completed all {totalStops} stops on your route today.
+            </p>
           </div>
-        </div>
 
-        {schedule && (
-          <div className="es-fade2" style={{ padding: '0 20px', marginBottom: 20 }}>
+          <div style={{ padding: '24px 20px', textAlign: 'center' }}>
+            <Fireworks />
+          </div>
+
+          <div className="es-fade2" style={{ padding: '0 20px', marginBottom: 24 }}>
             <div style={{
-              fontSize: 11, fontWeight: 800, color: '#94a3b8',
-              letterSpacing: '.06em', marginBottom: 10,
-            }}>ROUTE RECEIPT</div>
-            <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
-              <RouteCompletionMiniMap schedule={schedule} stopStatuses={stopStatuses} />
+              background: '#fff', borderRadius: 16, padding: '4px 16px',
+              border: '1px solid #e2e8f0', boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
+            }}>
+              <SummaryRow icon="⏱" label="Shift Duration" value={formattedTime} />
+              <SummaryRow icon="📍" label="Stops Completed" value={`${completedStops} / ${totalStops}`} />
+              <SummaryRow icon="✅" label="Completion" value={`${completionPct}%`} />
+              <SummaryRow icon="📅" label="Date" value={new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} />
             </div>
           </div>
-        )}
 
-        <div className="es-fade3" style={{ padding: '0 20px 32px', marginTop: 'auto' }}>
-          <button
-            id="end-shift-done-btn"
-            disabled={submitting}
-            onClick={() => {
-              if (dumpSiteLocation) {
-                setPhase('dump_site')
-              } else {
-                handleDone()
-              }
-            }}
-            style={{
-              width: '100%', padding: '17px', borderRadius: 14,
-              background: submitting ? '#e2e8f0' : '#0f172a',
-              color: submitting ? '#94a3b8' : '#fff', border: 'none',
-              fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900,
-              cursor: submitting ? 'not-allowed' : 'pointer', marginBottom: 10,
-              boxShadow: '0 6px 20px rgba(15,23,42,0.25)', letterSpacing: '.04em',
-            }}
-          >
-            {submitting ? 'Ending shift…' : '✓ End Shift'}
-          </button>
+          {schedule && (
+            <div className="es-fade2" style={{ padding: '0 20px', marginBottom: 20 }}>
+              <div style={{
+                fontSize: 11, fontWeight: 800, color: '#94a3b8',
+                letterSpacing: '.06em', marginBottom: 10,
+              }}>ROUTE RECEIPT</div>
+              <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+                <RouteCompletionMiniMap schedule={schedule} stopStatuses={stopStatuses} />
+              </div>
+            </div>
+          )}
 
-          <p style={{ textAlign: 'center', fontSize: 12, color: '#94a3b8', margin: '0 0 8px' }}>
-            Truck not full? Help collect unclaimed stops nearby.
-          </p>
-          <button
-            id="extended-mode-btn"
-            disabled={extendedModeLoading}
-            onClick={handleExtendedMode}
-            style={{
-              width: '100%', padding: '17px', borderRadius: 14,
-              background: extendedModeLoading ? '#e2e8f0' : '#0f172a',
-              color: extendedModeLoading ? '#94a3b8' : '#fff', border: 'none',
-              fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900,
-              cursor: extendedModeLoading ? 'not-allowed' : 'pointer',
-              boxShadow: '0 6px 20px rgba(15,23,42,0.25)', letterSpacing: '.04em',
-            }}
-          >
-            {extendedModeLoading ? 'Activating…' : '📦 My Truck is still not full'}
-          </button>
+          <div className="es-fade3" style={{ padding: '0 20px 32px', marginTop: 'auto' }}>
+            <button
+              id="end-shift-done-btn"
+              disabled={submitting}
+              onClick={() => {
+                if (dumpSiteLocation) {
+                  setPhase('dump_site')
+                } else {
+                  setPhase('calibration_complete')
+                }
+              }}
+              style={{
+                width: '100%', padding: '17px', borderRadius: 14,
+                background: submitting ? '#e2e8f0' : '#0f172a',
+                color: submitting ? '#94a3b8' : '#fff', border: 'none',
+                fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900,
+                cursor: submitting ? 'not-allowed' : 'pointer', marginBottom: 10,
+                boxShadow: '0 6px 20px rgba(15,23,42,0.25)', letterSpacing: '.04em',
+              }}
+            >
+              {submitting ? 'Proceeding…' : '✓ End Shift'}
+            </button>
+
+            <p style={{ textAlign: 'center', fontSize: 12, color: '#94a3b8', margin: '0 0 8px' }}>
+              Truck not full? Help collect unclaimed stops nearby.
+            </p>
+            <button
+              id="extended-mode-btn"
+              disabled={extendedModeLoading}
+              onClick={handleExtendedMode}
+              style={{
+                width: '100%', padding: '17px', borderRadius: 14,
+                background: extendedModeLoading ? '#e2e8f0' : '#0f172a',
+                color: extendedModeLoading ? '#94a3b8' : '#fff', border: 'none',
+                fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900,
+                cursor: extendedModeLoading ? 'not-allowed' : 'pointer',
+                boxShadow: '0 6px 20px rgba(15,23,42,0.25)', letterSpacing: '.04em',
+              }}
+            >
+              {extendedModeLoading ? 'Activating…' : '📦 My Truck is still not full'}
+            </button>
+          </div>
+
+          <div style={{
+            background: '#0f172a', padding: '16px 24px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12, letterSpacing: '.06em' }}>
+              Track · Monitor · Report
+            </span>
+          </div>
         </div>
+      </>
+    )
+  }
 
-        <div style={{
-          background: '#0f172a', padding: '16px 24px',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12, letterSpacing: '.06em' }}>
-            Track · Monitor · Report
-          </span>
-        </div>
-      </div>
-    </>
-  )
+  return null
 }

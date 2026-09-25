@@ -407,13 +407,17 @@ export default function TruckNotFull({ visible, shift, schedule, stopStatuses, o
   // ── Reassigned stops hook (other drivers' missed stops) ───────────────────
   useReassignedStops({
     enabled: visible,
-    scheduleId: schedule?.id,
+    driverLat: gpsPos?.lat ?? null,
+    driverLng: gpsPos?.lng ?? null,
     onNewStops: (newStops) => {
       setReassignedStops(prev => {
-        const existingIds = new Set(prev.map(s => s.pickup_status_id ?? s.stop_order))
-        const fresh = newStops.filter(s => !existingIds.has(s.pickup_status_id ?? s.stop_order))
+        const existingIds = new Set(prev.map(s => s.id))
+        const fresh = newStops.filter(s => !existingIds.has(s.id))
         return fresh.length ? [...prev, ...fresh] : prev
       })
+    },
+    onStopResolved: (resolvedId) => {
+      setReassignedStops(prev => prev.filter(s => s.id !== resolvedId))
     },
   })
 

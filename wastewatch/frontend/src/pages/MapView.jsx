@@ -505,7 +505,13 @@ export default function MapView() {
   useEffect(() => {
     const fetchAll = () => {
       api.get('/api/driver/shift/active_shifts/')
-        .then(res => setActiveTrucks(res.data))
+        .then(res => {
+          const trucks = res.data
+          console.log('[MapView] active_shifts raw:', trucks.length, 'trucks',
+            trucks.map(t => ({ id: t.id, lat: t.lat, lng: t.lng, status: t.status, driver: t.driver }))
+          )
+          setActiveTrucks(trucks)
+        })
         .catch(err => console.error('[MapView] active_shifts error', err))
 
       api.get('/api/driver/collection-schedules/')
@@ -625,10 +631,18 @@ export default function MapView() {
 
     api.get(`/api/driver/shift/barangay_stops/?barangay_name=${encodeURIComponent(selectedZone.name)}&scope=focus`)
       .then(res => {
+        console.log('[MapView] barangay_stops for', selectedZone.name, {
+          trucks: res.data.trucks,
+          stops: res.data.stops,
+          activeTruckIds: activeTrucksRef.current.map(t => t.id),
+        })
         setBarangayData({ trucks: res.data.trucks || [], stops: res.data.stops || [], loading: false })
         drawBarangayStops(res.data.stops || [])
       })
-      .catch(() => setBarangayData({ trucks: [], stops: [], loading: false }))
+      .catch(err => {
+        console.error('[MapView] barangay_stops error', err)
+        setBarangayData({ trucks: [], stops: [], loading: false })
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedZone?.name, mapReady])
 
@@ -1410,9 +1424,15 @@ export default function MapView() {
     const showInactive = activeFiltersRef.current.inactiveRoutes
     const showAllTrucks = !zoneFocusActive || showAll
 
-    if (activeFilters.trucks) {
+    if (activeFiltersRef.current.trucks) {
       const barangayTrucks = barangayDataRef.current.trucks
-      const allowedShiftIds = showAllTrucks ? null : new Set(barangayTrucks.map(t => t.id))
+      // IMPORTANT: Only restrict to barangay trucks if there ARE trucks for this zone.
+      // If barangayTrucks is empty (zone has no assigned trucks yet, or still loading),
+      // fall back to null so ALL active trucks render — an empty Set would be truthy
+      // and silently filter out every truck on the map.
+      const allowedShiftIds = showAllTrucks || barangayTrucks.length === 0
+        ? null
+        : new Set(barangayTrucks.map(t => t.id))
 
       activeTrucksRef.current.forEach(truck => {
         if (allowedShiftIds && !allowedShiftIds.has(truck.id)) return
@@ -2102,7 +2122,7 @@ function ReportPanel({ report, onStatusChange, onClose }) {
   }[report.status] ?? report.status?.toUpperCase()
 
   const tags = report.tags ? report.tags.split(',') : []
-  
+
   // Aggregate images into a clean array
   let rawImages = []
   if (report.images && Array.isArray(report.images)) {
@@ -2155,11 +2175,11 @@ function ReportPanel({ report, onStatusChange, onClose }) {
     <div style={{ display: 'flex', flexDirection: 'column', maxHeight: '80vh', position: 'relative' }}>
       {/* Top Close Button */}
       {onClose && (
-        <button onClick={onClose} style={{ 
-          position: 'absolute', top: 12, right: 12, width: 32, height: 32, 
-          borderRadius: '50%', background: 'var(--surface-2)', border: '1px solid var(--border)', 
-          color: 'var(--text-muted)', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', 
-          cursor: 'pointer', zIndex: 10 
+        <button onClick={onClose} style={{
+          position: 'absolute', top: 12, right: 12, width: 32, height: 32,
+          borderRadius: '50%', background: 'var(--surface-2)', border: '1px solid var(--border)',
+          color: 'var(--text-muted)', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', zIndex: 10
         }}>✕</button>
       )}
 
@@ -2178,22 +2198,22 @@ function ReportPanel({ report, onStatusChange, onClose }) {
 
         {/* Simplified Photo Display - Supports Multiple Pictures */}
         {imageUrls.length > 0 && (
-          <div style={{ 
-            marginBottom: 20, 
-            display: 'flex', 
-            gap: 12, 
+          <div style={{
+            marginBottom: 20,
+            display: 'flex',
+            gap: 12,
             overflowX: 'auto',
             paddingBottom: 8, // space for scrollbar if visible
             scrollbarWidth: 'thin'
           }}>
             {imageUrls.map((url, idx) => (
-              <div key={idx} style={{ 
+              <div key={idx} style={{
                 flexShrink: 0,
-                width: imageUrls.length === 1 ? '100%' : '85%', 
-                borderRadius: '16px', 
-                overflow: 'hidden', 
-                border: '1px solid var(--border)', 
-                background: 'var(--surface-2)' 
+                width: imageUrls.length === 1 ? '100%' : '85%',
+                borderRadius: '16px',
+                overflow: 'hidden',
+                border: '1px solid var(--border)',
+                background: 'var(--surface-2)'
               }}>
                 <img src={url} alt={`Report Photo ${idx + 1}`} style={{ width: '100%', maxHeight: '250px', objectFit: 'contain', display: 'block' }} />
               </div>

@@ -7,6 +7,10 @@ export default defineConfig({
     host: true,
     port: 3000,
 
+    hmr: {
+      host: 'localhost',
+    },
+
     allowedHosts: [
       'stinking-unweave-scam.ngrok-free.dev',
       '.ngrok-free.app',
@@ -29,4 +33,4 @@ export default defineConfig({
       },
     },
   },
-})
+})

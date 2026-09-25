@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { compressImage } from '../utils/imageCompressor'
 import GlobalCameraModal from './GlobalCameraModal'
 
@@ -6,24 +6,36 @@ const MAX_PHOTOS = 4
 
 export default function MultiPhotoPicker({ photos, onChange, error }) {
     const [isCameraOpen, setIsCameraOpen] = useState(false)
+    const [previews, setPreviews] = useState([])
+
+    // Automatically generate previews when `photos` changes
+    useEffect(() => {
+        const newUrls = photos.map(photo => {
+            if (typeof photo === 'string') return photo // Already a URL or Base64
+            if (photo instanceof Blob || photo instanceof File) return URL.createObjectURL(photo)
+            return null
+        }).filter(Boolean)
+        setPreviews(newUrls)
+
+        return () => {
+            // Clean up Blob URLs if they are not base64
+            newUrls.forEach(url => {
+                if (url.startsWith('blob:')) URL.revokeObjectURL(url)
+            })
+        }
+    }, [photos])
 
     async function handleCapture(capturedData) {
         if (!capturedData) return
         const files = Array.isArray(capturedData) ? capturedData : [capturedData]
-        
-        const newPhotos = []
+
+        const compressedFiles = []
         for (const file of files) {
             const compressedFile = await compressImage(file)
-            const base64Photo = await new Promise((resolve, reject) => {
-              const reader = new FileReader()
-              reader.onload = () => resolve(reader.result)
-              reader.onerror = reject
-              reader.readAsDataURL(compressedFile)
-            })
-            newPhotos.push(base64Photo)
+            compressedFiles.push(compressedFile)
         }
 
-        const next = [...photos, ...newPhotos].slice(0, MAX_PHOTOS)
+        const next = [...photos, ...compressedFiles].slice(0, MAX_PHOTOS)
         onChange(next)
         setIsCameraOpen(false)
     }
@@ -35,10 +47,10 @@ export default function MultiPhotoPicker({ photos, onChange, error }) {
     return (
         <div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {photos.map((base64, idx) => (
+                {previews.map((previewUrl, idx) => (
                     <div key={idx} style={{ position: 'relative', width: 72, height: 72 }}>
                         <img
-                            src={base64}
+                            src={previewUrl}
                             alt={`Photo ${idx + 1}`}
                             style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 10, border: '2px solid #e2e8f0' }}
                         />

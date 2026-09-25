@@ -8,35 +8,7 @@
  * Also exports useQueueStore(storeName) React hook for reactive state.
  */
 
-const DB_NAME = 'wastewatch_db'
-const DB_VERSION = 6   // v6: added proof_submissions and inspection_submissions
-
-const STORES = ['reports', 'analytics_queue', 'events_queue', 'sync_log', 'proof_submissions', 'inspection_submissions']
-
-// ─── IDB singleton ────────────────────────────────────────────────────────────
-
-let _dbPromise = null
-
-function openDB() {
-  if (_dbPromise) return _dbPromise
-  _dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION)
-    req.onupgradeneeded = (e) => {
-      const db = e.target.result
-      STORES.forEach(name => {
-        if (!db.objectStoreNames.contains(name)) {
-          const store = db.createObjectStore(name, { keyPath: 'id' })
-          store.createIndex('status', 'status', { unique: false })
-          store.createIndex('createdAt', 'createdAt', { unique: false })
-          store.createIndex('priority', 'priority', { unique: false })
-        }
-      })
-    }
-    req.onsuccess = (e) => resolve(e.target.result)
-    req.onerror = (e) => { _dbPromise = null; reject(e.target.error) }
-  })
-  return _dbPromise
-}
+import { openDB } from '../utils/idbSchema'
 
 // ─── Core IDB operations ──────────────────────────────────────────────────────
 

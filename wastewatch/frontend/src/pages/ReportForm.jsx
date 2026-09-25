@@ -169,6 +169,20 @@ export default function ReportForm({ isOpen, onClose, initialPhoto }) {
 
     setSubmitting(true)
     try {
+      // Convert File objects to base64 for offline storage
+      const serializedPhotos = await Promise.all(
+        photos.map(file => new Promise((resolve, reject) => {
+          if (typeof file === 'string') {
+            resolve(file)
+            return
+          }
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result)
+          reader.onerror = reject
+          reader.readAsDataURL(file)
+        }))
+      )
+
       const payload = {
         issue_type: wasteType,
         severity,
@@ -176,7 +190,7 @@ export default function ReportForm({ isOpen, onClose, initialPhoto }) {
         latitude: location?.lat,
         longitude: location?.lng,
         address: location?.address,
-        photos: photos,
+        photos: serializedPhotos,
       }
       try {
         await addReport(payload)
@@ -200,7 +214,7 @@ export default function ReportForm({ isOpen, onClose, initialPhoto }) {
     } finally {
       setSubmitting(false)
     }
-  }, [submitting, photos, addReport, wasteType, severity, notes, location])
+  }, [submitting, photos, addReport, wasteType, severity, notes, location, isOnline, pushReport, onClose])
 
   if (!isOpen) return null
 

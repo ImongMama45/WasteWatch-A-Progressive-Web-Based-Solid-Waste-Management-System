@@ -1,4 +1,18 @@
 from django.utils import timezone
+import math
+
+def fmt_time(dt):
+    """Cross-platform 12-hour time without leading zero (works on Windows & Linux)."""
+    return dt.strftime('%I:%M %p').lstrip('0') if dt else ''
+
+def haversine_km(lat1, lon1, lat2, lon2):
+    R = 6371
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
 from rest_framework import viewsets, permissions, status, filters
 from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
@@ -39,7 +53,18 @@ _MAP_FULL_ACCESS_ROLES = {'admin', 'watcher', 'brgy_official', 'driver'}
 class GarbageReportViewSet(viewsets.ModelViewSet):
     queryset = GarbageReport.objects.all()
     serializer_class = GarbageReportSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in ('create', 'list', 'retrieve', 'public', 'map_pins'):
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
+
+    def check_object_permissions(self, request, obj):
+        super().check_object_permissions(request, obj)
+        if self.action in ('update', 'partial_update', 'destroy'):
+            if request.user.role not in ['admin', 'brgy_official'] and obj.user != request.user:
+                self.permission_denied(request, message="Not authorized to modify this report.")
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['barangay', 'status', 'issue_type', 'severity']
     search_fields = ['address', 'description']
@@ -125,8 +150,9 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
         # Auto-promote to GarbageHotspot so it appears on the map (idempotent on double-click).
         if report.latitude and report.longitude and report.barangay:
             GarbageHotspot.objects.get_or_create(
-                name=f'Report #{report.id} — {report.get_issue_type_display()}',
+                source_report=report,
                 defaults={
+                    'name': f'Report #{report.id} — {report.get_issue_type_display()}',
                     'severity': report.severity,
                     'barangay': report.barangay,
                     'latitude': report.latitude,
@@ -160,9 +186,7 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
         report.approved_at = None
         report.save()
 
-        GarbageHotspot.objects.filter(
-            name=f'Report #{report.id} — {report.get_issue_type_display()}'
-        ).delete()
+        GarbageHotspot.objects.filter(source_report=report).delete()
 
         return Response(GarbageReportSerializer(report, context={'request': request}).data)
 
@@ -180,21 +204,12 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
         so only admin/brgy_official-approved issues appear on the public map.
         Each pin links back to the originating GarbageReport for the detail panel.
         """
-        hotspots = GarbageHotspot.objects.select_related('barangay').all()
+        hotspots = GarbageHotspot.objects.select_related('barangay', 'source_report', 'source_report__user').all()
 
         data = []
-        import re
         for h in hotspots:
-            # Try to find the originating report by the sentinel name pattern
-            report = None
-            if h.name and h.name.startswith('Report #'):
-                try:
-                    match = re.search(r'Report #(\d+)', h.name)
-                    if match:
-                        report_id = int(match.group(1))
-                        report = GarbageReport.objects.filter(id=report_id).select_related('barangay').first()
-                except Exception:
-                    pass
+            # Try to find the originating report
+            report = h.source_report
 
             data.append({
                 'id':            h.id,
@@ -218,6 +233,22 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def stats(self, request):
         qs = self.get_queryset()
+        return Response({
+            'total':    qs.count(),
+            'pending':  qs.filter(status=ReportStatus.PENDING).count(),
+            'approved': qs.filter(status=ReportStatus.APPROVED).count(),
+            'resolved': qs.filter(status=ReportStatus.RESOLVED).count(),
+            'rejected': qs.filter(status=ReportStatus.REJECTED).count(),
+        })
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def mine(self, request):
+        qs = GarbageReport.objects.filter(user=request.user).order_by('-created_at')
+        return Response(self.get_serializer(qs, many=True).data)
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def mine_stats(self, request):
+        qs = GarbageReport.objects.filter(user=request.user)
         return Response({
             'total':    qs.count(),
             'pending':  qs.filter(status=ReportStatus.PENDING).count(),
@@ -277,14 +308,26 @@ class CollectionConfirmationViewSet(viewsets.ModelViewSet):
             confirmation.report.status = ReportStatus.RESOLVED
             confirmation.report.save()
             # Retire the hotspot — collection confirmed, no longer an active issue
-            GarbageHotspot.objects.filter(
-                name=f'Report #{confirmation.report.id} — {confirmation.report.get_issue_type_display()}'
-            ).delete()
+            GarbageHotspot.objects.filter(source_report=confirmation.report).delete()
 
 class GarbageHotspotViewSet(viewsets.ModelViewSet):
     queryset = GarbageHotspot.objects.all()
     serializer_class = GarbageHotspotSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def check_object_permissions(self, request, obj):
+        super().check_object_permissions(request, obj)
+        if self.action in ('update', 'partial_update', 'destroy'):
+            if request.user.role not in ['admin', 'brgy_official']:
+                self.permission_denied(request, message="Not authorized to modify this hotspot.")
+
+    def get_permissions(self):
+        if self.action in ('create',):
+            class IsAdminOrBrgyOfficial(permissions.BasePermission):
+                def has_permission(self, request, view):
+                    return request.user.is_authenticated and request.user.role in ['admin', 'brgy_official']
+            return [IsAdminOrBrgyOfficial()]
+        return super().get_permissions()
 
     @action(detail=False, methods=['get'], url_path='nearby')
     def nearby(self, request):
@@ -294,18 +337,6 @@ class GarbageHotspotViewSet(viewsets.ModelViewSet):
         Falls back to all hotspots if no coords provided (capped at 50).
         """
         import math
-
-        def fmt_time(dt):
-            """Cross-platform 12-hour time without leading zero (works on Windows & Linux)."""
-            return dt.strftime('%I:%M %p').lstrip('0') if dt else ''
-
-        def haversine_km(lat1, lon1, lat2, lon2):
-            R = 6371
-            phi1, phi2 = math.radians(lat1), math.radians(lat2)
-            dphi = math.radians(lat2 - lat1)
-            dlam = math.radians(lon2 - lon1)
-            a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
-            return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
         try:
             drv_lat = float(request.query_params.get('lat', 0))
@@ -424,13 +455,35 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = StopValidationSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def get_permissions(self):
+        # Allow public read access to the list endpoint for the citizen map
+        if self.action == 'list':
+            return [permissions.AllowAny()]
+        return super().get_permissions()
+
     def get_queryset(self):
         ensure_today_stop_validations()
-        today = timezone.localdate()
-        qs = super().get_queryset().filter(collection_date=today)
+        qs = super().get_queryset()
+        
+        start_date_param = self.request.query_params.get('start_date')
+        end_date_param = self.request.query_params.get('end_date')
+        date_param = self.request.query_params.get('date')
+        
+        from django.utils.dateparse import parse_date
+        
+        if start_date_param and end_date_param:
+            start_date = parse_date(start_date_param)
+            end_date = parse_date(end_date_param)
+            if start_date and end_date:
+                qs = qs.filter(collection_date__range=(start_date, end_date))
+        elif date_param:
+            target_date = parse_date(date_param) or timezone.localdate()
+            qs = qs.filter(collection_date=target_date)
+        else:
+            qs = qs.filter(collection_date=timezone.localdate())
 
         user = self.request.user
-        if user.role == 'watcher' and user.barangay:
+        if user.is_authenticated and getattr(user, 'role', None) == 'watcher' and getattr(user, 'barangay', None):
             qs = qs.filter(barangay=user.barangay)
 
         status_param = self.request.query_params.get('status')
@@ -709,6 +762,20 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
 
             self._update_driver_timeline(validation)
 
+            # WATCHER_FLAG trigger: driver reported collection but watcher disputes it.
+            # This implies a falsely reported stop → penalize & add to missed pool.
+            if outcome == 'failed' and validation.schedule_id:
+                try:
+                    from driver.missed_stop_service import create_missed_stops
+                    from driver.models import MissedStopReason
+                    create_missed_stops(
+                        validation.schedule,
+                        [stop_order],
+                        reason=MissedStopReason.WATCHER_FLAG,
+                    )
+                except Exception:
+                    pass  # Non-fatal — don't let a service error block the verification response
+
         return Response(
             StopValidationSerializer(validation, context={'request': request}).data,
             status=status.HTTP_200_OK,
@@ -719,6 +786,29 @@ class EscalationViewSet(viewsets.ModelViewSet):
     queryset = Escalation.objects.all()
     serializer_class = EscalationSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_permissions(self):
+        class IsAdminOrBrgyOfficialOrDriver(permissions.BasePermission):
+            def has_permission(self, request, view):
+                if not request.user or not request.user.is_authenticated:
+                    return False
+                if request.user.role in ['admin', 'brgy_official']:
+                    return True
+                if request.user.role == 'driver' and request.method in permissions.SAFE_METHODS:
+                    return True
+                return False
+        return [IsAdminOrBrgyOfficialOrDriver()]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = super().get_queryset()
+        if getattr(user, 'role', None) == 'admin':
+            return qs
+        if getattr(user, 'role', None) == 'brgy_official' and getattr(user, 'barangay', None):
+            return qs.filter(barangay=user.barangay)
+        if getattr(user, 'role', None) == 'driver':
+            return qs.filter(assignee=user)
+        return qs.none()
 
     @action(detail=True, methods=['post'])
     def resolve(self, request, pk=None):

@@ -2,40 +2,72 @@ import { useEffect, useRef } from 'react'
 import api from '../api/client'
 
 /**
- * Polls /api/driver/stops/reassigned/ every `intervalMs` milliseconds.
+ * Polls /api/driver/shift/missed-stops/ every `intervalMs` milliseconds.
  * Only calls `onNewStops` when genuinely NEW stops appear (tracks seen
- * pickup_status_ids in a ref so repeating polls never re-fire).
+ * missed_stop ids in a ref so repeating polls never re-fire).
  *
- * The backend now returns only DRIVER_MISSED stops for extended-mode drivers,
- * so non-extended drivers always receive an empty list and the hook is silent.
+ * Also calls `onStopResolved` when a stop that was previously seen is no
+ * longer PENDING (resolved by another extended driver), so the UI can
+ * remove floating markers for claimed stops.
+ *
+ * Props:
+ *   enabled       {boolean}  — Only polls when true (i.e. isExtendedMode)
+ *   driverLat     {number}   — Current driver GPS lat for proximity sort
+ *   driverLng     {number}   — Current driver GPS lng for proximity sort
+ *   onNewStops    {fn}       — Called with array of new MissedStop records
+ *   onStopResolved {fn}      — Called with id of a stop that is no longer PENDING
+ *   intervalMs    {number}   — Poll interval in ms (default 8s)
  */
-export default function useReassignedStops({ enabled, scheduleId, onNewStops, intervalMs = 8000 }) {
+export default function useReassignedStops({
+  enabled,
+  driverLat,
+  driverLng,
+  onNewStops,
+  onStopResolved,
+  intervalMs = 8000,
+}) {
   // Persist seen IDs across re-renders without causing extra renders
   const seenIds = useRef(new Set())
+  // Track the last seen status of each id so we can detect removals
+  const pendingIds = useRef(new Set())
 
   useEffect(() => {
-    if (!enabled || !scheduleId) return
+    if (!enabled) return
 
     const poll = async () => {
       try {
-        const res = await api.get('/api/driver/stops/reassigned/')
-        const stops = res.data?.stops ?? []
+        const params = {}
+        if (driverLat != null && driverLng != null) {
+          params.lat = driverLat
+          params.lng = driverLng
+        }
+        const res = await api.get('/api/driver/shift/missed-stops/', { params })
+        const stops = res.data ?? []
+
+        // IDs currently PENDING from server
+        const serverPendingIds = new Set(stops.map(s => s.id))
+
+        // Detect stops that were seen before but are now gone (resolved/claimed)
+        if (onStopResolved) {
+          for (const id of pendingIds.current) {
+            if (!serverPendingIds.has(id)) {
+              pendingIds.current.delete(id)
+              onStopResolved(id)
+            }
+          }
+        }
+
         if (!stops.length) return
 
         // Filter to only stops we haven't announced yet
-        const newStops = stops.filter(wp => {
-          // Use pickup_status_id as the stable dedup key; fall back to stop_order
-          const id = wp.pickup_status_id ?? wp.stop_order ?? wp.stopOrder ?? wp.id
-          return id != null && !seenIds.current.has(id)
-        })
+        const newStops = stops.filter(s => !seenIds.current.has(s.id))
 
         if (newStops.length === 0) return
 
-        // Mark them all as seen before calling back so rapid re-polls can't
-        // double-fire while the component is still processing
-        newStops.forEach(wp => {
-          const id = wp.pickup_status_id ?? wp.stop_order ?? wp.stopOrder ?? wp.id
-          seenIds.current.add(id)
+        // Mark them all as seen & pending before calling back
+        newStops.forEach(s => {
+          seenIds.current.add(s.id)
+          pendingIds.current.add(s.id)
         })
 
         onNewStops(newStops)
@@ -47,5 +79,5 @@ export default function useReassignedStops({ enabled, scheduleId, onNewStops, in
     poll()
     const interval = setInterval(poll, intervalMs)
     return () => clearInterval(interval)
-  }, [enabled, scheduleId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled, driverLat, driverLng]) // eslint-disable-line react-hooks/exhaustive-deps
 }

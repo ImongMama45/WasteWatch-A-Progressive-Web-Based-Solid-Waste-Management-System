@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import api from '../../api/client'
 import { useAuth } from '../../context/AuthContext'
+import { clearDriverSessionData } from '../../hooks/useShiftTimer'
 import { DriverGpsProvider } from '../../context/DriverGpsContext'
 import AssignmentModule from './components/AssignmentModule'
 import NavigateToBaseModule from './components/NavigateToBaseModule'
@@ -8,7 +10,6 @@ import ConfirmStartModule from './components/ConfirmStartModule'
 import CheckInModule from './components/CheckInModule'
 import ShiftRouteModule from './components/ShiftRouteModule'
 import EndShiftModule from './components/EndShiftModule'
-import TruckNotFull from './components/TruckNotFull'
 
 // ─── PHASE METADATA ──────────────────────────────────────────────────────────
 const PHASES = [
@@ -189,9 +190,13 @@ function DevStatusBadge({ phase, activeShift }) {
   )
 }
 
+// ─── SESSION STATE MANAGEMENT ──────────────────────────────────────────────────
+
+
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function DriverRouteFlow() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [phase, setPhase] = useState(null)
   const [activeShift, setActiveShift] = useState(null)
   const [isCheckingShift, setIsChecking] = useState(true)
@@ -203,9 +208,14 @@ export default function DriverRouteFlow() {
       .then(r => {
         const shift = r.data.active_shift
         if (shift) {
+          // If resuming a pre-route phase, wipe any stale route completion state
+          if (!['shiftroute', 'end_shift'].includes(shift.status)) {
+            clearDriverSessionData()
+          }
           setActiveShift(shift)
           setPhase(shift.status)
         } else {
+          clearDriverSessionData()
           setPhase('assignment')
         }
       })
@@ -234,13 +244,7 @@ export default function DriverRouteFlow() {
   // ── DEV: jump to any phase, bypassing guards ─────────────────────────────
   async function devJumpToPhase(nextPhase) {
     // Clear stale route session keys so modules start fresh
-    const CLEAR_KEYS = [
-      'ww_route_state', 'ww_current_stop_index', 'ww_stop_statuses',
-      'ww_route_complete', 'ww_extended_mode', 'ww_stop_statuses_snapshot',
-      'ww_pending_collection_note', 'ww_pending_collection_stop_id',
-      'ww_current_stop', 'ww_completed_stops', 'ww_total_stops',
-    ]
-    CLEAR_KEYS.forEach(k => sessionStorage.removeItem(k))
+    clearDriverSessionData()
 
     // truck_not_full is a DEV-only virtual phase — no backend equivalent
     // Pre-populate ww_route_complete and jump to shiftroute so ShiftRouteModule mounts it with real data
@@ -311,11 +315,100 @@ export default function DriverRouteFlow() {
       {/* ── DEV: live phase badge ── */}
       <DevStatusBadge phase={phase} activeShift={activeShift} />
 
+      {/* ── DEV: Nuke Shift Button ── */}
+      <button
+        onClick={async () => {
+          if (!window.confirm("NUKE this shift back to Navigate to Base and wipe all completed stops?")) return;
+          try {
+            await api.post('/api/driver/shift/dev-reset/', { phase: 'navigate_to_base' });
+            Object.keys(sessionStorage).forEach(k => {
+              if (k.startsWith('ww_')) sessionStorage.removeItem(k);
+            });
+            window.location.reload();
+          } catch (e) {
+            alert("Reset failed: " + (e.response?.data?.error || e.message));
+          }
+        }}
+        style={{
+          position: 'fixed', top: 56, right: 16, zIndex: 9999,
+          background: '#ef4444', color: 'white', padding: '6px 10px',
+          borderRadius: 8, fontSize: 11, fontWeight: 'bold', border: '2px solid white',
+          boxShadow: '0 4px 12px rgba(239, 68, 68, 0.4)', cursor: 'pointer'
+        }}>
+        DEV: NUKE SHIFT
+      </button>
+
+      {/* ── Minimize to Dashboard Button ── */}
+      <button
+        onClick={() => navigate('/dashboard')}
+        style={{
+          position: 'fixed', top: 16, right: 16, zIndex: 9999,
+          background: 'rgba(15,23,42,0.7)', backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(255,255,255,0.2)', color: '#fff',
+          borderRadius: 20, padding: '8px 12px', fontSize: 12, fontWeight: 700,
+          display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+          transition: 'transform 0.15s, background 0.15s'
+        }}
+        onMouseOver={e => e.currentTarget.style.background = 'rgba(15,23,42,0.9)'}
+        onMouseOut={e => e.currentTarget.style.background = 'rgba(15,23,42,0.7)'}
+        onMouseDown={e => e.currentTarget.style.transform = 'scale(0.96)'}
+        onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+          <polyline points="4 14 10 14 10 20" />
+          <polyline points="20 10 14 10 14 4" />
+          <line x1="14" y1="10" x2="21" y2="3" />
+          <line x1="3" y1="21" x2="10" y2="14" />
+        </svg>
+        Minimize
+      </button>
+
       {/* ── Phase modules ── */}
-      {phase === 'assignment' && <AssignmentModule onAdvance={advancePhase} setActiveShift={setActiveShift} />}
-      {phase === 'navigate_to_base' && <NavigateToBaseModule onAdvance={advancePhase} shift={activeShift} />}
-      {phase === 'confirm_start' && <ConfirmStartModule onAdvance={advancePhase} shift={activeShift} />}
-      {phase === 'checkin' && <CheckInModule onAdvance={advancePhase} shift={activeShift} />}
+      {/*
+        IMPORTANT: .phase-wrapper uses opacity animation (fadePhase 0→1).
+        Per CSS spec, opacity !== 1 creates a new containing block for
+        position:fixed descendants — exactly what ShiftRouteModule and
+        EndShiftModule rely on for their full-screen map and overlays.
+        Fix: only apply the animated class to phases whose internals are
+        regular flow-positioned (assignment, navigate_to_base, confirm_start,
+        checkin). shiftroute and end_shift render without the wrapper so their
+        fixed children remain viewport-relative at all times.
+      */}
+      <style>{`
+        @keyframes fadePhase {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        .phase-fade {
+          animation: fadePhase 0.3s ease-in-out;
+          width: 100%;
+          display: flex;
+          flex-direction: column;
+        }
+      `}</style>
+
+      {phase === 'assignment' && (
+        <div key="assignment" className="phase-fade">
+          <AssignmentModule onAdvance={advancePhase} setActiveShift={setActiveShift} />
+        </div>
+      )}
+      {phase === 'navigate_to_base' && (
+        <div key="navigate_to_base" className="phase-fade">
+          <NavigateToBaseModule onAdvance={advancePhase} shift={activeShift} />
+        </div>
+      )}
+      {phase === 'confirm_start' && (
+        <div key="confirm_start" className="phase-fade">
+          <ConfirmStartModule onAdvance={advancePhase} shift={activeShift} />
+        </div>
+      )}
+      {phase === 'checkin' && (
+        <div key="checkin" className="phase-fade">
+          <CheckInModule onAdvance={advancePhase} shift={activeShift} />
+        </div>
+      )}
+      {/* shiftroute & end_shift: NO wrapper — their internals are position:fixed */}
       {phase === 'shiftroute' && <ShiftRouteModule onAdvance={advancePhase} shift={activeShift} />}
       {phase === 'end_shift' && <EndShiftModule onAdvance={advancePhase} shift={activeShift} />}
 

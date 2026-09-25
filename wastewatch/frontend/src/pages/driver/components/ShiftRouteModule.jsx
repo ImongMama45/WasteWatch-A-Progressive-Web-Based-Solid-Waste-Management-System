@@ -68,9 +68,9 @@ import {
   STOP_STATUS_COLORS,
   STOP_STATUS_LABELS,
   subscribePickupStatusSync,
+  isScheduleFullyResolved,
 } from '../../../utils/pickupStatusSync'
 import useReassignedStops from '../../../hooks/useReassignedStops'
-import TruckNotFull from './TruckNotFull'
 
 const STOP_COLORS = STOP_STATUS_COLORS
 
@@ -230,44 +230,7 @@ function decodePolyline(encoded) {
   return pts
 }
 
-const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
-const bearingToCompass = deg => deg != null
-  ? COMPASS[Math.round(((deg % 360) + 360) % 360 / 45) % 8] : null
-
-function TurnArrow({ type, bearing, size = 48, color = '#0f172a' }) {
-  const compass = bearingToCompass(bearing)
-  const s = { stroke: color, strokeWidth: 2.6, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' }
-  const wrap = (label, children) => (
-    <svg viewBox="0 0 44 44" width={size} height={size} aria-label={label} style={{ display: 'block' }}>
-      {children}
-      {compass && <text x="22" y="43" textAnchor="middle" fontSize="6.5" fontWeight="700"
-        fill={color} opacity="0.5" fontFamily="monospace">{compass}</text>}
-    </svg>
-  )
-  const arrows = {
-    0: wrap('Turn left', <g {...s}><path d="M22,36 L22,20 Q22,12 13,12" /><polyline points="20,20 13,12 21,5" /></g>),
-    1: wrap('Turn right', <g {...s}><path d="M22,36 L22,20 Q22,12 31,12" /><polyline points="24,20 31,12 23,5" /></g>),
-    2: wrap('Sharp left', <g {...s}><path d="M22,36 L22,24 Q22,18 16,14 Q10,10 10,4" /><polyline points="4,10 10,4 16,10" /></g>),
-    3: wrap('Sharp right', <g {...s}><path d="M22,36 L22,24 Q22,18 28,14 Q34,10 34,4" /><polyline points="28,10 34,4 40,10" /></g>),
-    4: wrap('Slight left', <g {...s}><path d="M22,36 L22,20 Q21,12 14,8" /><polyline points="7,12 14,8 16,16" /></g>),
-    5: wrap('Slight right', <g {...s}><path d="M22,36 L22,20 Q23,12 30,8" /><polyline points="28,16 30,8 37,12" /></g>),
-    6: wrap('Straight', <g {...s}><line x1="22" y1="36" x2="22" y2="8" /><polyline points="14,16 22,8 30,16" /></g>),
-    7: wrap('Enter roundabout', <g {...s}><circle cx="22" cy="19" r="8" /><line x1="22" y1="36" x2="22" y2="27" /><line x1="28" y1="12" x2="33" y2="7" /><polyline points="26,3 33,7 29,14" /></g>),
-    8: wrap('Exit roundabout', <g {...s}><circle cx="22" cy="19" r="8" /><line x1="22" y1="36" x2="22" y2="27" /><line x1="28" y1="12" x2="33" y2="7" /><polyline points="26,3 33,7 29,14" /></g>),
-    9: wrap('U-turn', <g {...s}><path d="M14,36 L14,18 Q14,6 22,6 Q30,6 30,14 L30,20" /><polyline points="22,14 30,20 38,14" /><polyline points="8,30 14,36 20,30" /></g>),
-    10: wrap('Arrived', <g><path d="M22,38 Q22,38 13,25 A11,11 0 1,1 31,25 Z" {...s} /><circle cx="22" cy="17" r="3.5" fill={color} opacity="0.7" stroke="none" /></g>),
-    11: wrap('Depart', <g {...s}><line x1="13" y1="7" x2="13" y2="37" /><path d="M13,7 L33,14 L13,21" fill={color} fillOpacity="0.12" stroke={color} strokeWidth="2.6" strokeLinejoin="round" /></g>),
-    12: wrap('Keep left', <g {...s}><line x1="22" y1="36" x2="22" y2="8" strokeOpacity="0.2" /><path d="M22,36 L22,22 L15,8" /><polyline points="9,13 15,8 18,15" /></g>),
-    13: wrap('Keep right', <g {...s}><line x1="22" y1="36" x2="22" y2="8" strokeOpacity="0.2" /><path d="M22,36 L22,22 L29,8" /><polyline points="26,15 29,8 35,13" /></g>),
-  }
-  return arrows[type] ?? arrows[6]
-}
-
-const TURN_COLOR = {
-  0: '#3b82f6', 1: '#3b82f6', 2: '#f59e0b', 3: '#f59e0b', 4: '#64748b', 5: '#64748b',
-  6: '#16a34a', 7: '#8b5cf6', 8: '#8b5cf6', 9: '#ef4444', 10: '#16a34a',
-  11: '#2563eb', 12: '#64748b', 13: '#64748b',
-}
+import TurnArrow, { TURN_COLOR } from './TurnArrow'
 
 function MapLegend() {
   const items = [
@@ -334,7 +297,7 @@ function RouteOverlay({ children, visible, onClose }) {
 // ─── ARRIVED OVERLAY ──────────────────────────────────────────────────────────
 const QUICK_NOTES = ['Collected', 'Partially collected', 'No bins outside', 'Overflowing']
 
-function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, onConfirm, onBack }) {
+function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, onConfirm, onBack, missedStopId }) {
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [stop, setStop] = useState(null)
@@ -383,13 +346,14 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
       setCameraError('You must be logged in to submit proof.')
       return
     }
-    
+
     setSubmitting(true)
     setCameraError('')
 
     try {
-      const photoRes = await fetch(photos[0])
-      const photoBlob = await photoRes.blob()
+      // photos[0] is a File object from compressImage — use it directly.
+      // fetch() on a File produces an empty/corrupted blob → Cloudinary "Invalid image file".
+      const photoBlob = photos[0]
 
       const note_ = note.trim()
       const collected_at = new Date().toISOString()
@@ -414,6 +378,10 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
           sessionStorage.setItem('ww_pending_collection_photo_url', res.data?.photo_url || '')
           sessionStorage.setItem('ww_pending_collection_note', note_)
           sessionStorage.setItem('ww_pending_collection_at', collected_at)
+          // If collecting a missed stop, also call the resolve endpoint
+          if (missedStopId) {
+            try { await api.post(`/api/driver/shift/missed-stops/${missedStopId}/collect/`) } catch { /* non-fatal */ }
+          }
           setSubmitting(false)
           onConfirm()
           return
@@ -434,7 +402,7 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
         collected_at,
         lat,
         lng,
-      }, 1) 
+      }, 1)
 
       sessionStorage.setItem('ww_pending_collection_photo_url', '')
       sessionStorage.setItem('ww_pending_collection_note', note_)
@@ -464,15 +432,19 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
             <div style={{ background: 'linear-gradient(160deg, #0f172a 60%, #1e3a5f)', padding: '40px 24px 32px', textAlign: 'center', color: '#fff', borderRadius: '18px 18px 0 0' }}>
-              <div style={{ fontSize: 48, marginBottom: 12 }}>📍</div>
-              <h1 style={{ fontFamily: 'var(--font-head)', fontSize: 24, fontWeight: 900, margin: '0 0 6px', letterSpacing: '.02em' }}>You have arrived</h1>
+              <div style={{ fontSize: 48, marginBottom: 12 }}>{missedStopId ? '🎯' : '📍'}</div>
+              <h1 style={{ fontFamily: 'var(--font-head)', fontSize: 24, fontWeight: 900, margin: '0 0 6px', letterSpacing: '.02em' }}>
+                {missedStopId ? 'Collect Missed Stop' : 'You have arrived'}
+              </h1>
               <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, margin: 0 }}>
                 {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
               </p>
             </div>
 
             <div className="am-card" style={{ margin: '0 16px', marginTop: -18, background: '#fff', borderRadius: 14, padding: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.08)', marginBottom: 16 }}>
-              <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.06em', marginBottom: 4 }}>CURRENT STOP</div>
+              <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.06em', marginBottom: 4 }}>
+                {missedStopId ? 'MISSED STOP — UNCLAIMED' : 'CURRENT STOP'}
+              </div>
               <div style={{ fontWeight: 900, fontSize: 15, color: '#0f172a', marginBottom: 2 }}>{displayName}</div>
               <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>{displayBarangay}</div>
             </div>
@@ -522,7 +494,7 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
                     </span>
                   )}
                 </div>
-                
+
                 <MultiPhotoPicker
                   photos={photos}
                   onChange={setPhotos}
@@ -553,7 +525,7 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
 
 // ─── STOP COMPLETED OVERLAY ───────────────────────────────────────────────────
 
-function StopCompletedOverlay({ visible, schedule, currentStopIndex, stopStatuses, gpsPos, onNextStop, onEndShift, onExtendedMode, onShowTruckNotFull }) {
+function StopCompletedOverlay({ visible, schedule, currentStopIndex, stopStatuses, gpsPos, onNextStop, onEndShift, onExtendedMode }) {
   const { user } = useAuth()
   const firstName = user?.full_name?.split(' ')[0] || 'Driver'
   const [showRouteList, setShowRouteList] = useState(false)
@@ -582,13 +554,13 @@ function StopCompletedOverlay({ visible, schedule, currentStopIndex, stopStatuse
   const progress = total > 0 ? Math.round((completed / total) * 100) : 0
   const isRouteComplete = total > 0 && progress === 100
 
-  // Auto-advance to TruckNotFull if the overlay becomes visible and route is already 100%
+  // Auto-advance to EndShiftModule if the overlay becomes visible and route is already 100%
   useEffect(() => {
-    if (!visible || !isRouteComplete || !onShowTruckNotFull) return
+    if (!visible || !isRouteComplete || !onEndShift) return
     const timer = setTimeout(() => {
       try { sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...stopStatuses])) } catch { }
       sessionStorage.setItem('ww_route_complete', 'true')
-      onShowTruckNotFull()
+      onEndShift()
     }, 600)
     return () => clearTimeout(timer)
   }, [visible, isRouteComplete]) // eslint-disable-line
@@ -709,10 +681,10 @@ function StopCompletedOverlay({ visible, schedule, currentStopIndex, stopStatuse
           {isRouteComplete ? (
             <>
               <button onClick={() => {
-                // Persist snapshot so TruckNotFull can read it even after re-render
+                // Persist snapshot so EndShiftModule can read it even after re-render
                 try { sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...stopStatuses])) } catch { }
                 sessionStorage.setItem('ww_route_complete', 'true')
-                if (onShowTruckNotFull) onShowTruckNotFull()
+                if (onEndShift) onEndShift()
               }} style={{
                 width: '100%', padding: '16px', borderRadius: 14,
                 background: '#0f172a', color: '#fff', border: 'none',
@@ -759,7 +731,6 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     shiftActive,
     scheduleId: activeScheduleId,
     loading: shiftLoading,
-    endShift: endShiftOnBackend,
   } = useShiftTimer()
   const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } = useDriverGps()
 
@@ -784,12 +755,22 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
   })
 
   const [showFullConfirm, setShowFullConfirm] = useState(false)
-  const [showTruckNotFull, setShowTruckNotFull] = useState(() => {
-    return sessionStorage.getItem('ww_route_complete') === 'true'
-  })
+  const [showOverrideConfirm, setShowOverrideConfirm] = useState(false)
+
 
   const isExtendedMode = sessionStorage.getItem('ww_extended_mode') === 'true'
+
+
   useEffect(() => { injectStopMarkerStyles() }, [])
+
+  // Hydrate the full stop→stop leg cache from sessionStorage on mount.
+  // Runs before schedule/GPS loads so cached legs are available immediately.
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem('ww_ors_route_cache')
+      if (saved) routeLegCacheRef.current = new Map(JSON.parse(saved))
+    } catch { }
+  }, [])
 
   // ── FIX 2: Clear mockGps on unmount to prevent stale state on remount. ────
   const [mockGps, setMockGps] = useState(null)
@@ -839,6 +820,62 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
   const prevStopIndexRef = useRef(currentStopIndex)
 
   const [stopStatuses, setStopStatuses] = useState(restoreStopStatuses)
+
+  // ── Reactive route-completion catcher ────────────────────────────────────
+  // Fires after BOTH of these are true:
+  //   1. statusesSynced — the API has responded at least once (not just the
+  //      sessionStorage-restored initial state from the prior mount).
+  //   2. sawIncompleteRef — this mount has seen at least one render where the
+  //      route was NOT fully resolved, so we know the completion happened
+  //      here, not before we arrived.
+  //
+  // Guard rationale:
+  //   Without (1), a stale ww_stop_statuses from a previously-finished run
+  //   could trigger auto-end before the first network response arrives.
+  //   Without (2), the catcher fires on routes whose backend data was already
+  //   all-resolved when we mounted (e.g., re-opening the app after the last
+  //   stop was confirmed hours ago).
+  //
+  // Known limitation: if the very first synced render shows "complete" because
+  // the last stop was just collected moments before a reload, sawIncompleteRef
+  // is still false and the catcher does NOT fire — the driver must either reload
+  // again (which triggers the backend /shift/current/ auto-heal to end_shift)
+  // or tap End Shift manually. This is intentional until the [catcher] console
+  // log confirms which hypothesis triggers the spurious auto-end in production.
+  //
+  // IMPORTANT: extended mode MUST be excluded — in extended mode the driver's
+  // original schedule is already 100% resolved by design, so this guard would
+  // instantly eject them if it were allowed to fire there.
+  const hasAutoEndedRef = useRef(false)
+  const sawIncompleteRef = useRef(false)
+  const [statusesSynced, setStatusesSynced] = useState(false)
+  useEffect(() => {
+    if (hasAutoEndedRef.current || isExtendedMode) return
+    if (!schedule || !statusesSynced || !stopStatuses.size) return
+
+    // Diagnostic: log on every evaluation so stale-state races show up in DevTools.
+    console.log('[catcher]', { schedId: schedule?.id, n: stopStatuses.size, statusesSynced, statuses: [...stopStatuses] })
+
+    if (!isScheduleFullyResolved(schedule, stopStatuses)) {
+      // Route still has unresolved stops — record that we've seen it incomplete.
+      sawIncompleteRef.current = true
+      return
+    }
+    if (!sawIncompleteRef.current) {
+      // Route was already fully resolved when we mounted (stale data or prior run).
+      // Do NOT auto-end — a driver who reloads mid-shift should not be ejected.
+      // The backend /shift/current/ auto-heal already handles the resume path.
+      console.warn('[ShiftRoute] route already resolved on arrival — not auto-ending (stale data guard)')
+      return
+    }
+    hasAutoEndedRef.current = true
+    sessionStorage.setItem('ww_route_complete', 'true')
+    try { sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...stopStatuses])) } catch {}
+    // Use setTimeout to let current React render cycle finish before transitioning
+    setTimeout(() => handleEndShift(), 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schedule, stopStatuses, statusesSynced, isExtendedMode])
+
   const [stopDetailsMap, setStopDetailsMap] = useState(new Map())
   const stopDetailsMapRef = useRef(new Map())
   useEffect(() => { stopDetailsMapRef.current = stopDetailsMap }, [stopDetailsMap])
@@ -846,12 +883,20 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
   const [orsData, setOrsData] = useState(null)
   const [orsFetchKey, setOrsFetchKey] = useState(0)
   const lastOrsGpsPosRef = useRef(null)
-  // Straight-line fallback layer (always drawn; replaced by ORS when online)
+  // Straight-line fallback layer ref (kept for cleanup only; drawing now via cachedLegLayersRef)
   const fallbackRouteLayer = useRef(null)
-  // Last successful ORS geometry — persisted across brief offline periods
+  // Last successful ORS geometry for the *current* target.
+  // Stored as { key: "lat,lng", geometry } so stale geometry from a previous
+  // leg is never redrawn over a new leg (Fix 1).
   const lastOrsGeometryRef = useRef(null)
   // Retry timer ref for ORS backoff
   const orsRetryTimerRef = useRef(null)
+  // Stop→stop leg cache: "fromIdx-toIdx" → { geometry } — pre-fetched while online (Fix 2)
+  const routeLegCacheRef = useRef(new Map())
+  // All currently-drawn route polyline layers, tracked as an array for clean teardown (Fix 4)
+  const cachedLegLayersRef = useRef([])
+  // Camera-authority flag: true while next stop is >800m away (Fix 5)
+  const isFarModeRef = useRef(false)
   // Track online status for auto-retry
   const [isOnline, setIsOnline] = useState(() => navigator.onLine)
 
@@ -859,7 +904,33 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
   // Missed stops from OTHER drivers' routes — shown as floating markers,
   // NOT inserted into the navigation sequence
   const [floatingMissedStops, setFloatingMissedStops] = useState([])
+  const [activeMissedStop, setActiveMissedStop] = useState(null)
   const floatingMarkersRef = useRef(new Map()) // key: pickup_status_id → L.Marker
+
+  // Auto-target nearest missed stop the moment they become available (or after
+  // the current one is claimed/resolved by another driver).
+  useEffect(() => {
+    if (!isExtendedMode) return
+    if (!floatingMissedStops.length) {
+      // All stops claimed — clear active target
+      setActiveMissedStop(null)
+      return
+    }
+    // If current activeMissedStop is still in the list, keep it
+    if (activeMissedStop && floatingMissedStops.find(s => s.id === activeMissedStop.id)) return
+    // Pick nearest stop by haversine distance (falls back to first if no GPS)
+    let best = floatingMissedStops[0]
+    if (gpsPos) {
+      let bestDist = Infinity
+      floatingMissedStops.forEach(s => {
+        if (s.lat == null || s.lng == null) return
+        const d = haversineDistance(gpsPos.lat, gpsPos.lng, Number(s.lat), Number(s.lng))
+        if (d < bestDist) { bestDist = d; best = s }
+      })
+    }
+    setActiveMissedStop(best)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floatingMissedStops, isExtendedMode])
 
   useEffect(() => {
     if (schedule?.waypoints) setLocalWaypoints(schedule.waypoints)
@@ -881,22 +952,28 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
 
   useReassignedStops({
     enabled: isExtendedMode,
-    scheduleId: schedule?.id,
+    driverLat: gpsPos?.lat,
+    driverLng: gpsPos?.lng,
     onNewStops: (newStops) => {
       // Store as floating markers — NOT part of the route sequence
       setFloatingMissedStops(prev => {
-        const existingIds = new Set(prev.map(s => s.pickup_status_id ?? s.stop_order))
-        const truly_new = newStops.filter(s => !existingIds.has(s.pickup_status_id ?? s.stop_order))
+        const existingIds = new Set(prev.map(s => s.id))
+        const truly_new = newStops.filter(s => !existingIds.has(s.id))
         if (!truly_new.length) return prev
         return [...prev, ...truly_new]
       })
       setHasNewStops(true)
-    }
+    },
+    onStopResolved: (resolvedId) => {
+      // Remove floating marker when another extended driver claims this stop
+      setFloatingMissedStops(prev => prev.filter(s => s.id !== resolvedId))
+    },
   })
 
   const waypoints = localWaypoints
 
-  const currentTarget = waypoints[currentStopIndex] || null
+  const targetWp = waypoints[currentStopIndex] || null
+  const currentTarget = activeMissedStop || targetWp
   const nextTarget = waypoints[currentStopIndex + 1] || null
 
   const distanceToStop = gpsPos && currentTarget
@@ -956,6 +1033,7 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
       })
       return next
     })
+    setStatusesSynced(true)
   }, [schedule?.id])
 
   const repaintMarker = useCallback((wpIndex, status, detailsOverride) => {
@@ -1042,6 +1120,7 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
             if (!Number.isNaN(stopOrder)) statusMap.set(stopOrder, status)
           })
           setStopStatuses(statusMap)
+          setStatusesSynced(true)
         } catch { }
       })
       .catch(() => setSchedule(null))
@@ -1076,7 +1155,7 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     setMapReady(true)
     setTimeout(() => map.invalidateSize(), 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leafletReady, schedule, showTruckNotFull])
+  }, [leafletReady, schedule])
 
 
   // ── Online / offline listener — triggers ORS retry on reconnect ─────────
@@ -1237,13 +1316,16 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
         zIndexOffset: 800,
       })
         .addTo(mapInstance.current)
+        .on('click', () => {
+          setActiveMissedStop(wp)
+        })
         .bindPopup(`
           <div style="font-family:sans-serif;min-width:180px;">
             <b style="font-size:13px;">⚠ Missed Stop</b><br/>
             <span style="font-size:12px;color:#64748b;">${wp.label || 'Unlabelled stop'}</span><br/>
             <span style="font-size:11px;color:#ef4444;font-weight:700;">Available for collection</span>
             <div style="margin-top:6px;font-size:10px;color:#94a3b8;">
-              This stop was missed by another driver.<br/>Collect it if you are nearby.
+              This stop was missed by another driver.<br/>Click "Confirm on Arrival" below to collect it.
             </div>
           </div>`)
 
@@ -1255,6 +1337,10 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
   const buildRouteCoords = useCallback(() => {
     const startLng = Number(gpsPos?.lng ?? waypoints[0]?.lng ?? 121.617)
     const startLat = Number(gpsPos?.lat ?? waypoints[0]?.lat ?? 13.9373)
+    if (activeMissedStop) {
+      const target = [Number(activeMissedStop.lng), Number(activeMissedStop.lat)]
+      return { startLat, startLng, remaining: [target], orsCoords: [[startLng, startLat], target] }
+    }
     const routableFromCurrent = getRoutableIndices().filter(idx => idx >= currentStopIndex)
     const remaining = routableFromCurrent
       .slice(0, 40)
@@ -1263,41 +1349,43 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
         const wp = waypoints[idx]
         return [Number(wp.lng), Number(wp.lat)]
       })
-      
+
     const target = remaining[0]
     const orsCoords = target ? [[startLng, startLat], target] : [[startLng, startLat]]
     return { startLat, startLng, remaining, orsCoords }
-  }, [gpsPos, waypoints, getRoutableIndices, currentStopIndex])
+  }, [gpsPos, waypoints, getRoutableIndices, currentStopIndex, activeMissedStop])
 
-  // ── Draw / update the straight-line fallback polyline ─────────────────────
-  // Called immediately so the driver always sees some route even without ORS.
-  const drawFallbackRoute = useCallback(() => {
+  // ── Shared traversal: the physical stop sequence from currentTarget onward,
+  // regardless of watcher/validation status. Used by BOTH the leg pre-cache
+  // (4b) and the draw loop (drawAllLegs) so their keys always agree.
+  const getAheadSequence = useCallback(() => {
+    if (!currentTarget) return []
+    if (activeMissedStop) return []
+    const rest = waypoints
+      .map((wp, idx) => ({ wp, idx }))
+      .filter(({ idx, wp }) => idx > currentStopIndex && wp.lat != null && wp.lng != null)
+    return [{ wp: currentTarget, idx: currentStopIndex }, ...rest]
+  }, [waypoints, currentStopIndex, currentTarget, activeMissedStop])
+
+
+  // ── Single authoritative draw function for all route legs ─────────────────
+  //
+  // Leg 0  (GPS → currentTarget) — always drawn when currentTarget exists,
+  //   regardless of watcher/validation status.  Uses lastOrsGeometryRef (Fix 1).
+  // Legs 1+ (stop → stop ahead) — uses raw waypoints, NOT getRoutableIndices,
+  //   so PENDING_INSPECTION / EMPTY_STOP stops don't suppress the route line.
+  //
+  // Current leg:  solid/dashed bright blue (#3b82f6 / #94a3b8)
+  // Upcoming legs: solid/dashed sky-blue  (#bfdbfe) — visually subordinate
+  const drawAllLegs = useCallback(() => {
     if (!mapReady || !mapInstance.current || !window.L) return
     const L = window.L
-    const { startLat, startLng, remaining } = buildRouteCoords()
-    
-    if (fallbackRouteLayer.current) {
-      try { mapInstance.current.removeLayer(fallbackRouteLayer.current) } catch { }
-      fallbackRouteLayer.current = null
-    }
-    
-    if (!remaining.length) return
-    
-    // Build [lat, lng] pairs for Leaflet (only to the immediate next stop)
-    const pts = [[startLat, startLng], [remaining[0][1], remaining[0][0]]]
-    
-    fallbackRouteLayer.current = L.polyline(pts, {
-      color: '#94a3b8',
-      weight: 3,
-      opacity: 0.7,
-      dashArray: '8 8',
-    }).addTo(mapInstance.current)
-  }, [buildRouteCoords, mapReady])
 
-  // ── Draw the ORS route (replaces fallback when ORS succeeds) ─────────────
-  const drawOrsRoute = useCallback((geometry) => {
-    if (!mapInstance.current || !window.L) return
-    
+    // Clear all managed leg layers
+    cachedLegLayersRef.current.forEach(layer => {
+      try { mapInstance.current.removeLayer(layer) } catch { }
+    })
+    cachedLegLayersRef.current = []
     if (routeLayer.current) {
       try { mapInstance.current.removeLayer(routeLayer.current) } catch { }
       routeLayer.current = null
@@ -1306,37 +1394,73 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
       try { mapInstance.current.removeLayer(fallbackRouteLayer.current) } catch { }
       fallbackRouteLayer.current = null
     }
-    
-    if (!geometry) return
-    
-    const pts = decodePolyline(geometry)
-    routeLayer.current = window.L.polyline(pts, { color: '#3b82f6', weight: 6, opacity: 0.85 }).addTo(mapInstance.current)
-  }, [])
 
-  // 4. ORS directions — with offline fallback and exponential-backoff retry
+    const driverLat = gpsPos?.lat ?? waypoints[0]?.lat ?? 13.9373
+    const driverLng = gpsPos?.lng ?? waypoints[0]?.lng ?? 121.617
+
+    // ── Leg 0: GPS → currentTarget ────────────────────────────────────────────
+    if (currentTarget) {
+      const targetKey = `${currentTarget.lat},${currentTarget.lng}`
+      if (lastOrsGeometryRef.current?.key === targetKey) {
+        const pts = decodePolyline(lastOrsGeometryRef.current.geometry)
+        const layer = L.polyline(pts, { color: '#3b82f6', weight: 6, opacity: 0.85 }).addTo(mapInstance.current)
+        cachedLegLayersRef.current.push(layer)
+      } else {
+        const layer = L.polyline(
+          [[driverLat, driverLng], [currentTarget.lat, currentTarget.lng]],
+          { color: '#94a3b8', weight: 3, opacity: 0.5, dashArray: '2 8' }
+        ).addTo(mapInstance.current)
+        cachedLegLayersRef.current.push(layer)
+      }
+    }
+
+    // ── Legs 1+: physical stop sequence ahead, watcher-status-agnostic ───────
+    const ahead = getAheadSequence()
+
+    for (let i = 0; i < ahead.length - 1; i++) {
+      const { wp: fromWp, idx: fromIdx } = ahead[i]
+      const { wp: toWp, idx: toIdx } = ahead[i + 1]
+      const legKey = `${fromIdx}-${toIdx}`
+      const cached = routeLegCacheRef.current.get(legKey)
+      if (cached?.geometry) {
+        const pts = decodePolyline(cached.geometry)
+        const layer = L.polyline(pts, { color: '#bfdbfe', weight: 4, opacity: 0.75, dashArray: '10 6' }).addTo(mapInstance.current)
+        cachedLegLayersRef.current.push(layer)
+      } else {
+        const layer = L.polyline(
+          [[fromWp.lat, fromWp.lng], [toWp.lat, toWp.lng]],
+          { color: '#bfdbfe', weight: 3, opacity: 0.4, dashArray: '2 10' }
+        ).addTo(mapInstance.current)
+        cachedLegLayersRef.current.push(layer)
+      }
+    }
+  }, [mapReady, currentStopIndex, currentTarget, gpsPos, waypoints, getAheadSequence])
+
+
+  // 4a. ORS directions — reactive current-leg (GPS → currentTarget)
+  //
+  // Draws all legs from current cache state first (via drawAllLegs), so the
+  // driver always sees something. Fetches real ORS for the current leg and
+  // upgrades the dashed fallback to a solid line once it lands.
+  //
+  // lastOrsGeometryRef is TARGET-KEYED: { key: "lat,lng", geometry }.
+  // drawAllLegs only draws the cached geometry if its key matches the current
+  // target — preventing stale routes from a previous leg being redrawn (Fix 1).
   useEffect(() => {
     if (!currentTarget || !mapReady) return
 
-    // Always draw the straight-line fallback first so the driver never sees a
-    // blank map.  This also covers: no API key, offline, ORS error.
-    drawFallbackRoute()
-
-    // If we have a cached ORS geometry, redraw it on top immediately so the
-    // driver keeps the turn-by-turn line during a brief offline period.
-    if (lastOrsGeometryRef.current) {
-      drawOrsRoute(lastOrsGeometryRef.current)
-    }
+    drawAllLegs() // draw all legs from cache; current leg: dashed until ORS lands
 
     const orsApiKey = import.meta.env.VITE_ORS_API_KEY
-    if (!orsApiKey) return          // no key — straight-line is the only route
-    if (!isOnline) return           // offline — cached route already redrawn above
+    if (!orsApiKey) return          // no key — dashed fallback is the only route
+    if (!isOnline) return           // offline — 4c hydration handles restore
 
     const { orsCoords } = buildRouteCoords()
     if (orsCoords.length < 2) return
 
-    // Clear any pending retry before starting a fresh fetch
     if (orsRetryTimerRef.current) { clearTimeout(orsRetryTimerRef.current); orsRetryTimerRef.current = null }
 
+    const targetKey = `${currentTarget.lat},${currentTarget.lng}`
     let cancelled = false
     let attempt = 0
     const MAX_ATTEMPTS = 3
@@ -1355,27 +1479,25 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
         const data = await res.json()
         if (cancelled) return
         if (!data.routes?.length) {
-          // ORS returned no routes (e.g. unreachable area) — keep fallback visible
-          console.warn('[ORS] No routes returned — using straight-line fallback')
-          drawFallbackRoute()
-          return
+          console.warn('[ORS] No routes returned — dashed fallback remains')
+          return // drawAllLegs already drew the dashed fallback at effect start
         }
         const route = data.routes[0]
         setOrsData(route)
-        lastOrsGeometryRef.current = route.geometry // cache for offline reuse
-        drawOrsRoute(route.geometry)
+        // Store with target key — prevents stale re-draw on the next effect run (Fix 1)
+        lastOrsGeometryRef.current = { key: targetKey, geometry: route.geometry }
+        // Persist for offline restore — target-keyed to prevent wrong-leg hydration on reload (Fix 3)
+        try { sessionStorage.setItem('ww_ors_route', JSON.stringify({ key: targetKey, geometry: route.geometry })) } catch { }
+        drawAllLegs() // upgrade current-leg dashed → solid
       } catch (err) {
         if (cancelled) return
         attempt += 1
         console.warn(`[ORS] Fetch failed (attempt ${attempt}/${MAX_ATTEMPTS}):`, err.message)
-        // Ensure fallback is visible while we wait to retry
-        drawFallbackRoute()
         if (attempt < MAX_ATTEMPTS && navigator.onLine) {
-          // Exponential backoff: 2 s, 4 s, 8 s
           const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1)
           orsRetryTimerRef.current = setTimeout(() => { if (!cancelled) attemptFetch() }, delay)
         } else {
-          console.warn('[ORS] Max retries reached — falling back to straight-line route')
+          console.warn('[ORS] Max retries reached — dashed fallback remains')
         }
       }
     }
@@ -1387,16 +1509,93 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
       if (orsRetryTimerRef.current) { clearTimeout(orsRetryTimerRef.current); orsRetryTimerRef.current = null }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orsFetchKey, currentTarget?.lat, currentTarget?.lng, currentStopIndex, mapReady, isOnline])
+  }, [orsFetchKey, currentTarget?.lat, currentTarget?.lng, currentStopIndex, mapReady, isOnline, drawAllLegs])
+
+  // 4b. Background pre-cache: fetch all remaining stop→stop legs while online.
+  //
+  // Only covers fixed stop→stop pairs (both endpoints stable coordinates).
+  // The GPS→currentTarget leg (leg 0) stays reactive in 4a — it’s GPS-anchored
+  // and changes too frequently to be a stable cache key.
+  // Sequential fetch with 300ms gap avoids ORS rate-limiting.
+  // Each successful leg is persisted immediately so a page refresh restores it.
+  useEffect(() => {
+    if (!isOnline || !schedule?.id || !mapReady) return
+    const orsApiKey = import.meta.env.VITE_ORS_API_KEY
+    if (!orsApiKey) return
+
+    const ahead = getAheadSequence()
+    if (ahead.length < 2) return
+
+    let cancelled = false
+
+    async function cacheLeg(fromIdx, toIdx) {
+      const legKey = `${fromIdx}-${toIdx}`
+      if (routeLegCacheRef.current.has(legKey)) return // already cached
+      const fromWp = waypoints[fromIdx]
+      const toWp = waypoints[toIdx]
+      if (!fromWp || !toWp) return
+      try {
+        const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: orsApiKey },
+          body: JSON.stringify({
+            coordinates: [[Number(fromWp.lng), Number(fromWp.lat)], [Number(toWp.lng), Number(toWp.lat)]],
+            instructions: false,
+          }),
+        })
+        if (cancelled || !res.ok) return
+        const data = await res.json()
+        if (cancelled || !data.routes?.length) return
+        routeLegCacheRef.current.set(legKey, { geometry: data.routes[0].geometry })
+        try { sessionStorage.setItem('ww_ors_route_cache', JSON.stringify([...routeLegCacheRef.current])) } catch {}
+        drawAllLegs() // upgrade dashed → solid as each leg becomes available
+      } catch { /* skip failed legs — they stay dashed */ }
+    }
+
+    async function cacheAllLegs() {
+      for (let i = 0; i < ahead.length - 1; i++) {
+        if (cancelled) return
+        await cacheLeg(ahead[i].idx, ahead[i + 1].idx)
+        if (!cancelled) await new Promise(r => setTimeout(r, 300))
+      }
+    }
+
+    cacheAllLegs()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline, schedule?.id, mapReady, currentStopIndex, currentTarget])
+
+  // 4c. Hydrate current-leg geometry from sessionStorage after currentTarget resolves.
+  //
+  // Deferred until AFTER schedule + stop-index loads (both async) so currentTarget
+  // is stable.  Only hydrates if the persisted key matches — prevents restoring a
+  // stale leg from a previous session (Fix 3).
+  useEffect(() => {
+    if (!currentTarget || !mapReady) return
+    const targetKey = `${currentTarget.lat},${currentTarget.lng}`
+    if (lastOrsGeometryRef.current?.key === targetKey) return // already in memory
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('ww_ors_route') || 'null')
+      if (saved?.key === targetKey) {
+        lastOrsGeometryRef.current = saved
+        drawAllLegs()
+      }
+    } catch { }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTarget?.lat, currentTarget?.lng, mapReady, drawAllLegs])
 
   // 5. Move driver marker — runs every time gpsPos updates.
+  //
+  // Camera authority (only while 'navigating'):
+  //   dist > 800m, not already in far-mode  → fitBounds(driver + target) ONCE
+  //   dist ≤ 800m (or no target)            → panTo follow-cam on every tick
+  //   dist > 800m, already in far-mode      → do nothing (respect driver’s manual pan)
   useEffect(() => {
     if (!gpsPos) return
     if (!mapInstance.current || !window.L) return
 
     if (driverMarker.current) {
       driverMarker.current.setLatLng([gpsPos.lat, gpsPos.lng])
-      // Update truck rotation if heading is available
       if (driverMarker.current._truckIconHtml && window.L) {
         const heading = gpsPos.heading ?? 0
         driverMarker.current.setIcon(window.L.divIcon({
@@ -1407,15 +1606,38 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
         }))
       }
     }
-    // Pan map only while navigating (not when an overlay is open).
+
     if (routeState === 'navigating') {
-      mapInstance.current.panTo([gpsPos.lat, gpsPos.lng])
+      const dist = currentTarget
+        ? haversineDistance(gpsPos.lat, gpsPos.lng, currentTarget.lat, currentTarget.lng)
+        : 0
+
+      const wasFar = isFarModeRef.current
+      const isFar = dist > 800
+
+      if (isFar && !wasFar) {
+        // Just crossed the far threshold — fit both driver and target into view once
+        isFarModeRef.current = true
+        mapInstance.current.fitBounds(
+          [[gpsPos.lat, gpsPos.lng], [currentTarget.lat, currentTarget.lng]],
+          { padding: [60, 60], maxZoom: 16 }
+        )
+      } else if (!isFar) {
+        // Normal range — follow-cam on every GPS tick
+        isFarModeRef.current = false
+        mapInstance.current.panTo([gpsPos.lat, gpsPos.lng])
+      }
+      // else: isFar && wasFar — already zoomed out, leave camera alone
     }
-  }, [gpsPos, routeState])
+  }, [gpsPos, routeState, currentTarget])
 
   // 6. Cleanup
   useEffect(() => () => {
     if (orsRetryTimerRef.current) clearTimeout(orsRetryTimerRef.current)
+    cachedLegLayersRef.current.forEach(layer => {
+      try { mapInstance.current?.removeLayer(layer) } catch { }
+    })
+    cachedLegLayersRef.current = []
     if (mapInstance.current) {
       mapInstance.current.remove()
       mapInstance.current = null
@@ -1464,7 +1686,49 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     setRouteState('arrived')
   }
 
+  async function handleCollectMissedStop() {
+    // Route through the ArrivedOverlay photo flow — same as a normal stop.
+    // The overlay's onConfirm will call /missed-stops/<id>/collect/ after uploading the photo.
+    if (gpsPos) {
+      sessionStorage.setItem('ww_gps_lat', String(gpsPos.lat))
+      sessionStorage.setItem('ww_gps_lng', String(gpsPos.lng))
+    }
+    setRouteState('arrived')
+  }
+
+  function handleCollectClick() {
+    if (activeMissedStop) {
+      handleCollectMissedStop()
+      return
+    }
+    const currentStatus = getStopStatus(currentStopIndex);
+    if (currentStatus === 'PENDING_INSPECTION') {
+      if (currentTarget?.watcher_names === 'No assigned watcher') {
+        sessionStorage.setItem('ww_override_reason', '[OVERRIDE: No Watcher] ');
+        handleArrived();
+      } else {
+        setShowOverrideConfirm(true);
+      }
+    } else {
+      sessionStorage.removeItem('ww_override_reason');
+      handleArrived();
+    }
+  }
+
   function handleCollectionConfirmed() {
+    if (activeMissedStop) {
+      // Missed stop: show a toast, remove from floating list, clear active target
+      notify({ variant: 'success', message: `🎯 Missed stop collected! +50 pts` })
+      
+      // Update local storage so the dashboard immediately shows the new count
+      const localCount = parseInt(sessionStorage.getItem('ww_missed_stops_collected') || '0', 10)
+      sessionStorage.setItem('ww_missed_stops_collected', String(localCount + 1))
+      
+      setFloatingMissedStops(prev => prev.filter(s => s.id !== activeMissedStop.id))
+      setActiveMissedStop(null)
+      setRouteState('navigating')
+      return
+    }
     setStopStatuses(prev => {
       const next = new Map(prev)
       try {
@@ -1486,12 +1750,12 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
           if (isCompletedStopStatus(s) || s === 'EMPTY_STOP') completedCount++
         }
         if (completedCount >= stopCount) {
-          // All stops done — snapshot, mark route complete, go straight to TruckNotFull
+          // All stops done — snapshot, mark route complete, go straight to EndShiftModule
           try { sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...next])) } catch { }
           sessionStorage.setItem('ww_route_complete', 'true')
           // Defer so state update from setStopStatuses settles first
           setTimeout(() => {
-            setShowTruckNotFull(true)
+            handleEndShift()
           }, 400)
           return next
         }
@@ -1501,6 +1765,13 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     })
     repaintMarker(currentStopIndex, 'COLLECTION_REPORTED')
     setRouteState('completed')
+  }
+
+  function handleDevSkipStop() {
+    if (nextTarget) {
+      teleportTo(nextTarget)
+      handleNextStop()
+    }
   }
 
   function handleNextStop() {
@@ -1542,23 +1813,11 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
       try { sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...stopStatuses])) } catch { }
     }
 
-    try {
-      // Wait for backend confirmation before advancing the UI — this is what
-      // guarantees the shift banner/state disappears globally, not just locally.
-      await endShiftOnBackend({ scheduleId: schedule?.id, missedStopOrders })
-      onAdvance('end_shift')
-    } catch (err) {
-      console.error('[ShiftRouteModule] Failed to end shift on backend:', err)
-      notify({
-        variant: 'error-dark',
-        message: 'Could not end your shift — check your connection and try again.',
-      })
-    }
+    onAdvance('end_shift')
   }
 
-  // Called by TruckNotFull when extended_mode API succeeds (TruckNotFull makes the API call itself)
+  // Called when extended_mode API succeeds
   function handleExtendedModeActivated() {
-    setShowTruckNotFull(false)
     sessionStorage.setItem('ww_extended_mode', 'true')
     sessionStorage.removeItem('ww_route_complete')
     sessionStorage.removeItem('ww_pending_collection_note')
@@ -1602,10 +1861,7 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
 
   return (
     <>
-      {/* ── Only render ShiftRouteModule UI when TruckNotFull is NOT shown ── */}
-      {!showTruckNotFull && (
-        <>
-          <Navbar />
+      <Navbar />
           <style>{`
             @keyframes navPulse    { 0%,100%{opacity:1} 50%{opacity:.3} }
             @keyframes markerPulse { 0%,100%{transform:scale(1);opacity:.5} 50%{transform:scale(1.6);opacity:0} }
@@ -1622,7 +1878,7 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
                 <div style={{ position: 'absolute', top: '50%', right: 14, marginTop: 54, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <button onClick={() => teleportTo(currentTarget)} disabled={!currentTarget} title="Teleport to Current Stop"
                     style={{ width: 44, height: 44, borderRadius: '50%', background: currentTarget ? '#f59e0b' : '#cbd5e1', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentTarget ? 'pointer' : 'not-allowed', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 20 }}>📍</button>
-                  <button onClick={() => teleportTo(nextTarget)} disabled={!nextTarget} title="Teleport to Next Stop"
+                  <button onClick={handleDevSkipStop} disabled={!nextTarget} title="Teleport to Next Stop & Skip Current"
                     style={{ width: 44, height: 44, borderRadius: '50%', background: nextTarget ? '#8b5cf6' : '#cbd5e1', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: nextTarget ? 'pointer' : 'not-allowed', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 20 }}>⏭</button>
                   {isMock && (
                     <button onClick={clearMock} title="Clear Mock GPS"
@@ -1651,10 +1907,25 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
               </div>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                  <span style={{ fontSize: 20, marginTop: 2 }}>📍</span>
+                  <span style={{ fontSize: 20, marginTop: 2 }}>{activeMissedStop ? '🎯' : '📍'}</span>
                   <div>
-                    <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, marginBottom: 2 }}>{currentTarget?.label || `Stop ${currentStopIndex}`}</div>
-                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>{currentStopIndex} of {waypoints.length - 1} · {schedule?.days || ''}</div>
+                    <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, marginBottom: 2 }}>
+                      {currentTarget?.label || (activeMissedStop ? 'Missed Stop' : `Stop ${currentStopIndex}`)}
+                      {!activeMissedStop && getStopStatus(currentStopIndex) === 'PENDING_INSPECTION' && (
+                        <span style={{ 
+                          marginLeft: 8, fontSize: 10, padding: '2px 6px', borderRadius: 4, fontWeight: 800, verticalAlign: 'middle',
+                          background: currentTarget?.watcher_names === 'No assigned watcher' ? '#ef4444' : '#f59e0b',
+                          color: currentTarget?.watcher_names === 'No assigned watcher' ? '#fff' : '#0f172a' 
+                        }}>
+                          {currentTarget?.watcher_names === 'No assigned watcher' ? 'NO WATCHER' : 'UNINSPECTED'}
+                        </span>
+                      )}
+                    </div>
+                    {activeMissedStop ? (
+                       <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>Unclaimed Stop</div>
+                    ) : (
+                       <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>{currentStopIndex} of {waypoints.length - 1} · {schedule?.days || ''}</div>
+                    )}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
@@ -1722,6 +1993,38 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
             {/* BOTTOM PANEL */}
             <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(12px)', borderTopLeftRadius: 24, borderTopRightRadius: 24, boxShadow: '0 -4px 24px rgba(0,0,0,.1)', display: 'flex', flexDirection: 'column', paddingBottom: 24 }}>
               <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2, margin: '12px auto' }} />
+
+              {/* ── Extended mode: no missed stops available ── */}
+              {isExtendedMode && floatingMissedStops.length === 0 ? (
+                <div style={{ padding: '16px 24px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                  <div style={{ fontSize: 42 }}>✅</div>
+                  <div style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 900, color: '#0f172a', textAlign: 'center' }}>
+                    All Clear — No Missed Stops
+                  </div>
+                  <p style={{ fontSize: 13, color: '#64748b', textAlign: 'center', margin: 0 }}>
+                    There are currently no unclaimed stops nearby.
+                    Checking again every 8 seconds…
+                  </p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#94a3b8' }}>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', animation: 'navPulse 1.5s ease infinite' }} />
+                    Scanning for unclaimed stops
+                  </div>
+                  <button
+                    id="end-extended-shift-btn"
+                    onClick={() => onAdvance('end_shift')}
+                    style={{
+                      marginTop: 4, width: '100%', maxWidth: 320, padding: '16px',
+                      borderRadius: 30, border: 'none',
+                      background: '#0f172a', color: '#fff',
+                      fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900,
+                      letterSpacing: '.04em', cursor: 'pointer',
+                      boxShadow: '0 6px 20px rgba(15,23,42,0.25)',
+                    }}>
+                    🏁 Return to Base &amp; End Shift
+                  </button>
+                </div>
+              ) : (
+                <>
               {isTargetRoutable && (
                 <div style={{ padding: '4px 12px 16px', display: 'flex', alignItems: 'center', borderBottom: '1px solid rgba(0,0,0,.06)' }}>
                   <StatCell value={arrivalTimeStr} label="arrival" />
@@ -1733,8 +2036,8 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
               )}
               <div style={{ padding: '20px 20px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                 <p style={{ fontFamily: 'var(--font-head)', fontSize: isTargetRoutable ? 18 : 15, fontWeight: 800, textAlign: 'center', color: isTargetRoutable ? (isNearDestination ? '#0f172a' : '#64748b') : '#f59e0b', marginBottom: 6, transition: 'color .3s' }}>
-                  {isTargetRoutable 
-                    ? (isNearDestination ? 'You have arrived!' : 'On the way to next stop') 
+                  {isTargetRoutable
+                    ? (isNearDestination ? 'You have arrived!' : 'On the way to next stop')
                     : `No verified Stops yet, contact your assigned watcher (${currentTarget?.watcher_names || 'Unknown'})`}
                 </p>
                 {isTargetRoutable && !isNearDestination && distanceToStop != null && (
@@ -1748,13 +2051,21 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
                   <p style={{ fontSize: 12, color: '#f59e0b', marginBottom: 12 }}>📡 Waiting for GPS signal…</p>
                 )}
                 {(() => {
-                  const currentStatus = stopStatuses.has(currentStopIndex) ? normalizeStopStatus(stopStatuses.get(currentStopIndex)) : 'PENDING_INSPECTION';
-                  const isRoutable = isRoutableStopStatus(currentStatus);
+                  const currentStatus = activeMissedStop ? 'READY_FOR_COLLECTION' : (stopStatuses.has(currentStopIndex) ? normalizeStopStatus(stopStatuses.get(currentStopIndex)) : 'PENDING_INSPECTION');
+                  const isRoutable = activeMissedStop ? true : isRoutableStopStatus(currentStatus);
                   const canArrive = isNearDestination && isRoutable;
 
                   let buttonText = 'Confirm on Arrival';
                   if (isNearDestination) {
-                    if (isRoutable) buttonText = 'Confirm Arrival';
+                    if (isRoutable) {
+                      if (currentStatus === 'PENDING_INSPECTION') {
+                        buttonText = currentTarget?.watcher_names === 'No assigned watcher' 
+                          ? 'Collect (No Watcher)' 
+                          : 'Collect (Uninspected)';
+                      } else {
+                        buttonText = 'Confirm Arrival';
+                      }
+                    }
                     else buttonText = 'Waiting for Inspection...';
                   }
 
@@ -1763,7 +2074,7 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
                       <button
                         id="arrived-btn"
                         disabled={!canArrive}
-                        onClick={handleArrived}
+                        onClick={handleCollectClick}
                         style={{
                           flex: 1, padding: '18px 12px', borderRadius: 30, border: 'none',
                           fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900, letterSpacing: '.06em',
@@ -1789,24 +2100,25 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
                   );
                 })()}
               </div>
+              </>
+              )}
             </div>
           </div>
-        </>
-      )}
 
       {/* ── Overlays — always mounted for state continuity ── */}
       <ArrivedOverlay
         visible={routeState === 'arrived'}
-        currentStop={currentTarget?.label || sessionStorage.getItem('ww_current_stop')}
-        stopIndex={currentStopIndex}
+        currentStop={activeMissedStop ? (activeMissedStop.label || 'Missed Stop') : (currentTarget?.label || sessionStorage.getItem('ww_current_stop'))}
+        stopIndex={activeMissedStop ? 0 : currentStopIndex}
         gpsPos={gpsPos}
         scheduleId={schedule?.id}
         onConfirm={handleCollectionConfirmed}
         onBack={() => setRouteState('navigating')}
+        missedStopId={activeMissedStop?.id ?? null}
       />
 
       <StopCompletedOverlay
-        visible={routeState === 'completed' && !showTruckNotFull}
+        visible={routeState === 'completed'}
         schedule={schedule}
         currentStopIndex={currentStopIndex}
         stopStatuses={stopStatuses}
@@ -1814,18 +2126,52 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
         onNextStop={handleNextStop}
         onEndShift={handleEndShift}
         onExtendedMode={handleExtendedMode}
-        onShowTruckNotFull={() => setShowTruckNotFull(true)}
       />
 
-      {routeState === 'end_shift' && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 3000 }}>
-          <EndShiftModule
-            setRouteState={setRouteState}
-            schedule={schedule}
-            stopStatuses={stopStatuses}
-            currentStopIndex={currentStopIndex}
-            shift={shift}
-          />
+      {showOverrideConfirm && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 4000,
+          background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 24, animation: 'navFadeUp .2s ease'
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 20, padding: 24,
+            width: '100%', maxWidth: 340, textAlign: 'center',
+            boxShadow: '0 10px 40px rgba(0,0,0,0.2)'
+          }}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+            <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 20, fontWeight: 900, color: '#0f172a', marginBottom: 8 }}>Watcher Delayed</h3>
+            <p style={{ fontSize: 14, color: '#64748b', marginBottom: 24, lineHeight: 1.5 }}>
+              Watcher <strong>{currentTarget?.watcher_names}</strong> hasn't inspected this stop — proceed anyway?
+            </p>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button
+                onClick={() => setShowOverrideConfirm(false)}
+                style={{
+                  flex: 1, padding: '14px', borderRadius: 14,
+                  background: '#f1f5f9', color: '#64748b', border: 'none',
+                  fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 800,
+                  cursor: 'pointer'
+                }}>
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowOverrideConfirm(false);
+                  sessionStorage.setItem('ww_override_reason', '[OVERRIDE: Watcher Delayed] ');
+                  handleArrived();
+                }}
+                style={{
+                  flex: 1, padding: '14px', borderRadius: 14,
+                  background: '#f59e0b', color: '#fff', border: 'none',
+                  fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 800,
+                  cursor: 'pointer', boxShadow: '0 4px 12px rgba(245,158,11,0.25)'
+                }}>
+                Proceed
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1860,6 +2206,10 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
               <button
                 onClick={() => {
                   setShowFullConfirm(false);
+                  // Flag that this shift ended because the truck is full — NOT an emergency.
+                  // EndShiftModule reads this flag and routes straight to dump_site,
+                  // bypassing the early-termination incident-report form.
+                  sessionStorage.setItem('ww_end_reason', 'truck_full');
                   handleEndShift();
                 }}
                 style={{
@@ -1875,18 +2225,6 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
         </div>
       )}
 
-      {/* TruckNotFull — standalone route-complete decision overlay */}
-      <TruckNotFull
-        visible={showTruckNotFull}
-        shift={shift}
-        schedule={schedule}
-        stopStatuses={stopStatuses}
-        onEndShift={() => {
-          setShowTruckNotFull(false)
-          handleEndShift()
-        }}
-        onExtendedMode={handleExtendedModeActivated}
-      />
     </>
   )
 }

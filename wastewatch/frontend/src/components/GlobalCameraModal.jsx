@@ -43,6 +43,7 @@ export default function GlobalCameraModal({
   }
 
   function resetState() {
+    if (photoPreview) URL.revokeObjectURL(photoPreview)
     setCameraPhase('idle')
     setCameraError('')
     setPhotoPreview(null)
@@ -106,7 +107,8 @@ export default function GlobalCameraModal({
 
   function handleUsePhoto() {
     if (!capturedBlob || !photoPreview) return
-    onCapture?.(capturedBlob, photoPreview)
+    const file = new File([capturedBlob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' })
+    onCapture?.(file, photoPreview)
   }
 
   function handleClose() {

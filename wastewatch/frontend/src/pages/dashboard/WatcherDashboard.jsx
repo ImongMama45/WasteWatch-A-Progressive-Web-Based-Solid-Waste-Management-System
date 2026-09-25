@@ -62,9 +62,9 @@ export default function Dashboard() {
           <p className="text-muted text-sm">Stay updated on garbage collection in your area</p>
         </div>
 
-        <DispatchCard 
-            dispatchData={activeDispatch} 
-            userBarangay={user?.barangay_name || user?.barangay?.name} 
+        <DispatchCard
+          dispatchData={activeDispatch}
+          userBarangay={user?.barangay_name || user?.barangay?.name}
         />
 
         {/* ── INSPECTION CTA ── */}
@@ -194,6 +194,11 @@ export default function Dashboard() {
                         <div className="report-location">
                           {report.barangay_name || 'Unknown location'}
                         </div>
+                        {report.status === 'rejected' && report.rejection_reason && (
+                          <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            ⚠️ Reason: {report.rejection_reason}
+                          </div>
+                        )}
                       </div>
                       <div className="report-date">
                         Reported on {report.created_at?.slice(0, 10)}
