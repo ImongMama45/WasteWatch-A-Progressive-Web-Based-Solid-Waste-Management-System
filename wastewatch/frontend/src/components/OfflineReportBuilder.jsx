@@ -22,15 +22,15 @@ import { Trash2, Truck, AlertTriangle, Camera, MapPin, Tag, Flame, FileText, Che
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const WASTE_TYPES = [
-  { value: 'overflow',        label: 'Overflow',        icon: <Trash2 size={20} />, color: '#ef4444', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.4)' },
-  { value: 'missed',          label: 'Missed',          icon: <Truck size={20} />, color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.4)' },
-  { value: 'illegal_dumping', label: 'Illegal Dump',    icon: <AlertTriangle size={20} />, color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', border: 'rgba(124,58,237,0.4)' },
+  { value: 'overflow', label: 'Overflow', icon: <Trash2 size={20} />, color: '#ef4444', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.4)' },
+  { value: 'missed', label: 'Missed', icon: <Truck size={20} />, color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.4)' },
+  { value: 'illegal_dumping', label: 'Illegal Dump', icon: <AlertTriangle size={20} />, color: '#7c3aed', bg: 'rgba(124,58,237,0.12)', border: 'rgba(124,58,237,0.4)' },
 ]
 
 const SEVERITIES = [
-  { value: 'low',      label: 'Low',      color: '#22c55e', desc: 'Minor issue'  },
-  { value: 'medium',   label: 'Medium',   color: '#f59e0b', desc: 'Needs attention' },
-  { value: 'high',     label: 'High',     color: '#ef4444', desc: 'Urgent'       },
+  { value: 'low', label: 'Low', color: '#22c55e', desc: 'Minor issue' },
+  { value: 'medium', label: 'Medium', color: '#f59e0b', desc: 'Needs attention' },
+  { value: 'high', label: 'High', color: '#ef4444', desc: 'Urgent' },
 ]
 
 // ─── GPS helpers ──────────────────────────────────────────────────────────────
@@ -82,17 +82,17 @@ function readFileAsBase64(file) {
 
 export default function OfflineReportBuilder({ isOpen, onClose, onSubmit, initialPhoto }) {
   const isOnline = useOnline()
-  const [wasteType,   setWasteType]   = useState('overflow')
-  const [severity,    setSeverity]    = useState('medium')
-  const [notes,       setNotes]       = useState('')
-  const [location,    setLocation]    = useState(null)
-  const [gpsState,    setGpsState]    = useState('idle')
-  const [submitting,  setSubmitting]  = useState(false)
-  const [submitted,   setSubmitted]   = useState(false)
+  const [wasteType, setWasteType] = useState('overflow')
+  const [severity, setSeverity] = useState('medium')
+  const [notes, setNotes] = useState('')
+  const [location, setLocation] = useState(null)
+  const [gpsState, setGpsState] = useState('idle')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
 
   // Photo state
-  const [photos,      setPhotos]      = useState([]) // array of base64 strings
-  const [photoError,  setPhotoError]  = useState('')
+  const [photos, setPhotos] = useState([]) // array of base64 strings
+  const [photoError, setPhotoError] = useState('')
 
   // ── Reset on open ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -163,14 +163,27 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit, initia
 
     setSubmitting(true)
     try {
+      // Convert File objects to base64 for IDB storage
+      const b64Photos = await Promise.all(
+        photos.map(async (file) => {
+          if (typeof file === 'string') return file;
+          return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+        })
+      );
+
       const report = await onSubmit({
         issue_type: wasteType,
-        severity,
+        severity: severity,
         description: notes,
-        latitude:  location?.lat,
+        latitude: location?.lat,
         longitude: location?.lng,
-        address:   location?.address,
-        photos: photos,
+        address: location?.address,
+        photos: b64Photos,
       })
       if (report) {
         setSubmitted(true)
@@ -186,9 +199,9 @@ export default function OfflineReportBuilder({ isOpen, onClose, onSubmit, initia
 
   if (!isOpen) return null
 
-  const selectedWaste    = WASTE_TYPES.find(w => w.value === wasteType) || WASTE_TYPES[0]
+  const selectedWaste = WASTE_TYPES.find(w => w.value === wasteType) || WASTE_TYPES[0]
   const selectedSeverity = SEVERITIES.find(s => s.value === severity) || SEVERITIES[0]
-  const canSubmit        = photos.length > 0 && !submitting
+  const canSubmit = photos.length > 0 && !submitting
 
   return (
     <>

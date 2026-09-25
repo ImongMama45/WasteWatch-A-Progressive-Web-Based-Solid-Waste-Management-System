@@ -108,6 +108,10 @@ export default function useShiftTimer() {
     }
     setLoading(true)
     refresh()
+
+    const handleUpdate = () => refresh()
+    window.addEventListener('ww_shift_updated', handleUpdate)
+    return () => window.removeEventListener('ww_shift_updated', handleUpdate)
   }, [userId, refresh])
 
   // Tick every second while active, always derived from the server timestamp.
@@ -139,22 +143,32 @@ export default function useShiftTimer() {
       duty_type: dutyType,
     })
     applyShiftPayload(res.data)
+    window.dispatchEvent(new Event('ww_shift_updated'))
     return res.data
   }, [applyShiftPayload])
 
   /**
-   * endShift({ scheduleId, missedStopOrders })
+   * endShift({ scheduleId, missedStopOrders, ...extra })
    * Local state is cleared ONLY after the backend confirms with 200 OK.
    * If the request fails, state is left untouched and the error propagates
    * to the caller.
+   *
+   * Extra fields (ended_early, reason, notes, etc.) are forwarded directly
+   * to POST /api/driver/shift/end/ — EndShiftModule uses this instead of
+   * calling api.post() directly, making this the single source of truth
+   * for the end-shift payload. Dispatching ww_shift_updated here ensures
+   * all hook consumers (ShiftStatusBanner, DriverDashboard, etc.) see
+   * shiftActive:false without requiring a full page refresh.
    */
-  const endShift = useCallback(async ({ scheduleId = null, missedStopOrders = [] } = {}) => {
+  const endShift = useCallback(async ({ scheduleId = null, missedStopOrders = [], ...extra } = {}) => {
     const res = await api.post('/api/driver/shift/end/', {
+      ...extra,
       schedule_id: scheduleId ?? stateRef.current.scheduleId,
       missed_stop_orders: missedStopOrders,
     })
     setState(EMPTY_STATE)
     setElapsedMs(0)
+    window.dispatchEvent(new Event('ww_shift_updated'))
     return res.data
   }, [])
 

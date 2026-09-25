@@ -220,6 +220,10 @@ class GarbageHotspot(models.Model):
     assigned_truck = models.ForeignKey(
         'driver.Truck', on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_hotspots'
     )
+    source_report = models.ForeignKey(
+        'GarbageReport', on_delete=models.CASCADE, null=True, blank=True, related_name='hotspots',
+        help_text='The report that created this hotspot, if any.'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -281,6 +285,10 @@ class StopValidation(models.Model):
     pre_validation_remarks = models.TextField(blank=True)
 
     # Driver collection
+    driver_bypassed_watcher = models.BooleanField(
+        default=False,
+        help_text='True if the driver bypassed watcher pre-inspection (e.g. Watcher Delayed)'
+    )
     driver = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

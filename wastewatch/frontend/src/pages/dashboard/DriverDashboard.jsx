@@ -1,8 +1,7 @@
 /**
  * DriverDashboard.jsx — Driver Home Screen
  * -----------------------------------------
- * Route progress + schedule pulled from /api/driver/collection-schedules/
- * to match NavigationModule.jsx's data source.
+ * Route progress + schedule pulled from /api/driver/collection-schedules/.
  */
 
 import { useState, useEffect } from 'react'
@@ -15,10 +14,11 @@ import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
 import { useNotification } from '../../context/NotificationContext'
 import api from '../../api/client'
-import useShiftTimer from '../../hooks/useShiftTimer'
+import useShiftTimer, { clearDriverSessionData } from '../../hooks/useShiftTimer'
 import { useOptionalDriverGps } from '../../context/DriverGpsContext'
 import IssueReporter from '../driver/components/IssueReporter'
 import HomeCarousel from '../../components/carousel/HomeCarousel'
+import { isCompletedStopStatus, normalizeStopStatus } from '../../utils/pickupStatusSync'
 
 // ─── STATUS CONFIG ─────────────────────────────────────────────────────────────
 
@@ -29,20 +29,7 @@ const STATUSES = [
   { key: 'issue', label: 'Issue', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
 ]
 
-const ROUTE_SESSION_KEYS = [
-  'ww_route_state',
-  'ww_current_stop_index',
-  'ww_stop_statuses',
-  'ww_current_stop',
-  'ww_route_complete',
-  'ww_extended_mode',
-  'ww_completed_stops',
-  'ww_total_stops',
-]
 
-function clearRouteSession() {
-  ROUTE_SESSION_KEYS.forEach(key => sessionStorage.removeItem(key))
-}
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -53,8 +40,18 @@ function formatDays(days) {
   return String(days)
 }
 
+function formatTime(timeStr) {
+  if (!timeStr) return ''
+  const [h, m] = timeStr.split(':')
+  if (!h || !m) return timeStr
+  let hour = parseInt(h, 10)
+  const ampm = hour >= 12 ? 'PM' : 'AM'
+  hour = hour % 12 || 12
+  return `${hour}:${m} ${ampm}`
+}
+
 /** Derive a schedule-table row list from the real schedule object */
-function buildScheduleRows(schedule) {
+function buildScheduleRows(schedule, isRouteDone = false) {
   if (!schedule) return []
 
   const DAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -72,17 +69,21 @@ function buildScheduleRows(schedule) {
   // Normalize activeDays to check by prefix (e.g. 'Mon' matches 'Monday')
   return DAY_ORDER
     .filter(d => activeDays.some(ad => d.toLowerCase().startsWith(ad.substring(0, 3).toLowerCase())))
-    .map(day => ({
-      day,
-      zone: schedule.zone || schedule.barangay || '—',
-      time: schedule.start_time && schedule.end_time
-        ? `${schedule.start_time} – ${schedule.end_time}`
-        : schedule.start_time || '—',
-      done: day === today
-        ? (schedule.completed === true)  // mark done if today's shift is completed
-        : DAY_ORDER.indexOf(day) < DAY_ORDER.indexOf(today),
-      isToday: day === today,
-    }))
+    .map(day => {
+      const isToday = day === today
+      const isPast = DAY_ORDER.indexOf(day) < DAY_ORDER.indexOf(today)
+
+      return {
+        day,
+        zone: schedule.zone || schedule.barangay || '—',
+        time: schedule.start_time && schedule.end_time
+          ? `${formatTime(schedule.start_time)} – ${formatTime(schedule.end_time)}`
+          : schedule.start_time ? formatTime(schedule.start_time) : '—',
+        done: isToday ? isRouteDone : false,
+        isPast: !isToday && isPast,
+        isToday,
+      }
+    })
 }
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
@@ -95,7 +96,7 @@ export default function DriverDashboard() {
   // Profile / truck info
   const [profile, setProfile] = useState({ route: '—', truck: '—', barangay: '—' })
 
-  // Real schedule from the same endpoint NavigationModule uses
+  // Real schedule from the same endpoint ShiftRouteModule uses
   const [schedule, setSchedule] = useState(null)
   const [scheduleRows, setScheduleRows] = useState([])
   const [driverAnalytics, setDriverAnalytics] = useState(null)
@@ -105,6 +106,7 @@ export default function DriverDashboard() {
   const [routeStats, setRouteStats] = useState({
     totalStops: 0,
     completedStops: 0,
+    missedStopsCollected: 0,
     distanceKm: 0,
     startTime: '—',
     estEnd: '—',
@@ -117,6 +119,7 @@ export default function DriverDashboard() {
   const {
     shiftActive, startTime, formattedTime,
     scheduleId: activeScheduleId,
+    shiftId,
     loading: shiftLoading,
     startShift,
   } = useShiftTimer()
@@ -151,7 +154,9 @@ export default function DriverDashboard() {
     : 0
   const displayStopsLeft = displayStats.totalStops - displayStats.completedStops
 
-  const isRouteDone = schedule?.truck_status === 'completed' || (displayStats.totalStops > 0 && displayStats.completedStops >= displayStats.totalStops)
+  const isRouteDone = schedule?.truck_status === 'completed'
+  const isShiftEndedIncomplete = schedule?.truck_status === 'returning_unfinished'
+  const isShiftDone = isRouteDone || isShiftEndedIncomplete
 
   // ── Data fetch ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -186,16 +191,28 @@ export default function DriverDashboard() {
       setSchedule(match || null)
 
       if (match) {
-        // Build schedule table rows
-        setScheduleRows(buildScheduleRows(match))
-
         // Derive route progress from waypoints + persisted stop index
+
         const waypoints = match.waypoints || []
         const totalStops = match.total_stops !== undefined ? match.total_stops : Math.max(waypoints.length - 1, 0) // exclude depot/start (index 0)
 
-        const savedIndex = parseInt(sessionStorage.getItem('ww_current_stop_index') || '1', 10)
-        // completedStops = max of local session progress and backend confirmed progress
-        const localCompleted = Math.max(0, savedIndex - 1)
+        // Prefer snapshot-based count (counts only genuinely collected/empty stops).
+        // Falls back to index-based estimate if no snapshot exists yet.
+        let localCompleted = 0
+        try {
+          const raw = sessionStorage.getItem('ww_stop_statuses_snapshot')
+          if (raw) {
+            const entries = new Map(JSON.parse(raw))
+            localCompleted = [...entries.values()]
+              .filter(s => isCompletedStopStatus(normalizeStopStatus(s)) || normalizeStopStatus(s) === 'EMPTY_STOP').length
+          } else {
+            const savedIndex = parseInt(sessionStorage.getItem('ww_current_stop_index') || '1', 10)
+            localCompleted = Math.max(0, savedIndex - 1)
+          }
+        } catch {
+          const savedIndex = parseInt(sessionStorage.getItem('ww_current_stop_index') || '1', 10)
+          localCompleted = Math.max(0, savedIndex - 1)
+        }
         const backendCompleted = match.completed_stops || 0
         const completedStops = Math.max(localCompleted, backendCompleted)
 
@@ -208,9 +225,14 @@ export default function DriverDashboard() {
           )
         }
 
+        const backendMissed = match.missed_stops_collected || 0
+        const localMissed = parseInt(sessionStorage.getItem('ww_missed_stops_collected') || '0', 10)
+        const missedStopsCollected = Math.max(localMissed, backendMissed)
+
         setRouteStats({
           totalStops,
           completedStops,
+          missedStopsCollected,
           distanceKm: Math.round(totalDistKm),
           startTime: match.start_time || '—',
           estEnd: match.end_time || '—',
@@ -220,28 +242,51 @@ export default function DriverDashboard() {
   }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-derive completedStops when navigation updates sessionStorage
-  // (NavigationModule updates ww_current_stop_index on each stop advance)
+  // (ShiftRouteModule updates ww_current_stop_index on each stop advance)
   useEffect(() => {
     const interval = setInterval(() => {
-      const savedIndex = parseInt(sessionStorage.getItem('ww_current_stop_index') || '1', 10)
-      const localCompleted = Math.max(0, savedIndex - 1)
-      
+      let localCompleted = 0
+      try {
+        const raw = sessionStorage.getItem('ww_stop_statuses_snapshot')
+        if (raw) {
+          const entries = new Map(JSON.parse(raw))
+          localCompleted = [...entries.values()]
+            .filter(s => isCompletedStopStatus(normalizeStopStatus(s)) || normalizeStopStatus(s) === 'EMPTY_STOP').length
+        } else {
+          const savedIndex = parseInt(sessionStorage.getItem('ww_current_stop_index') || '1', 10)
+          localCompleted = Math.max(0, savedIndex - 1)
+        }
+      } catch {
+        const savedIndex = parseInt(sessionStorage.getItem('ww_current_stop_index') || '1', 10)
+        localCompleted = Math.max(0, savedIndex - 1)
+      }
+
       setRouteStats(prev => {
         // Prevent local session (if cleared) from overwriting actual backend progress
         const completed = Math.max(localCompleted, schedule?.completed_stops || 0)
-        if (prev.completedStops === completed) return prev
-        return { ...prev, completedStops: completed }
+        const localMissed = parseInt(sessionStorage.getItem('ww_missed_stops_collected') || '0', 10)
+        const missedStopsCollected = Math.max(localMissed, schedule?.missed_stops_collected || 0)
+        
+        if (prev.completedStops === completed && prev.missedStopsCollected === missedStopsCollected) return prev
+        return { ...prev, completedStops: completed, missedStopsCollected }
       })
     }, 3000)
     return () => clearInterval(interval)
   }, [schedule])
+
+  // Update schedule rows when isRouteDone or schedule changes
+  useEffect(() => {
+    if (schedule) {
+      setScheduleRows(buildScheduleRows(schedule, isShiftDone))
+    }
+  }, [schedule, isShiftDone])
 
   // ── Shift toggle ─────────────────────────────────────────────────────────────
   async function handleShiftToggle() {
     if (!shiftActive) {
       if (!hasScheduleToday || !schedule?.id) return
       try {
-        clearRouteSession()
+        clearDriverSessionData()
         await startShift({ scheduleId: schedule.id })
         navigate('/driver/flow')
       } catch (err) {
@@ -255,7 +300,23 @@ export default function DriverDashboard() {
       return
     }
 
-    sessionStorage.setItem('ww_route_state', 'end_shift')
+    // Mid-shift End Shift: PATCH the backend first so DriverRouteFlow resumes
+    // into EndShiftModule (not back onto the live map). On failure, stop and
+    // surface a user-facing message — navigating with a stale backend status
+    // would drop the driver back on the active route with no explanation.
+    try {
+      if (shiftId) {
+        await api.patch(`/api/driver/shift/${shiftId}/update-status/`, { status: 'end_shift' })
+      }
+    } catch (err) {
+      console.error('[DriverDashboard] Could not end shift:', err)
+      notify({ variant: 'error-dark', message: 'Could not end your shift. Check your connection and try again.' })
+      return
+    }
+    // Copy local stop statuses to snapshot so EndShiftModule doesn't count
+    // stops still in the offline photo queue as missed.
+    const localStatuses = sessionStorage.getItem('ww_stop_statuses')
+    if (localStatuses) sessionStorage.setItem('ww_stop_statuses_snapshot', localStatuses)
     navigate('/driver/flow')
   }
 
@@ -275,7 +336,7 @@ export default function DriverDashboard() {
 
     setCarouselLoading(prev => ({ ...prev, route: true }))
     try {
-      clearRouteSession()
+      clearDriverSessionData()
       await startShift({ scheduleId: schedule.id })
       navigate('/driver/flow')
     } catch (err) {
@@ -375,6 +436,31 @@ export default function DriverDashboard() {
               </div>
               <button className="abtn btn" onClick={() => navigate('/driver/flow')}
                 style={{ padding: '8px 14px', borderRadius: 10, fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
+                Resume
+              </button>
+            </div>
+          )}
+
+          {shiftActive && (!activeScheduleId || !schedule?.id || String(activeScheduleId) === String(schedule.id)) && (
+            <div style={{
+              background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.4)',
+              borderRadius: 10, padding: '8px 14px', marginTop: 10,
+              display: 'flex', alignItems: 'center', gap: 10,
+              animation: 'fadeSlideIn .3s ease',
+            }}>
+              <Play size={20} color="#3b82f6" fill="currentColor" style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 800, fontSize: 13, color: '#1e40af' }}>Shift in progress</div>
+                <div style={{ fontSize: 12, color: '#3b82f6', fontWeight: 600 }}>
+                  Stop {loading ? '…' : displayStats.completedStops} / {loading ? '…' : displayStats.totalStops}
+                </div>
+              </div>
+              <button className="abtn btn" onClick={() => navigate('/driver/flow')}
+                style={{
+                  padding: '8px 16px', borderRadius: 10, fontSize: 12, fontWeight: 800, flexShrink: 0,
+                  background: '#3b82f6', color: '#fff', border: 'none',
+                  boxShadow: '0 4px 12px rgba(59,130,246,0.3)'
+                }}>
                 Resume
               </button>
             </div>
@@ -506,20 +592,24 @@ export default function DriverDashboard() {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                 <h3 className="section-title" style={{ margin: 0 }}>Today's Route</h3>
                 <span style={{
-                  background: isRouteDone ? 'rgba(46,204,113,0.1)' : status === 'issue' ? 'rgba(239,68,68,0.1)' : 'rgba(59,130,246,0.1)',
-                  color: isRouteDone ? '#2ecc71' : status === 'issue' ? 'var(--danger)' : '#3b82f6',
-                  border: `1px solid ${isRouteDone ? 'rgba(46,204,113,0.3)' : status === 'issue' ? 'rgba(239,68,68,0.3)' : 'rgba(59,130,246,0.3)'}`,
+                  background: isRouteDone ? 'rgba(46,204,113,0.1)' : isShiftEndedIncomplete ? 'rgba(245,158,11,0.1)' : status === 'issue' ? 'rgba(239,68,68,0.1)' : 'rgba(59,130,246,0.1)',
+                  color: isRouteDone ? '#2ecc71' : isShiftEndedIncomplete ? '#d97706' : status === 'issue' ? 'var(--danger)' : '#3b82f6',
+                  border: `1px solid ${isRouteDone ? 'rgba(46,204,113,0.3)' : isShiftEndedIncomplete ? 'rgba(245,158,11,0.3)' : status === 'issue' ? 'rgba(239,68,68,0.3)' : 'rgba(59,130,246,0.3)'}`,
                   fontSize: 9, fontWeight: 800, padding: '3px 10px', borderRadius: 20, letterSpacing: '.07em',
                 }}>
                   {loading
                     ? 'LOADING…'
                     : isRouteDone
                       ? '✓ COMPLETED'
-                      : status === 'issue'
-                        ? '⚠ DELAYED'
-                        : displayStats.totalStops === 0
-                          ? 'NO SCHEDULE'
-                          : 'IN PROGRESS'}
+                      : isShiftEndedIncomplete
+                        ? '⚠ ENDED INCOMPLETE'
+                        : status === 'issue'
+                          ? '⚠ DELAYED'
+                          : displayStats.totalStops === 0
+                            ? 'NO SCHEDULE'
+                            : shiftActive
+                              ? 'IN PROGRESS'
+                              : 'NOT STARTED'}
                 </span>
               </div>
 
@@ -552,6 +642,27 @@ export default function DriverDashboard() {
                 <div style={{ textAlign: 'right', fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
                   {displayProgress}% complete
                 </div>
+                {routeStats.missedStopsCollected > 0 && (
+                  <div style={{ 
+                    marginTop: 12, 
+                    padding: '8px 14px', 
+                    background: 'rgba(245,158,11,0.08)', 
+                    border: '1px solid rgba(245,158,11,0.25)',
+                    borderRadius: 10, 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: 10,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#d97706'
+                  }}>
+                    <span style={{ fontSize: 16 }}>🎯</span>
+                    <span>
+                      {routeStats.missedStopsCollected} Missed stops collected 
+                      <span style={{ opacity: 0.7, marginLeft: 6, fontSize: 11 }}>(+{routeStats.missedStopsCollected * 50} pts)</span>
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
@@ -603,19 +714,19 @@ export default function DriverDashboard() {
               <div style={{ display: 'flex', gap: 10, marginBottom: 24 }}>
                 <button id="driver-main-cta" className="abtn btn"
                   onClick={() => shiftActive ? navigate('/driver/flow') : handleShiftToggle()}
-                  disabled={(!shiftActive && !hasScheduleToday) || (!shiftActive && isRouteDone)}
+                  disabled={(!shiftActive && !hasScheduleToday) || (!shiftActive && isShiftDone)}
                   style={{
                     flex: 2, padding: '16px 20px', borderRadius: 14,
                     fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 800,
-                    background: (!shiftActive && !hasScheduleToday) || (!shiftActive && isRouteDone)
+                    background: (!shiftActive && !hasScheduleToday) || (!shiftActive && isShiftDone)
                       ? 'rgba(148,163,184,0.15)'
                       : shiftActive
                         ? 'linear-gradient(135deg,#2ecc71,#27ae60)'
                         : 'linear-gradient(135deg,#3b82f6,#2563eb)',
-                    color: (!shiftActive && !hasScheduleToday) || (!shiftActive && isRouteDone) ? '#94a3b8' : '#fff',
-                    border: (!shiftActive && !hasScheduleToday) || (!shiftActive && isRouteDone) ? '1.5px solid var(--border)' : 'none',
-                    cursor: (!shiftActive && !hasScheduleToday) || (!shiftActive && isRouteDone) ? 'not-allowed' : 'pointer',
-                    boxShadow: (!shiftActive && !hasScheduleToday) || (!shiftActive && isRouteDone)
+                    color: (!shiftActive && !hasScheduleToday) || (!shiftActive && isShiftDone) ? '#94a3b8' : '#fff',
+                    border: (!shiftActive && !hasScheduleToday) || (!shiftActive && isShiftDone) ? '1.5px solid var(--border)' : 'none',
+                    cursor: (!shiftActive && !hasScheduleToday) || (!shiftActive && isShiftDone) ? 'not-allowed' : 'pointer',
+                    boxShadow: (!shiftActive && !hasScheduleToday) || (!shiftActive && isShiftDone)
                       ? 'none'
                       : shiftActive
                         ? '0 4px 18px rgba(46,204,113,0.35)'
@@ -623,15 +734,17 @@ export default function DriverDashboard() {
                   }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     {!shiftActive && !hasScheduleToday && <Ban size={18} />}
-                    {!shiftActive && hasScheduleToday && isRouteDone && <CheckCircle2 size={18} />}
+                    {!shiftActive && hasScheduleToday && isShiftDone && <CheckCircle2 size={18} />}
                     {shiftActive && hasScheduleToday && <Truck size={18} />}
-                    {!shiftActive && hasScheduleToday && !isRouteDone && <Play size={18} fill="currentColor" />}
+                    {!shiftActive && hasScheduleToday && !isShiftDone && <Play size={18} fill="currentColor" />}
                     <span>
                       {!shiftActive && !hasScheduleToday
                         ? 'No Collection Today'
                         : !shiftActive && isRouteDone
                           ? 'Route Completed'
-                          : shiftActive ? 'Resume Route' : 'Start Duty'}
+                          : !shiftActive && isShiftEndedIncomplete
+                            ? 'Shift Ended Early'
+                            : shiftActive ? 'Resume Route' : 'Start Duty'}
                     </span>
                   </div>
                 </button>
@@ -664,7 +777,19 @@ export default function DriverDashboard() {
 
             {/* ── COLLECTION SCHEDULE (real data) ── */}
             <div style={{ marginBottom: 24 }}>
-              <h3 className="section-title">Collection Schedule</h3>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <h3 className="section-title" style={{ margin: 0 }}>Collection Schedule</h3>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <button onClick={() => navigate('/driver/route')}
+                    style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <MapIcon size={14} /> Route Overview
+                  </button>
+                  <button onClick={() => navigate('/driver/log')}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <ClipboardList size={14} /> Weekly Summary
+                  </button>
+                </div>
+              </div>
               <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                 {loading ? (
                   <div style={{ padding: '20px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
@@ -683,10 +808,10 @@ export default function DriverDashboard() {
                     }}>
                       <div style={{
                         width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-                        background: s.done ? 'rgba(46,204,113,0.12)' : s.isToday ? 'rgba(59,130,246,0.1)' : 'var(--surface-2)',
+                        background: s.done ? 'rgba(46,204,113,0.12)' : s.isPast ? 'rgba(148,163,184,0.15)' : s.isToday ? 'rgba(59,130,246,0.1)' : 'var(--surface-2)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
                       }}>
-                        {s.done ? <CheckCircle2 size={18} color="var(--accent)" /> : s.isToday ? <Truck size={18} color="var(--info)" /> : <Calendar size={18} color="var(--text-muted)" />}
+                        {s.done ? <CheckCircle2 size={18} color="var(--accent)" /> : s.isPast ? <Calendar size={18} color="#64748b" /> : s.isToday ? <Truck size={18} color="var(--info)" /> : <Calendar size={18} color="var(--text-muted)" />}
                       </div>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 600, fontSize: 14 }}>
@@ -712,20 +837,24 @@ export default function DriverDashboard() {
                           fontSize: 9, fontWeight: 800, padding: '2px 8px', borderRadius: 20, letterSpacing: '.05em',
                           background: s.done
                             ? 'rgba(46,204,113,0.1)'
-                            : s.isToday
-                              ? 'rgba(59,130,246,0.1)'
-                              : s.time === '—'
-                                ? 'rgba(148,163,184,0.1)'
-                                : 'rgba(243,156,18,0.1)',
+                            : s.isPast
+                              ? 'rgba(148,163,184,0.15)'
+                              : s.isToday
+                                ? 'rgba(59,130,246,0.1)'
+                                : s.time === '—'
+                                  ? 'rgba(148,163,184,0.1)'
+                                  : 'rgba(243,156,18,0.1)',
                           color: s.done
                             ? 'var(--accent)'
-                            : s.isToday
-                              ? 'var(--info)'
-                              : s.time === '—'
-                                ? 'var(--text-muted)'
-                                : 'var(--warning)',
+                            : s.isPast
+                              ? '#64748b'
+                              : s.isToday
+                                ? 'var(--info)'
+                                : s.time === '—'
+                                  ? 'var(--text-muted)'
+                                  : 'var(--warning)',
                         }}>
-                          {s.done ? 'DONE' : s.isToday ? 'ACTIVE' : s.time === '—' ? 'N/A' : 'UPCOMING'}
+                          {s.done ? 'DONE' : s.isPast ? 'MISSED' : s.isToday ? 'ACTIVE' : s.time === '—' ? 'N/A' : 'UPCOMING'}
                         </span>
                       </div>
                     </div>
@@ -751,14 +880,14 @@ export default function DriverDashboard() {
                     color: 'var(--accent)', fontWeight: 700,
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
                   }}>
-                  <MapIcon size={16} /> View My Route
+                  <MapIcon size={16} /> Route Overview
                 </button>
                 <button className="abtn btn btn-full" onClick={() => navigate('/driver/log')}
                   style={{
                     background: 'var(--surface-2)', border: '1px solid var(--border)', fontWeight: 600,
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
                   }}>
-                  <ClipboardList size={16} /> Collection Log
+                  <ClipboardList size={16} /> Weekly Summary
                 </button>
               </div>
             </div>

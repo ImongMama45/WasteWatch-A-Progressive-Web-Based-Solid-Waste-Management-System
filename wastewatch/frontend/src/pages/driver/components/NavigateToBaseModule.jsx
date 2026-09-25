@@ -15,6 +15,7 @@
 
 import React, { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../../../context/AuthContext'
+import TurnArrow, { TURN_COLOR } from './TurnArrow'
 import useGpsTracking from '../../../hooks/useGpsTracking'
 import api from '../../../api/client'
 import Navbar from '../../../components/Navbar'
@@ -207,9 +208,17 @@ export default function NavigateToBaseModule({ onAdvance, shift }) {
   // ── ORS display values ────────────────────────────────────────────────────
   let instructionText = 'Head to your home base'
   let etaMinutes = '--', arrivalTimeStr = '--:--', distanceKmStr = '--'
+  let stepType = 6
+  let stepBearing = null
+
   if (orsData) {
     const seg = orsData.segments?.[0]
-    if (seg?.steps?.length) instructionText = seg.steps[0].instruction || instructionText
+    if (seg?.steps?.length) {
+      const step = seg.steps[0]
+      instructionText = step.instruction || instructionText
+      stepType = step.type !== undefined ? step.type : 6
+      stepBearing = step.bearing_after !== undefined ? step.bearing_after : null
+    }
     if (seg) {
       etaMinutes = Math.ceil(seg.duration / 60)
       arrivalTimeStr = new Date(Date.now() + seg.duration * 1000)
@@ -217,6 +226,8 @@ export default function NavigateToBaseModule({ onAdvance, shift }) {
       distanceKmStr = (seg.distance / 1000).toFixed(1)
     }
   }
+  
+  const accentColor = TURN_COLOR[stepType] || '#16a34a'
 
   const distLabel = distanceToBase == null ? 'Calculating…'
     : distanceToBase > 1000 ? `${(distanceToBase / 1000).toFixed(1)} km to base`
@@ -303,16 +314,14 @@ export default function NavigateToBaseModule({ onAdvance, shift }) {
         {/* ── TURN INSTRUCTION CARD ── */}
         {(!distanceToBase || distanceToBase > 30) && (
           <div style={{ position: 'absolute', top: 122, left: 14, right: 14, zIndex: 10, background: 'rgba(255,255,255,0.97)', borderRadius: 16, overflow: 'hidden', display: 'flex', alignItems: 'stretch', boxShadow: '0 6px 28px rgba(0,0,0,.18)', animation: 'ntbFadeUp .25s ease' }}>
-            <div style={{ width: 76, flexShrink: 0, background: '#16a34a12', borderRight: '3px solid #16a34a28', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0', color: '#16a34a' }}>
-              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: `rotate(${gpsPos && baseLocation ? calculateBearing(gpsPos.lat, gpsPos.lng, Number(baseLocation.lat), Number(baseLocation.lng)) : 0}deg)`, transition: 'transform 0.3s ease' }}>
-                <path d="M12 19V5M5 12l7-7 7 7"/>
-              </svg>
+            <div style={{ width: 76, flexShrink: 0, background: `${accentColor}12`, borderRight: `3px solid ${accentColor}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0', color: accentColor }}>
+              <TurnArrow type={stepType} bearing={stepBearing} size={48} color={accentColor} />
             </div>
             <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
               <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, color: '#0f172a', lineHeight: 1.2, marginBottom: 4 }}>
                 {instructionText}
               </div>
-              <div style={{ fontSize: 13, color: '#16a34a', fontWeight: 700 }}>{distLabel}</div>
+              <div style={{ fontSize: 13, color: accentColor, fontWeight: 700 }}>{distLabel}</div>
             </div>
           </div>
         )}

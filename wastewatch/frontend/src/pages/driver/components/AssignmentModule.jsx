@@ -26,6 +26,8 @@ export default function AssignmentModule({ onAdvance, setActiveShift }) {
   const { user } = useAuth()
   const [profile, setProfile] = useState(null)
   const [schedule, setSchedule] = useState(null)
+  const [startError, setStartError] = useState(null)
+  const [starting, setStarting] = useState(false)
 
   // ── Leaflet map state ───────────────────────────────────────────────────────
   const mapRef = useRef(null)
@@ -92,12 +94,12 @@ export default function AssignmentModule({ onAdvance, setActiveShift }) {
 
     const wps = schedule.waypoints
 
-    // ── Start marker ──────────────────────────────────────────────────────
-    const startIcon = L.divIcon({
-      html: `<div style="background:#1e2633;border:2px solid #2ecc71;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;box-shadow:0 2px 6px rgba(0,0,0,.5);">🏛️</div>`,
-      className: '', iconSize: [22, 22], iconAnchor: [11, 11],
+    // ── Start marker (Base) ───────────────────────────────────────────────
+    const baseIcon = L.divIcon({
+      html: `<div style="background:#fff;border:2.5px solid #16A34A;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:0 3px 10px rgba(0,0,0,.18);">🏛️</div>`,
+      className: '', iconSize: [32, 32], iconAnchor: [16, 16],
     })
-    L.marker([wps[0].lat, wps[0].lng], { icon: startIcon }).addTo(map).bindPopup('<b>Start Point</b>')
+    L.marker([wps[0].lat, wps[0].lng], { icon: baseIcon }).addTo(map).bindPopup(`<b>Start Point</b><br>${wps[0].label || 'Home Base'}`)
 
     // ── Stop markers ──────────────────────────────────────────────────────
     wps.slice(1).forEach((wp, i) => {
@@ -108,8 +110,25 @@ export default function AssignmentModule({ onAdvance, setActiveShift }) {
       L.marker([wp.lat, wp.lng], { icon: stopIcon }).addTo(map).bindPopup(`<b>${wp.label || `Stop ${i + 1}`}</b>`)
     })
 
+    // ── Dumpsite Marker ───────────────────────────────────────────────────
+    if (schedule?.dumpsite_detail) {
+      const ds = schedule.dumpsite_detail
+      const dsIcon = L.divIcon({
+        html: `<div style="background:#DC2626;border:2px solid white;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:0 3px 8px rgba(0,0,0,.18);">🏭</div>`,
+        className: '', iconSize: [30, 30], iconAnchor: [15, 15],
+      })
+      L.marker([+ds.latitude, +ds.longitude], { icon: dsIcon }).addTo(map).bindPopup(`<b>${ds.name}</b>`)
+    }
+
+    // ── Full Route Coordinates ────────────────────────────────────────────
+    const allPts = [...wps]
+    if (schedule?.dumpsite_detail) {
+      allPts.push({ lat: +schedule.dumpsite_detail.latitude, lng: +schedule.dumpsite_detail.longitude })
+    }
+    allPts.push(wps[0]) // Return to Base
+
     // ── Fallback dashed straight-line while ORS loads ─────────────────────
-    const latlngs = wps.map(w => [w.lat, w.lng])
+    const latlngs = allPts.map(w => [w.lat, w.lng])
     const fallbackLine = L.polyline(latlngs, {
       color: '#2ecc71', weight: 3, opacity: 0.35, dashArray: '6, 6',
     }).addTo(map)
@@ -120,7 +139,7 @@ export default function AssignmentModule({ onAdvance, setActiveShift }) {
     if (!orsApiKey) return
 
     // ORS accepts max 50 coordinates
-    const coordinates = wps.slice(0, 50).map(w => [w.lng, w.lat])
+    const coordinates = allPts.slice(0, 50).map(w => [w.lng, w.lat])
 
     fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
       method: 'POST',
@@ -257,19 +276,34 @@ export default function AssignmentModule({ onAdvance, setActiveShift }) {
           </div>
 
           {/* Start button */}
-          <button id="start-duty-btn" onClick={async () => {
+          <button id="start-duty-btn" disabled={starting} onClick={async () => {
+            setStartError(null)
+            setStarting(true)
             try {
               sessionStorage.setItem('ww_duty_type', 'normal')
               const res = await api.post('/api/driver/shift/pre_start/', { duty_type: 'normal' })
               if (setActiveShift) setActiveShift(res.data)
               onAdvance('navigate_to_base')
             } catch (err) {
-              console.error('Failed to pre-start shift:', err)
+              const msg = err.response?.data?.error || 'Failed to start shift. Please try again.'
+              setStartError(msg)
+            } finally {
+              setStarting(false)
             }
           }}
-            style={{ width: '100%', padding: '16px', borderRadius: 30, background: '#10b981', color: '#fff', border: 'none', fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 800, letterSpacing: '.08em', cursor: 'pointer', boxShadow: '0 4px 14px rgba(16,185,129,0.3)', marginBottom: 32 }}>
-            START NORMAL DUTY
+            style={{ width: '100%', padding: '16px', borderRadius: 30, background: starting ? '#94a3b8' : '#10b981', color: '#fff', border: 'none', fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 800, letterSpacing: '.08em', cursor: starting ? 'not-allowed' : 'pointer', boxShadow: starting ? 'none' : '0 4px 14px rgba(16,185,129,0.3)', marginBottom: startError ? 12 : 32 }}>
+            {starting ? 'Starting…' : 'START NORMAL DUTY'}
           </button>
+
+          {startError && (
+            <div style={{
+              background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
+              borderRadius: 10, padding: '10px 14px', marginBottom: 20,
+              fontSize: 13, color: '#dc2626', fontWeight: 600, lineHeight: 1.5,
+            }}>
+              ⚠ {startError}
+            </div>
+          )}
         </div>
 
         {/* Bottom banner */}

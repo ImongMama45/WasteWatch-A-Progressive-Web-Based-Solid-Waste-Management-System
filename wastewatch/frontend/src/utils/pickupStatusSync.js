@@ -70,7 +70,7 @@ export const resolveStopVisualStatus = (stop, fallback = 'PENDING_INSPECTION') =
 
 export const isRoutableStopStatus = (status) => {
   const norm = normalizeStopStatus(status)
-  return norm === 'READY_FOR_COLLECTION'
+  return ['READY_FOR_COLLECTION', 'PENDING_INSPECTION'].includes(norm)
 }
 
 // COLLECTION_REPORTED is included because the driver has submitted proof.
@@ -93,6 +93,30 @@ export const MISSED_STOP_STATUSES = new Set([
 
 export const isMissedStopStatus = (status) =>
   MISSED_STOP_STATUSES.has(normalizeStopStatus(status))
+
+/**
+ * Returns true when every waypoint stop (indices 1..n) in the schedule
+ * is in a resolved state — either collected, disputed, empty, or driver-missed.
+ *
+ * This is the single authoritative definition of "route done" on the frontend.
+ * Use this everywhere instead of copy-pasting the loop:
+ *   - ShiftRouteModule reactive guard
+ *   - handleCollectionConfirmed auto-advance
+ *   - StopCompletedOverlay isRouteComplete
+ *
+ * @param {object|null} schedule  - schedule object with .waypoints array
+ * @param {Map<number,string>} statusMap - map of stop_order → status string
+ * @returns {boolean}
+ */
+export function isScheduleFullyResolved(schedule, statusMap) {
+  const total = (schedule?.waypoints?.length ?? 0) - 1
+  if (total <= 0) return false
+  for (let i = 1; i <= total; i++) {
+    const s = normalizeStopStatus(statusMap.get(i))
+    if (!isCompletedStopStatus(s) && !isMissedStopStatus(s) && s !== 'DRIVER_MISSED') return false
+  }
+  return true
+}
 
 /** Shared stop marker HTML — used by MapView and ShiftRouteModule */
 export function buildStopMarkerHtml(stopNumber, status, details = null, isActive = false) {

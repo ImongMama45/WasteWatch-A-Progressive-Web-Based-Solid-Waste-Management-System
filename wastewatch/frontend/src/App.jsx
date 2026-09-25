@@ -31,7 +31,7 @@ import CollectionSchedule from './pages/CollectionSchedule'
 import AnalyticsTabs from './pages/analytics/AnalyticsTabs'
 import NewsPage from './pages/news/NewsPage'
 import WatcherTasksHub from './pages/watcher/WatcherTasksHub'
-import ConfirmCollectionModule from './pages/watcher/ConfirmCollectionModule'
+import WatcherMapTaskModule from './pages/watcher/WatcherMapTaskModule'
 import NotificationsPage from './pages/NotificationsPage'
 
 // These may not exist yet — uncomment when ready:
@@ -96,12 +96,12 @@ export default function App() {
 
           {/* New hub route — watcher landing page */}
           <Route path="/watcher-tasks" element={
-            <PrivateRoute><WatcherTasksHub /></PrivateRoute>
+            <PrivateRoute roles={['watcher', 'admin']}><WatcherTasksHub /></PrivateRoute>
           } />
 
           {/* New map-based post-collection module */}
           <Route path="/watcher/confirm" element={
-            <PrivateRoute><ConfirmCollectionModule /></PrivateRoute>
+            <PrivateRoute roles={['watcher', 'admin']}><WatcherMapTaskModule mode="post" /></PrivateRoute>
           } />
 
           {/* Redirect the old /collection/confirm to the new module */}
@@ -111,7 +111,7 @@ export default function App() {
 
           {/* WATCHER PAGE: Pre-collection map module */}
           <Route path="/verification-tasks" element={
-            <PrivateRoute><VerificationTasks /></PrivateRoute>
+            <PrivateRoute roles={['watcher', 'admin']}><WatcherMapTaskModule mode="pre" /></PrivateRoute>
           } />
 
           {/* General Page*/}
@@ -124,79 +124,79 @@ export default function App() {
           } />
 
           <Route path="/analytics" element={
-            <PrivateRoute><AnalyticsTabs /></PrivateRoute>
+            <PrivateRoute roles={['admin', 'brgy_official']}><AnalyticsTabs /></PrivateRoute>
           } />
 
           {/* BARANGAY OFFICIAL PAGE */}
           <Route path="/brgy/escalate" element={
-            <PrivateRoute><EscalateToAdmin /></PrivateRoute>
+            <PrivateRoute roles={['brgy_official', 'admin']}><EscalateToAdmin /></PrivateRoute>
           } />
 
           <Route path="/brgy/validate-reports" element={
             <PrivateRoute roles={['admin', 'brgy_official']}><ValidateReports /></PrivateRoute>
           } />
 
-          {/* ADMIN PAGE */}
+          {/* ADMIN PAGE — admin only */}
           <Route path="/admin/barangays" element={
-            <PrivateRoute><BarangayManagement /></PrivateRoute>
+            <PrivateRoute roles={['admin']}><BarangayManagement /></PrivateRoute>
           } />
 
           <Route path="/admin/barangays/:barangayId" element={
-            <PrivateRoute><BarangayDetail /></PrivateRoute>
+            <PrivateRoute roles={['admin']}><BarangayDetail /></PrivateRoute>
           } />
 
           <Route path="/admin/trucks" element={
-            <PrivateRoute><TruckManagement /></PrivateRoute>
+            <PrivateRoute roles={['admin']}><TruckManagement /></PrivateRoute>
           } />
 
           <Route path="/admin/users" element={
-            <PrivateRoute><UserManagement /></PrivateRoute>
+            <PrivateRoute roles={['admin']}><UserManagement /></PrivateRoute>
           } />
 
           <Route path="/admin/dumpsites" element={
-            <PrivateRoute><DumpsiteManagement /></PrivateRoute>
+            <PrivateRoute roles={['admin']}><DumpsiteManagement /></PrivateRoute>
           } />
 
           <Route path="/admin/routes" element={
-            <PrivateRoute><RouteBuilder /></PrivateRoute>
+            <PrivateRoute roles={['admin']}><RouteBuilder /></PrivateRoute>
           } />
 
           <Route path="/admin/escalations" element={
-            <PrivateRoute><EscalationManagement /></PrivateRoute>
+            <PrivateRoute roles={['admin']}><EscalationManagement /></PrivateRoute>
           } />
 
           <Route path="/admin/escalations/:id" element={
-            <PrivateRoute><EscalationDetail /></PrivateRoute>
+            <PrivateRoute roles={['admin']}><EscalationDetail /></PrivateRoute>
           } />
 
           <Route path="/admin/reports/:id" element={
-            <PrivateRoute><ReportDetail /></PrivateRoute>
+            <PrivateRoute roles={['admin', 'brgy_official']}><ReportDetail /></PrivateRoute>
           } />
 
           <Route path="/admin/reports" element={
-            <PrivateRoute><AdminReports /></PrivateRoute>
+            <PrivateRoute roles={['admin', 'brgy_official']}><AdminReports /></PrivateRoute>
           } />
 
           <Route path="/admin/analytics" element={
-            <PrivateRoute><PerformanceAnalytics /></PrivateRoute>
+            <PrivateRoute roles={['admin']}><PerformanceAnalytics /></PrivateRoute>
           } />
 
           <Route path="/admin/hotspots" element={
-            <PrivateRoute><HotspotDetection /></PrivateRoute>
+            <PrivateRoute roles={['admin']}><HotspotDetection /></PrivateRoute>
           } />
 
           <Route path="/admin/notifications" element={
-            <PrivateRoute><NotificationCenter /></PrivateRoute>
+            <PrivateRoute roles={['admin']}><NotificationCenter /></PrivateRoute>
           } />
 
           <Route path="/admin/activity-log" element={
-            <PrivateRoute><ActivityLog /></PrivateRoute>
+            <PrivateRoute roles={['admin']}><ActivityLog /></PrivateRoute>
           } />
 
 
-          {/* ── DRIVER MODULE ── */}
+          {/* ── DRIVER MODULE — driver & admin only ── */}
           <Route path="/driver/flow" element={
-            <PrivateRoute>
+            <PrivateRoute roles={['driver', 'admin']}>
               <DriverRouteFlow />
             </PrivateRoute>
           } />
@@ -204,7 +204,7 @@ export default function App() {
           <Route
             path="/driver/route"
             element={
-              <PrivateRoute>
+              <PrivateRoute roles={['driver', 'admin']}>
                 <DashboardLayout>
                   <RouteOverview />
                 </DashboardLayout>
@@ -213,7 +213,7 @@ export default function App() {
           />
 
           <Route path="/driver/log" element={
-            <PrivateRoute>
+            <PrivateRoute roles={['driver', 'admin']}>
               <DashboardLayout>
                 <DriverCollectionLog />
               </DashboardLayout>
@@ -221,7 +221,7 @@ export default function App() {
           } />
 
           <Route path="/driver/hotspots" element={
-            <PrivateRoute>
+            <PrivateRoute roles={['driver', 'admin']}>
               <DashboardLayout>
                 <DriverHotspotAlert />
               </DashboardLayout>
@@ -229,7 +229,7 @@ export default function App() {
           } />
 
           <Route path="/driver/status" element={
-            <PrivateRoute>
+            <PrivateRoute roles={['driver', 'admin']}>
               <DashboardLayout>
                 <DriverStatusPanel />
               </DashboardLayout>
@@ -237,12 +237,11 @@ export default function App() {
           } />
 
           <Route path="/driver/analytics" element={
-            <PrivateRoute>
+            <PrivateRoute roles={['driver', 'admin']}>
               <DashboardLayout>
                 <DriverAnalytics />
               </DashboardLayout>
             </PrivateRoute>
-
           } />
 
           {/* ── DUMPSITE MODULE ── */}

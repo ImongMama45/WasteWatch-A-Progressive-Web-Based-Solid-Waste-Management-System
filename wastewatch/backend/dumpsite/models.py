@@ -168,6 +168,9 @@ FILL_LEVEL_MULTIPLIERS = {
 
 @receiver(post_save, sender='driver.Truck')
 def sync_fill_estimates(sender, instance, created, **kwargs):
+    if kwargs.get('raw', False):
+        return
+        
     for level, multiplier in FILL_LEVEL_MULTIPLIERS.items():
         obj, was_created = TruckFillEstimate.objects.get_or_create(
             truck=instance,

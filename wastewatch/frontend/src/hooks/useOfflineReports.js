@@ -30,46 +30,13 @@ import api from '../api/client'
 
 // ─── IndexedDB helpers ─────────────────────────────────────────────────────────
 
-const DB_NAME = 'wastewatch_db'
-const DB_VERSION = 6
-const STORE_NAME = 'reports'
+import { DB_NAME, openDB } from '../utils/idbSchema'
 
+const STORE_NAME = 'reports'
 const MAX_RETRY = 3
 
 if (import.meta.env.DEV) {
   window.__wwResetIDB = () => indexedDB.deleteDatabase(DB_NAME)
-}
-
-function openDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION)
-
-    req.onupgradeneeded = (e) => {
-      const db = e.target.result
-      console.log(`[IDB] Upgrading from v${e.oldVersion} to v${e.newVersion}`)
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' })
-        store.createIndex('status', 'status', { unique: false })
-        store.createIndex('createdAt', 'createdAt', { unique: false })
-        console.log('[IDB] Created object store:', STORE_NAME)
-      }
-    }
-
-    req.onblocked = () => {
-      console.error('[IDB] Blocked — another tab is holding an older DB connection open. Close other tabs of this app.')
-    }
-
-    req.onsuccess = (e) => {
-      const db = e.target.result
-      console.log('[IDB] Opened successfully. Stores:', Array.from(db.objectStoreNames))
-      resolve(db)
-    }
-
-    req.onerror = (e) => {
-      console.error('[IDB open] name:', e.target.error?.name, 'message:', e.target.error?.message)
-      reject(e.target.error)
-    }
-  })
 }
 
 const LS_FALLBACK_KEY = 'ww_offline_reports_fallback'

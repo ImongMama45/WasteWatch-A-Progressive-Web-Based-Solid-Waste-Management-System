@@ -68,8 +68,8 @@ export default function CitizenDashboard() {
   useEffect(() => {
     Promise.all([
       api.get('/api/news/items/for-dashboard/').catch(() => ({ data: [] })),
-      api.get('/api/watcher/reports/').catch(() => ({ data: [] })),
-      api.get('/api/watcher/reports/stats/').catch(() => ({ data: { total: 0, pending: 0, resolved: 0 } })),
+      api.get('/api/watcher/reports/mine/').catch(() => ({ data: [] })),
+      api.get('/api/watcher/reports/mine_stats/').catch(() => ({ data: { total: 0, pending: 0, resolved: 0 } })),
       api.get('/api/watcher/hotspots/').catch(() => ({ data: [] })),
       api.get('/api/public/schedule/').catch(() => ({ data: [] })),
       api.get('/api/public/live/').catch(() => ({ data: [] })),
@@ -123,6 +123,7 @@ export default function CitizenDashboard() {
     if (reportsTab === 'all') return true
     if (reportsTab === 'pending') return r.status === 'pending'
     if (reportsTab === 'done') return r.status === 'resolved' || r.status === 'approved'
+    if (reportsTab === 'rejected') return r.status === 'rejected'
     return true
   })
 
@@ -440,6 +441,7 @@ export default function CitizenDashboard() {
                   { key: 'all', label: 'All' },
                   { key: 'pending', label: 'Pending' },
                   { key: 'done', label: 'Done' },
+                  { key: 'rejected', label: 'Rejected' },
                 ].map(t => (
                   <button key={t.key} className="cd-tab"
                     onClick={() => setReportsTab(t.key)}
@@ -490,13 +492,13 @@ export default function CitizenDashboard() {
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                         }}>
                           <div style={{ width: 20, height: 20 }}>
-                            {TYPE_ICONS[report.waste_type] || ICONS.pin}
+                            {TYPE_ICONS[report.issue_type] || TYPE_ICONS[report.waste_type] || ICONS.pin}
                           </div>
                         </div>
 
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>
-                            {report.waste_type?.toUpperCase()}
+                            {report.issue_type_display || report.waste_type_display || (report.issue_type || report.waste_type)?.toUpperCase()}
                           </div>
                           <div style={{
                             fontSize: 12, color: 'var(--text-muted)',

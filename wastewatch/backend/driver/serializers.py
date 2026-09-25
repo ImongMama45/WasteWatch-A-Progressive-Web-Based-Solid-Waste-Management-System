@@ -81,6 +81,7 @@ class CollectionScheduleSerializer(serializers.ModelSerializer):
     completed_stops = serializers.SerializerMethodField()
     total_stops = serializers.SerializerMethodField()
     truck_status = serializers.SerializerMethodField()
+    missed_stops_collected = serializers.SerializerMethodField()
 
     class Meta:
         model  = CollectionSchedule
@@ -103,10 +104,11 @@ class CollectionScheduleSerializer(serializers.ModelSerializer):
     def get_completed_stops(self, obj):
         from django.utils import timezone
         today = timezone.localdate()
-        from django.db.models import Q
+        # Only count stops the driver actually collected — DRIVER_MISSED is
+        # explicitly excluded so missed stops don't inflate the completed counter.
         pickup_completed_orders = set(obj.pickups.filter(
-            Q(status='COMPLETED', collected_at__date=today) |
-            Q(status='DRIVER_MISSED', updated_at__date=today)
+            status='COMPLETED',
+            collected_at__date=today,
         ).values_list('stop_order', flat=True))
         
         try:
@@ -120,6 +122,16 @@ class CollectionScheduleSerializer(serializers.ModelSerializer):
             empty_stop_orders = set()
 
         return len(pickup_completed_orders | empty_stop_orders)
+
+    def get_missed_stops_collected(self, obj):
+        from driver.models import MissedStop, MissedStopStatus
+        from django.utils import timezone
+        today = timezone.localdate()
+        return MissedStop.objects.filter(
+            resolved_by_shift__driver=obj.driver,
+            resolved_at__date=today,
+            status=MissedStopStatus.RESOLVED
+        ).count()
 
     def get_total_stops(self, obj):
         count = obj.pickups.count()
@@ -142,10 +154,11 @@ class CollectionScheduleSerializer(serializers.ModelSerializer):
         if ended_shift:
             count = obj.pickups.count()
             total_stops = count if count > 0 else max(0, len(obj.waypoints or []) - 1)
-            from django.db.models import Q
+            # Same rule as get_completed_stops: DRIVER_MISSED stops are not
+            # collected — exclude them so a partial route isn't labeled 'completed'.
             pickup_completed_orders = set(obj.pickups.filter(
-                Q(status='COMPLETED', collected_at__date=today) |
-                Q(status='DRIVER_MISSED', updated_at__date=today)
+                status='COMPLETED',
+                collected_at__date=today,
             ).values_list('stop_order', flat=True))
             
             try:

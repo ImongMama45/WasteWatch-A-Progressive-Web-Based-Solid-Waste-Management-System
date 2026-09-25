@@ -1,4 +1,16 @@
 /**
+ * ⚠️  DEPRECATED — NOT IMPORTED ANYWHERE. DO NOT EDIT.
+ * -------------------------------------------------------
+ * This file is the first-generation "on route" screen. It is completely
+ * orphaned — DriverRouteFlow.jsx never imports it. The live component is
+ * ShiftRouteModule.jsx. This file is kept only for historical reference.
+ *
+ * git history preserves the full content; safe to delete with:
+ *   git rm wastewatch/frontend/src/pages/driver/components/NavigationModule.jsx
+ *
+ * Original description below:
+ */
+/**
  * NavigationModule.jsx
  * ---------------------
  * Module 4 — Core driver UI during active route execution.
@@ -22,6 +34,7 @@ import useGpsTracking from '../../../hooks/useGpsTracking'
 import Navbar from '../../../components/Navbar'
 import api from '../../../api/client'
 import { useAuth } from '../../../context/AuthContext'
+import TurnArrow, { TURN_COLOR } from './TurnArrow'
 
 // ─── GPS STATUS PILL ─────────────────────────────────────────────────────────
 
@@ -143,7 +156,7 @@ export default function NavigationModule({ setRouteState }) {
   const { formattedTime, shiftActive } = useShiftTimer()
   // GPS is ALWAYS enabled in the navigation module — position data is required
   // for turn-by-turn routing, geofenced arrival detection, and live map updates.
-  const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } = useGpsTracking({ enabled: true, intervalMs: 5000 })
+  const { position: realGpsPos, accuracy: gpsAccuracy, isTracking, error: gpsError } = useGpsTracking({ enabled: true, intervalMs: 30000 })
   const isExtendedMode = sessionStorage.getItem('ww_extended_mode') === 'true'
 
   // Developer Mock GPS — mockGps bypasses real GPS (accuracy check also bypassed for dev)
@@ -349,6 +362,8 @@ export default function NavigationModule({ setRouteState }) {
   let etaMinutes = '--'
   let arrivalTimeStr = '--:--'
   let distanceKmStr = '--'
+  let stepType = 6
+  let stepBearing = null
 
   if (orsData) {
     const segmentToNextStop = orsData.segments[0]
@@ -356,6 +371,8 @@ export default function NavigationModule({ setRouteState }) {
       const currentStep = segmentToNextStop.steps[0] // Simplify: just show the first upcoming step
       instructionText = currentStep.instruction
       instructionDistance = Math.round(currentStep.distance) + 'm'
+      stepType = currentStep.type !== undefined ? currentStep.type : 6
+      stepBearing = currentStep.bearing_after !== undefined ? currentStep.bearing_after : null
     }
 
     // Summary info (ETA/distance to NEXT STOP, not the whole route)
@@ -369,6 +386,8 @@ export default function NavigationModule({ setRouteState }) {
       distanceKmStr = (segmentToNextStop.distance / 1000).toFixed(1)
     }
   }
+
+  const accentColor = TURN_COLOR[stepType] || '#3b82f6'
 
   return (
     <>
@@ -523,28 +542,26 @@ export default function NavigationModule({ setRouteState }) {
         </div>
 
         {/* Turn direction card (Floating below header) */}
-        <div style={{
-          position: 'absolute', top: 120, left: 14, right: 14, zIndex: 10,
-          background: 'rgba(255,255,255,0.96)', borderRadius: 14, padding: '14px 18px',
-          display: 'flex', alignItems: 'center', gap: 16,
-          boxShadow: '0 4px 20px rgba(0,0,0,0.2)', backdropFilter: 'blur(6px)',
-        }}>
-          <div style={{
-            width: 44, height: 44, borderRadius: 10, flexShrink: 0,
-            background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="#0f172a" strokeWidth="2.5"
-              strokeLinecap="round" strokeLinejoin="round" width="24" height="24">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
+        <div style={{ position: 'absolute', top: 120, left: 14, right: 14, zIndex: 10, background: 'rgba(255,255,255,0.97)', borderRadius: 16, overflow: 'hidden', display: 'flex', alignItems: 'stretch', boxShadow: '0 6px 28px rgba(0,0,0,.18)', backdropFilter: 'blur(6px)', animation: 'navFadeUp .25s ease' }}>
+          <div style={{ width: 76, flexShrink: 0, background: `${accentColor}12`, borderRight: `3px solid ${accentColor}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
+            <div style={{ animation: 'arrowPop .3s ease' }}>
+              <TurnArrow type={stepType} bearing={stepBearing} size={48} color={accentColor} />
+            </div>
           </div>
-          <div>
-            <div style={{ fontFamily: 'var(--font-head)', fontSize: 20, fontWeight: 900, color: '#0f172a' }}>
+          <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 900, color: '#0f172a', lineHeight: 1.2, marginBottom: instructionDistance ? 5 : 0 }}>
               {instructionText}
             </div>
-            <div style={{ fontSize: 14, color: '#64748b', fontWeight: 600 }}>
-              {instructionDistance}
-            </div>
+            {instructionDistance && (
+              <div style={{ fontSize: 13, color: accentColor, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke={accentColor} strokeWidth="2" strokeLinecap="round">
+                  <line x1="8" y1="2" x2="8" y2="14" />
+                  <line x1="3" y1="9" x2="8" y2="14" />
+                  <line x1="13" y1="9" x2="8" y2="14" />
+                </svg>
+                in {instructionDistance}
+              </div>
+            )}
           </div>
         </div>
 

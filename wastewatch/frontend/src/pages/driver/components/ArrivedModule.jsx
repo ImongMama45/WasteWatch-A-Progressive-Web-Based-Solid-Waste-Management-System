@@ -128,11 +128,14 @@ export default function ArrivedModule({ setRouteState }) {
 
     try {
       const safeStopIndex = parseInt(sessionStorage.getItem('ww_current_stop_index') || '1', 10)
-      
-      const photoRes = await fetch(photos[0])
-      const photoBlob = await photoRes.blob()
 
-      const note_ = note.trim()
+      // photos[0] is already a File object from compressImage — use it directly.
+      // Using fetch() on a File produces an empty/corrupted blob, which is the
+      // root cause of the "Invalid image file" 500 error from Cloudinary.
+      const photoBlob = photos[0]
+
+      const overrideReason = sessionStorage.getItem('ww_override_reason') || ''
+      const note_ = [overrideReason, note.trim()].filter(Boolean).join('').trim()
       const collected_at = new Date().toISOString()
       const lat = sessionStorage.getItem('ww_gps_lat') || ''
       const lng = sessionStorage.getItem('ww_gps_lng') || ''
@@ -148,6 +151,10 @@ export default function ArrivedModule({ setRouteState }) {
           if (lng) formData.append('lng', lng)
           formData.append('schedule_id', schedule?.id || '')
           formData.append('stop_order', String(safeStopIndex))
+          
+          if (overrideReason.includes('Watcher Delayed')) {
+            formData.append('watcher_delayed', 'true')
+          }
 
           const res = await api.post(`/api/driver/stops/collect/`, formData)
 

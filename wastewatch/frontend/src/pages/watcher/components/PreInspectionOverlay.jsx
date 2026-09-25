@@ -196,10 +196,18 @@ export default function PreInspectionOverlay({ visible, task, gpsPos, onComplete
 
           {/* Multi-photo (mandatory) */}
           <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.07em', marginBottom: 8 }}>
+                INSPECTION PHOTOS * <span style={{ fontWeight: 500, textTransform: 'none', fontSize: 10, color: photos.length >= 4 ? '#f59e0b' : '#94a3b8' }}>({photos.length}/4)</span>
+            </div>
             {MultiPhotoPicker
               ? <MultiPhotoPicker photos={photos} onChange={setPhotos} />
               : <p style={{ fontSize: 12, color: '#94a3b8' }}>Photo upload not available.</p>
             }
+            {photos.length === 0 && (
+                <p style={{ fontSize: 11, color: '#ef4444', marginTop: 6, fontWeight: 600 }}>
+                    At least one photo is required to submit.
+                </p>
+            )}
           </div>
 
           {error && (

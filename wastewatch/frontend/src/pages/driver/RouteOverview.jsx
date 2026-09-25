@@ -16,10 +16,27 @@ import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
 import useGpsTracking from '../../hooks/useGpsTracking'
 import Navbar from '../../components/Navbar'
+import useShiftTimer from '../../hooks/useShiftTimer'
 import { buildStopValidationSnapshot, normalizeStopStatus } from '../../utils/pickupStatusSync'
 
 
 // ─── ROUTE HELPERS ────────────────────────────────────────────────────────────
+
+// Get YYYY-MM-DD date for a given day name in the current week (Mon-Sun)
+function getDateForDay(dayName) {
+  const today = new Date()
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  const todayIndex = today.getDay()
+  const targetIndex = days.indexOf(dayName)
+  const diff = targetIndex - todayIndex
+  const targetDate = new Date(today)
+  targetDate.setDate(today.getDate() + diff)
+
+  const yyyy = targetDate.getFullYear()
+  const mm = String(targetDate.getMonth() + 1).padStart(2, '0')
+  const dd = String(targetDate.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
 
 function decodePolyline(encoded) {
   let pts = [], i = 0, lat = 0, lng = 0
@@ -188,11 +205,17 @@ export default function RouteOverview() {
   const driverRef = useRef(null)
 
   const [leafletReady, setLeafletReady] = useState(false)
+  const [schedules, setSchedules] = useState([])
+  const [selectedDay, setSelectedDay] = useState(new Date().toLocaleDateString('en-US', { weekday: 'long' }))
+  const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long' })
+  const isTodaySelected = selectedDay === todayStr
   const [schedule, setSchedule] = useState(null)
   const [profile, setProfile] = useState(null)
   const [stops, setStops] = useState([])
   const [mapLoading, setMapLoading] = useState(true)
   const [focusedId, setFocusedId] = useState(null)
+
+  const { shiftActive, scheduleId: activeScheduleId } = useShiftTimer()
 
   // ── Live GPS tracking ────────────────────────────────────────────────────────
   const { position: gpsPosition, accuracy: gpsAccuracy, error: gpsError, isTracking } =
@@ -217,21 +240,36 @@ export default function RouteOverview() {
     setMapLoading(true)
     api.get('/api/driver/collection-schedules/')
       .then(async res => {
-        const match = res.data.find(s => String(s.driver) === String(user.id))
-        setSchedule(match || null)
-        if (!match) return
+        const matches = res.data.filter(s => String(s.driver) === String(user.id))
+        setSchedules(matches)
+
+        const activeMatch = matches.find(s => {
+          let days = []
+          if (Array.isArray(s.days)) days = s.days
+          else if (typeof s.days === 'string') days = s.days.split(',').map(d => d.trim())
+          return days.some(d => d.toLowerCase().startsWith(selectedDay.substring(0, 3).toLowerCase()))
+        })
+
+        setSchedule(activeMatch || null)
+        if (!activeMatch) {
+          setStops([])
+          setMapLoading(false)
+          return
+        }
+
+        const targetDateStr = getDateForDay(selectedDay)
 
         const [currentRes, valRes] = await Promise.all([
           api.get('/api/driver/stops/current/').catch(() => ({ data: null })),
-          api.get(`/api/watcher/stop-validations/?schedule_id=${encodeURIComponent(match.id)}`).catch(() => ({ data: null })),
+          api.get(`/api/watcher/stop-validations/?schedule_id=${encodeURIComponent(activeMatch.id)}&date=${targetDateStr}`).catch(() => ({ data: null })),
         ])
         const currentStopOrder = Number(currentRes.data?.order) || null
         const rows = valRes.data?.results ?? valRes.data ?? []
         const snapshot = buildStopValidationSnapshot(rows)
 
-        const builtStops = (match.waypoints || []).slice(1).map((wp, i) => {
+        const builtStops = (activeMatch.waypoints || []).slice(1).map((wp, i) => {
           const wpIndex = i + 1
-          const key = `${match.id}:${wpIndex}`
+          const key = `${activeMatch.id}:${wpIndex}`
           const rawStatus = snapshot.statusMap.get(key) || 'PENDING_INSPECTION'
           const normalized = normalizeStopStatus(rawStatus)
           const isCurrentStop = wpIndex === currentStopOrder
@@ -240,7 +278,7 @@ export default function RouteOverview() {
             id: wpIndex,
             order: wpIndex,
             address: wp.label || wp.name || `Stop ${wpIndex}`,
-            zone: wp.barangay || match.barangay_names || '',
+            zone: wp.barangay || activeMatch.barangay_names || '',
             type: 'Waste Collection',
             lat: Number(wp.lat),
             lng: Number(wp.lng),
@@ -253,7 +291,7 @@ export default function RouteOverview() {
       })
       .catch(() => setSchedule(null))
       .finally(() => setMapLoading(false))
-  }, [user?.id])
+  }, [user?.id, selectedDay])
 
   // ── 3. Load Leaflet CDN ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -278,16 +316,23 @@ export default function RouteOverview() {
     }).addTo(map)
     L.control.zoom({ position: 'bottomright' }).addTo(map)
     mapInstance.current = map
+
+    // Fix gray block by invalidating size after layout settles
+    setTimeout(() => {
+      if (mapInstance.current) {
+        mapInstance.current.invalidateSize()
+      }
+    }, 250)
   }, [leafletReady])
 
   // ── 5. Redraw whenever stops change (after fetch or optimistic update) ────────
   useEffect(() => {
-    if (!mapInstance.current || !window.L || !stops.length) return
-    drawMap(mapInstance.current, stops)
-  }, [stops]) // eslint-disable-line
+    if (!mapInstance.current || !window.L || !stops.length || !schedule) return
+    drawMap(mapInstance.current, stops, schedule)
+  }, [stops, schedule]) // eslint-disable-line
 
   // ── Draw markers + ORS road-snapped route ────────────────────────────────────
-  function drawMap(map, stopsData) {
+  function drawMap(map, stopsData, sched) {
     const L = window.L
 
     // Clear previous markers before redraw
@@ -313,31 +358,49 @@ export default function RouteOverview() {
       .addTo(map)
       .bindPopup('<b>📍 Your Location</b>')
 
-    // Completed path — solid, straight line (already driven, accuracy fine)
-    const doneCoords = stopsData.filter(s => s.status === 'completed').map(s => [s.lat, s.lng])
-    if (doneCoords.length > 1)
-      L.polyline(doneCoords, { color: '#2ecc71', weight: 5, opacity: 0.9 }).addTo(map)
-
-    // Remaining path — faint fallback first, then swap with ORS road-snapped route
-    const curStop = stopsData.find(s => s.status === 'current')
-    const remCoords = [
-      ...(curStop ? [[curStop.lat, curStop.lng]] : []),
-      ...stopsData.filter(s => s.status === 'pending').map(s => [s.lat, s.lng]),
-    ]
-
-    let fallbackLine = null
-    if (remCoords.length > 1) {
-      fallbackLine = L.polyline(remCoords, {
-        color: '#2ecc71', weight: 3, opacity: 0.35, dashArray: '6, 6',
-      }).addTo(map)
+    // Home Base Marker
+    if (sched?.waypoints?.length) {
+      const sp = sched.waypoints[0]
+      const homeIcon = L.divIcon({
+        html: `<div style="background:#fff;border:2.5px solid #16A34A;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:0 3px 10px rgba(0,0,0,.18);">🏛️</div>`,
+        className: '', iconSize: [32, 32], iconAnchor: [16, 16],
+      })
+      const hm = L.marker([sp.lat, sp.lng], { icon: homeIcon }).addTo(map)
+      hm.bindPopup(`<b>Start</b><br>${sp.label || 'Home Base'}`)
+      markersRef.current['base'] = hm
     }
 
-    // Fit to all stops
-    map.fitBounds(L.latLngBounds(stopsData.map(s => [s.lat, s.lng])), { padding: [40, 40] })
+    // Dumpsite Marker
+    if (sched?.dumpsite_detail) {
+      const ds = sched.dumpsite_detail
+      const dsIcon = L.divIcon({
+        html: `<div style="background:#DC2626;border:2px solid white;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:0 3px 8px rgba(0,0,0,.18);">🏭</div>`,
+        className: '', iconSize: [30, 30], iconAnchor: [15, 15],
+      })
+      const dm = L.marker([+ds.latitude, +ds.longitude], { icon: dsIcon }).addTo(map)
+      dm.bindPopup(`<b>${ds.name}</b>`)
+      markersRef.current['dumpsite'] = dm
+    }
 
-    // ORS road-snapped route for remaining stops
+    // Full Route Path
+    const allPts = []
+    if (sched?.waypoints?.length) allPts.push(sched.waypoints[0])
+    stopsData.forEach(s => allPts.push(s))
+    if (sched?.dumpsite_detail) allPts.push({ lat: +sched.dumpsite_detail.latitude, lng: +sched.dumpsite_detail.longitude })
+    if (sched?.waypoints?.length) allPts.push(sched.waypoints[0]) // Return to Base
+
+    let fallbackLine = null
+    if (allPts.length > 1) {
+      fallbackLine = L.polyline(allPts.map(p => [p.lat, p.lng]), {
+        color: '#16A34A', weight: 3, opacity: 0.3, dashArray: '8,6',
+      }).addTo(map)
+      markersRef.current['route_fallback'] = fallbackLine
+      map.fitBounds(fallbackLine.getBounds(), { padding: [48, 48] })
+    }
+
+    // ORS road-snapped route for the full route
     const orsApiKey = import.meta.env.VITE_ORS_API_KEY
-    if (!orsApiKey || remCoords.length < 2) return
+    if (!orsApiKey || allPts.length < 2) return
 
     fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
       method: 'POST',
@@ -346,14 +409,15 @@ export default function RouteOverview() {
         'Content-Type': 'application/json',
         Authorization: orsApiKey,
       },
-      body: JSON.stringify({ coordinates: remCoords.slice(0, 50).map(([lat, lng]) => [lng, lat]) }),
+      body: JSON.stringify({ coordinates: allPts.slice(0, 50).map(p => [p.lng, p.lat]) }),
     })
       .then(r => r.json())
       .then(data => {
         if (!data.routes?.length || !mapInstance.current) return
         if (fallbackLine) map.removeLayer(fallbackLine)
         const pts = decodePolyline(data.routes[0].geometry)
-        L.polyline(pts, { color: '#2ecc71', weight: 5, opacity: 0.85 }).addTo(map)
+        const orsLine = L.polyline(pts, { color: '#16A34A', weight: 4.5, opacity: 0.85 }).addTo(map)
+        markersRef.current['route_ors'] = orsLine
       })
       .catch(() => { /* fallbackLine stays visible */ })
   }
@@ -379,36 +443,6 @@ export default function RouteOverview() {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [])
 
-  // ── Mark stop as completed ──────────────────────────────────────────────────
-  function handleMarkDone(stop) {
-    // Optimistic update
-    setStops(prev => {
-      const idx = prev.findIndex(s => s.id === stop.id)
-      const updated = [...prev]
-      updated[idx] = {
-        ...updated[idx],
-        status: 'completed',
-        completedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-      }
-      // Promote next pending → current
-      const nextPending = updated.find(s => s.status === 'pending')
-      if (nextPending) nextPending.status = 'current'
-      return updated
-    })
-
-    // Refresh markers on map
-    if (mapInstance.current && window.L) {
-      const L = window.L
-      stops.forEach(s => {
-        const m = markersRef.current[s.id]
-        if (m) m.setIcon(makeStopIcon(L, s))
-      })
-    }
-
-    // TODO: api.post(`/api/driver/stops/${stop.id}/complete/`, { photoProof: null })
-    api.post(`/api/driver/stops/${stop.id}/complete/`).catch(() => { })
-  }
-
   // ────────────────────────────────────────────────────────────────────────────
 
   return (
@@ -427,7 +461,19 @@ export default function RouteOverview() {
         .ww-routemap .leaflet-bottom { z-index: 2 !important; }
       `}</style>
 
-      <div className="page" style={{ paddingBottom: 80 }}>
+      <div className="page" style={{ paddingBottom: 20 }}>
+
+        {/* ── TOP NAV ── */}
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+          <button onClick={() => navigate('/dashboard')} style={{
+            background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 4, padding: 0
+          }}>
+            <span style={{ fontSize: 18 }}>‹</span> Dashboard
+          </button>
+        </div>
+
+        {/* ── WEEK SELECTOR ── */}
 
         {/* ── HEADER ── */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
@@ -551,6 +597,43 @@ export default function RouteOverview() {
           )}
         </div>
 
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: 16 }}>
+          {[
+            { full: 'Monday', short: 'Mon' },
+            { full: 'Tuesday', short: 'Tue' },
+            { full: 'Wednesday', short: 'Wed' },
+            { full: 'Thursday', short: 'Thu' },
+            { full: 'Friday', short: 'Fri' },
+            { full: 'Saturday', short: 'Sat' },
+            { full: 'Sunday', short: 'Sun' }
+          ].map(d => {
+            const isActive = selectedDay === d.full
+            const scheduled = schedules.some(s => {
+              let days = []
+              if (Array.isArray(s.days)) days = s.days
+              else if (typeof s.days === 'string') days = s.days.split(',').map(d => d.trim())
+              return days.some(day => day.toLowerCase().startsWith(d.full.substring(0, 3).toLowerCase()))
+            })
+            return (
+              <button key={d.full}
+                onClick={() => setSelectedDay(d.full)}
+                style={{
+                  flex: '1 0 44px', minWidth: 44, height: 48, borderRadius: 12,
+                  background: isActive ? 'var(--accent)' : 'var(--surface)',
+                  color: isActive ? '#fff' : scheduled ? 'var(--text)' : 'var(--text-muted)',
+                  border: `1px solid ${isActive ? 'var(--accent)' : scheduled ? 'rgba(46,204,113,0.3)' : 'transparent'}`,
+                  opacity: scheduled ? 1 : 0.5,
+                  cursor: 'pointer',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                  transition: 'all 0.2s ease'
+                }}>
+                <span style={{ fontSize: 11, fontWeight: 700 }}>{d.short}</span>
+                {scheduled && <div style={{ width: 4, height: 4, borderRadius: '50%', background: isActive ? '#fff' : 'var(--accent)', marginTop: 4 }} />}
+              </button>
+            )
+          })}
+        </div>
+
         {/* ── NEXT STOP BANNER (shown if current stop exists) ── */}
         {nextStop && (
           <div style={{
@@ -580,6 +663,8 @@ export default function RouteOverview() {
           </div>
         )}
 
+
+
         {/* ── STOP LIST ── */}
         <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <h2 className="section-title" style={{ margin: 0, fontSize: 16 }}>All Stops</h2>
@@ -597,7 +682,6 @@ export default function RouteOverview() {
                 isNext={isNext}
                 focused={focusedId === stop.id}
                 onFocus={focusStop}
-                onMarkDone={handleMarkDone}
                 gpsPosition={gpsPosition}
               />
             )
@@ -605,6 +689,40 @@ export default function RouteOverview() {
         </div>
 
       </div>
+
+      {/* ── FIXED BOTTOM CTA (Only if viewing today's route) ── */}
+      {isTodaySelected && schedule && (
+        <div style={{
+          position: 'sticky', bottom: 20, zIndex: 1000,
+          background: 'var(--surface)', padding: '16px',
+          borderRadius: 20,
+          border: '1px solid var(--border)',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.1)',
+          display: 'flex', justifyContent: 'center',
+          marginTop: 20
+        }}>
+          <button
+            onClick={() => {
+              if (totalCount > 0 && completedCount === totalCount) return;
+              navigate('/driver/flow');
+            }}
+            style={{
+              width: '100%', maxWidth: 400,
+              background: (totalCount > 0 && completedCount === totalCount) ? 'var(--surface-hover)' : (shiftActive ? 'var(--accent)' : '#10b981'),
+              color: (totalCount > 0 && completedCount === totalCount) ? 'var(--text-muted)' : '#fff', 
+              border: (totalCount > 0 && completedCount === totalCount) ? '1px solid var(--border)' : 'none', 
+              borderRadius: 12,
+              padding: '16px', fontSize: 16, fontWeight: 800,
+              cursor: (totalCount > 0 && completedCount === totalCount) ? 'default' : 'pointer', 
+              boxShadow: (totalCount > 0 && completedCount === totalCount) ? 'none' : '0 4px 12px rgba(46,204,113,0.3)',
+            }}
+          >
+            {(totalCount > 0 && completedCount === totalCount) 
+              ? 'Shift Completed 🎉' 
+              : (shiftActive ? 'Resume Active Shift' : 'Start Today\'s Shift')}
+          </button>
+        </div>
+      )}
     </>
   )
 }
