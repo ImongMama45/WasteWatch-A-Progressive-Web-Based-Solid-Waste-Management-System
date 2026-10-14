@@ -308,6 +308,7 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
   const { user } = useAuth()
   const isOnline = useOnline()
   const proofQueue = getQueue('proof_submissions')
+  const { notify } = useNotification()
 
   useEffect(() => {
     if (!visible) {
@@ -378,12 +379,18 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
           sessionStorage.setItem('ww_pending_collection_photo_url', res.data?.photo_url || '')
           sessionStorage.setItem('ww_pending_collection_note', note_)
           sessionStorage.setItem('ww_pending_collection_at', collected_at)
+          let missedStopResolved = true
           // If collecting a missed stop, also call the resolve endpoint
           if (missedStopId) {
-            try { await api.post(`/api/driver/shift/missed-stops/${missedStopId}/collect/`) } catch { /* non-fatal */ }
+            try {
+              await api.post(`/api/driver/shift/missed-stops/${missedStopId}/collect/`)
+            } catch {
+              missedStopResolved = false
+              notify({ variant: 'warning', message: 'Photo saved, but failed to mark missed stop as resolved. Please retry later.' })
+            }
           }
           setSubmitting(false)
-          onConfirm()
+          onConfirm(missedStopResolved)
           return
         } catch (netErr) {
           const isNetworkErr = !netErr?.response
@@ -408,7 +415,7 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
       sessionStorage.setItem('ww_pending_collection_note', note_)
       sessionStorage.setItem('ww_pending_collection_at', collected_at)
       setSubmitting(false)
-      onConfirm()
+      onConfirm(missedStopId ? false : true)
     } catch (err) {
       setCameraError(err?.response?.data?.error || err?.message || 'Proof photo upload failed.')
       setSubmitting(false)
@@ -870,7 +877,7 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     }
     hasAutoEndedRef.current = true
     sessionStorage.setItem('ww_route_complete', 'true')
-    try { sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...stopStatuses])) } catch {}
+    try { sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...stopStatuses])) } catch { }
     // Use setTimeout to let current React render cycle finish before transitioning
     setTimeout(() => handleEndShift(), 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -929,7 +936,7 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
       })
     }
     setActiveMissedStop(best)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floatingMissedStops, isExtendedMode])
 
   useEffect(() => {
@@ -1547,7 +1554,7 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
         const data = await res.json()
         if (cancelled || !data.routes?.length) return
         routeLegCacheRef.current.set(legKey, { geometry: data.routes[0].geometry })
-        try { sessionStorage.setItem('ww_ors_route_cache', JSON.stringify([...routeLegCacheRef.current])) } catch {}
+        try { sessionStorage.setItem('ww_ors_route_cache', JSON.stringify([...routeLegCacheRef.current])) } catch { }
         drawAllLegs() // upgrade dashed → solid as each leg becomes available
       } catch { /* skip failed legs — they stay dashed */ }
     }
@@ -1715,16 +1722,19 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     }
   }
 
-  function handleCollectionConfirmed() {
+  function handleCollectionConfirmed(missedStopResolved = true) {
     if (activeMissedStop) {
-      // Missed stop: show a toast, remove from floating list, clear active target
-      notify({ variant: 'success', message: `🎯 Missed stop collected! +50 pts` })
-      
-      // Update local storage so the dashboard immediately shows the new count
-      const localCount = parseInt(sessionStorage.getItem('ww_missed_stops_collected') || '0', 10)
-      sessionStorage.setItem('ww_missed_stops_collected', String(localCount + 1))
-      
-      setFloatingMissedStops(prev => prev.filter(s => s.id !== activeMissedStop.id))
+      if (missedStopResolved) {
+        // Missed stop: show a toast, remove from floating list, clear active target
+        notify({ variant: 'success', message: `🎯 Missed stop collected! +50 pts` })
+
+        // Update local storage so the dashboard immediately shows the new count
+        const localCount = parseInt(sessionStorage.getItem('ww_missed_stops_collected') || '0', 10)
+        sessionStorage.setItem('ww_missed_stops_collected', String(localCount + 1))
+
+        setFloatingMissedStops(prev => prev.filter(s => s.id !== activeMissedStop.id))
+      }
+      // Either way, stop targeting it — the poller will re-surface it if still PENDING
       setActiveMissedStop(null)
       setRouteState('navigating')
       return
@@ -1862,169 +1872,169 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
   return (
     <>
       <Navbar />
-          <style>{`
+      <style>{`
             @keyframes navPulse    { 0%,100%{opacity:1} 50%{opacity:.3} }
             @keyframes markerPulse { 0%,100%{transform:scale(1);opacity:.5} 50%{transform:scale(1.6);opacity:0} }
             @keyframes navFadeUp   { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
             @keyframes arrowPop    { 0%{transform:scale(.8);opacity:0} 60%{transform:scale(1.1)} 100%{transform:scale(1);opacity:1} }
           `}</style>
 
-          <div style={{ position: 'fixed', top: 60, bottom: 0, left: 0, right: 0, zIndex: 900, display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-body)', overflow: 'hidden', background: '#1e293b' }}>
-            {/* MAP */}
-            <div style={{ position: 'absolute', inset: 0, zIndex: 0, background: '#2a3441' }}>
-              <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
-              <MapLegend />
-              {import.meta.env.DEV && (
-                <div style={{ position: 'absolute', top: '50%', right: 14, marginTop: 54, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <button onClick={() => teleportTo(currentTarget)} disabled={!currentTarget} title="Teleport to Current Stop"
-                    style={{ width: 44, height: 44, borderRadius: '50%', background: currentTarget ? '#f59e0b' : '#cbd5e1', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentTarget ? 'pointer' : 'not-allowed', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 20 }}>📍</button>
-                  <button onClick={handleDevSkipStop} disabled={!nextTarget} title="Teleport to Next Stop & Skip Current"
-                    style={{ width: 44, height: 44, borderRadius: '50%', background: nextTarget ? '#8b5cf6' : '#cbd5e1', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: nextTarget ? 'pointer' : 'not-allowed', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 20 }}>⏭</button>
-                  {isMock && (
-                    <button onClick={clearMock} title="Clear Mock GPS"
-                      style={{ width: 44, height: 44, borderRadius: '50%', background: '#ef4444', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 16, fontWeight: 800, color: '#fff' }}>✕</button>
+      <div style={{ position: 'fixed', top: 60, bottom: 0, left: 0, right: 0, zIndex: 900, display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-body)', overflow: 'hidden', background: '#1e293b' }}>
+        {/* MAP */}
+        <div style={{ position: 'absolute', inset: 0, zIndex: 0, background: '#2a3441' }}>
+          <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+          <MapLegend />
+          {import.meta.env.DEV && (
+            <div style={{ position: 'absolute', top: '50%', right: 14, marginTop: 54, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button onClick={() => teleportTo(currentTarget)} disabled={!currentTarget} title="Teleport to Current Stop"
+                style={{ width: 44, height: 44, borderRadius: '50%', background: currentTarget ? '#f59e0b' : '#cbd5e1', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentTarget ? 'pointer' : 'not-allowed', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 20 }}>📍</button>
+              <button onClick={handleDevSkipStop} disabled={!nextTarget} title="Teleport to Next Stop & Skip Current"
+                style={{ width: 44, height: 44, borderRadius: '50%', background: nextTarget ? '#8b5cf6' : '#cbd5e1', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: nextTarget ? 'pointer' : 'not-allowed', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 20 }}>⏭</button>
+              {isMock && (
+                <button onClick={clearMock} title="Clear Mock GPS"
+                  style={{ width: 44, height: 44, borderRadius: '50%', background: '#ef4444', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 16, fontWeight: 800, color: '#fff' }}>✕</button>
+              )}
+              <button onClick={() => markRemainingMissed(currentStopIndex + 1)} title="Simulate shift end"
+                style={{ width: 44, height: 44, borderRadius: '50%', background: '#0f172a', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 14, color: '#fff', fontWeight: 800 }}>🚫</button>
+            </div>
+          )}
+        </div>
+
+        {/* STOP HEADER */}
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(30,42,58,0.92)', backdropFilter: 'blur(8px)', padding: '16px 18px 18px', color: '#fff', boxShadow: '0 4px 20px rgba(0,0,0,.15)' }}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+            <GpsStatusPill isTracking={isTracking} error={gpsError} accuracy={gpsAccuracy} />
+            <ConnPill />
+            {isExtendedMode && (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.5)', borderRadius: 20, padding: '3px 10px' }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', animation: 'navPulse 1.5s ease infinite', display: 'inline-block' }} />
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: '.04em' }}>COLLECTING UNCLAIMED</span>
+              </div>
+            )}
+            <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: '3px 10px' }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.65)', letterSpacing: '.04em' }}>⏱ {formattedTime}</span>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+              <span style={{ fontSize: 20, marginTop: 2 }}>{activeMissedStop ? '🎯' : '📍'}</span>
+              <div>
+                <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, marginBottom: 2 }}>
+                  {currentTarget?.label || (activeMissedStop ? 'Missed Stop' : `Stop ${currentStopIndex}`)}
+                  {!activeMissedStop && getStopStatus(currentStopIndex) === 'PENDING_INSPECTION' && (
+                    <span style={{
+                      marginLeft: 8, fontSize: 10, padding: '2px 6px', borderRadius: 4, fontWeight: 800, verticalAlign: 'middle',
+                      background: currentTarget?.watcher_names === 'No assigned watcher' ? '#ef4444' : '#f59e0b',
+                      color: currentTarget?.watcher_names === 'No assigned watcher' ? '#fff' : '#0f172a'
+                    }}>
+                      {currentTarget?.watcher_names === 'No assigned watcher' ? 'NO WATCHER' : 'UNINSPECTED'}
+                    </span>
                   )}
-                  <button onClick={() => markRemainingMissed(currentStopIndex + 1)} title="Simulate shift end"
-                    style={{ width: 44, height: 44, borderRadius: '50%', background: '#0f172a', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 14, color: '#fff', fontWeight: 800 }}>🚫</button>
+                </div>
+                {activeMissedStop ? (
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>Unclaimed Stop</div>
+                ) : (
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>{currentStopIndex} of {waypoints.length - 1} · {schedule?.days || ''}</div>
+                )}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+              {[
+                { status: 'PENDING_INSPECTION', color: '#94a3b8' },
+                { status: 'READY_FOR_COLLECTION', color: '#f59e0b' },
+                { status: 'EMPTY_STOP', color: '#94a3b8' },
+                { status: 'COLLECTION_REPORTED', color: '#eab308' },
+                { status: 'VERIFIED_COLLECTED', color: '#16a34a' },
+                { status: 'COLLECTION_DISPUTED', color: '#ef4444' },
+              ].map(({ status, color }) => {
+                const count = [...stopStatuses.values()].filter(s => normalizeStopStatus(s) === status).length
+                return count > 0 && (
+                  <div key={status} style={{ display: 'flex', alignItems: 'center', gap: 3, background: `${color}22`, border: `1px solid ${color}44`, borderRadius: 20, padding: '2px 8px' }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
+                    <span style={{ fontSize: 9, fontWeight: 800, color, letterSpacing: '.04em' }}>{count}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+
+        {hasNewStops && (
+          <div style={{
+            position: 'absolute', top: 105, left: 14, right: 14, zIndex: 20,
+            background: '#0f172a', borderRadius: 12, padding: '12px 16px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+          }}>
+            <span style={{ color: '#fff', fontSize: 13, fontWeight: 700 }}>
+              📦 New stops assigned to your route
+            </span>
+            <button onClick={() => setHasNewStops(false)} style={{
+              background: 'none', border: 'none', color: 'rgba(255,255,255,0.6)',
+              fontSize: 18, cursor: 'pointer', padding: 0
+            }}>✕</button>
+          </div>
+        )}
+
+        {/* TURN INSTRUCTION CARD */}
+        {isTargetRoutable && (!distanceToStop || distanceToStop > 30) && (
+          <div key={stepType} style={{ position: 'absolute', top: hasNewStops ? 160 : 105, left: 14, right: 14, zIndex: 10, background: 'rgba(255,255,255,0.97)', borderRadius: 16, overflow: 'hidden', display: 'flex', alignItems: 'stretch', boxShadow: '0 6px 28px rgba(0,0,0,.18)', backdropFilter: 'blur(6px)', transition: 'top .3s ease', animation: 'navFadeUp .25s ease' }}>
+            <div style={{ width: 76, flexShrink: 0, background: `${accentColor}12`, borderRight: `3px solid ${accentColor}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
+              <div style={{ animation: 'arrowPop .3s ease' }}>
+                <TurnArrow type={stepType} bearing={stepBearing} size={48} color={accentColor} />
+              </div>
+            </div>
+            <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <div style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 900, color: '#0f172a', lineHeight: 1.2, marginBottom: instructionDist ? 5 : 0 }}>{instructionText}</div>
+              {instructionDist && (
+                <div style={{ fontSize: 13, color: accentColor, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke={accentColor} strokeWidth="2" strokeLinecap="round">
+                    <line x1="8" y1="2" x2="8" y2="14" />
+                    <line x1="3" y1="9" x2="8" y2="14" />
+                    <line x1="13" y1="9" x2="8" y2="14" />
+                  </svg>
+                  in {instructionDist}
                 </div>
               )}
             </div>
+          </div>
+        )}
 
-            {/* STOP HEADER */}
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(30,42,58,0.92)', backdropFilter: 'blur(8px)', padding: '16px 18px 18px', color: '#fff', boxShadow: '0 4px 20px rgba(0,0,0,.15)' }}>
-              <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-                <GpsStatusPill isTracking={isTracking} error={gpsError} accuracy={gpsAccuracy} />
-                <ConnPill />
-                {isExtendedMode && (
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.5)', borderRadius: 20, padding: '3px 10px' }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', animation: 'navPulse 1.5s ease infinite', display: 'inline-block' }} />
-                    <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: '.04em' }}>COLLECTING UNCLAIMED</span>
-                  </div>
-                )}
-                <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: '3px 10px' }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.65)', letterSpacing: '.04em' }}>⏱ {formattedTime}</span>
-                </div>
+        {/* BOTTOM PANEL */}
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(12px)', borderTopLeftRadius: 24, borderTopRightRadius: 24, boxShadow: '0 -4px 24px rgba(0,0,0,.1)', display: 'flex', flexDirection: 'column', paddingBottom: 24 }}>
+          <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2, margin: '12px auto' }} />
+
+          {/* ── Extended mode: no missed stops available ── */}
+          {isExtendedMode && floatingMissedStops.length === 0 ? (
+            <div style={{ padding: '16px 24px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+              <div style={{ fontSize: 42 }}>✅</div>
+              <div style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 900, color: '#0f172a', textAlign: 'center' }}>
+                All Clear — No Missed Stops
               </div>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                  <span style={{ fontSize: 20, marginTop: 2 }}>{activeMissedStop ? '🎯' : '📍'}</span>
-                  <div>
-                    <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, marginBottom: 2 }}>
-                      {currentTarget?.label || (activeMissedStop ? 'Missed Stop' : `Stop ${currentStopIndex}`)}
-                      {!activeMissedStop && getStopStatus(currentStopIndex) === 'PENDING_INSPECTION' && (
-                        <span style={{ 
-                          marginLeft: 8, fontSize: 10, padding: '2px 6px', borderRadius: 4, fontWeight: 800, verticalAlign: 'middle',
-                          background: currentTarget?.watcher_names === 'No assigned watcher' ? '#ef4444' : '#f59e0b',
-                          color: currentTarget?.watcher_names === 'No assigned watcher' ? '#fff' : '#0f172a' 
-                        }}>
-                          {currentTarget?.watcher_names === 'No assigned watcher' ? 'NO WATCHER' : 'UNINSPECTED'}
-                        </span>
-                      )}
-                    </div>
-                    {activeMissedStop ? (
-                       <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>Unclaimed Stop</div>
-                    ) : (
-                       <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>{currentStopIndex} of {waypoints.length - 1} · {schedule?.days || ''}</div>
-                    )}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-                  {[
-                    { status: 'PENDING_INSPECTION', color: '#94a3b8' },
-                    { status: 'READY_FOR_COLLECTION', color: '#f59e0b' },
-                    { status: 'EMPTY_STOP', color: '#94a3b8' },
-                    { status: 'COLLECTION_REPORTED', color: '#eab308' },
-                    { status: 'VERIFIED_COLLECTED', color: '#16a34a' },
-                    { status: 'COLLECTION_DISPUTED', color: '#ef4444' },
-                  ].map(({ status, color }) => {
-                    const count = [...stopStatuses.values()].filter(s => normalizeStopStatus(s) === status).length
-                    return count > 0 && (
-                      <div key={status} style={{ display: 'flex', alignItems: 'center', gap: 3, background: `${color}22`, border: `1px solid ${color}44`, borderRadius: 20, padding: '2px 8px' }}>
-                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
-                        <span style={{ fontSize: 9, fontWeight: 800, color, letterSpacing: '.04em' }}>{count}</span>
-                      </div>
-                    )
-                  })}
-                </div>
+              <p style={{ fontSize: 13, color: '#64748b', textAlign: 'center', margin: 0 }}>
+                There are currently no unclaimed stops nearby.
+                Checking again every 8 seconds…
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#94a3b8' }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', animation: 'navPulse 1.5s ease infinite' }} />
+                Scanning for unclaimed stops
               </div>
+              <button
+                id="end-extended-shift-btn"
+                onClick={() => onAdvance('end_shift')}
+                style={{
+                  marginTop: 4, width: '100%', maxWidth: 320, padding: '16px',
+                  borderRadius: 30, border: 'none',
+                  background: '#0f172a', color: '#fff',
+                  fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900,
+                  letterSpacing: '.04em', cursor: 'pointer',
+                  boxShadow: '0 6px 20px rgba(15,23,42,0.25)',
+                }}>
+                🏁 Return to Base &amp; End Shift
+              </button>
             </div>
-
-            {hasNewStops && (
-              <div style={{
-                position: 'absolute', top: 105, left: 14, right: 14, zIndex: 20,
-                background: '#0f172a', borderRadius: 12, padding: '12px 16px',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
-              }}>
-                <span style={{ color: '#fff', fontSize: 13, fontWeight: 700 }}>
-                  📦 New stops assigned to your route
-                </span>
-                <button onClick={() => setHasNewStops(false)} style={{
-                  background: 'none', border: 'none', color: 'rgba(255,255,255,0.6)',
-                  fontSize: 18, cursor: 'pointer', padding: 0
-                }}>✕</button>
-              </div>
-            )}
-
-            {/* TURN INSTRUCTION CARD */}
-            {isTargetRoutable && (!distanceToStop || distanceToStop > 30) && (
-              <div key={stepType} style={{ position: 'absolute', top: hasNewStops ? 160 : 105, left: 14, right: 14, zIndex: 10, background: 'rgba(255,255,255,0.97)', borderRadius: 16, overflow: 'hidden', display: 'flex', alignItems: 'stretch', boxShadow: '0 6px 28px rgba(0,0,0,.18)', backdropFilter: 'blur(6px)', transition: 'top .3s ease', animation: 'navFadeUp .25s ease' }}>
-                <div style={{ width: 76, flexShrink: 0, background: `${accentColor}12`, borderRight: `3px solid ${accentColor}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
-                  <div style={{ animation: 'arrowPop .3s ease' }}>
-                    <TurnArrow type={stepType} bearing={stepBearing} size={48} color={accentColor} />
-                  </div>
-                </div>
-                <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                  <div style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 900, color: '#0f172a', lineHeight: 1.2, marginBottom: instructionDist ? 5 : 0 }}>{instructionText}</div>
-                  {instructionDist && (
-                    <div style={{ fontSize: 13, color: accentColor, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke={accentColor} strokeWidth="2" strokeLinecap="round">
-                        <line x1="8" y1="2" x2="8" y2="14" />
-                        <line x1="3" y1="9" x2="8" y2="14" />
-                        <line x1="13" y1="9" x2="8" y2="14" />
-                      </svg>
-                      in {instructionDist}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* BOTTOM PANEL */}
-            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(12px)', borderTopLeftRadius: 24, borderTopRightRadius: 24, boxShadow: '0 -4px 24px rgba(0,0,0,.1)', display: 'flex', flexDirection: 'column', paddingBottom: 24 }}>
-              <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2, margin: '12px auto' }} />
-
-              {/* ── Extended mode: no missed stops available ── */}
-              {isExtendedMode && floatingMissedStops.length === 0 ? (
-                <div style={{ padding: '16px 24px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-                  <div style={{ fontSize: 42 }}>✅</div>
-                  <div style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 900, color: '#0f172a', textAlign: 'center' }}>
-                    All Clear — No Missed Stops
-                  </div>
-                  <p style={{ fontSize: 13, color: '#64748b', textAlign: 'center', margin: 0 }}>
-                    There are currently no unclaimed stops nearby.
-                    Checking again every 8 seconds…
-                  </p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#94a3b8' }}>
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', animation: 'navPulse 1.5s ease infinite' }} />
-                    Scanning for unclaimed stops
-                  </div>
-                  <button
-                    id="end-extended-shift-btn"
-                    onClick={() => onAdvance('end_shift')}
-                    style={{
-                      marginTop: 4, width: '100%', maxWidth: 320, padding: '16px',
-                      borderRadius: 30, border: 'none',
-                      background: '#0f172a', color: '#fff',
-                      fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900,
-                      letterSpacing: '.04em', cursor: 'pointer',
-                      boxShadow: '0 6px 20px rgba(15,23,42,0.25)',
-                    }}>
-                    🏁 Return to Base &amp; End Shift
-                  </button>
-                </div>
-              ) : (
-                <>
+          ) : (
+            <>
               {isTargetRoutable && (
                 <div style={{ padding: '4px 12px 16px', display: 'flex', alignItems: 'center', borderBottom: '1px solid rgba(0,0,0,.06)' }}>
                   <StatCell value={arrivalTimeStr} label="arrival" />
@@ -2059,8 +2069,8 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
                   if (isNearDestination) {
                     if (isRoutable) {
                       if (currentStatus === 'PENDING_INSPECTION') {
-                        buttonText = currentTarget?.watcher_names === 'No assigned watcher' 
-                          ? 'Collect (No Watcher)' 
+                        buttonText = currentTarget?.watcher_names === 'No assigned watcher'
+                          ? 'Collect (No Watcher)'
                           : 'Collect (Uninspected)';
                       } else {
                         buttonText = 'Confirm Arrival';
@@ -2100,10 +2110,10 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
                   );
                 })()}
               </div>
-              </>
-              )}
-            </div>
-          </div>
+            </>
+          )}
+        </div>
+      </div>
 
       {/* ── Overlays — always mounted for state continuity ── */}
       <ArrivedOverlay

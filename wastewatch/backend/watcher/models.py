@@ -84,14 +84,14 @@ class GarbageReport(models.Model):
     address = models.CharField(max_length=255, blank=True)
 
     # Photo evidence
-    image = models.ImageField(
-        upload_to='reports/',
+    image = CloudinaryField('image',
+
         null=True,
         blank=True,
     )
-    image_2 = models.ImageField(upload_to='reports/', null=True, blank=True)
-    image_3 = models.ImageField(upload_to='reports/', null=True, blank=True)
-    image_4 = models.ImageField(upload_to='reports/', null=True, blank=True)
+    image_2 = CloudinaryField('image', null=True, blank=True)
+    image_3 = CloudinaryField('image', null=True, blank=True)
+    image_4 = CloudinaryField('image', null=True, blank=True)
 
     # Classification
     issue_type = models.CharField(
@@ -145,6 +145,7 @@ class GarbageReport(models.Model):
     )
     rejected_at = models.DateTimeField(null=True, blank=True)
     rejection_reason = models.TextField(blank=True)
+    is_archived = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)  # Tracks when status changes
@@ -224,6 +225,8 @@ class GarbageHotspot(models.Model):
         'GarbageReport', on_delete=models.CASCADE, null=True, blank=True, related_name='hotspots',
         help_text='The report that created this hotspot, if any.'
     )
+    dispatch_acknowledged = models.BooleanField(default=True, help_text='False = driver has not yet acknowledged this dispatch')
+    dispatched_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -356,8 +359,12 @@ class Escalation(models.Model):
     barangay = models.ForeignKey('accounts.Barangay', on_delete=models.CASCADE, related_name='escalations')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     assignee = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_escalations')
+    driver = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='driver_escalations', help_text='The driver this escalation is filed against')
+    truck = models.ForeignKey('driver.Truck', on_delete=models.SET_NULL, null=True, blank=True, related_name='escalations', help_text='The truck involved in this escalation')
     deadline = models.DateField(null=True, blank=True)
     notes = models.TextField(blank=True)
+    points_deducted = models.IntegerField(default=0, help_text='Points penalized from the driver for this escalation.')
+    driver_acknowledged = models.BooleanField(default=False, help_text='True if the driver has seen and acknowledged this write-up.')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -376,3 +383,47 @@ class SystemSetting(models.Model):
 
     def __str__(self):
         return self.key
+
+class InterventionType(models.TextChoices):
+    DISPATCH = 'dispatch', 'Dispatch'
+    FLAG = 'flag', 'Flag'
+
+class InterventionStatus(models.TextChoices):
+    CREATED = 'created', 'Created'
+    FLAGGED = 'flagged', 'Flagged'
+    ACKNOWLEDGED = 'acknowledged', 'Acknowledged'
+    COLLECTED = 'collected', 'Collected'
+    RESOLVED = 'resolved', 'Resolved'
+    CANCELLED = 'cancelled', 'Cancelled'
+
+class HotspotIntervention(models.Model):
+    hotspot = models.ForeignKey(
+        'GarbageHotspot', on_delete=models.PROTECT, related_name='interventions',
+        help_text='Anchor hotspot (lowest id in the cluster at creation time).'
+    )
+    intervention_type = models.CharField(max_length=10, choices=InterventionType.choices)
+    status = models.CharField(max_length=15, choices=InterventionStatus.choices)
+
+    truck = models.ForeignKey('driver.Truck', on_delete=models.SET_NULL, null=True, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    acknowledged_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+
+    resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolution_notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['hotspot', 'intervention_type'],
+                condition=models.Q(status__in=['created', 'flagged', 'acknowledged']),
+                name='one_active_intervention_per_type_per_hotspot',
+            )
+        ]
+        
+    def __str__(self):
+        return f'{self.intervention_type} on {self.hotspot.name} - {self.status}'

@@ -14,12 +14,17 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
+import { useEscalations } from '../../hooks/useEscalations'
 import { useNotification } from '../../context/NotificationContext'
 import HomeCarousel from '../../components/carousel/HomeCarousel'
 import { ICONS } from '../../api/navConfig'
 import { getApiErrorMessage } from '../../utils/notificationHelpers'
 import api from '../../api/client'
 import DispatchCard from '../../components/DispatchCard'
+import OfflineReportBuilder from '../../components/OfflineReportBuilder'
+import { useOfflineReports } from '../../hooks/useOfflineReports'
+import { useBarangayTracker } from '../../hooks/useBarangayTracker'
+import LiveTrackerCard from '../../components/analytics/LiveTrackerCard'
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 
@@ -42,30 +47,6 @@ const MOCK_PENDING_REPORTS = [
     description: 'Truck did not come on Monday despite being scheduled.',
     tags: ['Residential'],
   },
-]
-
-const MOCK_TRUCKS = [
-  {
-    id: 'T01', label: 'Truck 01', driver: 'Pedro Santos',
-    status: 'collecting', scheduledTime: '6:00 AM', actualTime: '6:14 AM',
-    stopsCompleted: 11, totalStops: 15, missedYesterday: false, capacity: 75,
-  },
-  {
-    id: 'T02', label: 'Truck 02', driver: 'Juan Dela Cruz',
-    status: 'collecting', scheduledTime: '6:00 AM', actualTime: '6:02 AM',
-    stopsCompleted: 9, totalStops: 15, missedYesterday: false, capacity: 60,
-  },
-  {
-    id: 'T03', label: 'Truck 03', driver: 'Maria Reyes',
-    status: 'en_route', scheduledTime: '7:00 AM', actualTime: '—',
-    stopsCompleted: 4, totalStops: 12, missedYesterday: true, capacity: 30,
-  },
-]
-
-const MOCK_SCHEDULE = [
-  { day: 'Monday', zone: 'Zone A', time: '6:00 – 10:00 AM', done: true },
-  { day: 'Wednesday', zone: 'Zone B', time: 'No Schedule', done: false },
-  { day: 'Friday', zone: 'Zone C', time: '6:00 – 10:00 AM', done: false },
 ]
 
 const ISSUE_LABELS = { overflow: 'Overflow', illegal_dumping: 'Illegal Dumping', missed: 'Missed Collection' }
@@ -103,35 +84,74 @@ export default function BrgyDashboard() {
   const { notify } = useNotification()
   const trucksRef = useRef(null);
   const navigate = useNavigate()
+  const { items: escalations } = useEscalations()
+  const { addReport } = useOfflineReports()
+
+  const userBrgyId = user?.barangay || user?.barangay_id
+  const tracker = useBarangayTracker(userBrgyId)
 
   const [stats, setStats] = useState({ pending: 0, approved: 0, rejected: 0, resolved: 0 })
   const [loading, setLoading] = useState(true)
   const [allReports, setAllReports] = useState([])
-  const [trucks, setTrucks] = useState(MOCK_TRUCKS)
+  const [trucks, setTrucks] = useState([])
+  const [schedule, setSchedule] = useState([])
   const [activeMainTab, setActiveMainTab] = useState('validation')
   const [reportFilter, setReportFilter] = useState('Pending')
-  const [expandedReport, setExpandedReport] = useState(null)
   const [expandedTruck, setExpandedTruck] = useState(null)
   const [toast, setToast] = useState(null)
   const [activeDispatch, setActiveDispatch] = useState(null)
+  const [showBuilder, setShowBuilder] = useState(false)
 
   useEffect(() => {
     fetchStats()
     fetchReports()
+    fetchSchedule()
     async function fetchLiveDispatch() {
       try {
-        const res = await api.get('/api/public/live/')
-        if (res.data) {
+        const liveRes = await api.get('/api/public/live/')
+
+        if (liveRes.data) {
           const userBrgy = user?.barangay_name || user?.barangay?.name;
           if (userBrgy) {
-            const dispatched = res.data.find(d => d.barangays && d.barangays.includes(userBrgy));
+            const dispatched = liveRes.data.find(d => d.barangays && d.barangays.includes(userBrgy));
             if (dispatched) setActiveDispatch(dispatched);
           }
+
+          const mappedTrucks = liveRes.data.map(d => ({
+            id: d.id,
+            label: d.truck_plate !== 'Unknown' ? `Truck ${d.truck_plate}` : 'Unknown Truck',
+            driver: d.driver_name,
+            status: d.op_status === 'en_route' ? 'en_route' : d.op_status === 'collecting' ? 'collecting' : 'idle',
+            scheduledTime: '—',
+            actualTime: d.started_at ? new Date(d.started_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—',
+            stopsCompleted: 0,
+            totalStops: 0,
+            missedYesterday: false,
+            capacity: 0,
+            truckId: d.truck_id,
+            driverId: d.driver_id,
+          }))
+          setTrucks(mappedTrucks)
         }
       } catch (err) { /* silent */ }
     }
     fetchLiveDispatch()
   }, [user?.barangay_name, user?.barangay?.name])
+
+  async function fetchSchedule() {
+    try {
+      const res = await api.get('/api/public/schedule/')
+      const userBrgy = user?.barangay_name || user?.barangay?.name
+      // Filter schedules where zone includes user's barangay, or show all if none
+      const brgySchedules = userBrgy
+        ? res.data.filter(s => s.zone && s.zone.includes(userBrgy))
+        : res.data
+
+      setSchedule(brgySchedules.length > 0 ? brgySchedules : res.data)
+    } catch (err) {
+      console.error('Failed to fetch schedule:', err)
+    }
+  }
 
   async function fetchStats() {
     try {
@@ -174,37 +194,9 @@ export default function BrgyDashboard() {
     setTimeout(() => setToast(null), 3000)
   }
 
-  async function handleApprove(id) {
-    try {
-      await api.post(`/api/watcher/reports/${id}/approve/`)
-      setAllReports(prev => prev.map(r => r.id === id ? { ...r, status: 'approved' } : r))
-      setExpandedReport(null)
-      fetchStats()
-      showToast('✅ Report approved — now visible on the live map.')
-    } catch (err) {
-      notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed to approve report') })
-    }
-  }
-
-  async function handleReject(id) {
-    const reason = prompt('Please enter rejection reason:')
-    if (reason === null) return
-    if (!reason.trim()) return notify({ variant: 'error-solid', message: 'Reason required' })
-
-    try {
-      await api.post(`/api/watcher/reports/${id}/reject/`, { rejection_reason: reason })
-      setAllReports(prev => prev.map(r => r.id === id ? { ...r, status: 'rejected', rejection_reason: reason } : r))
-      setExpandedReport(null)
-      fetchStats()
-      showToast('✕ Report rejected.')
-    } catch (err) {
-      notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed to reject report') })
-    }
-  }
-
-  function handleFlagTruck(truckId) {
-    setTrucks(prev => prev.map(t => t.id === truckId ? { ...t, flagged: true } : t))
-    showToast(' Truck flagged. Admin has been notified.')
+  function showToast(msg) {
+    setToast(msg)
+    setTimeout(() => setToast(null), 3000)
   }
 
   useEffect(() => {
@@ -280,13 +272,17 @@ export default function BrgyDashboard() {
           </p>
         </div>
 
-        <DispatchCard 
-            dispatchData={activeDispatch} 
-            userBarangay={user?.barangay_name || user?.barangay?.name} 
-        />
+        {tracker.data?.trucks?.length > 0 ? (
+          tracker.data.trucks.map(t => <LiveTrackerCard key={t.schedule_id} truck={t} />)
+        ) : (
+          <DispatchCard
+            dispatchData={activeDispatch}
+            userBarangay={user?.barangay_name || user?.barangay?.name}
+          />
+        )}
 
         <div className='mobile-schedule'>
-          <HomeCarousel role="brgy_official" userBarangay={user?.barangay_name} onReport={() => navigate('/report/submit')} extraSecondCta={{ label: '✔ Validate', onClick: () => navigate('/brgy/validate-reports') }} />
+          <HomeCarousel role="brgy_official" userBarangay={user?.barangay_name} onReport={() => setShowBuilder(true)} extraSecondCta={{ label: '✔ Validate', onClick: () => navigate('/brgy/validate-reports') }} />
         </div>
 
 
@@ -452,12 +448,14 @@ export default function BrgyDashboard() {
                         <div key={report.id} className="bcard"
                           style={{
                             background: 'var(--surface)',
-                            border: expandedReport === report.id
-                              ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                            border: '1px solid var(--border)',
                             borderRadius: 14, marginBottom: 10,
                             overflow: 'hidden', cursor: 'pointer',
+                            transition: 'border-color 0.2s, box-shadow 0.2s',
                           }}
-                          onClick={() => setExpandedReport(p => p === report.id ? null : report.id)}
+                          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = '0 2px 10px rgba(0,0,0,0.05)' }}
+                          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none' }}
+                          onClick={() => navigate('/brgy/validate-reports')}
                         >
                           {/* Row */}
                           <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -488,63 +486,9 @@ export default function BrgyDashboard() {
                             </div>
 
                             <div style={{
-                              fontSize: 16, color: 'var(--text-muted)',
-                              transform: expandedReport === report.id ? 'rotate(90deg)' : 'rotate(0)',
-                              transition: 'transform .2s',
+                              fontSize: 16, color: 'var(--text-muted)', flexShrink: 0,
                             }}>›</div>
                           </div>
-
-                          {/* Expanded */}
-                          {expandedReport === report.id && (
-                            <div style={{ borderTop: '1px solid var(--border)', padding: '14px 16px', animation: 'slideDown .18s' }}
-                              onClick={e => e.stopPropagation()}>
-                              <p style={{ fontSize: 13, lineHeight: 1.65, marginBottom: 12, fontStyle: 'italic', color: 'var(--text-muted)' }}>
-                                "{report.description || 'No description provided.'}"
-                              </p>
-                              {tags.length > 0 && (
-                                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
-                                  {tags.map(tag => (
-                                    <span key={tag} style={{
-                                      background: 'var(--bg)', border: '1px solid var(--border)',
-                                      borderRadius: 20, fontSize: 11, padding: '3px 10px', color: 'var(--text-muted)',
-                                    }}>{tag}</span>
-                                  ))}
-                                </div>
-                              )}
-                              {report.status === 'pending' && (
-                                <>
-                                  <div style={{
-                                    background: 'rgba(20,184,166,0.05)', border: '1px solid rgba(20,184,166,0.18)',
-                                    borderRadius: 8, padding: '9px 12px', marginBottom: 14,
-                                    fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6,
-                                  }}>
-                                    <strong style={{ color: 'var(--text)' }}>💡 Validate:</strong> Is this a real issue in your barangay? Approving adds it to the live map.
-                                  </div>
-                                  <div style={{ display: 'flex', gap: 8 }}>
-                                    <button className="abtn"
-                                      onClick={() => handleApprove(report.id)}
-                                      style={{
-                                        flex: 1, background: 'var(--accent)', color: '#ffffffff',
-                                        border: 'none', borderRadius: 10, padding: '10px',
-                                        fontWeight: 700, fontSize: 13,
-                                      }}>
-                                      Approve
-                                    </button>
-                                    <button className="abtn"
-                                      onClick={() => handleReject(report.id)}
-                                      style={{
-                                        flex: 1, background: 'transparent',
-                                        border: '1.5px solid var(--danger)',
-                                        color: 'var(--danger)', borderRadius: 10, padding: '10px',
-                                        fontWeight: 700, fontSize: 13,
-                                      }}>
-                                      ✕ Reject
-                                    </button>
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          )}
                         </div>
                       )
                     })}
@@ -718,45 +662,38 @@ export default function BrgyDashboard() {
                             <div style={{ width: 14, height: 14 }}>{ICONS.map}</div> Track on Map
                           </button>
 
-                          {/* 2. Flag to Admin */}
-                          {!truck.flagged ? (
-                            <button className="abtn"
-                              onClick={() => handleFlagTruck(truck.id)}
+                          {/* 2. Escalate to Admin */}
+                          {escalations.some(e => e.truck === truck.truckId && e.status !== 'resolved') ? (
+                            <button className="abtn" disabled
                               style={{
-                                flex: 1, minWidth: 90,
+                                flex: 1, minWidth: 100,
+                                background: 'rgba(243,156,18,0.05)',
+                                border: '1px solid rgba(243,156,18,0.3)',
+                                color: 'var(--warning)', borderRadius: 10,
+                                padding: '9px 8px', fontWeight: 700, fontSize: 12, opacity: .55,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+                              }}>
+                              <div style={{ width: 14, height: 14 }}>{ICONS.warning}</div> Escalation Active
+                            </button>
+                          ) : (
+                            <button className="abtn"
+                              onClick={() => navigate('/brgy/escalate', {
+                                state: {
+                                  shiftId: truck.id,
+                                  truckLabel: truck.label,
+                                  driver: truck.driver,
+                                  severity: truck.missedYesterday ? 'high' : 'medium'
+                                }
+                              })}
+                              style={{
+                                flex: 1, minWidth: 100,
                                 background: 'rgba(231,76,60,0.06)',
                                 border: '1px solid rgba(231,76,60,0.35)',
                                 color: 'var(--danger)', borderRadius: 10,
                                 padding: '9px 8px', fontWeight: 700, fontSize: 12,
                                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
                               }}>
-                              <div style={{ width: 14, height: 14 }}>{ICONS.warning}</div> Flag to Admin
-                            </button>
-                          ) : (
-                            <button disabled style={{
-                              flex: 1, minWidth: 90,
-                              background: 'rgba(243,156,18,0.05)',
-                              border: '1px solid rgba(243,156,18,0.3)',
-                              color: 'var(--warning)', borderRadius: 10,
-                              padding: '9px 8px', fontWeight: 700, fontSize: 12, opacity: .55,
-                              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
-                            }}>
-                              <div style={{ width: 14, height: 14 }}>{ICONS.warning}</div> Flagged
-                            </button>
-                          )}
-
-                          {/* 3. Escalate to Admin — ONLY when truck missed yesterday */}
-                          {truck.missedYesterday && (
-                            <button className="abtn"
-                              onClick={() => navigate('/brgy/escalate', { state: { truckLabel: truck.label, driver: truck.driver } })}
-                              style={{
-                                flex: '1 1 100%',   /* full width below the first two */
-                                background: 'rgba(231,76,60,0.07)',
-                                border: '1.5px solid rgba(231,76,60,0.38)',
-                                color: 'var(--danger)', borderRadius: 10,
-                                padding: '9px', fontWeight: 700, fontSize: 12,
-                              }}>
-                              Escalate to Admin
+                              <div style={{ width: 14, height: 14 }}>{ICONS.warning}</div> Escalate to Admin
                             </button>
                           )}
                         </div>
@@ -785,10 +722,12 @@ export default function BrgyDashboard() {
                   View Brgy Collection Schedule
                 </button>
                 <div className="card" style={{ padding: 16, animation: 'slideDown .2s' }}>
-                  {MOCK_SCHEDULE.map((s, i) => (
+                  {schedule.length === 0 ? (
+                    <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>No schedules found.</div>
+                  ) : schedule.map((s, i) => (
                     <div key={i} style={{
                       display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0',
-                      borderBottom: i < MOCK_SCHEDULE.length - 1 ? '1px solid var(--border)' : 'none',
+                      borderBottom: i < schedule.length - 1 ? '1px solid var(--border)' : 'none',
                     }}>
                       <div style={{
                         width: 36, height: 36, borderRadius: 10, flexShrink: 0,
@@ -879,10 +818,12 @@ export default function BrgyDashboard() {
 
             <div className="card">
               <h3 className="section-title" style={{ marginBottom: 12, fontSize: 15 }}>Collection Schedule</h3>
-              {MOCK_SCHEDULE.map((s, i) => (
+              {schedule.length === 0 ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>No schedules available.</div>
+              ) : schedule.slice(0, 3).map((s, i) => (
                 <div key={i} style={{
                   display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0',
-                  borderBottom: i < MOCK_SCHEDULE.length - 1 ? '1px solid var(--border)' : 'none',
+                  borderBottom: i < Math.min(schedule.length, 3) - 1 ? '1px solid var(--border)' : 'none',
                 }}>
                   <div style={{ width: 14, height: 14, color: s.done ? 'var(--accent)' : 'var(--text-muted)' }}>{s.done ? ICONS.check : ICONS.schedule}</div>
                   <div style={{ flex: 1 }}>
@@ -924,6 +865,14 @@ export default function BrgyDashboard() {
           </div>
         </div>
       </div>
+      <OfflineReportBuilder
+        isOpen={showBuilder}
+        onClose={() => setShowBuilder(false)}
+        onSubmit={async (data) => {
+          await addReport(data)
+          setShowBuilder(false)
+        }}
+      />
     </>
   )
 }

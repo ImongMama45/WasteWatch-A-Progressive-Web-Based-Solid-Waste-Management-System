@@ -10,7 +10,7 @@
  * 5. Route-based pages are available on all screen sizes
  */
 
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import PrivateRoute from './components/PrivateRoute'
 import DashboardLayout from './components/DashboardLayout'
@@ -24,8 +24,9 @@ import AuthModal from './components/AuthModal'
 import DashboardRouter from './pages/dashboard/DashboardRouter'
 import VerificationTasks from './pages/watcher/VerificationTasksModule'
 import MapView from './pages/MapView'
-import EscalateToAdmin from './pages/EscalateToAdmin'
-import ValidateReports from './pages/ValidateReports'
+import PublicMap from './pages/PublicMap'
+import EscalateToAdmin from './pages/brgy_official/EscalateToAdmin'
+import ValidateReports from './pages/brgy_official/ValidateReports'
 import Profile from './pages/Profile'
 import CollectionSchedule from './pages/CollectionSchedule'
 import AnalyticsTabs from './pages/analytics/AnalyticsTabs'
@@ -63,6 +64,17 @@ import CollectionLogs from './pages/dumpsite/CollectionLogs'
 import TruckQueue from './pages/dumpsite/TruckQueue'
 import BarangayBreakdown from './pages/dumpsite/BarangayBreakdown'
 
+function LogArrivalRoute() {
+  const [searchParams] = useSearchParams()
+  const truck = searchParams.get('truck')
+  const navigate = useNavigate()
+  return (
+    <DashboardLayout>
+      <ArrivalLogger open={true} onClose={() => navigate('/dashboard')} defaultTruckId={truck} />
+    </DashboardLayout>
+  )
+}
+
 function AuthOverlay({ mode }) {
   const navigate = useNavigate()
   return (
@@ -85,11 +97,14 @@ export default function App() {
           <Route path="/login" element={<AuthOverlay mode="login" />} />
           <Route path="/register" element={<AuthOverlay mode="register" />} />
           <Route path="/about" element={<AboutPage />} />
-          <Route path="/map" element={<MapView />} />
+          <Route path="/public-map" element={<PublicMap />} />
           <Route path="/announcements" element={<NewsPage />} />
           <Route path="/schedule" element={<CollectionSchedule />} />
 
           {/* ── PROTECTED — all screen sizes ── */}
+          <Route path="/map" element={
+            <PrivateRoute roles={['admin', 'brgy_official', 'watcher']}><MapView /></PrivateRoute>
+          } />
           <Route path="/dashboard" element={
             <PrivateRoute><DashboardRouter /></PrivateRoute>
           } />
@@ -169,9 +184,6 @@ export default function App() {
             <PrivateRoute roles={['admin']}><EscalationDetail /></PrivateRoute>
           } />
 
-          <Route path="/admin/reports/:id" element={
-            <PrivateRoute roles={['admin', 'brgy_official']}><ReportDetail /></PrivateRoute>
-          } />
 
           <Route path="/admin/reports" element={
             <PrivateRoute roles={['admin', 'brgy_official']}><AdminReports /></PrivateRoute>
@@ -245,11 +257,6 @@ export default function App() {
           } />
 
           {/* ── DUMPSITE MODULE ── */}
-          <Route path="/dumpsite/log-arrival" element={
-            <PrivateRoute roles={['dumpsite', 'admin']}>
-              <DashboardLayout><ArrivalLogger /></DashboardLayout>
-            </PrivateRoute>
-          } />
 
           <Route path="/dumpsite/queue" element={
             <PrivateRoute roles={['dumpsite', 'admin']}>
@@ -266,6 +273,12 @@ export default function App() {
           <Route path="/dumpsite/barangay" element={
             <PrivateRoute roles={['dumpsite', 'admin']}>
               <DashboardLayout><BarangayBreakdown /></DashboardLayout>
+            </PrivateRoute>
+          } />
+
+          <Route path="/dumpsite/log-arrival" element={
+            <PrivateRoute roles={['dumpsite', 'admin']}>
+              <LogArrivalRoute />
             </PrivateRoute>
           } />
 

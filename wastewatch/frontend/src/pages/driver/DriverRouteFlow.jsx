@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import api from '../../api/client'
+import api, { handleStaleShift } from '../../api/client'
 import { useAuth } from '../../context/AuthContext'
 import { clearDriverSessionData } from '../../hooks/useShiftTimer'
 import { DriverGpsProvider } from '../../context/DriverGpsContext'
@@ -235,6 +235,7 @@ export default function DriverRouteFlow() {
           { status: nextPhase }
         )
       } catch (err) {
+        if (handleStaleShift(err)) return
         console.warn('[ShiftState] Failed to sync phase to backend:', err)
       }
     }
@@ -261,6 +262,7 @@ export default function DriverRouteFlow() {
           { status: nextPhase, dev_skip: true }
         )
       } catch (err) {
+        if (handleStaleShift(err)) return
         console.warn('[DEV] Phase jump backend sync failed (proceeding anyway):', err)
       }
     }

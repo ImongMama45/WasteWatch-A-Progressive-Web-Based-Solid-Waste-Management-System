@@ -21,7 +21,13 @@ class GarbageReportSerializer(serializers.ModelSerializer):
             'status', 'user', 'approved_by', 'approved_at',
             'rejected_by', 'rejected_at', 'rejection_reason',
             'created_at', 'updated_at',
+            'is_archived',
         ]
+
+    def validate_reported_user(self, value):
+        if value and value.role not in ['driver', 'watcher']:
+            raise serializers.ValidationError("You can only report drivers or watchers.")
+        return value
 
     def get_barangay_name(self, obj):
         return obj.barangay.name if obj.barangay else "Unknown"
@@ -64,14 +70,11 @@ class GarbageHotspotSerializer(serializers.ModelSerializer):
     class Meta:
         model = GarbageHotspot
         fields = '__all__'
+        read_only_fields = ['assigned_truck', 'dispatch_acknowledged', 'dispatched_at', 'source_report']
 
     def get_report_count(self, obj):
-        from .models import GarbageReport, ReportStatus
-        # Simple proxy: count approved reports in the same barangay
-        return GarbageReport.objects.filter(
-            barangay=obj.barangay,
-            status__in=[ReportStatus.APPROVED, ReportStatus.RESOLVED]
-        ).count()
+        # Base count is 1 per row. Clustering in the view will aggregate these.
+        return 1
 
 class StopValidationSerializer(serializers.ModelSerializer):
     schedule_id = serializers.IntegerField(source='schedule.id', read_only=True)
@@ -114,7 +117,15 @@ class StopValidationSerializer(serializers.ModelSerializer):
         if not field:
             return None
         try:
-            return field.url
+            url = field.url
+            if url.startswith('res.cloudinary.com'):
+                return f'https://{url}'
+            if url.startswith('//res.cloudinary.com'):
+                return f'https:{url}'
+            request = self.context.get('request')
+            if request and not url.startswith('http'):
+                return request.build_absolute_uri(url)
+            return url
         except Exception:
             return None
 
@@ -158,7 +169,31 @@ class StopValidationSerializer(serializers.ModelSerializer):
 class EscalationSerializer(serializers.ModelSerializer):
     barangay_name = serializers.CharField(source='barangay.name', read_only=True)
     assignee_name = serializers.CharField(source='assignee.full_name', read_only=True)
+    driver_name = serializers.CharField(source='driver.full_name', read_only=True)
+    truck_plate = serializers.CharField(source='truck.plate_number', read_only=True)
+    driver_open_escalations = serializers.SerializerMethodField()
     
     class Meta:
         model = Escalation
         fields = '__all__'
+        read_only_fields = ['status', 'driver_acknowledged', 'resolved_by', 'resolved_at', 'points_deducted', 'created_at', 'updated_at']
+
+    def get_driver_open_escalations(self, obj):
+        if not obj.driver:
+            return 0
+        return Escalation.objects.filter(driver=obj.driver, status__in=['pending', 'approved']).exclude(id=obj.id).count()
+
+class HotspotInterventionSerializer(serializers.ModelSerializer):
+    hotspot_name = serializers.CharField(source='hotspot.name', read_only=True)
+    hotspot_latitude = serializers.DecimalField(source='hotspot.latitude', max_digits=9, decimal_places=6, read_only=True)
+    hotspot_longitude = serializers.DecimalField(source='hotspot.longitude', max_digits=10, decimal_places=6, read_only=True)
+    truck_plate = serializers.CharField(source='truck.plate_number', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.full_name', read_only=True)
+    acknowledged_by_name = serializers.CharField(source='acknowledged_by.full_name', read_only=True)
+    resolved_by_name = serializers.CharField(source='resolved_by.full_name', read_only=True)
+
+    class Meta:
+        from .models import HotspotIntervention
+        model = HotspotIntervention
+        fields = '__all__'
+        read_only_fields = ['status', 'acknowledged_by', 'resolved_by', 'resolved_at', 'created_at', 'updated_at']

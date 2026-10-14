@@ -4,12 +4,13 @@
  * Route: /brgy/validate-reports
  */
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import DashboardLayout from '../components/DashboardLayout'
-import { useAuth } from '../context/AuthContext'
-import api from '../api/client'
-import { ICONS } from '../api/navConfig'
+import DashboardLayout from '../../components/DashboardLayout'
+import { useAuth } from '../../context/AuthContext'
+import api from '../../api/client'
+import { ICONS } from '../../api/navConfig'
+import { useLeaflet } from '../../hooks/useLeaflet'
 
 const TYPE_META = {
   overflow: { label: 'Overflow', icon: ICONS.trash, color: '#ef4444', bg: 'rgba(239,68,68,0.1)' },
@@ -43,10 +44,62 @@ export default function ValidateReports() {
   const [rejectModal, setRejectModal] = useState(null)
   const [rejectReason, setRejectReason] = useState('')
   const [toast, setToast] = useState(null)
+  const { mapReady, mapError } = useLeaflet()
+  const mapRef = useRef(null)
+  const mapInstance = useRef(null)
 
   useEffect(() => {
     fetchReports()
   }, [])
+
+  // Initialize/cleanup the inline map when the drawer opens/closes or mapReady changes
+  useEffect(() => {
+    if (!mapReady || !drawerReport || !mapRef.current) return;
+
+    const lat = drawerReport.latitude || 13.9373;
+    const lng = drawerReport.longitude || 121.617;
+
+    // Cleanup previous instance if exists
+    if (mapInstance.current) {
+      mapInstance.current.remove();
+      mapInstance.current = null;
+    }
+
+    const map = window.L.map(mapRef.current, {
+      center: [lat, lng],
+      zoom: 16,
+      zoomControl: false,
+    });
+
+    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    const color = SEVERITY_COLORS[drawerReport.severity] || SEVERITY_COLORS.low;
+    window.L.circleMarker([lat, lng], {
+      radius: 8,
+      fillColor: color,
+      color: '#fff',
+      weight: 2,
+      opacity: 1,
+      fillOpacity: 0.8
+    }).addTo(map);
+
+    mapInstance.current = map;
+
+    // Fix map rendering inside animated drawer
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 400);
+
+    return () => {
+      clearTimeout(timer);
+      if (mapInstance.current) {
+        mapInstance.current.remove();
+        mapInstance.current = null;
+      }
+    };
+  }, [mapReady, drawerReport]);
 
   async function fetchReports() {
     setLoading(true)
@@ -94,6 +147,18 @@ export default function ValidateReports() {
     }
   }
 
+  async function handleArchive(id) {
+    if (!window.confirm('Are you sure you want to permanently hide this rejected report?')) return
+    try {
+      await api.post(`/api/watcher/reports/${id}/archive/`)
+      setReports(prev => prev.filter(r => r.id !== id))
+      if (drawerReport?.id === id) setDrawerReport(null)
+      showToast('📦 Report archived.')
+    } catch (err) {
+      showToast('❌ Failed to archive report', 'error')
+    }
+  }
+
   const filtered = useMemo(() => {
     const statusKey = activeTab === 'history' ? 'rejected' : activeTab
     return reports.filter(r => {
@@ -102,8 +167,8 @@ export default function ValidateReports() {
       if (search) {
         const q = search.toLowerCase()
         return (r.description || '').toLowerCase().includes(q) ||
-          r.issue_type.toLowerCase().includes(q) ||
-          r.user_name.toLowerCase().includes(q)
+          (r.issue_type || '').toLowerCase().includes(q) ||
+          (r.user_name || '').toLowerCase().includes(q)
       }
       return true
     })
@@ -281,7 +346,6 @@ export default function ValidateReports() {
                 { label: 'Reporter', value: drawerReport.user_name },
                 { label: 'Reported', value: new Date(drawerReport.created_at).toLocaleString() },
                 { label: 'Barangay', value: drawerReport.barangay_name },
-                { label: 'Location', value: `${drawerReport.latitude}, ${drawerReport.longitude}` },
               ].map(row => (
                 <div key={row.label} style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
@@ -296,6 +360,46 @@ export default function ValidateReports() {
                   <span style={{ fontSize: 13, textAlign: 'right' }}>{row.value}</span>
                 </div>
               ))}
+
+              {/* Location with Inline Map */}
+              <div style={{
+                padding: '10px 0', borderBottom: '1px solid var(--border)',
+              }}>
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                  marginBottom: 10
+                }}>
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
+                    letterSpacing: '.06em', flexShrink: 0
+                  }}>
+                    LOCATION
+                  </span>
+                  <span style={{ fontSize: 13, textAlign: 'right', fontWeight: 600 }}>
+                    {drawerReport.latitude}, {drawerReport.longitude}
+                  </span>
+                </div>
+                <div
+                  ref={mapRef}
+                  style={{
+                    height: 120, width: '100%', borderRadius: 8,
+                    background: '#e2e8f0', overflow: 'hidden', position: 'relative',
+                    border: '1px solid var(--border)'
+                  }}
+                >
+                  {!mapReady && !mapError && (
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5, background: 'rgba(255,255,255,0.7)' }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Loading map...</span>
+                    </div>
+                  )}
+                  {mapError && (
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 5, background: 'rgba(239,68,68,0.1)', color: 'var(--danger)' }}>
+                      <span style={{ fontSize: 18, marginBottom: 4 }}>⚠️</span>
+                      <span style={{ fontSize: 12, fontWeight: 700 }}>Map failed to load</span>
+                    </div>
+                  )}
+                </div>
+              </div>
 
               {/* Description */}
               <div style={{ marginTop: 16, marginBottom: 16 }}>
@@ -345,7 +449,9 @@ export default function ValidateReports() {
                   borderRadius: 10, overflow: 'hidden',
                   marginBottom: 16,
                 }}>
-                  <img src={drawerReport.image} alt="Evidence" style={{ width: '100%', height: 'auto', display: 'block' }} />
+                  <img src={drawerReport.image} alt="Evidence"
+                    style={{ width: '100%', height: 'auto', display: 'block' }}
+                    onError={(e) => { e.target.style.display = 'none'; }} />
                 </div>
               ) : (
                 <div style={{
@@ -577,6 +683,13 @@ export default function ValidateReports() {
                           border: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 700,
                         }}>
                         Approve & Publish to Map
+                      </button>
+                    </div>
+                  )}
+                  {report.status === 'rejected' && (
+                    <div style={{ borderTop: '1px solid var(--border)', display: 'flex' }} onClick={e => e.stopPropagation()}>
+                      <button className="vr-btn" onClick={e => { e.stopPropagation(); handleArchive(report.id) }} style={{ flex: 1, padding: '10px', background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                        <div style={{ width: 14, height: 14 }}>{ICONS.trash}</div> Archive
                       </button>
                     </div>
                   )}

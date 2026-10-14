@@ -20,8 +20,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import api from '../api/client'
-import useShiftTimer from '../hooks/useShiftTimer'
+import api, { handleStaleShift } from '../api/client'
 
 const DEFAULT_INTERVAL_MS = 10_000   // send to backend every 10 s
 const SYNC_FAIL_THRESHOLD = 3       // warn after this many consecutive failures
@@ -80,6 +79,8 @@ export default function useGpsTracking({
       .catch(err => {
         console.error('Truck location sync failed:', err.response?.data || err)
 
+        if (handleStaleShift(err)) return
+
         failCountRef.current += 1
 
         if (failCountRef.current >= SYNC_FAIL_THRESHOLD) {
@@ -94,7 +95,7 @@ export default function useGpsTracking({
   // All driver process components must have GPS available as a baseline.
   useEffect(() => {
     primeGpsPermission()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── Start / stop watchPosition ─────────────────────────────────────────────
@@ -121,10 +122,14 @@ export default function useGpsTracking({
         setAccuracy(Math.round(acc))
         setError(null)
         setIsTracking(true)
-        
-        sessionStorage.setItem('ww_gps_lat', String(lat))
-        sessionStorage.setItem('ww_gps_lng', String(lng))
-        
+
+        try {
+          sessionStorage.setItem('ww_gps_lat', String(lat))
+          sessionStorage.setItem('ww_gps_lng', String(lng))
+        } catch (e) {
+          // Ignore storage errors in private browsing modes
+        }
+
         if (syncEnabled) syncToBackend(lat, lng, acc)
       },
       (err) => {

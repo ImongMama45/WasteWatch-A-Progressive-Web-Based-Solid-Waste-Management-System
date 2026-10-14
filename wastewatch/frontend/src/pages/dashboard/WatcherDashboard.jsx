@@ -4,12 +4,22 @@ import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
 import HomeCarousel from '../../components/carousel/HomeCarousel'
+import OfflineReportBuilder from '../../components/OfflineReportBuilder'
+import { useOfflineReports } from '../../hooks/useOfflineReports'
 import { ICONS } from '../../api/navConfig'
 import DispatchCard from '../../components/DispatchCard'
+import ReportDetail from '../admin/ReportDetail'
+import { useBarangayTracker } from '../../hooks/useBarangayTracker'
+import LiveTrackerCard from '../../components/analytics/LiveTrackerCard'
 
 export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const { addReport } = useOfflineReports()
+  
+  const userBrgyId = user?.barangay || user?.barangay_id
+  const tracker = useBarangayTracker(userBrgyId)
+
   const [reports, setReports] = useState([])
   const [stats, setStats] = useState({ total: 0, pending_approval: 0, resolved: 0, rejected: 0 })
   const [pendingTasksCount, setPendingTasksCount] = useState(0)
@@ -18,22 +28,33 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('schedule')
   const [activeTab1, setActiveTab1] = useState('reports')
   const [activeDispatch, setActiveDispatch] = useState(null)
+  const [selectedReportId, setSelectedReportId] = useState(null)
+  const [showBuilder, setShowBuilder] = useState(false)
 
   useEffect(() => {
+    let cancelled = false;
+
     Promise.all([
       api.get('/api/watcher/reports/'),
       api.get('/api/watcher/stop-validations/'),
       api.get('/api/public/live/').catch(() => ({ data: [] }))
     ])
       .then(([rRes, vRes, liveRes]) => {
-        setReports(rRes.data)
-        setStats({ total: rRes.data.length, pending_approval: 0, resolved: 0, rejected: 0 })
+        if (cancelled) return;
+        const allReports = rRes.data || []
+        setReports(allReports)
+        
+        const pending = allReports.filter(r => r.status === 'pending').length
+        const resolved = allReports.filter(r => r.status === 'resolved' || r.status === 'completed').length
+        const rejected = allReports.filter(r => r.status === 'issue' || r.status === 'rejected').length
+        setStats({ total: allReports.length, pending_approval: pending, resolved, rejected })
+        
         const validations = vRes.data?.results ?? vRes.data ?? []
-        const pending = validations.filter(v => {
+        const pendingVals = validations.filter(v => {
           const status = v.current_status ? v.current_status.toUpperCase().replace(/ /g, '_') : 'PENDING_INSPECTION'
           return status === 'PENDING_INSPECTION' || status === 'COLLECTION_REPORTED'
         })
-        setPendingTasksCount(pending.length)
+        setPendingTasksCount(pendingVals.length)
         setTotalTasksCount(validations.length)
 
         if (liveRes && liveRes.data) {
@@ -44,8 +65,14 @@ export default function Dashboard() {
           }
         }
       })
-      .catch(console.error)
-      .finally(() => setLoading(false))
+      .catch(err => {
+        if (!cancelled) console.error(err)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => { cancelled = true }
   }, [user?.barangay_name, user?.barangay?.name])
 
   const badgeClass = (status) => `badge badge-${status}`
@@ -62,10 +89,14 @@ export default function Dashboard() {
           <p className="text-muted text-sm">Stay updated on garbage collection in your area</p>
         </div>
 
-        <DispatchCard
-          dispatchData={activeDispatch}
-          userBarangay={user?.barangay_name || user?.barangay?.name}
-        />
+        {tracker.data?.trucks?.length > 0 ? (
+          tracker.data.trucks.map(t => <LiveTrackerCard key={t.schedule_id} truck={t} />)
+        ) : (
+          <DispatchCard
+            dispatchData={activeDispatch}
+            userBarangay={user?.barangay_name || user?.barangay?.name}
+          />
+        )}
 
         {/* ── INSPECTION CTA ── */}
         <div
@@ -107,7 +138,7 @@ export default function Dashboard() {
         </div>
 
         <div className='mobile-schedule'>
-          <HomeCarousel role="watcher" userBarangay={user?.barangay_name} onReport={() => navigate('/report/submit')} />
+          <HomeCarousel role="watcher" userBarangay={user?.barangay_name} onReport={() => setShowBuilder(true)} />
         </div>
 
         <div className="page-grid">
@@ -175,14 +206,14 @@ export default function Dashboard() {
                   <p className="text-muted text-sm text-center" style={{ padding: '20px 0' }}>
                     No reports yet.{' '}
                     <span style={{ color: 'var(--accent)', cursor: 'pointer' }}
-                      onClick={() => navigate('/report/submit')}>
+                      onClick={() => setShowBuilder(true)}>
                       Submit your first report
                     </span>
                   </p>
                 ) : (
                   reports.slice(0, 10).map(report => (
                     <div key={report.id} className="report-item"
-                      onClick={() => navigate(`/report/${report.id}`)}>
+                      onClick={() => setSelectedReportId(report.id)}>
                       <div className="report-pin" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <div style={{ width: 20, height: 20 }}>{ICONS.pin}</div>
                       </div>
@@ -334,6 +365,20 @@ export default function Dashboard() {
 
         </div>
       </div>
+      {selectedReportId && (
+        <ReportDetail 
+          reportId={selectedReportId} 
+          onClose={() => setSelectedReportId(null)} 
+        />
+      )}
+      <OfflineReportBuilder
+        isOpen={showBuilder}
+        onClose={() => setShowBuilder(false)}
+        onSubmit={async (data) => {
+          await addReport(data)
+          setShowBuilder(false)
+        }}
+      />
     </>
   )
 }

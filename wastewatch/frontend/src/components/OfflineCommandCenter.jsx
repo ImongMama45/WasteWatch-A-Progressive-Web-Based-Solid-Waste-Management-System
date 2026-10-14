@@ -110,7 +110,7 @@ export default function OfflineCommandCenter() {
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           {!isOnline && <span className="oas-badge oas-badge--cached">📦 Cached</span>}
-          <button className="occ-fullbtn" onClick={() => navigate('/map')}>Full Map ›</button>
+          <button className="occ-fullbtn" onClick={() => navigate('/public-map')}>Full Map ›</button>
         </div>
       </div>
 

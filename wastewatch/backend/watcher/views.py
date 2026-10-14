@@ -13,7 +13,20 @@ def haversine_km(lat1, lon1, lat2, lon2):
     a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-from rest_framework import viewsets, permissions, status, filters
+def get_cluster_ids(lat, lng, radius_m=15):
+    from .models import GarbageHotspot
+    lat, lng = float(lat), float(lng)
+    radius_km = radius_m / 1000.0
+    lat_delta = radius_km / 111.0
+    lng_delta = radius_km / (111.0 * math.cos(math.radians(lat)))
+    
+    nearby = GarbageHotspot.objects.filter(
+        latitude__range=(lat - lat_delta, lat + lat_delta),
+        longitude__range=(lng - lng_delta, lng + lng_delta),
+    )
+    return [h.id for h in nearby if haversine_km(lat, lng, float(h.latitude), float(h.longitude)) * 1000 <= radius_m]
+
+from rest_framework import viewsets, permissions, status, filters, mixins
 from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
@@ -56,7 +69,7 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_permissions(self):
-        if self.action in ('create', 'list', 'retrieve', 'public', 'map_pins'):
+        if self.action in ('create', 'list', 'retrieve', 'public', 'map_pins', 'leaderboard'):
             return [permissions.AllowAny()]
         return [permissions.IsAuthenticated()]
 
@@ -79,7 +92,7 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = GarbageReport.objects.all()
+        qs = GarbageReport.objects.filter(is_archived=False)
 
         status_param = self.request.query_params.get('status')
         if status_param:
@@ -147,6 +160,16 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
         report.rejection_reason = ''
         report.save()
 
+        # Send notification to the reporter
+        if report.user:
+            from notifications.models import Notification, NotificationType
+            Notification.objects.create(
+                user=report.user,
+                title='Report Approved',
+                message=f'Your {report.get_issue_type_display()} report at {report.address or "the reported location"} has been approved and published to the map.',
+                type=NotificationType.REPORT_UPDATE
+            )
+
         # Auto-promote to GarbageHotspot so it appears on the map (idempotent on double-click).
         if report.latitude and report.longitude and report.barangay:
             GarbageHotspot.objects.get_or_create(
@@ -186,9 +209,36 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
         report.approved_at = None
         report.save()
 
+        # Send notification to the reporter
+        if report.user:
+            from notifications.models import Notification, NotificationType
+            Notification.objects.create(
+                user=report.user,
+                title='Report Rejected',
+                message=f'Your {report.get_issue_type_display()} report at {report.address or "the reported location"} was rejected. Reason: {reason}',
+                type=NotificationType.REPORT_UPDATE
+            )
+
         GarbageHotspot.objects.filter(source_report=report).delete()
 
         return Response(GarbageReportSerializer(report, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def archive(self, request, pk=None):
+        """Soft deletes the report (only available to Brgy Officials / Admin)."""
+        if request.user.role not in ['admin', 'brgy_official']:
+            return Response({'error': 'Not authorized'}, status=403)
+        
+        report = self.get_object()
+        if request.user.role == 'brgy_official' and report.barangay != request.user.barangay:
+            return Response({'error': 'Cannot archive reports outside your barangay'}, status=status.HTTP_403_FORBIDDEN)
+            
+        if report.status != ReportStatus.REJECTED:
+            return Response({'error': 'Only rejected reports can be archived.'}, status=400)
+            
+        report.is_archived = True
+        report.save()
+        return Response({'status': 'archived'})
 
     @action(detail=False, methods=['get'])
     def public(self, request):
@@ -206,6 +256,8 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
         """
         hotspots = GarbageHotspot.objects.select_related('barangay', 'source_report', 'source_report__user').all()
 
+        is_privileged = request.user.is_authenticated and getattr(request.user, 'role', None) in _MAP_FULL_ACCESS_ROLES
+        
         data = []
         for h in hotspots:
             # Try to find the originating report
@@ -224,7 +276,7 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
                 'reported':      report.created_at.isoformat() if report else None,
                 'description':   report.description if report else '',
                 'images':        [img.url for img in [report.image, report.image_2, report.image_3, report.image_4] if report and img] if report else [],
-                'user_name':     (report.user.get_full_name() or report.user.username) if report and report.user else None,
+                'user_name':     (report.user.get_full_name() or report.user.username) if (report and report.user and is_privileged) else None,
                 'rejection_reason': None,
             })
 
@@ -329,6 +381,63 @@ class GarbageHotspotViewSet(viewsets.ModelViewSet):
             return [IsAdminOrBrgyOfficial()]
         return super().get_permissions()
 
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        # Sort by id to ensure stable anchor selection (lowest ID is always the anchor)
+        data = sorted(serializer.data, key=lambda x: x['id'])
+        
+        CLUSTER_RADIUS_M = 15
+        clustered = []
+        SEVERITY_RANKS = {'low': 1, 'medium': 2, 'high': 3, 'critical': 4}
+        
+        for row in data:
+            lat = float(row['latitude'])
+            lng = float(row['longitude'])
+            
+            found_cluster = False
+            for cluster in clustered:
+                if haversine_km(lat, lng, float(cluster['latitude']), float(cluster['longitude'])) * 1000 <= CLUSTER_RADIUS_M:
+                    cluster['report_count'] = cluster.get('report_count', 1) + 1
+                    
+                    if row.get('assigned_truck'):
+                        cluster['assigned_truck'] = row['assigned_truck']
+                        cluster['dispatch_acknowledged'] = row.get('dispatch_acknowledged')
+                        cluster['dispatched_at'] = row.get('dispatched_at')
+                        
+                    # Escalate severity to max
+                    if SEVERITY_RANKS.get(row.get('severity', 'low'), 1) > SEVERITY_RANKS.get(cluster.get('severity', 'low'), 1):
+                        cluster['severity'] = row['severity']
+                        
+                    row_name = row.get('name', '')
+                    cluster_name = cluster.get('name', '')
+                    
+                    def extract_type(name):
+                        if '—' in name: return name.split('—')[-1].strip()
+                        if '-' in name: return name.split('-')[-1].strip()
+                        return name
+
+                    row_type = extract_type(row_name)
+                    cluster_type = extract_type(cluster_name)
+                    
+                    if row_type != cluster_type and cluster_type != 'Mixed':
+                        cluster['name'] = f"{cluster.get('barangay_name', 'Unknown')} — Mixed"
+                        cluster['type'] = 'Mixed'
+                        
+                    found_cluster = True
+                    break
+                    
+            if not found_cluster:
+                # Add type if not already there
+                def extract_type(name):
+                    if '—' in name: return name.split('—')[-1].strip()
+                    if '-' in name: return name.split('-')[-1].strip()
+                    return name
+                row['type'] = extract_type(row.get('name', ''))
+                clustered.append(row)
+                
+        return Response(clustered)
+
     @action(detail=False, methods=['get'], url_path='nearby')
     def nearby(self, request):
         """
@@ -396,6 +505,7 @@ class GarbageHotspotViewSet(viewsets.ModelViewSet):
                 'id':                  h.id,
                 'severity':            h.severity,
                 'barangay':            h.barangay.name if h.barangay else 'Unknown',
+                'barangay_id':         h.barangay_id,
                 'address':             h.name,
                 'description':         '',
                 'distanceKm':          None,
@@ -405,36 +515,214 @@ class GarbageHotspotViewSet(viewsets.ModelViewSet):
                 'longitude':           float(h.longitude),
                 'assigned_truck_id':   h.assigned_truck_id,
                 'assigned_truck_plate':h.assigned_truck.plate_number if h.assigned_truck else None,
+                'dispatch_acknowledged': h.dispatch_acknowledged,
+                'dispatched_at':         h.dispatched_at.isoformat() if h.dispatched_at else None,
             })
         return Response(data)
 
+    @action(detail=True, methods=['get'], url_path='reports')
+    def reports(self, request, pk=None):
+        """Re-derives the cluster by proximity — do NOT trust a `count` field, it doesn't exist on the model."""
+        hotspot = self.get_object()
+        cluster_ids = get_cluster_ids(hotspot.latitude, hotspot.longitude, radius_m=15)
+        
+        nearby = GarbageHotspot.objects.filter(
+            id__in=cluster_ids,
+            source_report__isnull=False,
+        ).select_related('source_report', 'source_report__user')
+
+        def _get_url(img):
+            if not img: return None
+            try:
+                u = img.url
+                if u.startswith('res.cloudinary.com'): return f'https://{u}'
+                if u.startswith('//res.cloudinary.com'): return f'https:{u}'
+                if not u.startswith('http') and request: return request.build_absolute_uri(u)
+                return u
+            except Exception: return None
+
+        reports_dict = {}
+        for h in nearby:
+            r = h.source_report
+            if r.id not in reports_dict:
+                reports_dict[r.id] = {
+                    'id': r.id, 'issue_type': r.issue_type, 'severity': r.severity,
+                    'status': r.status, 'address': r.address, 'description': r.description,
+                    'latitude': float(r.latitude) if r.latitude else None,
+                    'longitude': float(r.longitude) if r.longitude else None,
+                    'reported_by': (r.user.get_full_name() or r.user.username) if r.user else 'Anonymous',
+                    'created_at': r.created_at.isoformat(),
+                    'images': [_get_url(img) for img in [r.image, r.image_2, r.image_3, r.image_4] if img],
+                }
+        reports = list(reports_dict.values())
+        reports.sort(key=lambda x: x['created_at'], reverse=True)
+        return Response(reports)
+
+    @action(detail=True, methods=['get'], url_path='recommend-trucks')
+    def recommend_trucks(self, request, pk=None):
+        from driver.models import DriverShift, Truck, TruckStatus
+        hotspot = self.get_object()
+
+        shifts = DriverShift.objects.filter(is_active=True, truck__isnull=False)\
+            .select_related('truck', 'schedule', 'driver').prefetch_related('schedule__barangays')
+
+        scored = []
+        seen_trucks = set()
+        for shift in shifts:
+            truck = shift.truck
+            if truck.status != TruckStatus.ACTIVE:
+                continue
+            if truck.id in seen_trucks:
+                continue
+            seen_trucks.add(truck.id)
+            if shift.schedule and hotspot.barangay in shift.schedule.barangays.all():
+                score = 0
+            elif truck.zone and hotspot.barangay and truck.zone.strip().lower() == hotspot.barangay.name.strip().lower():
+                score = 1  # fallback — zone is freeform text, not FK'd to Barangay
+            else:
+                score = 2
+            scored.append((score, truck, shift))
+
+        scored.sort(key=lambda x: x[0])
+        return Response([{
+            'id': t.id, 'plate_number': t.plate_number, 'model': t.model, 'zone': t.zone,
+            'driver_name': s.driver.get_full_name() or s.driver.username,
+            'capacity': t.current_capacity,
+            'match': ['schedule', 'zone', 'other'][sc],
+        } for sc, t, s in scored])
+
     @action(detail=True, methods=['post'], url_path='assign-truck')
     def assign_truck(self, request, pk=None):
-        """
-        Admin assigns a truck to a hotspot for direct collection.
-        Body: { truck_id: <int> }  — pass null to un-assign.
-        """
-        from driver.models import Truck
+        from driver.models import Truck, TruckStatus
         if request.user.role not in ('admin', 'brgy_official'):
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied('Only admins can assign trucks to hotspots.')
         hotspot = self.get_object()
         truck_id = request.data.get('truck_id')
+        
+        cluster_ids = get_cluster_ids(hotspot.latitude, hotspot.longitude, radius_m=15)
+        cluster_qs = GarbageHotspot.objects.filter(id__in=cluster_ids)
+
         if truck_id:
             try:
-                truck = Truck.objects.get(id=truck_id)
-                hotspot.assigned_truck = truck
+                truck = Truck.objects.get(id=truck_id, status=TruckStatus.ACTIVE)
             except Truck.DoesNotExist:
-                return Response({'error': 'Truck not found.'}, status=404)
+                return Response({'error': 'Truck not found or not active.'}, status=404)
+            from django.utils import timezone
+            cluster_qs.update(
+                assigned_truck=truck,
+                dispatch_acknowledged=False,
+                dispatched_at=timezone.now()
+            )
+            from .models import HotspotIntervention, InterventionType, InterventionStatus
+            HotspotIntervention.objects.filter(
+                hotspot=hotspot, 
+                intervention_type=InterventionType.DISPATCH,
+                status__in=[InterventionStatus.CREATED, InterventionStatus.ACKNOWLEDGED]
+            ).update(status=InterventionStatus.CANCELLED)
+            HotspotIntervention.objects.create(
+                hotspot=hotspot,
+                intervention_type=InterventionType.DISPATCH,
+                status=InterventionStatus.CREATED,
+                truck=truck,
+                created_by=request.user
+            )
+            hotspot.refresh_from_db()
         else:
-            hotspot.assigned_truck = None
-        hotspot.save(update_fields=['assigned_truck'])
+            cluster_qs.update(
+                assigned_truck=None,
+                dispatch_acknowledged=True,
+                dispatched_at=None
+            )
+            from .models import HotspotIntervention, InterventionType, InterventionStatus
+            HotspotIntervention.objects.filter(
+                hotspot=hotspot, 
+                intervention_type=InterventionType.DISPATCH,
+                status__in=[InterventionStatus.CREATED, InterventionStatus.ACKNOWLEDGED]
+            ).update(status=InterventionStatus.CANCELLED)
+            hotspot.refresh_from_db()
+            
         return Response({
-            'status': 'ok',
-            'id': hotspot.id,
+            'status': 'ok', 'id': hotspot.id,
             'assigned_truck_id': hotspot.assigned_truck_id,
             'assigned_truck_plate': hotspot.assigned_truck.plate_number if hotspot.assigned_truck else None,
         })
+
+    @action(detail=True, methods=['post'], url_path='acknowledge-dispatch')
+    def acknowledge_dispatch(self, request, pk=None):
+        hotspot = self.get_object()
+        if hotspot.assigned_truck_id is None:
+            return Response({'error': 'No active dispatch on this hotspot.'}, status=400)
+            
+        if request.user.role != 'admin':
+            from driver.models import DriverShift
+            shift = DriverShift.objects.filter(driver=request.user, is_active=True, truck=hotspot.assigned_truck).first()
+            if not shift:
+                return Response({'error': 'Not your dispatch.'}, status=403)
+
+        cluster_ids = get_cluster_ids(hotspot.latitude, hotspot.longitude, radius_m=15)
+        GarbageHotspot.objects.filter(id__in=cluster_ids).update(dispatch_acknowledged=True)
+        
+        from .models import HotspotIntervention, InterventionType, InterventionStatus
+        from django.utils import timezone
+        active_dispatch = HotspotIntervention.objects.filter(
+            hotspot=hotspot,
+            intervention_type=InterventionType.DISPATCH,
+            status=InterventionStatus.CREATED
+        ).first()
+        if active_dispatch:
+            active_dispatch.status = InterventionStatus.ACKNOWLEDGED
+            active_dispatch.acknowledged_by = request.user
+            active_dispatch.acknowledged_at = timezone.now()
+            active_dispatch.save()
+            
+        return Response({'status': 'acknowledged'})
+
+    @action(detail=True, methods=['post'], url_path='flag-to-brgy')
+    def flag_to_brgy(self, request, pk=None):
+        """
+        Notify Barangay officials about a persistent hotspot.
+        """
+        if request.user.role not in ('admin', 'brgy_official'):
+            return Response({'error': 'Not authorized'}, status=403)
+
+        hotspot = self.get_object()
+        if not hotspot.barangay:
+            return Response({'error': 'Hotspot has no associated barangay.'}, status=400)
+
+        from notifications.models import Notification, NotificationType
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        officials = User.objects.filter(role='brgy_official', barangay=hotspot.barangay)
+        notifications = []
+        for off in officials:
+            notifications.append(
+                Notification(
+                    user=off,
+                    type=NotificationType.REPORT_UPDATE,
+                    title='Hotspot Flagged by Admin',
+                    message=f"Admin flagged a hotspot in {hotspot.barangay.name} ({hotspot.severity.upper()} severity) for your attention."
+                )
+            )
+        if notifications:
+            Notification.objects.bulk_create(notifications)
+
+        from .models import HotspotIntervention, InterventionType, InterventionStatus
+        HotspotIntervention.objects.filter(
+            hotspot=hotspot, 
+            intervention_type=InterventionType.FLAG,
+            status__in=[InterventionStatus.FLAGGED, InterventionStatus.ACKNOWLEDGED]
+        ).update(status=InterventionStatus.CANCELLED)
+        
+        HotspotIntervention.objects.create(
+            hotspot=hotspot,
+            intervention_type=InterventionType.FLAG,
+            status=InterventionStatus.FLAGGED,
+            created_by=request.user
+        )
+
+        return Response({'status': 'flagged'})
 
     @action(detail=True, methods=['post'], url_path='noted')
     def noted(self, request, pk=None):
@@ -794,21 +1082,49 @@ class EscalationViewSet(viewsets.ModelViewSet):
                     return False
                 if request.user.role in ['admin', 'brgy_official']:
                     return True
-                if request.user.role == 'driver' and request.method in permissions.SAFE_METHODS:
-                    return True
+                if request.user.role == 'driver':
+                    if request.method in permissions.SAFE_METHODS or view.action == 'acknowledge':
+                        return True
                 return False
         return [IsAdminOrBrgyOfficialOrDriver()]
 
     def get_queryset(self):
         user = self.request.user
         qs = super().get_queryset()
+        
+        # Simple query param filtering
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+            
+        driver_ack_param = self.request.query_params.get('driver_acknowledged')
+        if driver_ack_param is not None:
+            is_ack = driver_ack_param.lower() in ['true', '1', 't', 'y', 'yes']
+            qs = qs.filter(driver_acknowledged=is_ack)
+            
         if getattr(user, 'role', None) == 'admin':
             return qs
         if getattr(user, 'role', None) == 'brgy_official' and getattr(user, 'barangay', None):
             return qs.filter(barangay=user.barangay)
         if getattr(user, 'role', None) == 'driver':
-            return qs.filter(assignee=user)
+            return qs.filter(driver=user)
         return qs.none()
+
+    @action(detail=True, methods=['patch'])
+    def acknowledge(self, request, pk=None):
+        escalation = self.get_object()
+        
+        # Security: only the penalized driver can acknowledge their own write-up
+        if escalation.driver != request.user:
+            return Response({"error": "You can only acknowledge your own escalations."}, status=status.HTTP_403_FORBIDDEN)
+            
+        if escalation.status != 'approved':
+            return Response({"error": "Only approved escalations require acknowledgment."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        escalation.driver_acknowledged = True
+        escalation.save(update_fields=['driver_acknowledged'])
+        
+        return Response({"message": "Escalation acknowledged."})
 
     @action(detail=True, methods=['post'])
     def resolve(self, request, pk=None):
@@ -816,3 +1132,125 @@ class EscalationViewSet(viewsets.ModelViewSet):
         escalation.status = 'resolved'
         escalation.save()
         return Response(self.get_serializer(escalation).data)
+
+class HotspotInterventionViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
+    from .models import HotspotIntervention
+    queryset = HotspotIntervention.objects.select_related('hotspot', 'truck', 'created_by', 'acknowledged_by', 'resolved_by').all()
+    from .serializers import HotspotInterventionSerializer
+    serializer_class = HotspotInterventionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        from .models import InterventionType
+
+        if user.role == 'admin':
+            pass
+        elif user.role == 'brgy_official' and user.barangay_id:
+            qs = qs.filter(intervention_type=InterventionType.FLAG, hotspot__barangay_id=user.barangay_id)
+        elif user.role == 'driver':
+            from driver.models import DriverShift
+            shift = DriverShift.objects.filter(driver=user, is_active=True).select_related('truck').first()
+            if shift and shift.truck:
+                qs = qs.filter(intervention_type=InterventionType.DISPATCH, truck=shift.truck)
+            else:
+                qs = qs.none()
+        else:
+            qs = qs.none()
+
+        type_param = self.request.query_params.get('type')
+        if type_param:
+            qs = qs.filter(intervention_type=type_param)
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            statuses = status_param.split(',')
+            qs = qs.filter(status__in=statuses)
+        return qs
+
+    @action(detail=False, methods=['get'], url_path='mine')
+    def mine(self, request):
+        if request.user.role != 'brgy_official':
+            return Response([])
+        return Response(self.get_serializer(self.get_queryset(), many=True).data)
+
+    @action(detail=False, methods=['get'], url_path='driver')
+    def driver(self, request):
+        if request.user.role != 'driver':
+            return Response([])
+        from .models import InterventionStatus
+        qs = self.get_queryset().filter(
+            status__in=[InterventionStatus.CREATED, InterventionStatus.ACKNOWLEDGED]
+        )
+        return Response(self.get_serializer(qs, many=True).data)
+
+    def _clear_dispatch_fields(self, hotspot):
+        from .models import GarbageHotspot
+        cluster_ids = get_cluster_ids(hotspot.latitude, hotspot.longitude, radius_m=15)
+        GarbageHotspot.objects.filter(id__in=cluster_ids).update(
+            assigned_truck=None, dispatch_acknowledged=True, dispatched_at=None
+        )
+
+    @action(detail=True, methods=['post'], url_path='acknowledge')
+    def acknowledge(self, request, pk=None):
+        from .models import InterventionType, InterventionStatus
+        from django.utils import timezone
+        intervention = self.get_object()
+        
+        if request.user.role != 'admin':
+            if intervention.intervention_type == InterventionType.DISPATCH:
+                from driver.models import DriverShift
+                shift = DriverShift.objects.filter(driver=request.user, is_active=True, truck=intervention.truck).first()
+                if not shift:
+                    return Response({'error': 'Not your dispatch.'}, status=403)
+            elif intervention.intervention_type == InterventionType.FLAG:
+                if request.user.role != 'brgy_official' or intervention.hotspot.barangay_id != request.user.barangay_id:
+                    return Response({'error': 'Not your barangay.'}, status=403)
+
+        intervention.status = InterventionStatus.ACKNOWLEDGED
+        intervention.acknowledged_by = request.user
+        intervention.acknowledged_at = timezone.now()
+        intervention.save()
+        return Response({'status': 'ok'})
+
+    @action(detail=True, methods=['post'], url_path='resolve')
+    def resolve(self, request, pk=None):
+        from .models import InterventionType, InterventionStatus
+        from django.utils import timezone
+        intervention = self.get_object()
+        
+        if request.user.role != 'admin':
+            if intervention.intervention_type == InterventionType.DISPATCH:
+                from driver.models import DriverShift
+                shift = DriverShift.objects.filter(driver=request.user, is_active=True, truck=intervention.truck).first()
+                if not shift:
+                    return Response({'error': 'Not your dispatch.'}, status=403)
+            elif intervention.intervention_type == InterventionType.FLAG:
+                if request.user.role != 'brgy_official' or intervention.hotspot.barangay_id != request.user.barangay_id:
+                    return Response({'error': 'Not your barangay.'}, status=403)
+
+        intervention.status = InterventionStatus.RESOLVED if intervention.intervention_type == InterventionType.FLAG else InterventionStatus.COLLECTED
+        intervention.resolved_by = request.user
+        intervention.resolved_at = timezone.now()
+        intervention.resolution_notes = request.data.get('notes', '')
+        intervention.save()
+        
+        if intervention.intervention_type == InterventionType.DISPATCH:
+            self._clear_dispatch_fields(intervention.hotspot)
+            
+        return Response({'status': 'ok'})
+
+    @action(detail=True, methods=['post'], url_path='cancel')
+    def cancel(self, request, pk=None):
+        from .models import InterventionType, InterventionStatus
+        if request.user.role != 'admin':
+            return Response({'error': 'Only admins can cancel'}, status=403)
+        intervention = self.get_object()
+        intervention.status = InterventionStatus.CANCELLED
+        intervention.save()
+        
+        if intervention.intervention_type == InterventionType.DISPATCH:
+            self._clear_dispatch_fields(intervention.hotspot)
+            
+        return Response({'status': 'ok'})
+

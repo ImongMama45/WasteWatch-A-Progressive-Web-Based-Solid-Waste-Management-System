@@ -1,7 +1,18 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
+
+const Ico = ({ d, size = 14, color = 'currentColor', sw = 1.75, style = {}, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={sw}
+    strokeLinecap="round" strokeLinejoin="round" className={className} style={{ flexShrink: 0, display: 'block', ...style }}>
+    {Array.isArray(d) ? d.map((p, i) => <path key={i} d={p} />) : <path d={d} />}
+  </svg>
+);
+const IcoRadar = p => <Ico {...p} d={["M12 12v.01", "M16.24 7.76a6 6 0 0 1 0 8.49", "M7.76 7.76a6 6 0 0 0 0 8.49", "M19.07 4.93a10 10 0 0 1 0 14.14", "M4.93 4.93a10 10 0 0 0 0 14.14"]} />;
+const IcoTruck = p => <Ico {...p} d={["M1 3h15v13H1z", "M16 8h4l3 3v5h-7V8z", "M5.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z", "M18.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"]} />;
+const IcoHourglass = p => <Ico {...p} d={["M12 2v20", "M8 2h8", "M8 22h8", "M10 6l4 12", "M14 6l-4 12"]} />;
+const IcoCheckCircle = p => <Ico {...p} d={["M22 11.08V12a10 10 0 1 1-5.93-9.14", "M22 4L12 14.01l-3-3"]} />;
+const IcoChevronLeft = p => <Ico {...p} d="M15 18l-6-6 6-6" />;
 
 // Ordered list for slider snapping
 const LEVELS = ['nearly_empty', 'quarter', 'half', 'three_quarters', 'full', 'overflowing']
@@ -22,10 +33,8 @@ function getFillColor(pct) {
   return '#22c55e'
 }
 
-export default function ArrivalLogger() {
-  const navigate      = useNavigate()
-  const [params]      = useSearchParams()
-  const { user }      = useAuth()
+export default function ArrivalLogger({ open, onClose, defaultTruckId }) {
+  const { user } = useAuth()
 
   const [siteId,    setSiteId]    = useState(null)
   const [trucks,    setTrucks]    = useState([])
@@ -34,7 +43,7 @@ export default function ArrivalLogger() {
   const [barangays, setBarangays] = useState([])
 
   // Form state
-  const [selectedTruck, setSelectedTruck] = useState(params.get('truck_id') || '')
+  const [selectedTruck, setSelectedTruck] = useState(defaultTruckId || '')
   const [selectedBarangays, setSelectedBarangays] = useState([])
   const [barangaySearch, setBarangaySearch] = useState('')
   const [barangayDropOpen, setBarangayDropOpen] = useState(false)
@@ -152,7 +161,9 @@ export default function ArrivalLogger() {
         remarks,
       })
       setToast({ type: 'success', msg: 'Arrival logged successfully!' })
-      setTimeout(() => navigate('/dumpsite/logs'), 1500)
+      setTimeout(() => {
+        if (onClose) onClose(true)
+      }, 1500)
     } catch (err) {
       const detail = err.response?.data
       const msg = typeof detail === 'object'
@@ -166,8 +177,19 @@ export default function ArrivalLogger() {
 
   const fillColor = getFillColor(sliderPct)
 
+  if (!open) return null
+
   return (
-    <div style={{ padding: '1.5rem', maxWidth: 720, margin: '0 auto' }}>
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)',
+      zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem'
+    }} onClick={() => onClose && onClose()}>
+      <div style={{
+        background: 'var(--surface)', borderRadius: 24, width: '100%', maxWidth: 720,
+        maxHeight: '90vh', overflowY: 'auto', position: 'relative',
+        boxShadow: '0 24px 60px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column'
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: '2rem' }}>
       {/* Toast */}
       {toast && (
         <div style={{
@@ -180,16 +202,18 @@ export default function ArrivalLogger() {
         </div>
       )}
 
-      <div style={{ marginBottom: '2rem' }}>
-        <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-          ← Back
+      <div style={{ marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h1 style={{ fontSize: '1.5rem', fontWeight: 900, letterSpacing: '-0.03em', color: 'var(--surface-3)' }}>
+            Log Truck Arrival
+          </h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+            Record an incoming truck delivery using the fill level slider.
+          </p>
+        </div>
+        <button onClick={() => onClose && onClose()} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 24, lineHeight: 1, padding: 0 }}>
+          &times;
         </button>
-        <h1 style={{ fontSize: '1.5rem', fontWeight: 900, letterSpacing: '-0.03em', color: 'var(--surface-3)' }}>
-          Log Truck Arrival
-        </h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-          Record an incoming truck delivery using the fill level slider.
-        </p>
       </div>
 
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -201,8 +225,8 @@ export default function ArrivalLogger() {
           {/* Inbound quick-select */}
           {inbound.length > 0 && (
             <div style={{ marginBottom: '0.75rem' }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                📡 Inbound Queue
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <IcoRadar size={14} /> Inbound Queue
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                 {inbound.map(i => (
@@ -215,9 +239,10 @@ export default function ArrivalLogger() {
                       background: String(selectedTruck) === String(i.truck_id)
                         ? 'rgba(46,204,113,0.12)' : 'var(--surface-1)',
                       color: String(selectedTruck) === String(i.truck_id) ? 'var(--accent)' : 'var(--text-muted)',
+                      display: 'flex', alignItems: 'center', gap: '6px'
                     }}
                   >
-                    🚛 {i.truck_plate} <span style={{ opacity: 0.7 }}>· {i.driver}</span>
+                    <IcoTruck size={14} /> {i.truck_plate} <span style={{ opacity: 0.7 }}>· {i.driver}</span>
                   </button>
                 ))}
               </div>
@@ -357,11 +382,13 @@ export default function ArrivalLogger() {
           padding: '1rem', fontWeight: 800, fontSize: '1rem',
           cursor: submitting ? 'not-allowed' : 'pointer',
           boxShadow: submitting ? 'none' : '0 8px 24px rgba(46,204,113,0.35)',
-          transition: 'all 0.15s',
+          transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
         }}>
-          {submitting ? '⏳ Logging...' : '✅ Confirm Arrival'}
+          {submitting ? <><IcoHourglass size={18} style={{ animation: 'spin 1s linear infinite' }} /> Logging...</> : <><IcoCheckCircle size={18} /> Confirm Arrival</>}
         </button>
       </form>
+        </div>
+      </div>
     </div>
   )
 }

@@ -287,35 +287,114 @@ function PeriodTab({ label, active, onClick }) {
     )
 }
 
+const BADGE_META = {
+    gold:   { label: 'Gold',   bg: 'linear-gradient(135deg,#f6c94e,#e0a800)', fg: '#7a5100' },
+    silver: { label: 'Silver', bg: 'linear-gradient(135deg,#c0c7d1,#8e9aaa)', fg: '#3a4350' },
+    bronze: { label: 'Bronze', bg: 'linear-gradient(135deg,#d4876a,#a85f3d)', fg: '#5c2d12' },
+}
+
+function DriverScoreCard({ score, period }) {
+    if (!score?.me) {
+        return (
+            <div className="card da-card" style={{ marginBottom: 20, textAlign: 'center' }}>
+                <div className="form-label">Driver Score</div>
+                <p className="text-muted text-xs">Complete a stop this {period} to appear on the board.</p>
+            </div>
+        )
+    }
+    const { me, leaders, fleet_size } = score
+    const badge = me.badge ? BADGE_META[me.badge] : null
+    return (
+        <div className="card da-card" style={{ marginBottom: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <div style={{
+                    width: 56, height: 56, borderRadius: 14, flexShrink: 0,
+                    background: badge ? badge.bg : 'var(--bg)',
+                    border: badge ? 'none' : '1px solid var(--border)',
+                    color: badge ? badge.fg : 'var(--text-muted)',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                }}>
+                    <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 20, lineHeight: 1 }}>#{me.rank}</span>
+                    {badge && <span style={{ fontSize: 8, fontWeight: 800, textTransform: 'uppercase' }}>{badge.label}</span>}
+                </div>
+                <div style={{ flex: 1 }}>
+                    <div className="form-label" style={{ marginBottom: 0 }}>Driver Score</div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                        <span style={{ fontFamily: 'var(--font-head)', fontSize: 32, fontWeight: 800, color: 'var(--accent)' }}>
+                            {me.points.toLocaleString()}
+                        </span>
+                        <span className="text-muted text-sm">pts</span>
+                    </div>
+                    <div className="text-muted text-xs">
+                        Top {me.rank} of {me.of || fleet_size} · this {period}
+                    </div>
+                </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+                {[
+                    { l: 'stops', v: `+${me.stops_completed * 50}`, c: 'var(--accent)' },
+                    { l: 'missed', v: me.stops_missed ? `-${me.stops_missed * 20}` : '0', c: me.stops_missed ? 'var(--danger)' : 'var(--text-muted)' },
+                    { l: 'fill bonus', v: me.fill_bonus > 0 ? `+${me.fill_bonus}` : me.fill_bonus, c: me.fill_bonus < 0 ? 'var(--danger)' : me.fill_bonus > 0 ? 'var(--accent)' : 'var(--text-muted)' },
+                ].map(p => (
+                    <span key={p.l} style={{
+                        fontSize: 11, padding: '3px 10px', borderRadius: 20,
+                        background: 'var(--bg)', border: '1px solid var(--border)',
+                    }}>
+                        <b style={{ color: p.c }}>{p.v}</b> <span className="text-muted">{p.l}</span>
+                    </span>
+                ))}
+            </div>
+
+            {leaders?.length > 0 && (
+                <div style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                    <div className="form-label">Fleet leaders</div>
+                    {leaders.map(l => (
+                        <div key={l.rank} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 0' }}>
+                            <span>#{l.rank} {l.name}</span>
+                            <b>{l.points.toLocaleString()}</b>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    )
+}
+
+
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
 export default function DriverAnalytics() {
     const { user } = useAuth()
     const navigate = useNavigate()
 
-        const [period, setPeriod] = useState('week')
+    const [period, setPeriod] = useState('week')
     const [summary, setSummary] = useState({ routesCompleted: 0, stopsCompleted: 0, totalWorkingHours: 0, avgCompletionMins: 0 })
     const [weekly, setWeekly] = useState([])
     const [trend, setTrend] = useState([])
     const [loading, setLoading] = useState(true)
     const [hoverRow, setHoverRow] = useState(null)
     const [error, setError] = useState(null)
+    const [score, setScore] = useState(null)
 
-        const fetchAnalytics = () => {
+    const fetchAnalytics = () => {
         setLoading(true)
         setError(null)
-        api.get(`/api/driver/shift/analytics/?period=${period}`)
-            .then(res => {
-                if (!res.data) throw new Error('No data returned')
-                if (res.data.summary) setSummary(res.data.summary)
-                if (res.data.weekly)  setWeekly(res.data.weekly)
-                if (res.data.trend)   setTrend(res.data.trend)
-            })
-            .catch(err => {
-                console.error('Failed to load analytics:', err)
+        Promise.allSettled([
+            api.get(`/api/driver/shift/analytics/?period=${period}`),
+            api.get(`/api/analytics/driver-summary/?period=${period}`),
+        ]).then(([a, s]) => {
+            if (a.status === 'rejected' || !a.value.data) {
+                console.error('Failed to load analytics:', a.reason)
                 setError('Failed to load performance data. Please check your connection.')
-            })
-            .finally(() => setLoading(false))
+                return
+            }
+            const d = a.value.data
+            if (d.summary) setSummary(d.summary)
+            if (d.weekly)  setWeekly(d.weekly)
+            if (d.trend)   setTrend(d.trend)
+            setScore(s.status === 'fulfilled' ? s.value.data : null)
+        }).finally(() => setLoading(false))
     }
 
     useEffect(() => {
@@ -384,6 +463,7 @@ export default function DriverAnalytics() {
                 {/* ── STAT CARDS 2×2 ── */}
                 {!loading && !error && (
                     <>
+                <DriverScoreCard score={score} period={period} />
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}
                     className="da-card">
                     <StatCard label="Routes Done" value={fmt(summary.routesCompleted)} color="#2ecc71" sub={`this ${period}`} />
@@ -432,7 +512,8 @@ export default function DriverAnalytics() {
 
                     {/* Trend badge */}
                     {trend.length >= 2 && (() => {
-                        const diff = trend[trend.length - 1] - trend[0]
+                        const vals = trend.map(t => typeof t === 'object' ? t.val : t)
+                        const diff = vals[vals.length - 1] - vals[0]
                         const faster = diff < 0
                         return (
                             <div style={{

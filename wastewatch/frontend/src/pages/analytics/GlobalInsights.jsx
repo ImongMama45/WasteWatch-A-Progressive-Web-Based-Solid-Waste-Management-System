@@ -7,11 +7,14 @@
  * Falls back to placeholder data while backend is being seeded.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import BarangayRankingCard from './BarangayRankingCard'
 import HotspotMap from './HotspotMap'
-import api from '../../api/client'
-import { Trash2, CheckCircle2, Truck, Flame, AlertTriangle, Building2, BarChart2, LineChart, ClipboardCheck, Clock, XCircle, TrendingUp, MapPin, PieChart, BarChart3, Flag, Hourglass, Users, Trophy, Map } from 'lucide-react'
+import { useLiveAnalytics } from './useLiveAnalytics'
+import { toGlobal } from './globalMapper'
+import { Trash2, CheckCircle2, Truck, Flame, AlertTriangle, Building2, BarChart2, LineChart as LineChartIcon, ClipboardCheck, Clock, XCircle, TrendingUp, MapPin, BarChart3, Flag, Hourglass, Users, Trophy, Map, ArrowRight, Search } from 'lucide-react'
+import { fmtDay } from './perfMapper'
 
 // ─── Reusable primitives ──────────────────────────────────────────────────────
 
@@ -38,57 +41,33 @@ function SHead({ icon, title, subtitle, right }) {
   )
 }
 
-function PeriodToggle({ value, onChange, options }) {
-  return (
-    <div style={{ display: 'flex', gap: 2, background: 'var(--bg)', borderRadius: 8, padding: 3, flexShrink: 0 }}>
-      {options.map(o => (
-        <button key={o.value} onClick={() => onChange(o.value)} style={{
-          padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer',
-          fontSize: 10, fontWeight: 600, fontFamily: 'var(--font-body)',
-          background: value === o.value ? 'var(--surface)' : 'transparent',
-          color: value === o.value ? 'var(--text)' : 'var(--text-muted)',
-          borderBottom: value === o.value ? '2px solid var(--accent)' : '2px solid transparent',
-          whiteSpace: 'nowrap',
-        }}>{o.label}</button>
-      ))}
-    </div>
-  )
-}
-
-function asList(payload) {
-  if (Array.isArray(payload)) return payload
-  if (payload && Array.isArray(payload.results)) return payload.results
-  return []
-}
-
-function normalizePeriod(period) {
-  return (period || '').trim().toLowerCase()
-}
 
 // ─── Mini bar chart ───────────────────────────────────────────────────────────
 function MiniBar({ data, valueKey = 'value', color = 'var(--accent)', height = 80 }) {
   const max = Math.max(...data.map(d => d[valueKey] || 0), 1)
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5, height }}>
-      {data.map((d, i) => {
-        const val = d[valueKey] || 0
-        const h = Math.max(Math.round((val / max) * (height - 18)), 4)
-        const hot = val > max * 0.8
-        return (
-          <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-            <div style={{ fontSize: 7, color: 'var(--text-muted)', fontWeight: 600 }}>
-              {val > 999 ? `${(val / 1000).toFixed(1)}k` : val}
+    <div className="ac-hide-scrollbar" style={{ overflowX: 'auto', paddingBottom: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height, minWidth: 'min-content' }}>
+        {data.map((d, i) => {
+          const val = d[valueKey] || 0
+          const h = Math.max(Math.round((val / max) * (height - 18)), 4)
+          const hot = val > max * 0.8
+          return (
+            <div key={i} style={{ flex: '1 0 35px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+              <div style={{ fontSize: 7, color: 'var(--text-muted)', fontWeight: 600 }}>
+                {val > 999 ? `${(val / 1000).toFixed(1)}k` : val}
+              </div>
+              <div style={{
+                width: '100%', height: h, maxWidth: 35,
+                background: hot ? 'var(--danger)' : color,
+                borderRadius: '3px 3px 0 0', opacity: .8,
+                transition: 'height .3s ease',
+              }} />
+              <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>{d.label}</div>
             </div>
-            <div style={{
-              width: '100%', height: h,
-              background: hot ? 'var(--danger)' : color,
-              borderRadius: '3px 3px 0 0', opacity: .8,
-              transition: 'height .3s ease',
-            }} />
-            <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>{d.label}</div>
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -124,122 +103,115 @@ function MiniLine({ data, valueKey = 'value', color = 'var(--accent)' }) {
   )
 }
 
-// ─── Donut chart ──────────────────────────────────────────────────────────────
-function Donut({ segments, size = 80 }) {
-  const total = segments.reduce((s, c) => s + c.value, 0) || 1
-  const r = 28, cx = size / 2, cy = size / 2
-  const circumference = 2 * Math.PI * r
-  let offset = 0
+// ─── Forecast Line Chart ──────────────────────────────────────────────────────
+function ForecastLine({ forecast }) {
+  if (!forecast?.sufficient) {
+    return (
+      <GCard>
+        <SHead icon={<TrendingUp size={16} />} title="7-Day Weight Forecast" subtitle="Predictive analytics" />
+        <div style={{ height: 160, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', borderRadius: 12, border: '1px dashed var(--border)', color: 'var(--text-muted)' }}>
+          <span className="material-symbols-rounded" style={{ fontSize: 32, marginBottom: 8, opacity: 0.5 }}>query_stats</span>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Forecast Unavailable</span>
+          <span style={{ fontSize: 11, maxWidth: 200, textAlign: 'center', marginTop: 4 }}>
+            {forecast?.reason === 'not_enough_data'
+              ? `Requires 14 days of history (only ${forecast.days_available || 0} available).`
+              : 'Not enough historical waste data to generate a forecast.'}
+          </span>
+        </div>
+      </GCard>
+    )
+  }
+
+  const { history, points } = forecast
+  const allPts = [...history.map(d => d.kg), ...points.map(p => p.expected_kg)]
+  const max = Math.max(...allPts, ...points.map(p => p.high_kg), 1)
+  const min = Math.min(...allPts, ...points.map(p => p.low_kg), 0)
+  const rng = max - min || 1
+
+  const W = 350, H = 140, P = 14
+
+  const getX = i => P + (i / (allPts.length - 1)) * (W - P * 2)
+  const getY = v => P + ((max - v) / rng) * (H - P * 2)
+
+  const histPts = history.map((d, i) => [getX(i), getY(d.kg)])
+  const forcPts = points.map((d, i) => [getX(history.length + i), getY(d.expected_kg)])
+
+  const histPoly = histPts.map(p => p.join(',')).join(' ')
+  const forcPoly = [histPts[histPts.length - 1], ...forcPts].map(p => p.join(',')).join(' ')
+
+  const bandPts = [
+    histPts[histPts.length - 1],
+    ...points.map((p, i) => [getX(history.length + i), getY(p.high_kg)]),
+    ...[...points].reverse().map((p, i) => [getX(history.length + points.length - 1 - i), getY(p.low_kg)]),
+    histPts[histPts.length - 1]
+  ]
+  const bandPoly = bandPts.map(p => p.join(',')).join(' ')
+
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: 'rotate(-90deg)' }}>
-      {segments.map((seg, i) => {
-        const dash = (seg.value / total) * circumference
-        const gap = circumference - dash
-        const el = (
-          <circle key={i} cx={cx} cy={cy} r={r}
-            fill="none" stroke={seg.color} strokeWidth="10"
-            strokeDasharray={`${dash} ${gap}`}
-            strokeDashoffset={-offset}
-          />
-        )
-        offset += dash
-        return el
-      })}
-    </svg>
+    <GCard>
+      <SHead icon={<TrendingUp size={16} />} title="7-Day Weight Forecast" subtitle="Expected tonnage (80% confidence)" />
+      <div style={{ position: 'relative' }}>
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
+          {/* Background grid */}
+          {[0, 0.5, 1].map((t, i) => {
+            const y = P + t * (H - P * 2)
+            const v = Math.round(max - t * rng)
+            return (
+              <g key={i}>
+                <line x1={P} y1={y} x2={W - P} y2={y} stroke="var(--border)" strokeWidth="1" strokeDasharray="4,4" />
+                <text x={P - 4} y={y + 3} fontSize="8" fill="var(--text-muted)" textAnchor="end">{v > 999 ? `${(v / 1000).toFixed(1)}k` : v}</text>
+              </g>
+            )
+          })}
+
+          {/* Confidence Band */}
+          <polygon points={bandPoly} fill="var(--warning)" opacity="0.15" />
+
+          {/* History Line */}
+          <polyline points={histPoly} fill="none" stroke="var(--text-muted)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+
+          {/* Forecast Line */}
+          <polyline points={forcPoly} fill="none" stroke="var(--warning)" strokeWidth="2.5" strokeDasharray="6,4" strokeLinecap="round" strokeLinejoin="round" />
+
+          {/* Forecast Dots */}
+          {forcPts.map((p, i) => (
+            <circle key={i} cx={p[0]} cy={p[1]} r="3.5" fill="var(--warning)" stroke="var(--surface)" strokeWidth="1.5" />
+          ))}
+          <circle cx={histPts[histPts.length - 1][0]} cy={histPts[histPts.length - 1][1]} r="3.5" fill="var(--text-muted)" stroke="var(--surface)" strokeWidth="1.5" />
+        </svg>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>
+        <span>{fmtDay(history[0].date)}</span>
+        <span style={{ color: 'var(--text)' }}>Today</span>
+        <span style={{ color: 'var(--warning)' }}>{fmtDay(points[points.length - 1].date)}</span>
+      </div>
+    </GCard>
   )
 }
 
-// ─── Placeholder data (used until backend is seeded) ─────────────────────────
-const PLACEHOLDER = {
-  kpi: {
-    collected_kg: 4820,
-    collection_rate: 91,
-    active_trucks: 7,
-    open_hotspots: 14,
-    escalations: 3,
-    barangays_served: 22,
-    collected_kg_delta: '+320',
-    collection_rate_delta: '+2%',
-    hotspots_delta: '-3',
-  },
-  wasteDaily: [
-    { label: 'Mon', value: 680, organic: 420, residual: 260 },
-    { label: 'Tue', value: 720, organic: 440, residual: 280 },
-    { label: 'Wed', value: 590, organic: 370, residual: 220 },
-    { label: 'Thu', value: 810, organic: 510, residual: 300 },
-    { label: 'Fri', value: 940, organic: 580, residual: 360 },
-    { label: 'Sat', value: 760, organic: 480, residual: 280 },
-    { label: 'Sun', value: 320, organic: 200, residual: 120 },
-  ],
-  rankings: [
-    { name: 'Gulang-Gulang', score: 98, compliance: 97, trend: 'up', population: 4200, hotspots: 0, reports: 2 },
-    { name: 'Ibabang Dupay', score: 95, compliance: 94, trend: 'up', population: 3800, hotspots: 0, reports: 3 },
-    { name: 'Mayao Crossing', score: 92, compliance: 91, trend: 'same', population: 5100, hotspots: 1, reports: 4 },
-    { name: 'Cotta', score: 88, compliance: 87, trend: 'up', population: 6200, hotspots: 2, reports: 5 },
-    { name: 'Isabang', score: 84, compliance: 83, trend: 'down', population: 4900, hotspots: 2, reports: 7 },
-  ],
-  problematic: [
-    { name: 'Barangay 9', score: 44, compliance: 48, trend: 'down', population: 3100, hotspots: 8, reports: 24 },
-    { name: 'Barangay 10', score: 51, compliance: 52, trend: 'down', population: 2800, hotspots: 6, reports: 19 },
-    { name: 'Barangay 6', score: 58, compliance: 60, trend: 'same', population: 3400, hotspots: 5, reports: 15 },
-  ],
-  trucks: [
-    { truck_id: 'LCN-001', driver_name: 'Juan Dela Cruz', routes: 18, completed: 17, missed: 1, avg_fill: 88, total_km: '142.5' },
-    { truck_id: 'LCN-002', driver_name: 'Ana Mendoza', routes: 16, completed: 16, missed: 0, avg_fill: 94, total_km: '128.0' },
-    { truck_id: 'LCN-003', driver_name: 'Jose Bautista', routes: 14, completed: 13, missed: 1, avg_fill: 79, total_km: '108.3' },
-    { truck_id: 'LCN-004', driver_name: 'Maria Santos', routes: 15, completed: 15, missed: 0, avg_fill: 91, total_km: '119.7' },
-  ],
-  issueTrends: [
-    { label: 'Jun 1', value: 8 },
-    { label: 'Jun 2', value: 12 },
-    { label: 'Jun 3', value: 7 },
-    { label: 'Jun 4', value: 15 },
-    { label: 'Jun 5', value: 11 },
-    { label: 'Jun 6', value: 19 },
-    { label: 'Jun 7', value: 14 },
-  ],
-  hotspots: [
-    { id: 1, location: 'Purok 3, Barangay 9', severity: 'critical', type: 'Illegal Dumping', reports: 24, reportsWeek: 8, resolved: 6 },
-    { id: 2, location: 'Market Area, Cotta', severity: 'high', type: 'Open Burning', reports: 18, reportsWeek: 5, resolved: 7 },
-    { id: 3, location: 'Riverside, Isabang', severity: 'high', type: 'Illegal Dumping', reports: 15, reportsWeek: 4, resolved: 8 },
-    { id: 4, location: 'Highway, Barangay 10', severity: 'medium', type: 'Littering', reports: 11, reportsWeek: 3, resolved: 9 },
-    { id: 5, location: 'Purok 1, Barangay 6', severity: 'medium', type: 'Illegal Dumping', reports: 9, reportsWeek: 2, resolved: 5 },
-  ],
-  wasteComposition: [
-    { label: 'Organic', value: 42, color: '#22c55e' },
-    { label: 'Residual', value: 31, color: '#3b82f6' },
-    { label: 'Recyclable', value: 19, color: '#f59e0b' },
-    { label: 'Special', value: 8, color: '#ef4444' },
-  ],
-  stats: {
-    totalWaste: '4,820 kg',
-    totalOrganic: '2,024 kg',
-    totalResidual: '1,494 kg',
-    reportsThisWeek: 14,
-    resolutionRate: 68,
-    avgResponse: 2.4,
-  },
-}
+
 
 // ─── Overview KPIs ────────────────────────────────────────────────────────────
 function OverviewKPIs({ kpi }) {
   const CARDS = [
-    { label: 'Waste Collected Today', value: `${kpi.collected_kg?.toLocaleString() ?? '—'} kg`, delta: kpi.collected_kg_delta, icon: Trash2, color: 'var(--accent)' },
-    { label: 'Collection Rate', value: `${kpi.collection_rate ?? '—'}%`, delta: kpi.collection_rate_delta, icon: CheckCircle2, color: 'var(--accent)' },
+    { label: 'Total Waste Collected', value: `${kpi.collected_kg?.toLocaleString() ?? '—'} kg`, delta: kpi.collected_kg_delta, sub: 'all recorded weight (unvalidated included)', icon: Trash2, color: 'var(--accent)' },
+    { label: 'Collection Rate', value: kpi.collection_rate == null ? '—' : `${kpi.collection_rate}%`, delta: kpi.collection_rate_delta, icon: CheckCircle2, color: 'var(--accent)' },
     { label: 'Active Trucks', value: kpi.active_trucks ?? '—', delta: null, icon: Truck, color: 'var(--info)' },
-    { label: 'Open Hotspots', value: kpi.open_hotspots ?? '—', delta: kpi.hotspots_delta, icon: Flame, color: 'var(--danger)' },
-    { label: 'Escalations', value: kpi.escalations ?? '—', delta: null, icon: AlertTriangle, color: 'var(--warning)' },
-    { label: 'Barangays Served', value: kpi.barangays_served ?? '—', delta: null, icon: Building2, color: 'var(--accent)' },
+    { label: 'Open Hotspots (All Time)', value: kpi.open_hotspots ?? '—', delta: kpi.hotspots_delta, icon: Flame, color: 'var(--danger)' },
+    // Escalations omitted until backend supplies the field — was showing hard-coded 3
+    { label: 'Barangays Served', value: kpi.barangays_served, hide: kpi.barangays_served == null, icon: Building2, color: 'var(--accent)', delta: null },
   ]
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 140px), 1fr))', gap: 10, marginBottom: 16 }}>
-      {CARDS.map(c => {
+    <div className="ac-hide-scrollbar" style={{ display: 'flex', gap: 10, marginBottom: 16, overflowX: 'auto' }}>
+      {CARDS.filter(c => !c.hide).map(c => {
         const Icon = c.icon;
         return (
           <div key={c.label} style={{
             background: 'var(--surface)', border: '1px solid var(--border)',
             borderRadius: 'var(--radius)', padding: '14px 12px',
+            flex: '1 0 140px', minWidth: 140
           }}>
             <Icon size={20} color={c.color} style={{ display: 'block', marginBottom: 8 }} />
             <div style={{ fontWeight: 700, fontSize: 20, color: 'var(--text)', lineHeight: 1 }}>{c.value}</div>
@@ -248,6 +220,11 @@ function OverviewKPIs({ kpi }) {
                 fontSize: 10, fontWeight: 700, marginTop: 4,
                 color: c.delta.startsWith('+') ? 'var(--accent)' : c.delta.startsWith('-') ? 'var(--danger)' : 'var(--text-muted)',
               }}>{c.delta} vs yesterday</div>
+            )}
+            {c.sub && (
+              <div style={{ fontSize: 9, fontWeight: 500, color: 'var(--text-muted)', marginTop: 4 }}>
+                {c.sub}
+              </div>
             )}
             <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '.04em', marginTop: 4 }}>
               {c.label.toUpperCase()}
@@ -261,27 +238,20 @@ function OverviewKPIs({ kpi }) {
 
 // ─── Waste Collection Chart ───────────────────────────────────────────────────
 function WasteCollectionChart({ data }) {
-  const [period, setPeriod] = useState('week')
   const [chartType, setChartType] = useState('bar')
 
   return (
     <GCard>
       <SHead
         icon={<Trash2 size={16} />}
-        title="Waste Collected per Barangay"
+        title="Daily Waste Collected"
         subtitle="Daily totals tracked from dumpsite weighing"
-        right={
-          <PeriodToggle
-            value={period} onChange={setPeriod}
-            options={[{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }]}
-          />
-        }
       />
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 12 }}>
         {[
           { key: 'bar', icon: BarChart2, label: 'Bar' },
-          { key: 'line', icon: LineChart, label: 'Trend' },
+          { key: 'line', icon: LineChartIcon, label: 'Trend' },
         ].map((t, idx) => {
           const Icon = t.icon;
           return (
@@ -301,29 +271,22 @@ function WasteCollectionChart({ data }) {
       {chartType === 'bar' && <MiniBar data={data} valueKey="value" color="var(--accent)" height={100} />}
       {chartType === 'line' && <MiniLine data={data} valueKey="value" />}
 
-      {/* Stacked breakdown legend */}
-      <div style={{ display: 'flex', gap: 16, marginTop: 10, fontSize: 10, color: 'var(--text-muted)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <div style={{ width: 9, height: 9, borderRadius: 2, background: 'var(--accent)' }} /> Organic
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <div style={{ width: 9, height: 9, borderRadius: 2, background: 'var(--info)' }} /> Residual
-        </div>
-      </div>
+
     </GCard>
   )
 }
 
 // ─── Collection Efficiency ────────────────────────────────────────────────────
 function CollectionEfficiency({ kpi }) {
-  const scheduled = kpi.total_routes || 40
-  const completed = kpi.completed_routes || 37
-  const missed = scheduled - completed
-  const efficiency = Math.round((completed / scheduled) * 100)
+  const scheduled = kpi.total_routes ?? 0
+  const completed = kpi.completed_routes ?? 0
+  const missed = kpi.missed_stops ?? 0
+  const pending = kpi.pending_stops ?? Math.max(0, scheduled - (completed + missed))
+  const efficiency = kpi.completion_rate
 
   return (
     <GCard>
-      <SHead icon={<ClipboardCheck size={16} />} title="Collection Efficiency" subtitle="Scheduled vs. completed routes this week" />
+      <SHead icon={<ClipboardCheck size={16} />} title="Collection Efficiency" subtitle="Completed vs. decided stops" />
 
       {/* Big efficiency number */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
@@ -331,9 +294,9 @@ function CollectionEfficiency({ kpi }) {
           <svg width="80" height="80" viewBox="0 0 80 80" style={{ transform: 'rotate(-90deg)' }}>
             <circle cx="40" cy="40" r="30" fill="none" stroke="var(--border)" strokeWidth="8" />
             <circle cx="40" cy="40" r="30" fill="none"
-              stroke={efficiency >= 90 ? 'var(--accent)' : efficiency >= 75 ? 'var(--warning)' : 'var(--danger)'}
+              stroke={efficiency == null ? 'var(--border)' : efficiency >= 90 ? 'var(--accent)' : efficiency >= 75 ? 'var(--warning)' : 'var(--danger)'}
               strokeWidth="8"
-              strokeDasharray={`${(efficiency / 100) * 188.5} 188.5`}
+              strokeDasharray={`${((efficiency ?? 0) / 100) * 188.5} 188.5`}
               strokeLinecap="round"
             />
           </svg>
@@ -341,7 +304,7 @@ function CollectionEfficiency({ kpi }) {
             position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
             justifyContent: 'center', flexDirection: 'column',
           }}>
-            <span style={{ fontWeight: 800, fontSize: 16, color: 'var(--text)', lineHeight: 1 }}>{efficiency}%</span>
+            <span style={{ fontWeight: 800, fontSize: 16, color: 'var(--text)', lineHeight: 1 }}>{efficiency != null ? `${efficiency}%` : '—'}</span>
           </div>
         </div>
 
@@ -350,13 +313,14 @@ function CollectionEfficiency({ kpi }) {
             { label: 'Scheduled', value: scheduled, color: 'var(--text-muted)', icon: Clock },
             { label: 'Completed', value: completed, color: 'var(--accent)', icon: CheckCircle2 },
             { label: 'Missed', value: missed, color: missed > 0 ? 'var(--danger)' : 'var(--text-muted)', icon: XCircle },
+            { label: 'Pending', value: pending, color: pending > 0 ? 'var(--warning)' : 'var(--text-muted)', icon: Hourglass },
           ].map((r, idx) => {
             const Icon = r.icon;
             return (
               <div key={r.label || idx} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                 <Icon size={14} color={r.color} style={{ flexShrink: 0 }} />
                 <div style={{ flex: 1, height: 4, borderRadius: 20, background: 'var(--border)', overflow: 'hidden' }}>
-                  <div style={{ width: `${(r.value / scheduled) * 100}%`, height: '100%', background: r.color, borderRadius: 20 }} />
+                  <div style={{ width: `${scheduled > 0 ? (r.value / scheduled) * 100 : 0}%`, height: '100%', background: r.color, borderRadius: 20 }} />
                 </div>
                 <span style={{ fontSize: 11, fontWeight: 700, color: r.color, width: 22, textAlign: 'right' }}>{r.value}</span>
                 <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 54 }}>{r.label.toUpperCase()}</span>
@@ -371,8 +335,9 @@ function CollectionEfficiency({ kpi }) {
 
 // ─── Truck Performance ────────────────────────────────────────────────────────
 function TruckPerformanceSection({ trucks }) {
-  const [period, setPeriod] = useState('This Week')
-  const sorted = [...trucks].sort((a, b) => (b.completed / b.routes) - (a.completed / a.routes))
+  const decided = t => (t.completed || 0) + (t.missed || 0)
+  const rateOf = t => decided(t) > 0 ? Math.round((t.completed / decided(t)) * 100) : null
+  const sorted = [...trucks].sort((a, b) => (rateOf(b) ?? -1) - (rateOf(a) ?? -1))
 
   return (
     <GCard>
@@ -380,95 +345,67 @@ function TruckPerformanceSection({ trucks }) {
         icon={<Truck size={16} />}
         title="Truck & Driver Performance"
         subtitle="Routes completed · Efficiency rankings"
-        right={
-          <PeriodToggle
-            value={period} onChange={setPeriod}
-            options={[{ value: 'This Week', label: 'Week' }, { value: 'This Month', label: 'Month' }]}
-          />
-        }
       />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {sorted.map((truck, i) => {
-          const rate = Math.round((truck.completed / Math.max(truck.routes, 1)) * 100)
-          const isTop = i === 0
-          return (
-            <div key={truck.truck_id} style={{
-              background: 'var(--bg)', border: `1px solid ${isTop ? 'rgba(46,204,113,.3)' : 'var(--border)'}`,
-              borderRadius: 'var(--radius)', padding: '12px 14px',
-              display: 'flex', alignItems: 'center', gap: 10,
-            }}>
-              {/* Rank */}
-              <div style={{
-                width: 30, height: 30, borderRadius: 8, flexShrink: 0,
-                background: isTop ? 'rgba(46,204,113,.1)' : 'var(--surface)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
+        {sorted.length === 0 ? (
+          <div style={{ padding: '20px 10px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12, background: 'var(--surface)', borderRadius: 8 }}>
+            No truck logs recorded for this period.
+          </div>
+        ) : (
+          sorted.map((truck, i) => {
+            const rate = rateOf(truck)
+            const isTop = i === 0 && rate != null
+            return (
+              <div key={truck.truck_id} style={{
+                background: 'var(--bg)', border: `1px solid ${isTop ? 'rgba(46,204,113,.3)' : 'var(--border)'}`,
+                borderRadius: 'var(--radius)', padding: '12px 14px',
+                display: 'flex', alignItems: 'center', gap: 10,
               }}>
-                {isTop
-                  ? <Trophy size={18} color="#f59e0b" />
-                  : <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)' }}>#{i + 1}</span>
-                }
-              </div>
+                {/* Rank */}
+                <div style={{
+                  width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+                  background: isTop ? 'rgba(46,204,113,.1)' : 'var(--surface)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  {isTop
+                    ? <Trophy size={18} color="#f59e0b" />
+                    : <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)' }}>#{i + 1}</span>
+                  }
+                </div>
 
-              {/* Info */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, flexWrap: 'wrap' }}>
-                  <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)' }}>{truck.truck_id}</span>
-                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{truck.driver_name}</span>
+                {/* Info */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)' }}>{truck.truck_id}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{truck.driver_name}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, fontSize: 10, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+                    <span><strong style={{ color: 'var(--accent)' }}>{truck.completed}</strong>/{decided(truck)} decided</span>
+                    {truck.missed > 0 && <span style={{ color: 'var(--danger)' }}>{truck.missed} missed</span>}
+                    <span>{truck.total_weight} delivered</span>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: 12, fontSize: 10, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-                  <span><strong style={{ color: 'var(--accent)' }}>{truck.completed}</strong>/{truck.routes} routes</span>
-                  {truck.missed > 0 && <span style={{ color: 'var(--danger)' }}>{truck.missed} missed</span>}
-                  <span>{truck.total_km} km</span>
-                </div>
-              </div>
 
-              {/* Rate */}
-              <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                <div style={{ fontWeight: 800, fontSize: 15, color: rate >= 90 ? 'var(--accent)' : rate >= 75 ? 'var(--warning)' : 'var(--danger)' }}>
-                  {rate}%
+                {/* Rate */}
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, color: rate == null ? 'var(--text-muted)' : rate >= 90 ? 'var(--accent)' : rate >= 75 ? 'var(--warning)' : 'var(--danger)' }}>
+                    {rate ?? '—'}{rate != null && '%'}
+                  </div>
+                  <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '.04em' }}>EFFICIENCY</div>
                 </div>
-                <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '.04em' }}>EFFICIENCY</div>
               </div>
-            </div>
-          )
-        })}
+            )
+          })
+        )}
       </div>
     </GCard>
   )
 }
 
-// ─── Daily Issue Trends ───────────────────────────────────────────────────────
-function IssueTrendsSection({ trends, hotspots }) {
-  const topToday = hotspots[0]
-  return (
-    <GCard>
-      <SHead icon={<TrendingUp size={16} />} title="Daily Issue Trends" subtitle="Reports filed per day · Most reported barangay today" />
-
-      {topToday && (
-        <div style={{
-          background: 'rgba(231,76,60,.06)', border: '1px solid rgba(231,76,60,.2)',
-          borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: 14,
-          display: 'flex', alignItems: 'center', gap: 10,
-        }}>
-          <MapPin size={22} color="var(--danger)" style={{ flexShrink: 0 }} />
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 12, color: 'var(--danger)', marginBottom: 2 }}>Most Reported Today</div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{topToday.location}</div>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-              {topToday.reportsWeek} reports this week · {topToday.reports - topToday.resolved} unresolved
-            </div>
-          </div>
-        </div>
-      )}
-
-      <MiniBar data={trends} valueKey="value" color="var(--warning)" height={90} />
-    </GCard>
-  )
-}
-
-// ─── Hotspots ─────────────────────────────────────────────────────────────────
-function HotspotsSection({ hotspots, stats }) {
+// ─── Unified Hotspot & Issue Trends ──────────────────────────────────────────
+function UnifiedHotspotMonitoring({ trends, hotspots, stats }) {
+  const navigate = useNavigate()
   const SEV = {
     critical: { color: 'var(--danger)', bg: 'rgba(231,76,60,.08)', border: 'rgba(231,76,60,.25)' },
     high: { color: 'var(--warning)', bg: 'rgba(243,156,18,.08)', border: 'rgba(243,156,18,.25)' },
@@ -476,295 +413,252 @@ function HotspotsSection({ hotspots, stats }) {
     low: { color: 'var(--text-muted)', bg: 'transparent', border: 'var(--border)' },
   }
 
+  const topToday = hotspots[0]
+
   return (
     <GCard>
-      <SHead icon={<Flame size={16} />} title="Hotspot Monitoring" subtitle="Illegal dumping & recurring violation areas" />
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 90px), 1fr))', gap: 8, marginBottom: 14 }}>
-        {[
-          { label: 'This Week', value: stats.reportsThisWeek, color: 'var(--danger)' },
-          { label: 'Resolved', value: `${stats.resolutionRate}%`, color: 'var(--accent)' },
-          { label: 'Avg Response', value: `${stats.avgResponse}d`, color: 'var(--warning)' },
-        ].map(s => (
-          <div key={s.label} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px', textAlign: 'center' }}>
-            <div style={{ fontWeight: 700, fontSize: 16, color: s.color }}>{s.value}</div>
-            <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '.04em', marginTop: 2 }}>{s.label.toUpperCase()}</div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {hotspots.slice(0, 5).map((h, i) => {
-          const sv = SEV[h.severity] || SEV.medium
-          const resRate = Math.round((h.resolved / Math.max(h.reports, 1)) * 100)
-          return (
-            <div key={h.id} style={{
-              background: 'var(--surface)', border: `1px solid ${sv.border}`,
-              borderRadius: 'var(--radius)', padding: '11px 14px',
-              display: 'flex', alignItems: 'flex-start', gap: 10,
+      <SHead
+        icon={<Flame size={16} />}
+        title="Hotspot & Daily Issue Trends"
+        subtitle="Illegal dumping, recurring violation areas & reports filed per day"
+        right={
+          <button
+            onClick={() => navigate('/admin/hotspots')}
+            style={{
+              background: 'transparent', border: 'none', color: 'var(--accent)',
+              fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4,
+              cursor: 'pointer', padding: 0
             }}>
-              <div style={{
-                width: 26, height: 26, borderRadius: 6, flexShrink: 0,
-                background: sv.bg, display: 'flex', alignItems: 'center',
-                justifyContent: 'center', fontSize: 10, fontWeight: 800, color: sv.color,
-              }}>#{i + 1}</div>
+            VIEW ALL REPORTS <ArrowRight size={14} />
+          </button>
+        }
+      />
 
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 2 }}>
-                  <span style={{ fontWeight: 600, fontSize: 12 }}>{h.location}</span>
-                  <span style={{ fontSize: 8, fontWeight: 800, padding: '1px 6px', borderRadius: 20, background: sv.bg, color: sv.color, letterSpacing: '.05em' }}>
-                    {h.severity.toUpperCase()}
-                  </span>
-                </div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 5 }}>
-                  {h.type} · {h.reports} reports · {h.reportsWeek} this week
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{ flex: 1, height: 3, borderRadius: 20, background: 'var(--border)', overflow: 'hidden' }}>
-                    <div style={{ width: `${resRate}%`, height: '100%', background: 'var(--accent)', borderRadius: 20 }} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {/* Trend Bar Chart */}
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.05em', color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>
+            Daily Reports Filed
+          </div>
+          <MiniBar data={trends} valueKey="value" color="var(--warning)" height={70} />
+        </div>
+
+        {/* Hotspots List */}
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.05em', color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>
+            Active Hotspots
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {hotspots.length === 0 ? (
+              <div style={{ padding: '20px 10px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12, background: 'var(--surface)', borderRadius: 8 }}>
+                No active hotspots reported.
+              </div>
+            ) : (
+              hotspots.slice(0, 5).map((h, i) => {
+                const sv = SEV[h.severity.toLowerCase()] || SEV.medium
+                const resRate = Math.round((h.resolved / Math.max(h.reports, 1)) * 100)
+                return (
+                  <div key={h.id} style={{
+                    background: 'var(--surface)', border: `1px solid ${sv.border}`,
+                    borderRadius: 'var(--radius)', padding: '11px 14px',
+                    display: 'flex', alignItems: 'flex-start', gap: 10,
+                  }}>
+                    <div style={{
+                      width: 26, height: 26, borderRadius: 6, flexShrink: 0,
+                      background: sv.bg, display: 'flex', alignItems: 'center',
+                      justifyContent: 'center', fontSize: 10, fontWeight: 800, color: sv.color,
+                    }}>#{i + 1}</div>
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 2 }}>
+                        <span style={{ fontWeight: 600, fontSize: 12 }}>{h.location}</span>
+                        <span style={{ fontSize: 8, fontWeight: 800, padding: '1px 6px', borderRadius: 20, background: sv.bg, color: sv.color, letterSpacing: '.05em' }}>
+                          {h.severity.toUpperCase()}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 5 }}>
+                        {h.type} · {h.reports} reports · {h.reports_in_range} in range
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ flex: 1, height: 3, borderRadius: 20, background: 'var(--border)', overflow: 'hidden' }}>
+                          <div style={{ width: `${resRate}%`, height: '100%', background: 'var(--accent)', borderRadius: 20 }} />
+                        </div>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)', flexShrink: 0 }}>{resRate}% resolved</span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => navigate('/admin/hotspots')}
+                      style={{
+                        background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)',
+                        borderRadius: 6, padding: '6px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+                        flexShrink: 0, fontSize: 10, fontWeight: 700, transition: 'all 0.2s', marginTop: 2
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.borderColor = 'var(--accent)' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.borderColor = 'var(--border)' }}
+                    >
+                      <Map size={14} /> MAP
+                    </button>
                   </div>
-                  <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)', flexShrink: 0 }}>{resRate}% resolved</span>
-                </div>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </GCard>
-  )
-}
-
-// ─── Waste Composition ────────────────────────────────────────────────────────
-function WasteComposition({ segments }) {
-  const total = segments.reduce((s, c) => s + c.value, 0) || 1
-  return (
-    <GCard>
-      <SHead icon={<PieChart size={16} />} title="Waste Composition" subtitle="Classification breakdown from dumpsite data" />
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 20 }}>
-        <Donut segments={segments} size={90} />
-        <div style={{ flex: '1 1 200px' }}>
-          {segments.map(s => (
-            <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
-              <div style={{ width: 10, height: 10, borderRadius: 2, background: s.color, flexShrink: 0 }} />
-              <div style={{ flex: 1, height: 4, borderRadius: 20, background: 'var(--border)', overflow: 'hidden' }}>
-                <div style={{ width: `${s.value}%`, height: '100%', background: s.color, borderRadius: 20 }} />
-              </div>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', width: 30, textAlign: 'right' }}>{s.value}%</span>
-              <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '.03em', width: 60 }}>{s.label.toUpperCase()}</span>
-            </div>
-          ))}
+                )
+              })
+            )}
+          </div>
         </div>
       </div>
     </GCard>
   )
 }
 
+
 // ─── Rankings ─────────────────────────────────────────────────────────────────
-function RankingsSection({ rankings, problematic, userBarangay }) {
+function RankingsSection({ rankings, problematic, userBarangay, style }) {
   const [showProb, setShowProb] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+
+  const activeList = showProb ? problematic : rankings
+  const filteredList = activeList.filter(b => b.name.toLowerCase().includes(searchTerm.toLowerCase()))
+
   return (
-    <GCard>
+    <GCard style={{ display: 'flex', flexDirection: 'column', ...style }}>
       <SHead icon={<BarChart3 size={16} />} title="Barangay Cleanliness Rankings" subtitle="Ranked by compliance ratio · Updated daily" />
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, background: 'var(--bg)', borderRadius: 8, padding: 3, width: 'fit-content', marginBottom: 14 }}>
-        {[
-          { key: false, label: 'Top Cleanest', icon: Trophy },
-          { key: true, label: 'Problematic Areas', icon: AlertTriangle },
-        ].map(t => {
-          const Icon = t.icon;
-          return (
-            <button key={String(t.key)} onClick={() => setShowProb(t.key)} style={{
-              display: 'flex', alignItems: 'center', gap: 5,
-              padding: '5px 11px', borderRadius: 6, border: 'none', cursor: 'pointer',
-              fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)',
-              background: showProb === t.key ? 'var(--surface)' : 'transparent',
-              color: showProb === t.key ? 'var(--text)' : 'var(--text-muted)',
-              borderBottom: showProb === t.key ? '2px solid var(--accent)' : '2px solid transparent',
-            }}>
-              <Icon size={13} />
-              {t.label}
-            </button>
-          )
-        })}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {(showProb ? problematic : rankings).map((b, i) => (
-          <BarangayRankingCard
-            key={b.name}
-            brgy={b}
-            rank={showProb ? '!' : i + 1}
-            isUser={userBarangay && b.name.toLowerCase() === userBarangay.toLowerCase()}
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 14 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, background: 'var(--bg)', borderRadius: 8, padding: 3, width: 'fit-content' }}>
+          {[
+            { key: false, label: 'Top Cleanest', icon: Trophy },
+            { key: true, label: 'Problematic Areas', icon: AlertTriangle },
+          ].map(t => {
+            const Icon = t.icon;
+            return (
+              <button key={String(t.key)} onClick={() => setShowProb(t.key)} style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '5px 11px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)',
+                background: showProb === t.key ? 'var(--surface)' : 'transparent',
+                color: showProb === t.key ? 'var(--text)' : 'var(--text-muted)',
+                borderBottom: showProb === t.key ? '2px solid var(--accent)' : '2px solid transparent',
+              }}>
+                <Icon size={13} />
+                {t.label}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Search Bar */}
+        <div style={{ position: 'relative', width: 180 }}>
+          <Search size={13} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+          <input
+            type="text"
+            placeholder="Search barangay..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            style={{
+              width: '100%', padding: '6px 8px 6px 26px', fontSize: 11,
+              borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)',
+              color: 'var(--text)', outline: 'none', fontFamily: 'var(--font-body)'
+            }}
           />
-        ))}
+        </div>
+      </div>
+
+      <div className="rankings-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 4, paddingBottom: 4 }}>
+        {filteredList.length === 0 ? (
+          <div style={{ padding: '20px', textAlign: 'center', fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg)', borderRadius: 8 }}>
+            No barangays found.
+          </div>
+        ) : (
+          filteredList.map((b, i) => (
+            <BarangayRankingCard
+              key={b.name}
+              brgy={b}
+              rank={showProb ? '!' : rankings.findIndex(r => r.name === b.name) + 1}
+              isUser={userBarangay && b.name.toLowerCase() === userBarangay.toLowerCase()}
+            />
+          ))
+        )}
       </div>
     </GCard>
   )
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function daysDiff(dateFrom, dateTo) {
-  const a = new Date(dateFrom), b = new Date(dateTo)
-  return Math.max(1, Math.round((b - a) / 86400000) + 1)
-}
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 export default function GlobalInsights({ userBarangay, selectedBarangay, dateFrom, dateTo, selectedPeriod }) {
-  const [data, setData] = useState(PLACEHOLDER)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const { raw, loading, error } = useLiveAnalytics({ selectedBarangay, dateFrom, dateTo })
+  const data = useMemo(() => toGlobal(raw), [raw])
 
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
+  const mapData = useMemo(
+    () => data
+      ? Object.fromEntries(data.rankings.map(b => [b.name, { score: b.score, hotspots: b.hotspots }]))
+      : {},
+    [data]
+  )
 
-    async function fetchLive() {
-      try {
-        const params = new URLSearchParams()
-        if (selectedBarangay && selectedBarangay !== 'all') {
-          params.set('barangay_id', selectedBarangay)
-        }
-        if (dateFrom && dateTo) {
-          params.set('days', String(daysDiff(dateFrom, dateTo)))
-        }
-
-        const res = await api.get(`/api/analytics/live/?${params}`)
-        if (cancelled) return
-        const d = res.data
-
-        // ── Map summary → KPI cards ──────────────────────────────────────────
-        const s = d.summary || {}
-        const completionPct = Math.round((s.completion_rate ?? 0) * 100)
-        const kpi = {
-          ...PLACEHOLDER.kpi,
-          collected_kg: Math.round(s.total_weight_kg ?? 0),
-          collection_rate: completionPct,
-          active_trucks: (d.fleet || []).length,
-          barangays_served: (d.barangay_breakdown || []).length,
-          total_routes: s.stops_total ?? 0,
-          completed_routes: s.stops_completed ?? 0,
-          missed_stops: s.stops_missed ?? 0,
-          completion_rate: completionPct,
-          collected_kg_delta: null,
-          collection_rate_delta: null,
-          hotspots_delta: null,
-        }
-
-        // ── Map weight_over_time → daily bar/line chart ───────────────────────
-        const wasteDaily = (d.weight_over_time || []).map(row => ({
-          label: new Date(row.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }),
-          value: Math.round(row.weight_kg),
-          deliveries: row.deliveries,
-        }))
-
-        // ── Map barangay_breakdown → rankings ─────────────────────────────────
-        const mappedRankings = (d.barangay_breakdown || [])
-          .map(row => {
-            const rate = row.completion_rate ?? 0
-            const score = Math.min(100, Math.round(rate * 70 + Math.min(row.weight_kg / 50, 30)))
-            const trend = rate >= 0.9 ? 'up' : rate >= 0.6 ? 'same' : 'down'
-            return {
-              name: row.name,
-              score,
-              compliance: Math.round(rate * 100),
-              trend,
-              weight_kg: row.weight_kg,
-              deliveries: row.deliveries,
-              stops_completed: row.stops_completed,
-              stops_missed: row.stops_missed,
-              hotspots: 0,
-              reports: row.stops_completed + row.stops_missed,
-            }
-          })
-          .sort((a, b) => b.score - a.score)
-
-        const mappedProblematic = [...mappedRankings]
-          .filter(r => r.score < 60)
-          .sort((a, b) => a.score - b.score)
-
-        // ── Map fleet → truck performance ─────────────────────────────────────
-        const mappedTrucks = (d.fleet || []).map(row => ({
-          truck_id: row.plate_number,
-          driver_name: row.driver_name,
-          routes: row.stops_total,
-          completed: row.stops_completed,
-          missed: row.stops_missed,
-          avg_fill: 0,
-          total_km: row.total_weight_kg
-            ? `${(row.total_weight_kg / 1000).toFixed(1)}t`
-            : '—',
-        }))
-
-        // ── Issue trends from weight_over_time (deliveries per day) ───────────
-        const issueTrends = (d.weight_over_time || []).map(row => ({
-          label: new Date(row.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }),
-          value: row.deliveries,
-        }))
-
-        setData(prev => ({
-          ...prev,
-          kpi,
-          wasteDaily: wasteDaily.length ? wasteDaily : prev.wasteDaily,
-          rankings: mappedRankings.length ? mappedRankings : prev.rankings,
-          problematic: mappedProblematic.length ? mappedProblematic : prev.problematic,
-          trucks: mappedTrucks.length ? mappedTrucks : prev.trucks,
-          issueTrends: issueTrends.length ? issueTrends : prev.issueTrends,
-        }))
-      } catch (err) {
-        if (!cancelled) setError('Could not load live data — showing cached figures.')
-        // keep PLACEHOLDER intact
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    fetchLive()
-    return () => { cancelled = true }
-  }, [selectedBarangay, dateFrom, dateTo])
-
-  if (loading) return (
+  if (loading && !raw) return (
     <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
       <div className="spinner" style={{ margin: '0 auto 12px' }} />
       Loading analytics…
     </div>
   )
 
+  // data is null when the fetch failed outright
+  if (!data) return (
+    <div style={{
+      background: 'rgba(231,76,60,.08)', border: '1px solid rgba(231,76,60,.25)',
+      borderRadius: 8, padding: '16px 14px', margin: '12px 0',
+      fontSize: 13, color: 'var(--danger)', fontWeight: 600,
+    }}>
+      {error || 'Failed to load analytics data.'}
+    </div>
+  )
+
   return (
-    <>
-      {error && (
+    <div style={{ position: 'relative' }}>
+      {loading && raw && (
         <div style={{
-          background: 'rgba(231,76,60,.08)', border: '1px solid rgba(231,76,60,.25)',
-          borderRadius: 8, padding: '10px 14px', marginBottom: 14,
-          fontSize: 12, color: 'var(--danger)', fontWeight: 600,
+          position: 'absolute', top: 10, right: 10, fontSize: 11,
+          color: 'var(--accent)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6,
+          background: 'var(--surface)', padding: '4px 10px', borderRadius: 20, zIndex: 10,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
         }}>
-          ⚠ {error}
+          <div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+          Updating…
         </div>
       )}
-
       {/* ── Overview KPIs ── */}
       <OverviewKPIs kpi={data.kpi} />
 
       {/* ── Two-column mid section ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 16, alignItems: 'start' }}>
-        <div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 16, alignItems: 'stretch' }}>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
           <WasteCollectionChart data={data.wasteDaily} />
+          <ForecastLine forecast={data.forecast} />
           <CollectionEfficiency kpi={data.kpi} />
         </div>
-        <div>
-          <RankingsSection rankings={data.rankings} problematic={data.problematic} userBarangay={userBarangay} />
-        </div>
+        {data.peersIncluded && (
+          <div style={{ position: 'relative', minHeight: 400 }}>
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
+              <RankingsSection rankings={data.rankings} problematic={data.problematic} userBarangay={userBarangay} style={{ flex: 1, minHeight: 0, marginBottom: 0 }} />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Lower sections ── */}
-      <IssueTrendsSection trends={data.issueTrends} hotspots={data.hotspots} />
-      <HotspotsSection hotspots={data.hotspots} stats={data.stats} />
+      <UnifiedHotspotMonitoring trends={data.issueTrends} hotspots={data.hotspots} />
       <TruckPerformanceSection trucks={data.trucks} />
 
       {/* ── Map ── */}
-      <GCard>
-        <SHead icon={<Map size={16} />} title="Barangay Cleanliness Map" subtitle="Color-coded by completion rate · Sourced from live delivery data" />
-        <HotspotMap userBarangay={userBarangay} />
-      </GCard>
-    </>
+      {data.peersIncluded && (
+        <GCard style={{ position: 'relative', zIndex: 1, isolation: 'isolate' }}>
+          <SHead icon={<Map size={16} />} title="Barangay Cleanliness Map" subtitle="Color-coded by completion rate · Sourced from live delivery data" />
+          <HotspotMap userBarangay={userBarangay} mapData={mapData} />
+        </GCard>
+      )}
+    </div>
   )
 }
 

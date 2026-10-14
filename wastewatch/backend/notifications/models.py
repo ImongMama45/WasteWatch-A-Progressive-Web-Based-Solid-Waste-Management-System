@@ -10,6 +10,7 @@ class NotificationType(models.TextChoices):
     DUMPSITE_INBOUND = 'DUMPSITE_INBOUND', 'Dumpsite Inbound'
     WATCHER_STOP_VERIFIED = 'WATCHER_STOP_VERIFIED', 'Watcher Stop Verified'
     WATCHER_ROUTE_SUMMARY = 'WATCHER_ROUTE_SUMMARY', 'Watcher Route Summary'
+    REPORT_UPDATE = 'REPORT_UPDATE', 'Report Update'
 
 
 class Notification(models.Model):

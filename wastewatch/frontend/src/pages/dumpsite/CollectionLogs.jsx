@@ -1,14 +1,27 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../api/client'
+import ArrivalLogger from './ArrivalLogger'
+
+const Ico = ({ d, size = 14, color = 'currentColor', sw = 1.75, style = {}, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={sw}
+    strokeLinecap="round" strokeLinejoin="round" className={className} style={{ flexShrink: 0, display: 'block', ...style }}>
+    {Array.isArray(d) ? d.map((p, i) => <path key={i} d={p} />) : <path d={d} />}
+  </svg>
+);
+const IcoListAlt = p => <Ico {...p} d={["M8 6h13", "M8 12h13", "M8 18h13", "M3 6h.01", "M3 12h.01", "M3 18h.01"]} />;
+const IcoAlert = p => <Ico {...p} d={["M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z", "M12 9v4", "M12 17h.01"]} />;
+const IcoChevronUp = p => <Ico {...p} d="M18 15l-6-6-6 6" />;
+const IcoChevronDown = p => <Ico {...p} d="M6 9l6 6 6-6" />;
+const IcoAdd = p => <Ico {...p} d={["M12 5v14", "M5 12h14"]} />;
 
 const FILL_LABELS = {
-  nearly_empty:   { label: 'Nearly Empty', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
-  quarter:        { label: 'Quarter',       color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
-  half:           { label: 'Half',          color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
-  three_quarters: { label: 'Three Quarters',color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
-  full:           { label: 'Full',          color: '#a16207', bg: 'rgba(161,98,7,0.12)' },
-  overflowing:    { label: 'Overflowing',   color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
+  nearly_empty: { label: 'Nearly Empty', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
+  quarter: { label: 'Quarter', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
+  half: { label: 'Half', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
+  three_quarters: { label: 'Three Quarters', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
+  full: { label: 'Full', color: '#a16207', bg: 'rgba(161,98,7,0.12)' },
+  overflowing: { label: 'Overflowing', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
 }
 
 function FillBadge({ level }) {
@@ -23,17 +36,18 @@ function FillBadge({ level }) {
 }
 
 export default function CollectionLogs() {
-  const navigate   = useNavigate()
-  const [siteId,   setSiteId]   = useState(null)
-  const [logs,     setLogs]     = useState([])
-  const [loading,  setLoading]  = useState(true)
+  const navigate = useNavigate()
+  const [siteId, setSiteId] = useState(null)
+  const [logs, setLogs] = useState([])
+  const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState(null)
+  const [logOpen, setLogOpen] = useState(false)
 
   // Filters
-  const [dateFrom,   setDateFrom]   = useState('')
-  const [dateTo,     setDateTo]     = useState('')
-  const [truck,      setTruck]      = useState('')
-  const [barangay,   setBarangay]   = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [truck, setTruck] = useState('')
+  const [barangay, setBarangay] = useState('')
   const [fillFilter, setFillFilter] = useState('')
 
   useEffect(() => {
@@ -46,10 +60,10 @@ export default function CollectionLogs() {
     if (!siteId) return
     setLoading(true)
     const params = new URLSearchParams()
-    if (dateFrom)   params.set('date_from', dateFrom)
-    if (dateTo)     params.set('date_to', dateTo)
-    if (truck)      params.set('truck', truck)
-    if (barangay)   params.set('barangay', barangay)
+    if (dateFrom) params.set('date_from', dateFrom)
+    if (dateTo) params.set('date_to', dateTo)
+    if (truck) params.set('truck', truck)
+    if (barangay) params.set('barangay', barangay)
     if (fillFilter) params.set('fill_level', fillFilter)
 
     api.get(`/api/dumpsite/dumpsites/${siteId}/deliveries/?${params}`)
@@ -67,10 +81,10 @@ export default function CollectionLogs() {
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: 2 }}>All recorded truck arrivals at this site</p>
         </div>
         <button
-          onClick={() => navigate('/dumpsite/log-arrival')}
-          style={{ background: 'var(--accent)', color: '#0d1117', border: 'none', borderRadius: 14, padding: '0.7rem 1.25rem', fontWeight: 700, fontSize: '0.875rem', cursor: 'pointer' }}
+          onClick={() => setLogOpen(true)}
+          style={{ background: 'var(--accent)', color: '#0d1117', border: 'none', borderRadius: 14, padding: '0.7rem 1.25rem', fontWeight: 700, fontSize: '0.875rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
         >
-          + Log Arrival
+          <IcoAdd size={16} sw={2.5} /> Log Arrival
         </button>
       </header>
 
@@ -112,7 +126,7 @@ export default function CollectionLogs() {
         <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>Loading...</div>
       ) : logs.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '3rem', border: '2px dashed var(--border)', borderRadius: 18, color: 'var(--text-muted)' }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+          <IcoListAlt size={32} style={{ marginBottom: 8, margin: '0 auto', opacity: 0.5 }} />
           <p style={{ fontWeight: 600 }}>No logs found for these filters.</p>
         </div>
       ) : (
@@ -156,8 +170,8 @@ export default function CollectionLogs() {
                     {log.is_validated ? 'Verified' : 'Logged'}
                   </span>
                 </div>
-                <div style={{ alignSelf: 'center', color: 'var(--text-muted)', fontSize: 16 }}>
-                  {expanded === log.id ? '▲' : '▼'}
+                <div style={{ alignSelf: 'center', color: 'var(--text-muted)' }}>
+                  {expanded === log.id ? <IcoChevronUp size={16} /> : <IcoChevronDown size={16} />}
                 </div>
               </div>
 
@@ -176,9 +190,9 @@ export default function CollectionLogs() {
                   )}
                   <button
                     onClick={() => navigate(`/dumpsite/logs`)}
-                    style={{ fontSize: 12, color: '#ef4444', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8, padding: '4px 12px', cursor: 'pointer', fontWeight: 700, alignSelf: 'flex-start', marginTop: 16 }}
+                    style={{ fontSize: 12, color: '#ef4444', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8, padding: '4px 12px', cursor: 'pointer', fontWeight: 700, alignSelf: 'flex-start', marginTop: 16, display: 'flex', alignItems: 'center', gap: '4px' }}
                   >
-                    ⚠️ Flag Incident
+                    <IcoAlert size={14} sw={2.5} /> Flag Incident
                   </button>
                 </div>
               )}
@@ -186,6 +200,14 @@ export default function CollectionLogs() {
           ))}
         </div>
       )}
+
+      <ArrivalLogger 
+        open={logOpen} 
+        onClose={(refresh) => {
+          setLogOpen(false)
+          if (refresh) fetchLogs()
+        }}
+      />
     </div>
   )
 }

@@ -13,4 +13,8 @@ router.register(r'crew-assignments',    views.TruckCrewAssignmentViewSet)
 router.register(r'calendar-events',     views.CalendarEventViewSet)
 router.register(r'shift',               views.DriverShiftViewSet, basename='shift')
 
-urlpatterns = router.urls
+from django.urls import path
+
+urlpatterns = [
+    path('home-base/', views.HomeBaseView.as_view(), name='home-base'),
+] + router.urls

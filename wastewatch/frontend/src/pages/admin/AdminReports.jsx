@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../api/client'
 import BarangaySelect from '../../components/BarangaySelect'
+import ReportDetail from './ReportDetail'
 
 const STATUS_META = {
   pending: { label: 'Pending', color: '#f39c12', bg: 'rgba(243,156,18,0.1)' },
@@ -57,29 +58,34 @@ export default function AdminReports() {
     severity: '',
     tag: '',
   })
+  const [selectedReportId, setSelectedReportId] = useState(null)
 
   useEffect(() => {
-    fetchReports()
-  }, [filters])
+    let cancelled = false;
+    
+    async function fetchReports() {
+      setLoading(true)
+      try {
+        const params = new URLSearchParams()
+        if (filters.status) params.append('status', filters.status)
+        if (filters.barangay) params.append('barangay', filters.barangay)
+        if (filters.issue_type) params.append('issue_type', filters.issue_type)
+        if (filters.severity) params.append('severity', filters.severity)
+        if (filters.tag) params.append('tags__icontains', filters.tag)
 
-  async function fetchReports() {
-    setLoading(true)
-    try {
-      const params = new URLSearchParams()
-      if (filters.status) params.append('status', filters.status)
-      if (filters.barangay) params.append('barangay', filters.barangay)
-      if (filters.issue_type) params.append('issue_type', filters.issue_type)
-      if (filters.severity) params.append('severity', filters.severity)
-      if (filters.tag) params.append('tags__icontains', filters.tag)
-
-      const res = await api.get(`/api/watcher/reports/?${params.toString()}`)
-      setReports(res.data)
-    } catch (err) {
-      console.error('Failed to fetch reports:', err)
-    } finally {
-      setLoading(false)
+        const res = await api.get(`/api/watcher/reports/?${params.toString()}`)
+        if (!cancelled) setReports(res.data)
+      } catch (err) {
+        if (!cancelled) console.error('Failed to fetch reports:', err)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
-  }
+    
+    fetchReports()
+    
+    return () => { cancelled = true; }
+  }, [filters])
 
   const handleFilterChange = (key, val) => {
     setFilters(f => ({ ...f, [key]: val }))
@@ -177,7 +183,7 @@ export default function AdminReports() {
                 reports.map(r => (
                   <tr 
                     key={r.id} 
-                    onClick={() => navigate(`/report/${r.id}`)}
+                    onClick={() => setSelectedReportId(r.id)}
                     style={{ 
                       borderBottom: '1px solid var(--border)', 
                       background: r.tags?.includes('Misconduct') ? 'rgba(231,76,60,0.03)' : 'transparent',
@@ -189,7 +195,7 @@ export default function AdminReports() {
                     <td style={{ padding: '14px 16px', fontSize: 13 }}>
                       <div style={{ fontWeight: 600 }}>{ISSUE_TYPE_LABELS[r.issue_type] || r.issue_type}</div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-                        {r.tags?.split(',').map(tag => (
+                        {r.tags?.split(',').filter(Boolean).map(tag => (
                           <span key={tag} style={{
                             fontSize: 10, background: tag === 'Misconduct' ? '#e74c3c' : 'var(--surface-2)',
                             color: tag === 'Misconduct' ? 'white' : 'var(--text)',
@@ -218,6 +224,14 @@ export default function AdminReports() {
           </table>
         </div>
       </div>
+      
+      {/* Report Detail Modal Overlay */}
+      {selectedReportId && (
+        <ReportDetail 
+          reportId={selectedReportId} 
+          onClose={() => setSelectedReportId(null)} 
+        />
+      )}
     </div>
   )
 }

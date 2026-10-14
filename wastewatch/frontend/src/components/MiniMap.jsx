@@ -10,8 +10,10 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useNotification } from '../context/NotificationContext'
+import { classifyShift } from '../utils/shiftState'
 import api from '../api/client'
 import {
+
   buildStopMarkerHtml,
   buildStopValidationSnapshot,
   normalizeStopStatus,
@@ -48,6 +50,11 @@ const TYPE_LABELS = {
 
 // ─── MARKER HTML (mirrors MapView exactly) ───────────────────────────────────
 
+const IcoTruckString = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-truck"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></svg>`
+
+const IcoAlertString = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-alert-triangle"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`
+const IcoExpandString = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 9-6 6"/><path d="M15 9V3"/><path d="M15 9h6"/><path d="M9 15v6"/><path d="M9 15H3"/></svg>`
+
 const makeTruckIconHtml = (color, label, status) => `
   <div style="position:relative;width:36px;height:50px;">
     <div style="background:${color};border:2px solid white;border-radius:50% 50% 50% 0;
@@ -55,7 +62,7 @@ const makeTruckIconHtml = (color, label, status) => `
       box-shadow:0 3px 10px rgba(0,0,0,0.4);
       display:flex;align-items:center;justify-content:center;">
       <div style="transform:rotate(45deg);display:flex;align-items:center;justify-content:center;">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-truck"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></svg>
+        ${IcoTruckString}
       </div>
     </div>
     <div style="position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
@@ -73,9 +80,15 @@ const makeReportIconHtml = (severity) => {
   return `<div style="background:${c};border:2px solid white;border-radius:50% 50% 50% 0;
     transform:rotate(-45deg);width:24px;height:24px;
     display:flex;align-items:center;justify-content:center;
-    box-shadow:0 2px 8px rgba(0,0,0,0.35);">
-    <div style="transform:rotate(45deg);font-size:11px;">⚠️</div>
+    box-shadow:0 2px 8px rgba(0,0,0,0.35);color:white;">
+    <div style="transform:rotate(45deg);display:flex;align-items:center;justify-content:center;">${IcoAlertString.replace('width="16"', 'width="12"').replace('height="16"', 'height="12"')}</div>
   </div>`
+}
+
+const HS_COLORS = { critical: '#ef4444', high: '#f59e0b', medium: '#eab308', low: '#22c55e' }
+const makeHotspotIconHtml = (status, count) => {
+  const c = HS_COLORS[status] || HS_COLORS.low
+  return `<div style="background:${c}26;border:1px solid ${c};border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 15px ${c}40;"><div style="background:${c};color:white;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;border:2px solid white;">${count}</div></div>`
 }
 
 const makeYouMarkerHtml = () => `
@@ -132,7 +145,7 @@ function TruckPanel({ truck, onClose }) {
       animation: 'mmSlideDown .22s ease',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <span style={{ fontSize: 20 }}>🚛</span>
+        <div style={{ color: 'white', display: 'flex' }} dangerouslySetInnerHTML={{ __html: IcoTruckString }} />
         <div style={{ flex: 1 }}>
           <div style={{ color: 'white', fontWeight: 800, fontSize: 15 }}>{truck.truckId}</div>
           <div style={{ color: '#94a3b8', fontSize: 11 }}>{truck.driver}</div>
@@ -185,7 +198,7 @@ function ReportPanel({ report, canModerate, onAction, onClose }) {
       animation: 'mmSlideDown .22s ease',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <span style={{ fontSize: 20 }}>⚠️</span>
+        <div style={{ color: sev, display: 'flex' }} dangerouslySetInnerHTML={{ __html: IcoAlertString }} />
         <div style={{ flex: 1 }}>
           <div style={{ color: 'white', fontWeight: 800, fontSize: 15 }}>
             {TYPE_LABELS[report.issue_type || report.type] ?? (report.issue_type || report.type)}
@@ -208,9 +221,9 @@ function ReportPanel({ report, canModerate, onAction, onClose }) {
       {tags.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 12 }}>
           {tags.map(tag => (
-            <span key={tag} style={{ 
-              fontSize: 9, background: tag === 'Misconduct' ? '#ef4444' : 'rgba(255,255,255,0.08)', 
-              color: tag === 'Misconduct' ? 'white' : '#cbd5e1', 
+            <span key={tag} style={{
+              fontSize: 9, background: tag === 'Misconduct' ? '#ef4444' : 'rgba(255,255,255,0.08)',
+              color: tag === 'Misconduct' ? 'white' : '#cbd5e1',
               padding: '1px 6px', borderRadius: 4, border: tag === 'Misconduct' ? 'none' : '1px solid rgba(255,255,255,0.1)'
             }}>{tag}</span>
           ))}
@@ -218,8 +231,8 @@ function ReportPanel({ report, canModerate, onAction, onClose }) {
       )}
 
       {report.reported_user_name && (
-        <div style={{ 
-          background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', 
+        <div style={{
+          background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
           borderRadius: 6, padding: '8px 10px', marginBottom: 12, color: '#fca5a5', fontSize: 11
         }}>
           <b>Reported Person:</b> {report.reported_user_name}
@@ -249,14 +262,14 @@ function ReportPanel({ report, canModerate, onAction, onClose }) {
                   flex: 1, background: 'rgba(34,197,94,0.1)', border: '1px solid #22c55e',
                   color: '#22c55e', borderRadius: 8, padding: '8px', fontWeight: 700, fontSize: 11, cursor: 'pointer'
                 }}>
-                ✅ Approve
+                Approve
               </button>
               <button onClick={() => onAction('reject', report)}
                 style={{
                   flex: 1, background: 'rgba(239,68,68,0.1)', border: '1px solid #ef4444',
                   color: '#ef4444', borderRadius: 8, padding: '8px', fontWeight: 700, fontSize: 11, cursor: 'pointer'
                 }}>
-                ✕ Reject
+                Reject
               </button>
             </>
           )}
@@ -266,7 +279,7 @@ function ReportPanel({ report, canModerate, onAction, onClose }) {
                 flex: 1, background: 'rgba(34,197,94,0.1)', border: '1px solid #22c55e',
                 color: '#22c55e', borderRadius: 8, padding: '8px', fontWeight: 700, fontSize: 11, cursor: 'pointer'
               }}>
-              🏁 Mark Resolved
+              Mark Resolved
             </button>
           )}
         </div>
@@ -277,7 +290,10 @@ function ReportPanel({ report, canModerate, onAction, onClose }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
-export default function MiniMap({ height = 260, focusCoordinate = null }) {
+const ALL_LAYERS = { trucks: true, stops: true, reports: true, hotspots: true }
+const NO_HOTSPOTS = []
+
+export default function MiniMap({ height = 260, focusCoordinate = null, layers = ALL_LAYERS, hotspots = NO_HOTSPOTS, onHotspotClick }) {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { notify } = useNotification()
@@ -312,12 +328,14 @@ export default function MiniMap({ height = 260, focusCoordinate = null }) {
   // keep refs in sync for use inside drawLayers (no stale closure)
   const activeTrucksRef = useRef(activeTrucks)
   const reportsRef = useRef(reports)
+  const hotspotsRef = useRef(hotspots)
   const schedulesRef = useRef(schedules)
   const barangayStopsRef = useRef(barangayStops)
   const stopStatusMapRef = useRef(stopStatusMap)
   const stopDetailsMapRef = useRef(stopDetailsMap)
   useEffect(() => { activeTrucksRef.current = activeTrucks }, [activeTrucks])
   useEffect(() => { reportsRef.current = reports }, [reports])
+  useEffect(() => { hotspotsRef.current = hotspots }, [hotspots])
   useEffect(() => { schedulesRef.current = schedules }, [schedules])
   useEffect(() => { barangayStopsRef.current = barangayStops }, [barangayStops])
   useEffect(() => { stopStatusMapRef.current = stopStatusMap }, [stopStatusMap])
@@ -359,10 +377,17 @@ export default function MiniMap({ height = 260, focusCoordinate = null }) {
     if (!map || !barangayName || isAdmin) return
     let alive = true
     getBarangayCenter(barangayName).then(center => {
-      if (alive && mapInstanceRef.current) mapInstanceRef.current.setView(center, 15)
+      if (alive && mapInstanceRef.current && !focusCoordinate) mapInstanceRef.current.setView(center, 15)
     })
     return () => { alive = false }
-  }, [barangayName, isAdmin, leafletReady])
+  }, [barangayName, isAdmin, leafletReady, focusCoordinate])
+
+  // ── Focus Coordinate ──
+  useEffect(() => {
+    const map = mapInstanceRef.current
+    if (!map || !focusCoordinate) return
+    map.setView([focusCoordinate.lat, focusCoordinate.lng], focusCoordinate.zoom || 16)
+  }, [focusCoordinate, leafletReady])
 
   // ── Poll live data ──
   useEffect(() => {
@@ -386,7 +411,8 @@ export default function MiniMap({ height = 260, focusCoordinate = null }) {
         api.get(shiftsUrl)
           .then(res => {
             const raw = res.data
-            setActiveTrucks(Array.isArray(raw) ? raw : raw ? [raw] : [])
+            const list = Array.isArray(raw) ? raw : raw ? [raw] : []
+            setActiveTrucks(isDriver ? list : list.filter(t => ['active', 'extended'].includes(classifyShift(t).lifecycle)))
           })
           .catch(() => { })
       }
@@ -462,7 +488,7 @@ export default function MiniMap({ height = 260, focusCoordinate = null }) {
   useEffect(() => {
     if (mapInstanceRef.current) drawLayers(mapInstanceRef.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leafletReady, activeTrucks, reports, schedules, stopStatusMap])
+  }, [leafletReady, activeTrucks, reports, schedules, stopStatusMap, layers, hotspots])
 
   // ── Layer helpers ──
 
@@ -480,43 +506,44 @@ export default function MiniMap({ height = 260, focusCoordinate = null }) {
     const L = window.L
     if (!L) return
     clearMainLayers(map)
+    clearStopMarkers(map)
 
     // ── 1. Truck markers ──
-    activeTrucksRef.current.forEach(truck => {
-      if (truck.lat == null || truck.lng == null) return
+    if (layers.trucks !== false) {
+      activeTrucksRef.current.forEach(truck => {
+        if (truck.lat == null || truck.lng == null) return
 
-      const color = STATUS_COLORS[truck.status] || '#14b8a6'
-      const icon = L.divIcon({
-        html: makeTruckIconHtml(color, truck.truckId, truck.status),
-        className: '', iconSize: [36, 50], iconAnchor: [18, 50],
-      })
-      const lastUpdate = truck.last_update
-        ? new Date(truck.last_update).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
-        : 'N/A'
+        const color = STATUS_COLORS[truck.status] || '#14b8a6'
+        const icon = L.divIcon({
+          html: makeTruckIconHtml(color, truck.truckId, truck.status),
+          className: '', iconSize: [36, 50], iconAnchor: [18, 50],
+        })
+        const lastUpdate = truck.last_update
+          ? new Date(truck.last_update).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
+          : 'N/A'
 
-      const m = L.marker([truck.lat, truck.lng], { icon })
-        .addTo(map)
-        .bindPopup(`<div style="font-family:sans-serif;min-width:160px;">
-          <b style="font-size:13px;">🚛 ${truck.truckId}</b><br/>
+        const m = L.marker([truck.lat, truck.lng], { icon })
+          .addTo(map)
+          .bindPopup(`<div style="font-family:sans-serif;min-width:160px;">
+          <b style="font-size:13px;">${truck.truckId}</b><br/>
           <span style="font-size:11px;color:#64748b;">${truck.driver}</span><br/>
           <span style="font-size:11px;color:${color};font-weight:700;">${truck.status === 'active' ? 'LIVE' : truck.status === 'weak_signal' ? 'WEAK SIGNAL' : 'OFFLINE'
-          }</span><br/>
+            }</span><br/>
           <span style="font-size:10px;color:#94a3b8;">Updated: ${lastUpdate}</span>
         </div>`)
 
-      m.on('click', () => {
-        setSelectedTruck({ ...truck, lastUpdate })
-        setPanelType('truck')
-        setSelectedReport(null)
-      })
+        m.on('click', () => {
+          setSelectedTruck({ ...truck, lastUpdate })
+          setPanelType('truck')
+          setSelectedReport(null)
+        })
 
-      layersRef.current[`truck-${truck.id}`] = m
-    })
+        layersRef.current[`truck-${truck.id}`] = m
+      })
+    }
 
     // ── 2. Stop markers (non-driver roles only) ──
-    if (!isDriver) {
-      clearStopMarkers(map)
-
+    if (!isDriver && layers.stops !== false) {
       const pending = schedulesRef.current.filter(s => {
         const st = String(s.status || '').toUpperCase()
         return !['COMPLETED', 'CANCELLED'].includes(st)
@@ -532,19 +559,6 @@ export default function MiniMap({ height = 260, focusCoordinate = null }) {
           const rawStatus = stopStatusMapRef.current.get(statusKey)
           const stopStatus = normalizeStopStatus(rawStatus ?? 'PENDING_INSPECTION')
           const details = stopDetailsMapRef.current.get(statusKey)
-          const existing = stopMarkersRef.current.get(statusKey)
-
-          if (existing) {
-            if (existing.status !== stopStatus) {
-              existing.marker.setIcon(L.divIcon({
-                html: buildStopMarkerHtml(stopOrder, stopStatus, details),
-                className: '',
-                iconSize: [24, 24], iconAnchor: [12, 12],
-              }))
-              existing.status = stopStatus
-            }
-            return
-          }
 
           const color = STOP_COLORS_MAP[stopStatus]
           const marker = L.marker([Number(wp.lat), Number(wp.lng)], {
@@ -571,24 +585,45 @@ export default function MiniMap({ height = 260, focusCoordinate = null }) {
     }
 
     // ── 3. Report pins (citizen + moderator roles) ──
-    reportsRef.current.forEach(r => {
-      const lat = r.lat ?? r.latitude
-      const lng = r.lng ?? r.longitude
-      if (lat == null || lng == null) return
+    if (layers.reports !== false) {
+      reportsRef.current.forEach(r => {
+        const lat = r.lat ?? r.latitude
+        const lng = r.lng ?? r.longitude
+        if (lat == null || lng == null) return
 
-      // Citizens see all approved pins read-only; moderators can act on them
-      const icon = L.divIcon({
-        html: makeReportIconHtml(r.severity),
-        className: '', iconSize: [24, 30], iconAnchor: [6, 30],
+        // Citizens see all approved pins read-only; moderators can act on them
+        const icon = L.divIcon({
+          html: makeReportIconHtml(r.severity),
+          className: '', iconSize: [24, 30], iconAnchor: [6, 30],
+        })
+        const m = L.marker([lat, lng], { icon }).addTo(map)
+        m.on('click', () => {
+          setSelectedReport(r)
+          setPanelType('report')
+          setSelectedTruck(null)
+        })
+        layersRef.current[`rep-${r.id}`] = m
       })
-      const m = L.marker([lat, lng], { icon }).addTo(map)
-      m.on('click', () => {
-        setSelectedReport(r)
-        setPanelType('report')
-        setSelectedTruck(null)
+    }
+
+    // ── 4. Hotspots (admin/watcher only) ──
+    if (layers.hotspots !== false) {
+      hotspotsRef.current.forEach(h => {
+        const lat = h.latitude
+        const lng = h.longitude
+        if (lat == null || lng == null) return
+
+        const icon = L.divIcon({
+          html: makeHotspotIconHtml(h.status, h.count),
+          className: '', iconSize: [36, 36], iconAnchor: [18, 18],
+        })
+        const m = L.marker([lat, lng], { icon }).addTo(map)
+        m.on('click', () => {
+          if (onHotspotClick) onHotspotClick(h)
+        })
+        layersRef.current[`hs-${h.id}`] = m
       })
-      layersRef.current[`rep-${r.id}`] = m
-    })
+    }
   }
 
   // ── Moderation actions ──
@@ -618,12 +653,6 @@ export default function MiniMap({ height = 260, focusCoordinate = null }) {
   }
 
   function closePanel() { setPanelType(null); setSelectedTruck(null); setSelectedReport(null) }
-
-  useEffect(() => {
-    if (focusCoordinate && focusCoordinate.lat && focusCoordinate.lng && mapInstanceRef.current) {
-      mapInstanceRef.current.setView([focusCoordinate.lat, focusCoordinate.lng], focusCoordinate.zoom || 16)
-    }
-  }, [focusCoordinate])
 
 
   // ─── RENDER ───────────────────────────────────────────────────────────────
@@ -677,7 +706,7 @@ export default function MiniMap({ height = 260, focusCoordinate = null }) {
 
       {/* ── EXPAND BUTTON ── */}
       <button
-        onClick={() => navigate('/map')}
+        onClick={() => navigate(role === 'citizen' ? '/public-map' : '/map')}
         style={{
           position: 'absolute', top: 10, right: 10, zIndex: 400,
           background: 'rgba(20,184,166,0.88)', border: 'none',
@@ -687,7 +716,7 @@ export default function MiniMap({ height = 260, focusCoordinate = null }) {
           boxShadow: '0 2px 10px rgba(20,184,166,0.35)',
         }}
       >
-        ⛶ Full Map
+        <span dangerouslySetInnerHTML={{ __html: IcoExpandString }} /> Full Map
       </button>
 
 

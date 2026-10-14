@@ -10,6 +10,7 @@
 
 import { createContext, useContext, useState, useEffect } from 'react'
 import api from '../api/client'
+import { clearLiveAnalyticsCache } from '../api/analyticsCache'
 
 const AuthContext = createContext(null)
 
@@ -94,6 +95,7 @@ export function AuthProvider({ children }) {
     try { await api.post('/api/auth/logout/') } catch { }
     setUser(null)
     saveUserCache(null)
+    clearLiveAnalyticsCache()
   }
 
   /**

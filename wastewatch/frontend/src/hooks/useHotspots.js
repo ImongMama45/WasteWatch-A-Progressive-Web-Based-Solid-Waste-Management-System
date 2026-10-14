@@ -12,8 +12,8 @@ export function useHotspots() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  const refresh = useCallback(async () => {
-    setLoading(true)
+  const refresh = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const res = await api.get('/api/watcher/hotspots/')
       const mapped = res.data.map(h => {
@@ -28,7 +28,7 @@ export function useHotspots() {
           count: h.report_count || 0,
           type: pType,
           status: h.severity || 'low',
-          ago: new Date(h.created_at).toLocaleDateString()
+          ago: (h.created_at || h.last_detected) ? new Date(h.created_at || h.last_detected).toLocaleString() : '—'
         }
       })
       setItems(mapped)

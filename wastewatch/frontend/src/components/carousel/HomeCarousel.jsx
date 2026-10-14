@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { 
-  Megaphone, ArrowRight, Trophy, Medal, Award, TrendingUp, Trash2, Camera, 
-  Map as MapIcon, Truck, PlayCircle, Navigation, CheckCircle, 
-  BarChart, AlertCircle, CheckSquare, MapPin, Eye, Building2, Activity 
+import {
+  Megaphone, ArrowRight, Trophy, Medal, Award, TrendingUp, Trash2, Camera,
+  Map as MapIcon, Truck, PlayCircle, Navigation, CheckCircle,
+  BarChart, AlertCircle, CheckSquare, MapPin, Eye, Building2, Activity
 } from 'lucide-react'
 import RankingModal from './RankingModal'
 
@@ -192,12 +192,14 @@ function DriverRouteSlide({ route, onStartRoute, onViewMap, loadingRoute }) {
     pending: 'var(--warning)',
     in_progress: 'var(--accent)',
     done: 'var(--info)',
+    suspended: 'var(--danger)',
   }[route.status] || 'var(--accent)'
 
   const statusLabel = {
     pending: 'NOT STARTED',
     in_progress: 'IN PROGRESS',
     done: 'COMPLETED',
+    suspended: 'SUSPENDED',
   }[route.status]
 
   return (
@@ -228,24 +230,27 @@ function DriverRouteSlide({ route, onStartRoute, onViewMap, loadingRoute }) {
         </div>
       </div>
       <div className="hc-btns submit-button">
-        {route.status === 'pending' && (
+        {route.status === 'suspended' ? (
+          <button className="hc-btn hc-btn--danger" style={{ flex: 1 }} disabled>
+            <AlertCircle size={16} />
+            Suspended
+          </button>
+        ) : route.status === 'pending' ? (
           <button className="hc-btn hc-btn--warn" style={{ flex: 1 }} onClick={onStartRoute} disabled={loadingRoute}>
             {loadingRoute ? <span className="hc-spinner" /> : <PlayCircle size={16} />}
             Start Route
           </button>
-        )}
-        {route.status === 'in_progress' && (
+        ) : route.status === 'in_progress' ? (
           <button className="hc-btn hc-btn--white" style={{ flex: 1 }} onClick={onStartRoute} disabled={loadingRoute}>
             {loadingRoute ? <span className="hc-spinner" /> : <Navigation size={16} />}
             Continue Route
           </button>
-        )}
-        {route.status === 'done' && (
+        ) : route.status === 'done' ? (
           <button className="hc-btn hc-btn--ghost" style={{ flex: 1 }} disabled>
             <CheckCircle size={16} />
             Route Complete
           </button>
-        )}
+        ) : null}
         <button className="hc-btn hc-btn--ghost" style={{ flex: 1 }} onClick={onViewMap}>
           <MapIcon size={16} />
           View Map
@@ -609,13 +614,13 @@ export default function HomeCarousel({
       case 'citizen':
       default:
         return (
-          <CitizenSlides 
-            active={active} 
-            onReport={resolvedOnReport} 
+          <CitizenSlides
+            active={active}
+            onReport={resolvedOnReport}
             onViewMap={resolvedOnViewMap}
             onReadMore={resolvedOnReadMore}
-            onViewRankings={handleViewRankings} 
-            loading={loading || {}} 
+            onViewRankings={handleViewRankings}
+            loading={loading || {}}
           />
         )
     }

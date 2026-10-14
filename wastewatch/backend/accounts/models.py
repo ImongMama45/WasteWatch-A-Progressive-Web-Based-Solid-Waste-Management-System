@@ -233,3 +233,53 @@ class User(AbstractUser):
             # Use the part before @ as username, e.g. "juan.dela.cruz"
             self.username = self.email.split('@')[0]
         super().save(*args, **kwargs)
+
+# ---------------------------------------------------------------------------
+# 4. Driver Profile & Points Ledger
+# ---------------------------------------------------------------------------
+class DriverProfile(models.Model):
+    """
+    Dedicated profile for Driver users to track gamification points,
+    suspensions, and disciplinary strikes without polluting the main User model.
+    """
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='driverprofile')
+    points = models.IntegerField(default=0, help_text="Gamification points. Can be negative.")
+    is_suspended = models.BooleanField(default=False, help_text="If true, driver is blocked from starting shifts.")
+
+    def __str__(self):
+        return f"{self.user.full_name} Profile"
+
+class PointTransaction(models.Model):
+    """
+    Ledger for tracking point additions and deductions.
+    Provides an audit trail for why a driver has their current point balance.
+    """
+    driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='point_transactions')
+    escalation = models.ForeignKey('watcher.Escalation', on_delete=models.SET_NULL, null=True, blank=True, related_name='point_transactions', help_text="The escalation that triggered this deduction, if applicable.")
+    points = models.IntegerField(help_text="Amount added or deducted (e.g. +50, -100)")
+    description = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        sign = "+" if self.points >= 0 else ""
+        return f"{self.driver.full_name}: {sign}{self.points} ({self.description})"
+
+
+class SuspensionOverride(models.Model):
+    """
+    Audit trail for when an Admin manually lifts a driver's suspension.
+    Preserves the history of overrides since DriverProfile.is_suspended is just a snapshot.
+    """
+    driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='suspension_overrides')
+    admin = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='suspensions_lifted')
+    reason = models.TextField(help_text="Justification provided by the admin for lifting the suspension.")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Override for {self.driver.full_name} by {self.admin.full_name if self.admin else 'System'}"

@@ -24,7 +24,7 @@ import TurnArrow, { TURN_COLOR } from './TurnArrow'
 import { useNotification } from '../../../context/NotificationContext'
 import useShiftTimer, { clearDriverSessionData } from '../../../hooks/useShiftTimer'
 import useGpsTracking from '../../../hooks/useGpsTracking'
-import api from '../../../api/client'
+import api, { handleStaleShift } from '../../../api/client'
 import Navbar from '../../../components/Navbar'
 import NavigateToDumpsiteModule from './NavigateToDumpsiteModule'
 import CalibrationCelebrationModule from './CalibrationCelebrationModule'
@@ -202,6 +202,8 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
   // Persist sub-phase to the backend on every transition so any device
   // can resume correctly (sessionStorage is device-local; backend is canonical).
   const [phase, setPhaseRaw] = useState('loading')
+  const endedRef = useRef(false)
+
   function setPhase(p) {
     if (p !== 'loading') {
       // Fire-and-forget — non-blocking, won't block UI transition
@@ -209,7 +211,9 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
         api.patch(`/api/driver/shift/${shift.id}/update-status/`, {
           status: 'end_shift',
           end_shift_phase: p,
-        }).catch(() => { /* best-effort */ })
+        }).catch((err) => { 
+          if (!endedRef.current) handleStaleShift(err) 
+        })
       }
       // Also keep sessionStorage as a fast-path fallback (same device, offline)
       sessionStorage.setItem('ww_endshift_phase', p)
@@ -579,9 +583,9 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
   const [extendedModeLoading, setExtendedModeLoading] = useState(false)
 
   async function handleEarlySubmit() {
-
     if (!reason || submitting) return
     setSubmitting(true)
+    endedRef.current = true
     try {
       await endShift({
         scheduleId: schedule?.id,
@@ -603,6 +607,7 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
   async function handleDone() {
     if (submitting) return
     setSubmitting(true)
+    endedRef.current = true
     try {
       await endShift({
         scheduleId: schedule?.id,
