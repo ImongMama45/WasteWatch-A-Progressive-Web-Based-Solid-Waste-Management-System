@@ -4,6 +4,15 @@ import api from '../../../api/client'
 import { useAuth } from '../../../context/AuthContext'
 import { ICONS } from '../../../api/navConfig'
 
+const Ico = ({ d, size = 14, color = 'currentColor', sw = 1.75, style = {}, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={sw}
+    strokeLinecap="round" strokeLinejoin="round" className={className} style={{ flexShrink: 0, display: 'block', ...style }}>
+    {Array.isArray(d) ? d.map((p, i) => <path key={i} d={p} />) : <path d={d} />}
+  </svg>
+);
+const IcoArrowRight = p => <Ico {...p} d="M5 12h14M12 5l7 7-7 7" />;
+const IcoX = p => <Ico {...p} d="M18 6L6 18M6 6l12 12" />;
+
 export default function DumpsiteArrivalAlert() {
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -95,10 +104,7 @@ export default function DumpsiteArrivalAlert() {
                 justifyContent: 'center'
               }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
+              <IcoX size={16} sw={3} />
             </button>
           </div>
           
@@ -128,7 +134,7 @@ export default function DumpsiteArrivalAlert() {
               gap: '8px'
             }}
           >
-            Review in Queue →
+            Review in Queue <IcoArrowRight size={16} sw={2.5} />
           </button>
         </div>
       ))}

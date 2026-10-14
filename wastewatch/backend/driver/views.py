@@ -1,9 +1,12 @@
 from rest_framework import viewsets, permissions, status
+from rest_framework.throttling import ScopedRateThrottle, AnonRateThrottle, UserRateThrottle
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from datetime import timezone
+from datetime import timezone, timedelta
 from django.utils.dateparse import parse_datetime
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
 from .models import (
     Truck,
     CollectionSchedule,
@@ -28,7 +31,11 @@ from .serializers import (
 )
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
+from accounts.models import UserRole
+
+_MAP_FULL_ACCESS_ROLES = {'admin', 'watcher', 'brgy_official', 'driver'}
 import math
 
 def haversine(lat1, lon1, lat2, lon2):
@@ -60,18 +67,45 @@ def is_schedule_complete_today(schedule):
     ).values_list('stop_order', flat=True).distinct().count()
     return resolved >= total
 
+class IsAppAdmin(permissions.BasePermission):
+    def has_permission(self, request, view):
+        u = request.user
+        return bool(u and u.is_authenticated and (u.is_staff or getattr(u, 'role', None) == 'admin'))
+
 class TruckViewSet(viewsets.ModelViewSet):
     queryset = Truck.objects.all()
     serializer_class = TruckSerializer
-    permission_classes = [permissions.IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [permissions.IsAuthenticated()]
+        return [IsAppAdmin()]
 
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
 
 class CollectionScheduleViewSet(viewsets.ModelViewSet):
     queryset = CollectionSchedule.objects.all().order_by('-id')
     serializer_class = CollectionScheduleSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [permissions.AllowAny()]
+        return [IsAppAdmin()]
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
 
 class RouteAssignmentViewSet(viewsets.ModelViewSet):
     queryset = RouteAssignment.objects.all()
@@ -532,7 +566,7 @@ class TruckLocationViewSet(viewsets.ModelViewSet):
         # 1. Enforce Active Shift
         active_shift = DriverShift.objects.filter(driver=driver, is_active=True).first()
         if not active_shift:
-            return Response({'error': 'GPS tracking requires an active shift.'}, status=403)
+            return Response({'error': 'GPS tracking requires an active shift.', 'code': 'no_active_shift'}, status=403)
 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -650,11 +684,21 @@ class TruckCrewAssignmentViewSet(viewsets.ModelViewSet):
         'truck', 'driver', 'schedule'
     ).prefetch_related('crew_members', 'schedule__barangays').all()
     serializer_class = TruckCrewAssignmentSerializer
-    permission_classes = [permissions.IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action == 'my_assignment':
+            return [permissions.IsAuthenticated()]
+        return [IsAppAdmin()]
 
     @action(detail=False, methods=['get'], url_path='my-assignment')
     def my_assignment(self, request):
         """Returns today's active crew assignment for the requesting crew member."""
+        from .crew_resolver import get_crew_assignment_for
+        resolved = get_crew_assignment_for(request.user)
+        if resolved:
+            return Response(resolved)
+
+        # DEPRECATED legacy fallback
         from django.utils import timezone
         today = timezone.localdate()
         assignment = TruckCrewAssignment.objects.filter(
@@ -799,25 +843,30 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='current')
     def current(self, request):
         from datetime import timedelta
+        from django.db.models import Q
+        from django.conf import settings
         now = timezone.now()
-        staleness_cutoff = now - timedelta(hours=24)
+        staleness_cutoff = now - timedelta(hours=getattr(settings, 'SHIFT_STALE_HOURS', 6))
 
-        # Auto-close any shifts abandoned for more than 24 hours
+        # Auto-close any shifts abandoned for more than SHIFT_STALE_HOURS
+        from django.db.models import F
+        from django.db.models.functions import Coalesce
         DriverShift.objects.filter(
+            Q(last_location_update__lt=staleness_cutoff) | Q(last_location_update__isnull=True, started_at__lt=staleness_cutoff),
             driver=request.user,
             ended_at__isnull=True,
-            started_at__lt=staleness_cutoff,
         ).update(
-            ended_at=now,
+            ended_at=Coalesce(F('last_location_update'), F('started_at')),
             status='end_shift',
-            is_active=False
+            is_active=False,
+            end_reason='heartbeat_timeout',
         )
 
         # Now look for a genuinely active shift
         shift = DriverShift.objects.filter(
+            Q(last_location_update__gte=staleness_cutoff) | Q(last_location_update__isnull=True, started_at__gte=staleness_cutoff),
             driver=request.user,
             ended_at__isnull=True,
-            started_at__gte=staleness_cutoff,
             is_active=True
         ).order_by('-started_at').first()
 
@@ -846,6 +895,12 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['patch'], url_path='update-status')
     def update_status(self, request, pk=None):
         shift = self.get_object()
+        
+        if not shift.is_active:
+            return Response(
+                {'error': 'No active shift found.', 'code': 'no_active_shift'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         VALID_TRANSITIONS = {
             'navigate_to_base': ['confirm_start', 'end_shift'],
@@ -941,6 +996,23 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
 
         return Response({'status': 'extended_mode_activated'})
 
+    @action(detail=True, methods=['post'], url_path='force-end')
+    def force_end(self, request, pk=None):
+        if getattr(request.user, 'role', None) != 'admin':
+            return Response({'error': 'Only admins can force-end shifts.'}, status=status.HTTP_403_FORBIDDEN)
+            
+        shift = self.get_object()
+        if not shift.is_active:
+            return Response({'error': 'Shift is already inactive.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        shift.is_active = False
+        shift.status = 'end_shift'
+        shift.end_reason = 'admin_force_ended'
+        shift.ended_at = timezone.now()
+        shift.save(update_fields=['is_active', 'status', 'ended_at', 'end_reason'])
+        
+        return Response({'status': 'force_ended', 'shift_id': shift.id})
+
     @action(detail=False, methods=['post'], url_path='pre_start')
     def pre_start_shift(self, request):
         driver = request.user
@@ -1003,16 +1075,24 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
           { "active": true,  "shift": { ...DriverShiftSerializer... } }
         """
         from datetime import timedelta
+        from django.db.models import Q
+        from django.conf import settings
         now = timezone.now()
-        staleness_cutoff = now - timedelta(hours=24)
+        staleness_cutoff = now - timedelta(hours=getattr(settings, 'SHIFT_STALE_HOURS', 6))
 
-        # Auto-close anything abandoned for 24h+ so a dead shift can never
-        # masquerade as active just because is_active was never flipped.
+        # Auto-close any shifts abandoned for more than SHIFT_STALE_HOURS
+        from django.db.models import F
+        from django.db.models.functions import Coalesce
         DriverShift.objects.filter(
+            Q(last_location_update__lt=staleness_cutoff) | Q(last_location_update__isnull=True, started_at__lt=staleness_cutoff),
             driver=request.user,
             is_active=True,
-            started_at__lt=staleness_cutoff,
-        ).update(ended_at=now, status='end_shift', is_active=False)
+        ).update(
+            ended_at=Coalesce(F('last_location_update'), F('started_at')),
+            status='end_shift',
+            is_active=False,
+            end_reason='heartbeat_timeout',
+        )
 
         shift = (
             DriverShift.objects
@@ -1131,7 +1211,10 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             shift = DriverShift.objects.select_for_update().filter(driver=driver, is_active=True).first()
             if not shift:
-                return Response({'error': 'No active shift found.'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {'error': 'No active shift found.', 'code': 'no_active_shift'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
             # Safety check — don't let a stale client end the wrong route's shift.
             if schedule_id and shift.schedule_id and str(shift.schedule_id) != str(schedule_id):
@@ -1145,6 +1228,7 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
             shift.duration_ms = int((now - shift.started_at).total_seconds() * 1000)
             shift.is_active = False
             shift.status = 'end_shift'
+            shift.end_reason = 'driver_ended'
             shift.current_latitude = None
             shift.current_longitude = None
             shift.last_location_update = None
@@ -1258,16 +1342,29 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='active_shifts')
     def active_shifts(self, request):
+        from django.core.cache import cache
+        if cache.add('shift_sweep_lock', 1, 300):   # at most once per 5 min
+            from .management.commands.sweep_stale_shifts import sweep_stale_shifts
+            sweep_stale_shifts()
+
         from django.db.models import Q
+        is_privileged = request.user.is_authenticated and getattr(request.user, 'role', None) in _MAP_FULL_ACCESS_ROLES
         today = timezone.localdate()
+        # Include: all active shifts, today's inactive shifts, and today-swept abandoned shifts
         shifts = DriverShift.objects.filter(
-            Q(is_active=True) | Q(is_active=False, started_at__date=today)
+            Q(is_active=True)
+            | Q(is_active=False, started_at__date=today)
+            | Q(is_active=False, end_reason__in=['heartbeat_timeout', 'truck_deleted'], ended_at__date=today)
         ).select_related('driver', 'truck')
         data = []
         now = timezone.now()
 
         for shift in shifts:
-            if not shift.is_active:
+            end_reason = shift.end_reason or ''
+            if end_reason in ('heartbeat_timeout', 'truck_deleted'):
+                # Authoritative abandoned — swept by management command or truck delete signal
+                conn_status = 'abandoned'
+            elif not shift.is_active:
                 conn_status = 'done'
             elif shift.current_latitude and shift.current_longitude:
                 # Determine staleness status from last_location_update
@@ -1298,18 +1395,22 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
 
             data.append({
                 'id': shift.id,
-                'driver': shift.driver.full_name or shift.driver.username,
-                'truck': truck.id if truck else None,
-                'truckId': truck.plate_number if truck else 'Unknown',
-                'truckModel': truck.model if truck else 'Unknown',
+                'driver': (shift.driver.full_name or shift.driver.username) if is_privileged else 'Collection Team',
+                'truck': truck.id if truck and is_privileged else None,
+                'truckId': truck.plate_number if truck and is_privileged else 'Hidden',
+                'truckModel': truck.model if truck and is_privileged else 'Hidden',
                 'lat': float(shift.current_latitude) if shift.current_latitude else None,
                 'lng': float(shift.current_longitude) if shift.current_longitude else None,
                 'last_update': shift.last_location_update,
+                'ended_at': shift.ended_at,
+                'end_reason': end_reason,
                 'duty_type': shift.duty_type,
                 'op_status': shift.op_status,
                 'phase_status': shift.status,
+                'end_shift_phase': getattr(shift, 'end_shift_phase', None),
                 'status': conn_status,
                 'is_extended_mode': shift.is_extended_mode,
+                'schedule_id': shift.schedule_id,
                 })
         return Response(data)
 
@@ -1502,6 +1603,70 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
         })
     # ↑ analytics ends here — barangay_stops is a SEPARATE method below
 
+    @method_decorator(cache_page(15))
+    @action(detail=False, methods=['get'], url_path='barangay_summary', permission_classes=[permissions.AllowAny], throttle_classes=[AnonRateThrottle, UserRateThrottle])
+    def barangay_collection_summary(self, request):
+        """
+        Returns aggregate collection progress per barangay for the public transparency portal.
+        """
+        from accounts.models import Barangay
+        from watcher.models import StopValidation, StopValidationStatus
+        from watcher.stop_validation_service import ensure_stop_validations_for_schedule
+        from watcher.stop_validation_utils import is_schedule_today
+
+        today = timezone.localdate()
+        active_shifts = DriverShift.objects.filter(is_active=True).select_related('schedule')
+        
+        # Determine which schedules are active today
+        active_schedules = []
+        for shift in active_shifts:
+            schedule = shift.schedule
+            if not schedule:
+                continue
+            if not is_schedule_today(schedule, today):
+                continue
+            active_schedules.append(schedule)
+
+        summary = []
+        barangays = Barangay.objects.all()
+
+        for b in barangays:
+            # Find if this barangay is covered by any active schedule
+            b_schedules = [s for s in active_schedules if s.barangays.filter(id=b.id).exists()]
+            if not b_schedules:
+                continue
+            
+            total_stops = 0
+            completed_stops = 0
+            
+            for s in b_schedules:
+                ensure_stop_validations_for_schedule(s)
+                # Build a set of stop_orders that belong to this specific barangay
+                b_stop_orders = {
+                    i for i, wp in enumerate(s.waypoints or [])
+                    if isinstance(wp, dict) and str(wp.get('barangay_id', '')) == str(b.id)
+                }
+                if not b_stop_orders:
+                    continue
+
+                validations = StopValidation.objects.filter(schedule=s, collection_date=today, stop_order__in=b_stop_orders)
+                
+                total_stops += validations.count()
+                completed_stops += validations.filter(
+                    current_status__in=[StopValidationStatus.COLLECTION_REPORTED, StopValidationStatus.VERIFIED_COLLECTED]
+                ).count()
+            
+            if total_stops > 0:
+                summary.append({
+                    'barangay_id': b.id,
+                    'barangay_name': b.name,
+                    'total_stops': total_stops,
+                    'completed_stops': completed_stops,
+                    'is_active': True
+                })
+            
+        return Response(summary)
+
     @action(detail=False, methods=['get'], url_path='barangay_stops')
     def barangay_stops(self, request):
         """
@@ -1531,13 +1696,21 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
         if not barangay_name:
             return Response({'error': 'barangay_name is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        is_privileged = request.user.is_authenticated and getattr(request.user, 'role', None) in _MAP_FULL_ACCESS_ROLES
         now = timezone.now()
         today = timezone.localdate()
         result_trucks, result_stops = [], []
 
+        from django.conf import settings
+        staleness_cutoff = now - timedelta(hours=getattr(settings, 'SHIFT_STALE_HOURS', 6))
+        from django.db.models import Q
+
         active_shifts = (
             DriverShift.objects
-            .filter(is_active=True)
+            .filter(
+                Q(last_location_update__gte=staleness_cutoff) | Q(last_location_update__isnull=True, started_at__gte=staleness_cutoff),
+                is_active=True,
+            )
             .select_related('driver', 'truck', 'schedule')
         )
 
@@ -1570,12 +1743,12 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
             if shift.current_latitude and shift.current_longitude:
                 result_trucks.append({
                     'id': shift.id,
-                    'driver_id': shift.driver.id,
-                    'driver': shift.driver.full_name,
-                    'driver_name': shift.driver.full_name,
-                    'truckId': shift.truck.plate_number if shift.truck else 'Unknown',
-                    'truck_plate': shift.truck.plate_number if shift.truck else 'Unknown',
-                    'truckModel': shift.truck.model if shift.truck else 'Unknown',
+                    'driver_id': shift.driver.id if is_privileged else None,
+                    'driver': shift.driver.full_name if is_privileged else 'Collection Team',
+                    'driver_name': shift.driver.full_name if is_privileged else 'Collection Team',
+                    'truckId': shift.truck.plate_number if shift.truck and is_privileged else 'Hidden',
+                    'truck_plate': shift.truck.plate_number if shift.truck and is_privileged else 'Hidden',
+                    'truckModel': shift.truck.model if shift.truck and is_privileged else 'Hidden',
                     'lat': float(shift.current_latitude),
                     'lng': float(shift.current_longitude),
                     'status': conn,
@@ -1638,9 +1811,9 @@ class DriverShiftViewSet(viewsets.ModelViewSet):
                     'in_focused_barangay': str(wp.get('barangay_id', '')) == str(matched_barangay.id),
                     'stop_order': i,
                     'schedule_id': schedule.id,
-                    'driver_id': shift.driver.id,
-                    'driver_name': shift.driver.full_name,
-                    'truck_plate': shift.truck.plate_number if shift.truck else '',
+                    'driver_id': shift.driver.id if is_privileged else None,
+                    'driver_name': shift.driver.full_name if is_privileged else 'Collection Team',
+                    'truck_plate': (shift.truck.plate_number if shift.truck else '') if is_privileged else 'Hidden',
                     'collected_at': sv.collection_timestamp.isoformat() if sv.collection_timestamp else None,
                 })
 
@@ -1656,3 +1829,57 @@ class CalendarEventViewSet(viewsets.ModelViewSet):
     queryset = CalendarEvent.objects.all().order_by('-date')
     serializer_class = CalendarEventSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+from .models import SystemSetting
+from .serializers import HomeBaseSerializer
+from rest_framework.views import APIView
+
+def _home_base_payload(s):
+    return {'lat': s.home_base_lat, 'lng': s.home_base_lng, 'label': s.home_base_label}
+
+class HomeBaseView(APIView):
+    def get_permissions(self):
+        return [IsAppAdmin()] if self.request.method == 'PUT' else [permissions.IsAuthenticated()]
+
+    def get(self, request):
+        return Response(_home_base_payload(SystemSetting.load()))
+
+    def put(self, request):
+        ser = HomeBaseSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+        label = d['label'].strip() or 'Home Base'
+        updated_routes = 0
+
+        with transaction.atomic():
+            setting, _ = SystemSetting.objects.select_for_update().get_or_create(pk=1)
+            
+            if d.get('apply_to_existing'):
+                from django.conf import settings
+                cutoff = timezone.now() - timedelta(hours=getattr(settings, 'SHIFT_STALE_HOURS', 6))
+                live = DriverShift.objects.filter(is_active=True).filter(
+                    Q(last_location_update__gte=cutoff) |
+                    Q(last_location_update__isnull=True, started_at__gte=cutoff)
+                )
+                if live.exists():
+                    return Response(
+                        {'error': f'{live.count()} shift(s) are active. End them (or force-end) first.'},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+            setting.home_base_lat = d['lat']
+            setting.home_base_lng = d['lng']
+            setting.home_base_label = label
+            setting.updated_by = request.user
+            setting.save()
+
+            if d.get('apply_to_existing'):
+                base = {'lat': d['lat'], 'lng': d['lng'], 'label': label}
+                schedules = list(CollectionSchedule.objects.select_for_update())
+                for sch in schedules:
+                    wps = sch.waypoints if isinstance(sch.waypoints, list) else []
+                    wps = [{**wps[0], **base}, *wps[1:]] if wps else [base]
+                    sch.waypoints = wps
+                CollectionSchedule.objects.bulk_update(schedules, ['waypoints'])
+                updated_routes = len(schedules)
+
+        return Response({**_home_base_payload(setting), 'updated_routes': updated_routes})

@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import api from '../../api/client'
-import DashboardLayout from '../../components/DashboardLayout'
 
 const TYPE_META = {
   overflow: { label: 'Overflow', color: '#ef4444', bg: 'rgba(239,68,68,0.1)' },
@@ -18,88 +17,87 @@ const STATUS_META = {
 
 const SEVERITY_COLORS = { high: '#ef4444', medium: '#f59e0b', low: '#22c55e' }
 
-export default function ReportDetail() {
-  const { id } = useParams()
+import { useAuth } from '../../context/AuthContext'
+
+export default function ReportDetail({ reportId, onClose }) {
+  const { user } = useAuth()
   const navigate = useNavigate()
   const [report, setReport] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  
-  const mapContainerRef = useRef(null)
-  const [leafletReady, setLeafletReady] = useState(!!window.L)
 
   useEffect(() => {
-    if (window.L) return
-    const link = Object.assign(document.createElement('link'),
-      { rel: 'stylesheet', href: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' })
-    document.head.appendChild(link)
-    const script = Object.assign(document.createElement('script'),
-      { src: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js' })
-    script.onload = () => setLeafletReady(true)
-    document.head.appendChild(script)
-  }, [])
-
-  useEffect(() => {
+    if (!reportId) return
+    let cancelled = false;
+    
+    setLoading(true)
+    setError(null)
+    
     async function fetchReport() {
       try {
-        const res = await api.get(`/api/watcher/reports/${id}/`)
-        setReport(res.data)
+        const res = await api.get(`/api/watcher/reports/${reportId}/`)
+        if (!cancelled) setReport(res.data)
       } catch (err) {
-        setError(err.response?.status === 404 ? 'Report not found' : 'Failed to load report')
+        if (!cancelled) setError(err.response?.status === 404 ? 'Report not found' : 'Failed to load report')
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }
     fetchReport()
-  }, [id])
+    
+    return () => { cancelled = true; }
+  }, [reportId])
 
-  useEffect(() => {
-    if (!leafletReady || !mapContainerRef.current || !report || !report.latitude || !report.longitude) return
-    const L = window.L
+  if (!reportId) return null
 
-    const map = L.map(mapContainerRef.current, {
-      zoomControl: true,
-      scrollWheelZoom: false,
-      attributionControl: false,
-    }).setView([report.latitude, report.longitude], 16)
+  // Overlay container styles
+  const overlayStyle = {
+    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+    background: 'rgba(0,0,0,0.5)', zIndex: 9999,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: 24, overflowY: 'auto'
+  }
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map)
+  const modalStyle = {
+    background: '#fff', borderRadius: 16, width: '100%', maxWidth: 800,
+    maxHeight: '90vh', overflowY: 'auto', position: 'relative',
+    boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)'
+  }
 
-    const markerHtml = `
-      <div style="
-        background: #DC2626; color: white;
-        width: 30px; height: 30px; border-radius: 50%;
-        display: flex; align-items: center; justify-content: center;
-        box-shadow: 0 4px 12px rgba(220,38,38,0.4);
-        border: 2px solid white; font-size: 14px;
-      ">🗑️</div>
-    `
-    const icon = L.divIcon({ html: markerHtml, className: '', iconSize: [30, 30], iconAnchor: [15, 15] })
-    L.marker([report.latitude, report.longitude], { icon }).addTo(map)
-
-    return () => map.remove()
-  }, [leafletReady, report, id])
-
-  if (loading) return <div style={{ padding: 40, textAlign: 'center' }}>Loading report...</div>
-  if (error) return <div style={{ padding: 40, textAlign: 'center', color: '#DC2626' }}>{error}</div>
+  if (loading) return (
+    <div style={overlayStyle}>
+      <div style={{...modalStyle, padding: 40, textAlign: 'center'}}>Loading report...</div>
+    </div>
+  )
+  if (error) return (
+    <div style={overlayStyle}>
+      <div style={{...modalStyle, padding: 40, textAlign: 'center', color: '#DC2626'}}>
+        {error}
+        <br/><br/>
+        <button onClick={onClose} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #CBD5E1', cursor: 'pointer' }}>Close</button>
+      </div>
+    </div>
+  )
   if (!report) return null
 
   const tm = TYPE_META[report.issue_type] || TYPE_META.overflow
   const sm = STATUS_META[report.status] || STATUS_META.pending
 
   return (
-    <DashboardLayout>
-    <div style={{ maxWidth: 800, margin: '0 auto', padding: '24px 16px' }}>
-      
-      <button onClick={() => navigate(-1)} style={{
-        background: 'none', border: 'none', color: '#64748B',
-        fontSize: 14, fontWeight: 600, cursor: 'pointer',
-        display: 'flex', alignItems: 'center', gap: 6, marginBottom: 24
-      }}>
-        <span style={{ fontSize: 18 }}>←</span> Back
-      </button>
+    <div style={overlayStyle} onClick={onClose}>
+      <div style={modalStyle} onClick={e => e.stopPropagation()}>
+        
+        <div style={{ position: 'absolute', top: 16, right: 16, zIndex: 10 }}>
+          <button onClick={onClose} style={{
+            background: 'rgba(0,0,0,0.05)', border: 'none', borderRadius: '50%',
+            width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', fontSize: 18, color: '#64748B'
+          }}>
+            ×
+          </button>
+        </div>
 
-      <div style={{ background: '#fff', borderRadius: 16, border: '1px solid #E2E8F0', overflow: 'hidden' }}>
+        <div style={{ overflow: 'hidden' }}>
         <div style={{ padding: '24px 24px 20px', borderBottom: '1px solid #E2E8F0' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
             <div>
@@ -195,17 +193,35 @@ export default function ReportDetail() {
             )}
           </div>
 
-          {/* Map */}
+          {/* Location Action */}
           {report.latitude && report.longitude && (
             <div>
-              <div style={{ fontSize: 11, fontWeight: 800, color: '#94A3B8', letterSpacing: '.06em', marginBottom: 12 }}>LOCATION MAP</div>
-              <div ref={mapContainerRef} style={{ height: 250, width: '100%', borderRadius: 12, border: '1px solid #E2E8F0', zIndex: 1 }} />
+              <div style={{ fontSize: 11, fontWeight: 800, color: '#94A3B8', letterSpacing: '.06em', marginBottom: 12 }}>LOCATION ACTION</div>
+              <button 
+                onClick={() => {
+                  if (user?.role === 'admin') {
+                    navigate(`/admin/hotspots?lat=${report.latitude}&lng=${report.longitude}`)
+                  } else if (user?.role === 'brgy_official' || user?.role === 'watcher') {
+                    navigate('/map', { state: { focusReport: report } })
+                  } else {
+                    navigate('/public-map', { state: { focusReport: report } })
+                  }
+                  onClose()
+                }}
+                style={{
+                  width: '100%', padding: '12px', background: 'var(--accent)', color: '#fff',
+                  border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
+                }}
+              >
+                <span>📍</span> Navigate to that stop
+              </button>
             </div>
           )}
 
         </div>
       </div>
     </div>
-    </DashboardLayout>
+    </div>
   )
 }

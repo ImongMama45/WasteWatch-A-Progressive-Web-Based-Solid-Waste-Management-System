@@ -9,6 +9,16 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
 
+const Ico = ({ d, size = 14, color = 'currentColor', sw = 1.75, style = {}, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={sw}
+    strokeLinecap="round" strokeLinejoin="round" className={className} style={{ flexShrink: 0, display: 'block', ...style }}>
+    {Array.isArray(d) ? d.map((p, i) => <path key={i} d={p} />) : <path d={d} />}
+  </svg>
+);
+const IcoListAlt = p => <Ico {...p} d={["M8 6h13", "M8 12h13", "M8 18h13", "M3 6h.01", "M3 12h.01", "M3 18h.01"]} />;
+const IcoChevronLeft = p => <Ico {...p} d="M15 18l-6-6 6-6" />;
+const IcoCheck = p => <Ico {...p} d="M20 6L9 17l-5-5" />;
+
 const CATEGORY_COLORS = {
   'Biodegradable': '#2ecc71',
   'Recyclable': '#3b82f6',
@@ -31,8 +41,10 @@ function HistoryCard({ entry }) {
         width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
         background: 'rgba(46,204,113,0.12)', border: '1.5px solid #2ecc71',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontWeight: 800, fontSize: 12, color: '#2ecc71',
-      }}>✓</div>
+        fontWeight: 800, color: '#2ecc71',
+      }}>
+        <IcoCheck size={16} sw={3} />
+      </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>{entry.address}</div>
@@ -93,9 +105,9 @@ export default function DriverCollectionLog() {
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
           <button onClick={() => navigate('/dashboard')} style={{
             background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', gap: 4, padding: 0
+            display: 'flex', alignItems: 'center', gap: 6, padding: 0
           }}>
-            <span style={{ fontSize: 18 }}>‹</span> Dashboard
+            <IcoChevronLeft size={18} sw={2.5} /> Dashboard
           </button>
         </div>
 
@@ -108,7 +120,7 @@ export default function DriverCollectionLog() {
           <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 40 }}>Loading...</div>
         ) : sortedDates.length === 0 ? (
           <div className="card" style={{ textAlign: 'center', padding: '32px 20px' }}>
-            <div style={{ fontSize: 36, marginBottom: 10 }}>📋</div>
+            <IcoListAlt size={36} style={{ marginBottom: 10, margin: '0 auto', opacity: 0.5 }} />
             <div className="text-muted text-sm">No collections recorded in the last 7 days.</div>
           </div>
         ) : (

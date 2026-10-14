@@ -506,6 +506,7 @@ export default function PublicDashboard() {
   const [showSchedulePopup, setShowSchedulePopup] = useState(false)
   const [showCalendarPopup, setShowCalendarPopup] = useState(false)
   const [selectedBarangay, setSelectedBarangay] = useState('all')
+  const [showReportMap, setShowReportMap] = useState(null)
 
   // Per-barangay schedule cache: { [barangayName]: scheduleItems[] }
   const [barangayScheduleCache, setBarangayScheduleCache] = useState(() => {
@@ -571,8 +572,9 @@ export default function PublicDashboard() {
   const handleSubmitReport = useCallback(async (fields) => addReport(fields), [addReport])
   const handleReportClick = useCallback((report) => {
     if (!report.location?.lat || !report.location?.lng) return
-    navigate('/map', { state: { focusReport: report } })
-  }, [navigate])
+    // navigate('/map', { state: { focusReport: report } }) // Temporarily disabled while Public Map is built
+    setShowReportMap(report)
+  }, [])
 
   // ── Derived ───────────────────────────────────────────────────────────────────
   const nextCollection = schedule.find(s => s.isNext) || schedule[0]
@@ -694,7 +696,7 @@ export default function PublicDashboard() {
             Ano ang magagawa mo?
           </h2>
           <div className="ld-features">
-            <button className="ld-feature" onClick={() => navigate('/map')}>
+            <button className="ld-feature" onClick={() => navigate('/public-map')}>
               <div className="ld-feature__icon ld-feature__icon--green"><IconMap /></div>
               <div className="ld-feature__title">GIS Waste Map</div>
               <p className="ld-feature__desc">Tingnan kung saan ang pinaka-maraming basura sa interactive na mapa ng Lucena City.</p>
@@ -975,7 +977,7 @@ export default function PublicDashboard() {
           </div>
           <div className="ld-footer__col">
             <h4 className="ld-footer__col-title">Mapa</h4>
-            <a href="#" onClick={e => { e.preventDefault(); navigate('/map') }}>Hotspots</a>
+            <a href="#" onClick={e => { e.preventDefault(); navigate('/public-map') }}>Hotspots</a>
             <a href="#">Truck Radar</a>
             <a href="#">Live View</a>
             <a href="#">Statistics</a>
@@ -1160,6 +1162,45 @@ export default function PublicDashboard() {
               </button>
             </div>
 
+          </div>
+        </>
+      )}
+
+      {/* ════════ REPORT MAP PREVIEW MODAL ════════ */}
+      {showReportMap && (
+        <>
+          <div className="ld-modal-bd" onClick={() => setShowReportMap(null)} />
+          <div className="ld-sched-modal" role="dialog" aria-modal style={{ paddingBottom: 20 }}>
+            <div className="ld-modal-handle" />
+            <div className="ld-sched-modal__header" style={{ marginBottom: 12 }}>
+              <div>
+                <div className="ld-eyebrow" style={{ marginBottom: 6 }}>
+                  <span className="ld-eyebrow__dot" /> Report Location
+                </div>
+                <h2 className="ld-sched-modal__title">{(showReportMap.issue_type || 'Unknown').charAt(0).toUpperCase() + (showReportMap.issue_type || 'unknown').slice(1)} Report</h2>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button className="ld-modal-close" onClick={() => setShowReportMap(null)} aria-label="Close">✕</button>
+              </div>
+            </div>
+
+            <div style={{ padding: '0 20px', marginBottom: 16 }}>
+              <div style={{ fontSize: 13, color: 'var(--ld-text-3)', marginBottom: 12 }}>
+                Detailed public map functionality is currently being upgraded. For now, here is a static preview of your report's location.
+              </div>
+
+              <div style={{ width: '100%', height: 220, borderRadius: 12, overflow: 'hidden', background: '#0f172a', position: 'relative' }}>
+                <HeroOfflineMapSnapshot hotspots={[
+                  { ...showReportMap, lat: showReportMap.location.lat, lng: showReportMap.location.lng }
+                ]} isOnline={isOnline} />
+              </div>
+            </div>
+
+            <div className="ld-sched-modal__footer">
+              <button className="ld-btn ld-btn--primary" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setShowReportMap(null)}>
+                Isara
+              </button>
+            </div>
           </div>
         </>
       )}

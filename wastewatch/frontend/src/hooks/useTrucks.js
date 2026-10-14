@@ -30,7 +30,7 @@ export function useTrucks() {
     try {
       if (id) {
         const res = await api.patch(`/api/driver/trucks/${id}/`, data)
-        setTrucks(prev => prev.map(t => t.id === id ? res.data : t))
+        setTrucks(prev => prev.map(t => String(t.id) === String(id) ? res.data : t))
       } else {
         const res = await api.post('/api/driver/trucks/', data)
         setTrucks(prev => [...prev, res.data])
@@ -45,7 +45,7 @@ export function useTrucks() {
   const deleteTruck = async (id) => {
     try {
       await api.delete(`/api/driver/trucks/${id}/`)
-      setTrucks(prev => prev.filter(t => t.id !== id))
+      setTrucks(prev => prev.filter(t => String(t.id) !== String(id)))
       return { ok: true }
     } catch (err) {
       console.error(err)

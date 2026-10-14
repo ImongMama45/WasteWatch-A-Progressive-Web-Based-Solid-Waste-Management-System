@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect, useMemo } from 'react'
+import { Edit2, Trash2, Shield, EyeOff, Eye, Truck, MapPin, AlertTriangle, Users, Plus } from 'lucide-react'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useUsers } from '../../hooks/useUsers'
 import { useNotification } from '../../context/NotificationContext'
@@ -42,8 +43,10 @@ function RoleBadge({ role }) {
   const m = ROLE_META[role] || { label: role, color: '#888', bg: '#eee', border: '#ccc' }
   return (
     <span style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      width: 'max-content', alignSelf: 'flex-start',
       background: m.bg, border: `1px solid ${m.border}`, color: m.color,
-      borderRadius: 20, padding: '2px 10px', fontSize: 9, fontWeight: 800,
+      borderRadius: 6, padding: '2px 8px', fontSize: 9, fontWeight: 800,
       letterSpacing: '.06em', whiteSpace: 'nowrap',
     }}>{m.label.toUpperCase()}</span>
   )
@@ -172,8 +175,8 @@ function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
           <div style={{ position: 'relative' }}>
             <label className="form-label">{isEdit ? 'New Password' : 'Password'}</label>
             <input className="form-input" type={showPassword ? "text" : "password"} value={form.password} onChange={e => set('password', e.target.value)} placeholder="••••••••" style={{ paddingRight: 40 }} />
-            <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 10, top: 28, background: 'none', border: 'none', cursor: 'pointer', opacity: 0.6, padding: 0 }}>
-              {showPassword ? '🙈' : '👁️'}
+            <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 10, top: 28, background: 'none', border: 'none', cursor: 'pointer', opacity: 0.6, padding: 0, display: 'flex', alignItems: 'center' }}>
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
             </button>
           </div>
           <div style={{ position: 'relative' }}>
@@ -237,7 +240,7 @@ function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
                 }} />
               </div>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 700 }}>🚛 Crew Member</div>
+                <div style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}><Truck size={16} /> Crew Member</div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Assigns this citizen to collection truck crews</div>
               </div>
             </label>
@@ -265,6 +268,32 @@ function UserModal({ user, onSave, onClose, barangays, dumpsites }) {
             </span>
           </label>
         </div>
+
+        {isEdit && user.role === 'driver' && user.suspension_overrides && user.suspension_overrides.length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '.06em', marginBottom: 8, textTransform: 'uppercase' }}>
+              Reinstatement History ({user.suspension_overrides.length})
+            </div>
+            <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: '10px 14px', maxHeight: 150, overflowY: 'auto' }}>
+              {user.suspension_overrides.map((override, i) => (
+                <div key={override.id} style={{
+                  fontSize: 12,
+                  marginBottom: i < user.suspension_overrides.length - 1 ? 12 : 0,
+                  paddingBottom: i < user.suspension_overrides.length - 1 ? 12 : 0,
+                  borderBottom: i < user.suspension_overrides.length - 1 ? '1px solid var(--border)' : 'none'
+                }}>
+                  <div style={{ fontWeight: 600, color: 'var(--text)', display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span>By {override.admin_name}</span>
+                    <span style={{ color: 'var(--text-muted)' }}>{new Date(override.created_at).toLocaleDateString()}</span>
+                  </div>
+                  <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', lineHeight: 1.4 }}>
+                    "{override.reason}"
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 10 }}>
           <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
@@ -296,6 +325,8 @@ export default function UserManagement() {
 
   const [modal, setModal] = useState(null)  // null | 'add' | user object
   const [deleteModal, setDeleteModal] = useState(null) // null | user object to delete
+  const [liftModal, setLiftModal] = useState(null)
+  const [liftReason, setLiftReason] = useState('')
   const [toast, setToast] = useState(null)
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768)
   useEffect(() => {
@@ -330,10 +361,10 @@ export default function UserManagement() {
         setRoleFilter('all')
         setStatusFilter('all')
         setSearch('')
-        showToast('✅ User created successfully.')
+        showToast('User created successfully.')
       } else {
         await api.patch(`/api/accounts/users/${modal.id}/`, formData)
-        showToast('✅ User updated.')
+        showToast('User updated.')
       }
       setCurrentPage(1)
       await refreshUsers()
@@ -346,10 +377,10 @@ export default function UserManagement() {
   async function toggleActive(u) {
     try {
       await api.patch(`/api/accounts/users/${u.id}/`, { is_active: !u.is_active })
-      showToast(u.is_active ? '⛔ Account deactivated.' : '✅ Account activated.')
+      showToast(u.is_active ? 'Account deactivated.' : 'Account activated.')
       await refreshUsers()
     } catch {
-      showToast('❌ Failed to update status.')
+      showToast('Failed to update status.')
     }
   }
 
@@ -357,11 +388,27 @@ export default function UserManagement() {
     if (!deleteModal) return
     try {
       await api.delete(`/api/accounts/users/${deleteModal.id}/`)
-      showToast('🗑 User removed.')
+      showToast('User removed.')
       await refreshUsers()
       setDeleteModal(null)
     } catch {
-      showToast('❌ Failed to delete user.')
+      showToast('Failed to delete user.')
+    }
+  }
+
+  async function confirmLiftSuspension() {
+    if (!liftReason.trim()) {
+      showToast('Reason is required.')
+      return
+    }
+    try {
+      await api.patch(`/api/accounts/users/${liftModal.id}/lift_suspension/`, { reason: liftReason })
+      showToast('Suspension lifted.')
+      setLiftModal(null)
+      setLiftReason('')
+      await refreshUsers()
+    } catch (err) {
+      showToast('Failed to lift suspension.')
     }
   }
 
@@ -450,8 +497,8 @@ export default function UserManagement() {
             </div>
             <p className="text-muted text-sm">Manage accounts, roles, and assignments.</p>
           </div>
-          <button className="btn btn-primary" onClick={() => setModal('add')}>
-            + Add User
+          <button className="btn btn-primary" onClick={() => setModal('add')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Plus size={16} /> Add User
           </button>
         </div>
 
@@ -472,7 +519,7 @@ export default function UserManagement() {
 
         {/* ── Role filter tabs ── */}
         <div style={{
-          display: 'flex', gap: 4, marginBottom: 14,
+          display: 'flex', gap: 4, marginBottom: 14, marginTop: 14, justifyContent: 'space-between',
           background: 'var(--surface-2)', borderRadius: 10, padding: 4,
           overflowX: 'auto', WebkitOverflowScrolling: 'touch',
           maxWidth: '100%',
@@ -483,11 +530,11 @@ export default function UserManagement() {
             { key: 'driver', label: 'Drivers' },
             { key: 'brgy_official', label: 'Brgy. Officials' },
             { key: 'citizen', label: 'Citizens' },
-            { key: 'crew_member', label: '🚛 Crew' },
+            { key: 'crew_member', label: <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Truck size={14} /> Crew</span> },
             { key: 'dumpsite', label: 'Dumpsite Ops' },
           ].map(f => (
             <button key={f.key} className="um-filter" onClick={() => setRoleFilter(f.key)} style={{
-              padding: '6px 14px', borderRadius: 8, border: 'none',
+              padding: '6px 10px', borderRadius: 8, border: 'none', margin: '2px 20px',
               fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-body)',
               background: roleFilter === f.key ? 'var(--surface)' : 'transparent',
               color: roleFilter === f.key ? 'var(--text)' : 'var(--text-muted)',
@@ -528,7 +575,7 @@ export default function UserManagement() {
           {!isMobile && (
             <div style={{
               display: 'grid',
-              gridTemplateColumns: '2fr 2fr 1fr 1.2fr 80px 100px',
+              gridTemplateColumns: '2fr 2fr 1fr 1.2fr 1fr 80px 100px',
               padding: '10px 16px',
               background: 'var(--surface-2)',
               borderBottom: '1px solid var(--border)',
@@ -539,6 +586,7 @@ export default function UserManagement() {
               <span>Email</span>
               <span>Role</span>
               <span>Jurisdiction</span>
+              <span>Trust Score</span>
               <span style={{ textAlign: 'center' }}>Status</span>
               <span style={{ textAlign: 'right' }}>Actions</span>
             </div>
@@ -548,7 +596,7 @@ export default function UserManagement() {
             <div style={{ textAlign: 'center', padding: 40 }}>Loading users...</div>
           ) : filtered.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px 20px' }}>
-              <div style={{ fontSize: 32, marginBottom: 10 }}>👥</div>
+              <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'center' }}><Users size={40} color="var(--text-muted)" opacity={0.5} /></div>
               <div style={{ fontWeight: 700, marginBottom: 4 }}>No users found</div>
               <div className="text-muted text-sm">Try adjusting your filters.</div>
             </div>
@@ -581,8 +629,8 @@ export default function UserManagement() {
                   {/* Meta row: jurisdiction + crew badge */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
                     {(u.barangay_name || u.dumpsite_name) && (
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                        📍 {u.role === 'dumpsite' ? (u.dumpsite_name || '—') : (u.barangay_name || '—')}
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <MapPin size={12} /> {u.role === 'dumpsite' ? (u.dumpsite_name || '—') : (u.barangay_name || '—')}
                       </span>
                     )}
                     {u.employee_type === 'crew_member' && (
@@ -591,6 +639,20 @@ export default function UserManagement() {
                         background: 'rgba(251,191,36,0.12)', color: '#f59e0b',
                         border: '1px solid rgba(251,191,36,0.3)', letterSpacing: '.06em',
                       }}>CREW</span>
+                    )}
+                    {u.role === 'driver' && (
+                      <>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: u.points < 0 ? '#e74c3c' : 'var(--text-muted)' }}>
+                          {u.points ?? 0} pts
+                        </span>
+                        {u.is_suspended && (
+                          <span style={{
+                            fontSize: 8, fontWeight: 800, padding: '1px 6px', borderRadius: 10,
+                            background: 'rgba(231,76,60,0.1)', color: '#e74c3c',
+                            border: '1px solid rgba(231,76,60,0.3)', letterSpacing: '.06em',
+                          }}>SUSPENDED</span>
+                        )}
+                      </>
                     )}
                   </div>
 
@@ -614,22 +676,32 @@ export default function UserManagement() {
                     <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1 }}>
                       {u.is_active ? 'Active' : 'Inactive'}
                     </span>
+                    {u.role === 'driver' && u.is_suspended && (
+                      <button
+                        onClick={() => setLiftModal(u)}
+                        style={{
+                          background: 'rgba(46,204,113,0.1)', border: '1px solid rgba(46,204,113,0.3)',
+                          borderRadius: 8, padding: '6px 12px', cursor: 'pointer',
+                          fontSize: 12, color: '#2ecc71', display: 'flex', alignItems: 'center', gap: 4
+                        }}
+                      ><Shield size={14} /> Lift</button>
+                    )}
                     <button
                       onClick={() => setModal(u)}
                       style={{
                         background: 'var(--surface-2)', border: '1px solid var(--border)',
                         borderRadius: 8, padding: '6px 12px', cursor: 'pointer',
-                        fontSize: 12, color: 'var(--text)',
+                        fontSize: 12, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 4
                       }}
-                    >✏️ Edit</button>
+                    ><Edit2 size={14} /> Edit</button>
                     <button
-                      onClick={() => deleteUser(u.id)}
+                      onClick={() => setDeleteModal(u)}
                       style={{
                         background: 'rgba(231,76,60,0.07)', border: '1px solid rgba(231,76,60,0.25)',
                         borderRadius: 8, padding: '6px 12px', cursor: 'pointer',
-                        fontSize: 12, color: '#e74c3c',
+                        fontSize: 12, color: '#e74c3c', display: 'flex', alignItems: 'center', gap: 4
                       }}
-                    >🗑</button>
+                    ><Trash2 size={14} /></button>
                   </div>
                 </div>
               ))}
@@ -642,7 +714,7 @@ export default function UserManagement() {
                 className="um-row"
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '2fr 2fr 1fr 1.2fr 80px 100px',
+                  gridTemplateColumns: '2fr 2fr 1fr 1.2fr 1fr 80px 100px',
                   padding: '13px 16px',
                   alignItems: 'center',
                   borderBottom: idx < filtered.length - 1 ? '1px solid var(--border)' : 'none',
@@ -681,6 +753,27 @@ export default function UserManagement() {
                   {u.role === 'dumpsite' ? (u.dumpsite_name || '—') : (u.barangay_name || '—')}
                 </span>
 
+                {/* Trust Score */}
+                <div style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {u.role === 'driver' ? (
+                    <>
+                      <span style={{ fontWeight: 600, color: u.points < 0 ? '#e74c3c' : 'var(--text)' }}>
+                        {u.points ?? 0} pts
+                      </span>
+                      {u.is_suspended && (
+                        <span style={{
+                          background: 'rgba(231,76,60,0.1)', color: '#e74c3c',
+                          border: '1px solid rgba(231,76,60,0.3)',
+                          fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 10,
+                          alignSelf: 'flex-start'
+                        }}>SUSPENDED</span>
+                      )}
+                    </>
+                  ) : (
+                    <span style={{ color: 'var(--text-muted)' }}>—</span>
+                  )}
+                </div>
+
                 {/* Active toggle */}
                 <div style={{ display: 'flex', justifyContent: 'center' }}>
                   <div
@@ -702,24 +795,35 @@ export default function UserManagement() {
 
                 {/* Actions */}
                 <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                  {u.role === 'driver' && u.is_suspended && (
+                    <button
+                      onClick={() => setLiftModal(u)}
+                      title="Lift Suspension"
+                      style={{
+                        background: 'rgba(46,204,113,0.1)', border: '1px solid rgba(46,204,113,0.3)',
+                        borderRadius: 8, padding: '7px', cursor: 'pointer',
+                        color: '#2ecc71', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                      }}
+                    ><Shield size={16} /></button>
+                  )}
                   <button
                     onClick={() => setModal(u)}
                     title="Edit"
                     style={{
                       background: 'var(--surface-2)', border: '1px solid var(--border)',
-                      borderRadius: 8, padding: '5px 10px', cursor: 'pointer',
-                      fontSize: 12, color: 'var(--text)',
+                      borderRadius: 8, padding: '7px', cursor: 'pointer',
+                      color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'center'
                     }}
-                  >✏️</button>
+                  ><Edit2 size={16} /></button>
                   <button
                     onClick={() => setDeleteModal(u)}
                     title="Delete"
                     style={{
                       background: 'rgba(231,76,60,0.07)', border: '1px solid rgba(231,76,60,0.25)',
-                      borderRadius: 8, padding: '5px 10px', cursor: 'pointer',
-                      fontSize: 12, color: '#e74c3c',
+                      borderRadius: 8, padding: '7px', cursor: 'pointer',
+                      color: '#e74c3c', display: 'flex', alignItems: 'center', justifyContent: 'center'
                     }}
-                  >🗑</button>
+                  ><Trash2 size={16} /></button>
                 </div>
               </div>
             ))
@@ -757,45 +861,92 @@ export default function UserManagement() {
 
       </div>
 
-      {deleteModal && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
-          zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
-        }} onClick={() => setDeleteModal(null)}>
+      {
+        deleteModal && (
           <div style={{
-            background: 'var(--surface)', borderRadius: 16, padding: '24px 20px',
-            width: '100%', maxWidth: 360, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-            textAlign: 'center',
-          }} onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
-            <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: '0 0 8px 0' }}>
-              Delete User?
-            </h3>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24, lineHeight: 1.4 }}>
-              Are you sure you want to permanently delete <strong>{deleteModal.full_name || deleteModal.username}</strong>? This action cannot be undone.
-            </p>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={() => setDeleteModal(null)}
-                style={{ flex: 1, padding: '10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
-                onMouseEnter={e => e.target.style.opacity = 0.8}
-                onMouseLeave={e => e.target.style.opacity = 1}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmDeleteUser}
-                style={{ flex: 1, padding: '10px', borderRadius: 8, border: 'none', background: '#e74c3c', color: '#fff', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
-                onMouseEnter={e => e.target.style.opacity = 0.8}
-                onMouseLeave={e => e.target.style.opacity = 1}
-              >
-                Delete
-              </button>
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+            zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+          }} onClick={() => setDeleteModal(null)}>
+            <div style={{
+              background: 'var(--surface)', borderRadius: 16, padding: '24px 20px',
+              width: '100%', maxWidth: 360, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+              textAlign: 'center',
+            }} onClick={e => e.stopPropagation()}>
+              <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'center' }}><AlertTriangle size={48} color="#e74c3c" /></div>
+              <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: '0 0 8px 0' }}>
+                Delete User?
+              </h3>
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24, lineHeight: 1.4 }}>
+                Are you sure you want to permanently delete <strong>{deleteModal.full_name || deleteModal.username}</strong>? This action cannot be undone.
+              </p>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  onClick={() => setDeleteModal(null)}
+                  style={{ flex: 1, padding: '10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
+                  onMouseEnter={e => e.target.style.opacity = 0.8}
+                  onMouseLeave={e => e.target.style.opacity = 1}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmDeleteUser}
+                  style={{ flex: 1, padding: '10px', borderRadius: 8, border: 'none', background: '#e74c3c', color: '#fff', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
+                  onMouseEnter={e => e.target.style.opacity = 0.8}
+                  onMouseLeave={e => e.target.style.opacity = 1}
+                >
+                  Delete
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
-    </DashboardLayout>
+      {
+        liftModal && (
+          <div style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+            zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+          }} onClick={() => setLiftModal(null)}>
+            <div style={{
+              background: 'var(--surface)', borderRadius: 16, padding: '24px 20px',
+              width: '100%', maxWidth: 400, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            }} onClick={e => e.stopPropagation()}>
+              <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: '0 0 16px 0' }}>
+                Lift Suspension
+              </h3>
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20, lineHeight: 1.4 }}>
+                You are manually lifting the suspension for <strong>{liftModal.full_name || liftModal.username}</strong>. This driver will be able to start shifts immediately. Please provide a reason for the audit log.
+              </p>
+              <div style={{ marginBottom: 20 }}>
+                <label className="form-label">Reason</label>
+                <textarea
+                  className="form-input"
+                  rows={3}
+                  placeholder="E.g., Cleared after review by admin."
+                  value={liftReason}
+                  onChange={e => setLiftReason(e.target.value)}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  onClick={() => setLiftModal(null)}
+                  style={{ flex: 1, padding: '10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmLiftSuspension}
+                  style={{ flex: 1, padding: '10px', borderRadius: 8, border: 'none', background: '#2ecc71', color: '#fff', fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Lift Suspension
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+    </DashboardLayout >
   )
 }

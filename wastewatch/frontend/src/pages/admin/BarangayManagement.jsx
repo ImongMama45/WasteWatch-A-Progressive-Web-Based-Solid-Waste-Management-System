@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Map, CheckCircle2, AlertTriangle, AlertOctagon, Search, ChevronRight, Filter } from 'lucide-react'
 import api from '../../api/client'
 import { ICONS } from '../../api/navConfig'
 import DashboardLayout from '../../components/DashboardLayout'
+import BarangayDetailModal from './BarangayDetail'
 
 export default function BarangayManagement() {
   const [barangays, setBarangays] = useState([])
@@ -12,6 +14,10 @@ export default function BarangayManagement() {
   // Filters
   const [search, setSearch] = useState('')
   const [healthFilter, setHealthFilter] = useState('all') // 'all', 'critical', 'warning', 'healthy'
+  const [issueFilter, setIssueFilter] = useState('all') // 'all', 'has_hotspots', 'has_escalations', 'no_issues'
+  const [sortBy, setSortBy] = useState('name') // 'name', 'population', 'issues'
+
+  const [selectedBarangayId, setSelectedBarangayId] = useState(null)
 
   const navigate = useNavigate()
 
@@ -33,13 +39,32 @@ export default function BarangayManagement() {
   }
 
   const filteredBarangays = useMemo(() => {
-    return barangays.filter(brgy => {
+    let result = barangays.filter(brgy => {
       const matchesSearch = brgy.name.toLowerCase().includes(search.toLowerCase())
       if (!matchesSearch) return false
       if (healthFilter !== 'all' && getHealthStatus(brgy) !== healthFilter) return false
+      
+      if (issueFilter === 'has_hotspots' && brgy.active_hotspots === 0) return false;
+      if (issueFilter === 'has_escalations' && brgy.open_escalations === 0) return false;
+      if (issueFilter === 'no_issues' && (brgy.active_hotspots > 0 || brgy.open_escalations > 0 || brgy.pending_concerns > 0)) return false;
+      
       return true
     })
-  }, [barangays, search, healthFilter])
+
+    result.sort((a, b) => {
+      if (sortBy === 'name') return a.name.localeCompare(b.name);
+      if (sortBy === 'population') return (b.population || 0) - (a.population || 0);
+      if (sortBy === 'issues') {
+        const issuesA = (a.active_hotspots || 0) + (a.open_escalations || 0) + (a.pending_concerns || 0);
+        const issuesB = (b.active_hotspots || 0) + (b.open_escalations || 0) + (b.pending_concerns || 0);
+        if (issuesB !== issuesA) return issuesB - issuesA;
+        return a.name.localeCompare(b.name);
+      }
+      return 0;
+    })
+    
+    return result;
+  }, [barangays, search, healthFilter, issueFilter, sortBy])
 
   // Summary Stats
   const stats = useMemo(() => {
@@ -70,10 +95,10 @@ export default function BarangayManagement() {
 
       {/* Stats Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 20, marginBottom: 32 }}>
-        <StatCard title="Total Barangays" value={stats.total} icon="🗺️" color="#3B82F6" bg="#EFF6FF" />
-        <StatCard title="Healthy Zones" value={stats.healthy} icon="✅" color="#10B981" bg="#ECFDF5" />
-        <StatCard title="Attention Needed" value={stats.warning} icon="⚠️" color="#F59E0B" bg="#FFFBEB" />
-        <StatCard title="Critical Issues" value={stats.critical} icon="🚨" color="#EF4444" bg="#FEF2F2" />
+        <StatCard title="Total Barangays" value={stats.total} icon={<Map size={24} />} color="#3B82F6" bg="#EFF6FF" />
+        <StatCard title="Healthy Zones" value={stats.healthy} icon={<CheckCircle2 size={24} />} color="#10B981" bg="#ECFDF5" />
+        <StatCard title="Attention Needed" value={stats.warning} icon={<AlertTriangle size={24} />} color="#F59E0B" bg="#FFFBEB" />
+        <StatCard title="Critical Issues" value={stats.critical} icon={<AlertOctagon size={24} />} color="#EF4444" bg="#FEF2F2" />
       </div>
 
       {/* Toolbar */}
@@ -83,7 +108,7 @@ export default function BarangayManagement() {
         boxShadow: '0 4px 20px rgba(0,0,0,0.02)', alignItems: 'center'
       }}>
         <div style={{ position: 'relative', flex: 1, maxWidth: 360 }}>
-          <span style={{ position: 'absolute', left: 14, top: 10, color: '#94A3B8' }}>{ICONS.search || '🔍'}</span>
+          <span style={{ position: 'absolute', left: 14, top: 10, color: '#94A3B8' }}><Search size={18} /></span>
           <input 
             type="text" 
             placeholder="Search barangay..." 
@@ -97,22 +122,43 @@ export default function BarangayManagement() {
           />
         </div>
         
-        <div style={{ display: 'flex', gap: 8 }}>
-          {['all', 'critical', 'warning', 'healthy'].map(f => (
-            <button
-              key={f}
-              onClick={() => setHealthFilter(f)}
-              style={{
-                padding: '8px 16px', borderRadius: 20, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                textTransform: 'capitalize', transition: 'all 0.2s',
-                background: healthFilter === f ? '#0F172A' : '#F1F5F9',
-                color: healthFilter === f ? '#FFF' : '#64748B',
-                border: 'none'
-              }}
-            >
-              {f}
-            </button>
-          ))}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingRight: 4 }}>
+             <Filter size={16} color="#94A3B8" />
+             <span style={{ fontSize: 13, fontWeight: 600, color: '#64748B' }}>Filters:</span>
+          </div>
+          
+          <select 
+            value={healthFilter} 
+            onChange={e => setHealthFilter(e.target.value)}
+            style={{ padding: '8px 32px 8px 12px', borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', fontSize: 13, fontWeight: 600, color: '#475569', cursor: 'pointer', appearance: 'none', backgroundImage: 'url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2394A3B8%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '10px auto' }}
+          >
+            <option value="all">Health: All</option>
+            <option value="critical">Health: Critical</option>
+            <option value="warning">Health: Warning</option>
+            <option value="healthy">Health: Healthy</option>
+          </select>
+
+          <select 
+            value={issueFilter} 
+            onChange={e => setIssueFilter(e.target.value)}
+            style={{ padding: '8px 32px 8px 12px', borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', fontSize: 13, fontWeight: 600, color: '#475569', cursor: 'pointer', appearance: 'none', backgroundImage: 'url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2394A3B8%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '10px auto' }}
+          >
+            <option value="all">Issues: All</option>
+            <option value="has_hotspots">Has Hotspots</option>
+            <option value="has_escalations">Has Escalations</option>
+            <option value="no_issues">No Issues (Clear)</option>
+          </select>
+
+          <select 
+            value={sortBy} 
+            onChange={e => setSortBy(e.target.value)}
+            style={{ padding: '8px 32px 8px 12px', borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', fontSize: 13, fontWeight: 600, color: '#475569', cursor: 'pointer', appearance: 'none', backgroundImage: 'url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2394A3B8%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '10px auto' }}
+          >
+            <option value="name">Sort: A-Z</option>
+            <option value="population">Sort: Population</option>
+            <option value="issues">Sort: Most Issues</option>
+          </select>
         </div>
       </div>
 
@@ -140,7 +186,7 @@ export default function BarangayManagement() {
               ) : filteredBarangays.length === 0 ? (
                 <tr>
                   <td colSpan="8" style={{ padding: '60px', textAlign: 'center' }}>
-                    <div style={{ fontSize: 40, marginBottom: 12 }}>🔍</div>
+                    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12, color: '#94A3B8' }}><Search size={40} /></div>
                     <div style={{ color: '#0F172A', fontWeight: 600, fontSize: 15 }}>No barangays found</div>
                     <div style={{ color: '#64748B', fontSize: 13, marginTop: 4 }}>Try adjusting your search or filters.</div>
                   </td>
@@ -158,7 +204,7 @@ export default function BarangayManagement() {
                       }}
                       onMouseEnter={e => e.currentTarget.style.background = '#F8FAFC'}
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                      onClick={() => navigate(`/admin/barangays/${brgy.id}`)}
+                      onClick={() => setSelectedBarangayId(brgy.id)}
                     >
                       <td style={{ padding: '18px 24px' }}>
                         <div style={{ fontWeight: 700, color: '#0F172A', fontSize: 14 }}>Brgy {brgy.name}</div>
@@ -188,13 +234,14 @@ export default function BarangayManagement() {
                       <td style={{ padding: '18px 24px', textAlign: 'right' }}>
                         <button style={{
                           background: '#F1F5F9', color: '#0F172A', border: 'none',
-                          padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-                          cursor: 'pointer', transition: 'all 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                          padding: '6px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                          cursor: 'pointer', transition: 'all 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                          display: 'inline-flex', alignItems: 'center', gap: 4
                         }}
                         onMouseEnter={e => { e.currentTarget.style.background = '#E2E8F0'; e.stopPropagation(); }}
                         onMouseLeave={e => e.currentTarget.style.background = '#F1F5F9'}
                         >
-                          Manage
+                          Manage <ChevronRight size={16} />
                         </button>
                       </td>
                     </tr>
@@ -206,6 +253,13 @@ export default function BarangayManagement() {
         </div>
       </div>
     </div>
+    
+    {selectedBarangayId && (
+      <BarangayDetailModal 
+        barangayId={selectedBarangayId} 
+        onClose={() => setSelectedBarangayId(null)} 
+      />
+    )}
     </DashboardLayout>
   )
 }
@@ -216,9 +270,14 @@ function StatCard({ title, value, icon, color, bg }) {
     <div style={{ 
       background: '#fff', borderRadius: 16, padding: 24, 
       display: 'flex', alignItems: 'center', gap: 16,
-      border: '1px solid rgba(0,0,0,0.06)', boxShadow: '0 4px 20px rgba(0,0,0,0.02)'
-    }}>
-      <div style={{ width: 56, height: 56, borderRadius: 16, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>
+      border: '1px solid rgba(0,0,0,0.06)', boxShadow: '0 4px 20px rgba(0,0,0,0.02)',
+      transition: 'transform 0.2s, box-shadow 0.2s',
+      cursor: 'default'
+    }}
+    onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.06)'; }}
+    onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.02)'; }}
+    >
+      <div style={{ width: 56, height: 56, borderRadius: 16, background: bg, color: color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {icon}
       </div>
       <div>
@@ -264,9 +323,9 @@ function CountBadge({ count, threshold, type }) {
 
 function HealthPill({ status }) {
   const map = {
-    critical: { bg: '#FEF2F2', color: '#DC2626', icon: '🚨' },
-    warning: { bg: '#FFFBEB', color: '#D97706', icon: '⚠️' },
-    healthy: { bg: '#F0FDF4', color: '#10B981', icon: '✅' },
+    critical: { bg: '#FEF2F2', color: '#DC2626', icon: <AlertOctagon size={14} /> },
+    warning: { bg: '#FFFBEB', color: '#D97706', icon: <AlertTriangle size={14} /> },
+    healthy: { bg: '#F0FDF4', color: '#10B981', icon: <CheckCircle2 size={14} /> },
   }
   const config = map[status];
   
@@ -276,7 +335,7 @@ function HealthPill({ status }) {
       background: config.bg, color: config.color,
       padding: '6px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em'
     }}>
-      <span style={{ fontSize: 14 }}>{config.icon}</span>
+      {config.icon}
       {status}
     </div>
   )

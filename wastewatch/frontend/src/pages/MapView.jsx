@@ -337,7 +337,7 @@ export default function MapView() {
   const [activeFilters, setActiveFilters] = useState({
     residential: true, commercial: true, industrial: true, agricultural: true,
     routes: true, trucks: true, dumpSites: true, reports: true,
-    allBarangays: false,
+    citywideView: false,
     inactiveRoutes: false,
   })
   const [barangayGeo, setBarangayGeo] = useState(null)
@@ -366,6 +366,35 @@ export default function MapView() {
   useEffect(() => {
     injectStopMarkerStyles()
   }, [])
+
+  const hasAutoSelectedZoneRef = useRef(false)
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768)
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  useEffect(() => {
+    // If we have map instance, user barangay, barangay geometries, and haven't auto-selected yet
+    if (mapInstance && user?.barangay && barangays.length > 0 && barangayGeo && !hasAutoSelectedZoneRef.current) {
+      hasAutoSelectedZoneRef.current = true
+      const userBrgy = barangays.find(b => b.id === user.barangay)
+      if (userBrgy) {
+        selectedZoneRef.current = userBrgy
+        setSelectedZone(userBrgy)
+        // Quietly fit bounds for auto-selected barangay (no bottom sheet popup)
+        try {
+          const feature = barangayGeo.features.find(f => f.properties.brgy_name === userBrgy.name)
+          if (feature) {
+            const layer = window.L.geoJSON(feature)
+            mapInstance.fitBounds(layer.getBounds())
+          }
+        } catch (e) { console.error('Failed to fit bounds for auto-selected barangay', e) }
+      }
+    }
+  }, [mapInstance, user, barangays, barangayGeo])
 
   const activeFiltersRef = useRef(activeFilters)
   const activeTrucksRef = useRef(activeTrucks)
@@ -410,7 +439,7 @@ export default function MapView() {
 
   // ── Handle focus from navigation state ──
   useEffect(() => {
-    if (!mapInstance || !reports.length) return
+    if (!mapInstance) return
 
     const focus = location.state?.focusReport
     if (!focus) return
@@ -886,7 +915,7 @@ export default function MapView() {
   // ── Draw stop markers for the selected barangay's active drivers ──────────
   // Only called when a zone IS selected (or if 'All Barangays' is enabled); mirrors ShiftRouteModule stop colours.
   // Does NOT draw polylines, ORS routes, or navigation paths — driver-only.
-  function drawGlobalStops(map, allowedShiftIds = null, showAll = false, showInactive = false) {
+  function drawGlobalStops(map, allowedShiftIds = null, showCitywide = false, showInactive = false) {
     if (!map || !window.L) return
     const L = window.L
 
@@ -903,7 +932,7 @@ export default function MapView() {
       if (isCompletedOrCancelled && !showInactive) return false
 
       if (showInactive) {
-        if (showAll) return true
+        if (showCitywide) return true
         return scheduleMatchesZone(s, selectedZoneRef.current)
       }
 
@@ -922,11 +951,13 @@ export default function MapView() {
 
       // ── Index 0: home base marker ──
       if (waypoints[0]?.lat && waypoints[0]?.lng) {
-        const baseKey = `${schedule.id}:base`
-        desired.set(baseKey, {
-          wp: waypoints[0], stopOrder: 'base',
-          stopStatus: 'base', details: null, schedule, statusKey: baseKey,
-        })
+        if (showCitywide || Boolean(selectedZoneRef.current)) {
+          const baseKey = `${schedule.id}:base`
+          desired.set(baseKey, {
+            wp: waypoints[0], stopOrder: 'base',
+            stopStatus: 'base', details: null, schedule, statusKey: baseKey,
+          })
+        }
       }
 
       // ── Index 1+: collection stops ──
@@ -936,7 +967,7 @@ export default function MapView() {
 
         const currentZone = selectedZoneRef.current
         // Compare as strings — barangay_id may be int or string from API
-        if (!showAll && currentZone && currentZone.id != null && String(wp.barangay_id) !== String(currentZone.id)) return
+        if (!showCitywide && currentZone && currentZone.id != null && String(wp.barangay_id) !== String(currentZone.id)) return
 
         const statusKey = `${schedule.id}:${stopOrder}`
         if (!stopStatusMapRef.current.has(statusKey)) return
@@ -1420,9 +1451,9 @@ export default function MapView() {
     }
 
     // ── Live truck markers ──
-    const showAll = activeFiltersRef.current.allBarangays
+    const showCitywide = activeFiltersRef.current.citywideView
     const showInactive = activeFiltersRef.current.inactiveRoutes
-    const showAllTrucks = !zoneFocusActive || showAll
+    const showAllTrucks = !zoneFocusActive || showCitywide
 
     if (activeFiltersRef.current.trucks) {
       const barangayTrucks = barangayDataRef.current.trucks
@@ -1494,17 +1525,24 @@ export default function MapView() {
       })
 
       // Draw stop markers scoped to this barangay's active schedules only (or all if showAll/showInactive)
-      drawGlobalStops(map, allowedShiftIds, showAll, showInactive)
+      drawGlobalStops(map, allowedShiftIds, showCitywide, showInactive)
     }
 
     // ── Dump sites (hidden when barangay focus is active, unless showAll) ──
-    if (activeFiltersRef.current.dumpSites && (!zoneFocusActive || showAll)) {
+    if (activeFiltersRef.current.dumpSites) {
       dumpsites.forEach(site => {
         if (!site.latitude || !site.longitude) return
+
+        const bName = typeof site.barangay === 'object' ? site.barangay?.name : barangaysRef.current.find(b => b.id === site.barangay)?.name || site.barangay_name || 'Unknown'
+
+        if (!showCitywide) {
+          if (!zoneFocusActive) return;
+          if (normalizeZoneName(bName) !== normalizeZoneName(selectedZoneRef.current.name)) return;
+        }
+
         const t = dumpsiteTypeMap[site.type] || DUMPSITE_TYPES[1]
         const icon = L.divIcon({ html: dumpSiteIconHtml(site.type), className: "", iconSize: [36, 42], iconAnchor: [18, 42] })
         const m = L.marker([Number(site.latitude), Number(site.longitude)], { icon }).addTo(map)
-        const bName = typeof site.barangay === 'object' ? site.barangay?.name : barangaysRef.current.find(b => b.id === site.barangay)?.name || site.barangay_name || 'Unknown'
         m.bindPopup(`<div style="font-family:sans-serif;min-width:160px;">
           <strong style="color:${t.color};display:flex;align-items:center;gap:4px;"><div style="width:16px;height:16px;display:flex;">${ReactDOMServer.renderToString(t.icon)}</div> ${site.name}</strong>
           <div style="margin-top:2px;">
@@ -1517,10 +1555,17 @@ export default function MapView() {
     }
 
     // ── Garbage reports (hidden when barangay focus is active, unless showAll) ──
-    if (activeFiltersRef.current.reports && (!zoneFocusActive || showAll)) {
+    if (activeFiltersRef.current.reports) {
+      const visibleReports = reports.filter(r => {
+        if (!showCitywide) {
+          if (!zoneFocusActive) return false;
+          if (normalizeZoneName(r.barangay_name) !== normalizeZoneName(selectedZoneRef.current.name)) return false;
+        }
+        return (r.latitude || r.lat) && (r.longitude || r.lng);
+      });
+
       if (heatmapModeRef.current && window.L.heatLayer) {
-        const heatData = reports
-          .filter(r => (r.latitude || r.lat) && (r.longitude || r.lng))
+        const heatData = visibleReports
           .map(r => {
             const lat = Number(r.latitude || r.lat)
             const lng = Number(r.longitude || r.lng)
@@ -1544,7 +1589,7 @@ export default function MapView() {
           layersRef.current['reports-heatmap'] = heatLayer
         }
       } else {
-        reports.forEach(report => {
+        visibleReports.forEach(report => {
           const lat = report.latitude || report.lat
           const lng = report.longitude || report.lng
           if (!lat || !lng) return
@@ -1720,19 +1765,20 @@ export default function MapView() {
           </div>
 
           {/* Right section: Map Toggles */}
-          <div style={{ pointerEvents: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <div style={{ pointerEvents: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "nowrap", justifyContent: "flex-end" }}>
             <button className="ww-btn" onClick={() => setHeatmapMode(h => !h)}
               style={{
                 background: heatmapMode ? "rgba(239,68,68,0.15)" : "rgba(15,23,42,0.65)",
                 backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
                 border: `1px solid ${heatmapMode ? "rgba(239,68,68,0.4)" : "rgba(255,255,255,0.15)"}`,
                 color: heatmapMode ? "#fca5a5" : "#e2e8f0",
-                borderRadius: 20, padding: "8px 16px", fontSize: 13, fontWeight: 600,
-                display: "flex", alignItems: "center", gap: 6,
-                boxShadow: "0 4px 12px rgba(0,0,0,0.2)"
+                borderRadius: 20, padding: isMobile ? "0" : "8px 16px", fontSize: 13, fontWeight: 600,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+                minWidth: isMobile ? 44 : 'auto', minHeight: isMobile ? 44 : 'auto'
               }}>
               <div style={{ width: 18, height: 18, display: 'flex', color: heatmapMode ? "#ef4444" : "#94a3b8" }}>{ICONS.hotspot}</div>
-              Heatmap {heatmapMode ? "On" : "Off"}
+              {!isMobile && (<span>Heatmap {heatmapMode ? "On" : "Off"}</span>)}
             </button>
             <button className="ww-btn" onClick={() => { setFilterOpen(o => !o); setLegendOpen(false) }}
               style={{
@@ -1740,12 +1786,13 @@ export default function MapView() {
                 backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
                 border: `1px solid ${filterOpen ? "rgba(20,184,166,0.4)" : "rgba(255,255,255,0.15)"}`,
                 color: filterOpen ? "#5eead4" : "#e2e8f0",
-                borderRadius: 20, padding: "8px 16px", fontSize: 13, fontWeight: 600,
-                display: "flex", alignItems: "center", gap: 6,
-                boxShadow: "0 4px 12px rgba(0,0,0,0.2)"
+                borderRadius: 20, padding: isMobile ? "0" : "8px 16px", fontSize: 13, fontWeight: 600,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+                minWidth: isMobile ? 44 : 'auto', minHeight: isMobile ? 44 : 'auto'
               }}>
               <div style={{ width: 18, height: 18, display: 'flex', color: filterOpen ? "#14b8a6" : "#94a3b8" }}>{ICONS.analytics}</div>
-              Filters
+              {!isMobile && (<span>Filters</span>)}
             </button>
             <button className="ww-btn" onClick={() => { setLegendOpen(o => !o); setFilterOpen(false) }}
               style={{
@@ -1753,15 +1800,72 @@ export default function MapView() {
                 backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
                 border: `1px solid ${legendOpen ? "rgba(20,184,166,0.4)" : "rgba(255,255,255,0.15)"}`,
                 color: legendOpen ? "#5eead4" : "#e2e8f0",
-                borderRadius: 20, padding: "8px 16px", fontSize: 13, fontWeight: 600,
-                display: "flex", alignItems: "center", gap: 6,
-                boxShadow: "0 4px 12px rgba(0,0,0,0.2)"
+                borderRadius: 20, padding: isMobile ? "0" : "8px 16px", fontSize: 13, fontWeight: 600,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+                minWidth: isMobile ? 44 : 'auto', minHeight: isMobile ? 44 : 'auto'
               }}>
               <div style={{ width: 18, height: 18, display: 'flex', color: legendOpen ? "#14b8a6" : "#94a3b8" }}>{ICONS.map}</div>
-              Legend
+              {!isMobile && (<span>Legend</span>)}
             </button>
           </div>
         </div>
+
+        {/* ── MAP SUMMARY PANEL ── */}
+        {!panelOpen && (
+          <div style={{
+            position: "absolute", bottom: 24, left: 16, zIndex: 400,
+            background: "rgba(15,23,42,0.85)", border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 12, padding: "12px 16px",
+            backdropFilter: "blur(12px)", boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+            pointerEvents: "auto", animation: "fadeIn 0.2s ease-out"
+          }}>
+            <div style={{ color: "white", fontWeight: 700, fontSize: 12, letterSpacing: '0.5px', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 14, height: 14, color: "#14b8a6", display: 'flex' }}>{ICONS.analytics}</div>
+                MAP SUMMARY
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: '#10b981', fontWeight: 600 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981', animation: 'pulse 2s infinite' }} />
+                LIVE
+              </div>
+            </div>
+            
+            {(() => {
+              const showCitywide = activeFilters.citywideView
+              const summaryReports = (showCitywide || !selectedZone) 
+                ? reports 
+                : reports.filter(r => normalizeZoneName(r.barangay_name) === normalizeZoneName(selectedZone.name))
+              const highSev = summaryReports.filter(r => r.severity === 'high').length
+              const medSev = summaryReports.filter(r => r.severity === 'medium').length
+              const lowSev = summaryReports.filter(r => r.severity === 'low').length
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, fontSize: 13 }}>
+                    <span style={{ color: "#94a3b8" }}>Reports:</span>
+                    <span style={{ color: "#e2e8f0", fontWeight: 600 }}>{summaryReports.length}</span>
+                  </div>
+                  
+                  {summaryReports.length > 0 && (
+                    <div style={{ display: 'flex', gap: 4, marginTop: -2, marginBottom: 4 }}>
+                       {highSev > 0 && <div title={`${highSev} High`} style={{ flex: highSev, height: 4, background: '#ef4444', borderRadius: 2 }} />}
+                       {medSev > 0 && <div title={`${medSev} Medium`} style={{ flex: medSev, height: 4, background: '#f59e0b', borderRadius: 2 }} />}
+                       {lowSev > 0 && <div title={`${lowSev} Low`} style={{ flex: lowSev, height: 4, background: '#22c55e', borderRadius: 2 }} />}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, fontSize: 13 }}>
+                    <span style={{ color: "#94a3b8" }}>Active Trucks:</span>
+                    <span style={{ color: "#e2e8f0", fontWeight: 600 }}>
+                      {selectedZone ? barangayData.trucks.length : activeTrucks.length}
+                    </span>
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
+        )}
 
         {/* ── FILTER PANEL ── */}
         {filterOpen && (
@@ -1769,6 +1873,7 @@ export default function MapView() {
             position: "absolute", top: 64, right: 16,
             background: "rgba(15,23,42,0.98)", border: "1px solid rgba(255,255,255,0.08)",
             borderRadius: 12, padding: "18px 20px", zIndex: 500, minWidth: 240,
+            maxWidth: "calc(100vw - 32px)", maxHeight: "calc(100vh - 120px)", overflowY: "auto",
             animation: "fadeIn 0.2s ease-out", boxShadow: "0 12px 40px rgba(0,0,0,0.6)",
             backdropFilter: "blur(12px)"
           }}>
@@ -1778,7 +1883,7 @@ export default function MapView() {
               { key: "trucks", label: "Truck Markers", icon: ICONS.truck },
               { key: "dumpSites", label: "Dump Sites", icon: ICONS.dumpsite },
               { key: "reports", label: "Garbage Reports", icon: ICONS.warning },
-              { key: "allBarangays", label: "Show All Barangays", icon: <div style={{ width: 14, height: 14, border: '2px solid currentColor', borderRadius: 2 }}></div> },
+              { key: "citywideView", label: "Show Citywide Data", icon: <div style={{ width: 14, height: 14, border: '2px solid currentColor', borderRadius: 2 }}></div> },
               { key: "inactiveRoutes", label: "Show Inactive/Completed Routes", icon: <div style={{ width: 14, height: 14, border: '2px solid currentColor', borderRadius: 2, borderStyle: 'dashed' }}></div> },
             ].map(f => (
               <div key={f.key} className="filter-chip" onClick={() => toggleFilter(f.key)}
@@ -1901,9 +2006,61 @@ export default function MapView() {
                 style={{ position: "absolute", top: 12, right: 16, background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}>✕</button>
               <div style={{ padding: "0 20px 24px" }}>
                 {panelMode === "route" && selectedRoute && <RoutePanel route={selectedRoute} />}
-                {panelMode === "zone" && selectedZone && (
-                  <ZonePanel zone={selectedZone} barangayData={barangayData} schedules={schedules} onClearFocus={clearBarangayFocus} />
-                )}
+                {panelMode === "zone" && selectedZone && (() => {
+                  const zoneReports = reports.filter(r => normalizeZoneName(r.barangay_name) === normalizeZoneName(selectedZone.name))
+                  const zoneDumpsites = dumpsites.filter(d => {
+                    const bName = typeof d.barangay === 'object' ? d.barangay?.name : barangaysRef.current.find(b => b.id === d.barangay)?.name || d.barangay_name || d.name
+                    return normalizeZoneName(bName) === normalizeZoneName(selectedZone.name)
+                  })
+                  
+                  // Compute Collection Progress based on stopStatusMap
+                  let verified = 0, total = 0, lastCollected = null
+                  barangayData.stops.forEach(s => {
+                    const stopKey = `${s.schedule_id}:${s.stop_order}`
+                    const status = stopStatusMap.has(stopKey) ? normalizeStopStatus(stopStatusMap.get(stopKey)) : normalizeStopStatus(s.current_status || s.status)
+                    if (status) total++
+                    if (status === 'VERIFIED_COLLECTED' || status === 'COLLECTION_REPORTED') verified++
+                    
+                    if (status === 'VERIFIED_COLLECTED') {
+                      const ts = s.collected_at || s.collectedAt || s.collectedAtRaw
+                      if (ts) {
+                        const d = new Date(ts)
+                        if (!lastCollected || d > lastCollected) lastCollected = d
+                      }
+                    }
+                  })
+
+                  let dumpsite = zoneDumpsites[0]
+                  if (dumpsite) {
+                    dumpsite = { ...dumpsite, capacity_percent: dumpsite.fill_percent ?? dumpsite.capacity_used ?? dumpsite.capacity ?? 0 }
+                  }
+
+                  const zoneStats = {
+                    reportsBySeverity: {
+                      high: zoneReports.filter(r => r.severity === 'high').length,
+                      medium: zoneReports.filter(r => r.severity === 'medium').length,
+                      low: zoneReports.filter(r => r.severity === 'low').length,
+                    },
+                    reportsByStatus: {
+                      pending: zoneReports.filter(r => r.status === 'pending').length,
+                      resolved: zoneReports.filter(r => r.status === 'resolved').length,
+                    },
+                    dumpsite: zoneDumpsites[0],
+                    collectionProgress: { verified, total },
+                    lastCollectedTimestamp: lastCollected ? lastCollected.toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : null,
+                  }
+
+                  return (
+                    <ZonePanel 
+                      zone={selectedZone} 
+                      barangayData={barangayData} 
+                      schedules={schedules} 
+                      onClearFocus={clearBarangayFocus} 
+                      zoneStats={zoneStats}
+                      stopStatusMap={stopStatusMap}
+                    />
+                  )
+                })()}
               </div>
             </div>
           </>
@@ -2104,6 +2261,8 @@ function DetailRow({ icon, label, value, accent, last }) {
 function ReportPanel({ report, onStatusChange, onClose }) {
   const { user } = useAuth()
   const { notify } = useNotification()
+  const [isRejecting, setIsRejecting] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
   const canModerate = REPORT_MODERATOR_ROLES.includes(user?.role)
   const severityColors = { high: "#ef4444", medium: "#f59e0b", low: "#22c55e" }
   const typeLabels = { overflow: "Overflow", illegal_dumping: "Illegal Dumping", missed: "Missed Pickup" }
@@ -2148,12 +2307,10 @@ function ReportPanel({ report, onStatusChange, onClose }) {
       })
   }
 
-  function handleReject() {
+  function submitReject() {
+    if (!rejectReason.trim()) return notify({ variant: 'error-solid', message: 'Reason is required for rejection.' })
     const id = report.report_id || report.id
-    const reason = prompt('Please enter a reason for rejection:')
-    if (reason === null) return
-    if (!reason.trim()) return notify({ variant: 'error-solid', message: 'Reason is required for rejection.' })
-    api.post(`/api/watcher/reports/${id}/reject/`, { rejection_reason: reason })
+    api.post(`/api/watcher/reports/${id}/reject/`, { rejection_reason: rejectReason })
       .then(() => onStatusChange?.())
       .catch(err => {
         console.error(err)
@@ -2271,11 +2428,30 @@ function ReportPanel({ report, onStatusChange, onClose }) {
 
         {canModerate && (
           <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-            {report.status === 'pending' && (
+            {report.status === 'pending' && !isRejecting && (
               <>
                 <button onClick={handleApprove} className="btn" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: 6, background: "rgba(46,204,113,0.1)", border: "1px solid rgba(46,204,113,0.4)", color: "var(--accent)", borderRadius: 12, padding: "12px", fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}><CheckCircle size={16} /> Approve</button>
-                <button onClick={handleReject} className="btn" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: 6, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.4)", color: "#ef4444", borderRadius: 12, padding: "12px", fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}><XCircle size={16} /> Reject</button>
+                <button onClick={() => setIsRejecting(true)} className="btn" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: 6, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.4)", color: "#ef4444", borderRadius: 12, padding: "12px", fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}><XCircle size={16} /> Reject</button>
               </>
+            )}
+            {report.status === 'pending' && isRejecting && (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <textarea
+                  autoFocus
+                  placeholder="Why is this report being rejected?"
+                  value={rejectReason}
+                  onChange={e => setRejectReason(e.target.value)}
+                  style={{
+                    width: '100%', padding: '10px 14px', background: 'var(--surface-3)', border: '1px solid var(--border)',
+                    borderRadius: 12, color: 'var(--text)', fontSize: 13, resize: 'vertical', minHeight: 60,
+                    outline: 'none', fontFamily: 'var(--font-body)'
+                  }}
+                />
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => { setIsRejecting(false); setRejectReason('') }} style={{ flex: 1, padding: 8, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                  <button onClick={submitReject} style={{ flex: 1, padding: 8, background: '#ef4444', border: 'none', color: '#fff', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Confirm Reject</button>
+                </div>
+              </div>
             )}
             {report.status === 'approved' && (
               <button onClick={handleResolve} className="btn" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: 6, background: "rgba(46,204,113,0.1)", border: "1px solid rgba(46,204,113,0.4)", color: "var(--accent)", borderRadius: 12, padding: "12px", fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}><CheckCircle size={16} /> Mark Resolved</button>

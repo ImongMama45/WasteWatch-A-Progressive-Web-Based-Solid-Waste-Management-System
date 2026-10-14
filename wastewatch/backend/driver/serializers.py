@@ -11,7 +11,11 @@ from .models import (
     DriverShift,
 )
 from dumpsite.serializers import TruckFillEstimateSerializer
+from django.contrib.auth import get_user_model
+from accounts.models import UserRole, EmployeeType
+from .models import TruckStatus
 
+User = get_user_model()
 
 class TruckSerializer(serializers.ModelSerializer):
     driver_details = serializers.SerializerMethodField()
@@ -21,12 +25,81 @@ class TruckSerializer(serializers.ModelSerializer):
         slug_field='full_name',
         source='crew'
     )
+    drivers = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=User.objects.filter(role=UserRole.DRIVER),
+        required=False
+    )
+    crew = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=User.objects.filter(employee_type=EmployeeType.CREW_MEMBER),
+        required=False
+    )
     fill_estimates = TruckFillEstimateSerializer(many=True, read_only=True)
     photo_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Truck
         fields = '__all__'
+        read_only_fields = ['maintenance_start', 'past_crew_names', 'created_at', 'current_capacity']
+
+    def validate(self, attrs):
+        from rest_framework.exceptions import ValidationError
+        
+        instance = self.instance
+        old_status = instance.status if instance else None
+        new_status = attrs.get('status', old_status or TruckStatus.ACTIVE)
+        
+        if 'drivers' in attrs and len(attrs['drivers']) > 2:
+            raise ValidationError({'drivers': 'A truck can have at most 2 drivers.'})
+            
+        if new_status == TruckStatus.INACTIVE and (attrs.get('drivers') or attrs.get('crew')):
+            raise ValidationError('Inactive trucks cannot have drivers or crew assigned.')
+            
+        # Skip conflict check unless active AND (people changed OR reactivating)
+        if new_status != TruckStatus.ACTIVE:
+            return attrs
+        if not ('drivers' in attrs or 'crew' in attrs or (old_status is not None and old_status != TruckStatus.ACTIVE)):
+            return attrs
+            
+        drivers = attrs['drivers'] if 'drivers' in attrs else (list(instance.drivers.all()) if instance else [])
+        crew = attrs['crew'] if 'crew' in attrs else (list(instance.crew.all()) if instance else [])
+        
+        # Lock user rows
+        ids = set(d.pk for d in drivers) | set(c.pk for c in crew)
+        if ids:
+            list(User.objects.select_for_update().filter(pk__in=ids).order_by('pk').values_list('pk', flat=True))
+            
+        errors = {}
+        # Rule: at most 1 active truck
+        if drivers:
+            driver_errs = []
+            for d in drivers:
+                clash = Truck.objects.filter(status=TruckStatus.ACTIVE, drivers=d)
+                if instance:
+                    clash = clash.exclude(pk=instance.pk)
+                clash = clash.first()
+                if clash:
+                    driver_errs.append(f"{d.full_name} is already assigned to active truck {clash.plate_number}.")
+            if driver_errs:
+                errors['drivers'] = driver_errs
+                
+        if crew:
+            crew_errs = []
+            for c in crew:
+                clash = Truck.objects.filter(status=TruckStatus.ACTIVE, crew=c)
+                if instance:
+                    clash = clash.exclude(pk=instance.pk)
+                clash = clash.first()
+                if clash:
+                    crew_errs.append(f"{c.full_name} is already assigned to active truck {clash.plate_number}.")
+            if crew_errs:
+                errors['crew'] = crew_errs
+                
+        if errors:
+            raise ValidationError(errors)
+            
+        return attrs
 
     def get_photo_url(self, obj):
         if obj.photo:
@@ -71,6 +144,12 @@ class TruckSerializer(serializers.ModelSerializer):
             })
         return details
 
+class HomeBaseSerializer(serializers.Serializer):
+    lat = serializers.FloatField(min_value=-90, max_value=90)
+    lng = serializers.FloatField(min_value=-180, max_value=180)
+    label = serializers.CharField(max_length=120, required=False, allow_blank=True, default='')
+    apply_to_existing = serializers.BooleanField(required=False, default=False)
+
 class CollectionScheduleSerializer(serializers.ModelSerializer):
     truck_plate    = serializers.CharField(source='truck.plate_number', read_only=True)
     driver_name    = serializers.CharField(source='driver.full_name',   read_only=True)
@@ -86,6 +165,82 @@ class CollectionScheduleSerializer(serializers.ModelSerializer):
     class Meta:
         model  = CollectionSchedule
         fields = '__all__'  # 'waypoints' (the raw JSONField) is now included automatically
+
+    def validate(self, attrs):
+        from rest_framework.exceptions import ValidationError
+        from django.contrib.auth import get_user_model
+        from django.db.models import Q
+        from .models import Truck
+        from .crew_resolver import normalize_days
+        
+        User = get_user_model()
+        instance = self.instance
+        
+        truck = attrs.get('truck', getattr(instance, 'truck', None)) if 'truck' in attrs else getattr(instance, 'truck', None)
+        driver = attrs.get('driver', getattr(instance, 'driver', None)) if 'driver' in attrs else getattr(instance, 'driver', None)
+        days = attrs.get('days', getattr(instance, 'days', '')) if 'days' in attrs else getattr(instance, 'days', '')
+        start_time = attrs.get('start_time', getattr(instance, 'start_time', None)) if 'start_time' in attrs else getattr(instance, 'start_time', None)
+        end_time = attrs.get('end_time', getattr(instance, 'end_time', None)) if 'end_time' in attrs else getattr(instance, 'end_time', None)
+        
+        truck_changed = not instance or ('truck' in attrs and attrs['truck'] != instance.truck)
+        driver_changed = not instance or ('driver' in attrs and attrs['driver'] != instance.driver)
+        
+        errors = {}
+        
+        if not instance:
+            if not truck:
+                errors['truck'] = 'Select a truck.'
+            if not driver:
+                errors['driver'] = 'Select a driver.'
+                
+        if truck and truck_changed and truck.status != 'active':
+            errors['truck'] = f"Truck {truck.plate_number} is {truck.status} and cannot be scheduled."
+            
+        if truck and driver and (truck_changed or driver_changed):
+            if not truck.drivers.filter(id=driver.id).exists():
+                errors['driver'] = f"{driver.full_name} is not assigned to truck {truck.plate_number}. Assign them in Truck Management first."
+                
+        if start_time and end_time and end_time <= start_time:
+            errors['end_time'] = 'End time must be after start time.'
+            
+        if errors:
+            raise ValidationError(errors)
+            
+        # Overlap check
+        if not instance or any(k in attrs for k in ['truck', 'driver', 'days', 'start_time', 'end_time']):
+            if truck and driver:
+                list(Truck.objects.select_for_update().filter(pk=truck.pk).values_list('pk', flat=True))
+                list(User.objects.select_for_update().filter(pk=driver.pk).values_list('pk', flat=True))
+                
+                new_days = normalize_days(days)
+                if new_days and start_time and end_time:
+                    qs = CollectionSchedule.objects.exclude(status='CANCELLED').filter(
+                        Q(truck=truck) | Q(driver=driver)
+                    )
+                    if instance:
+                        qs = qs.exclude(pk=instance.pk)
+                    
+                    for ex in qs:
+                        ex_days = normalize_days(ex.days)
+                        shared = new_days.intersection(ex_days)
+                        if not shared:
+                            continue
+                        
+                        if not (ex.start_time and ex.end_time):
+                            continue
+                            
+                        if start_time < ex.end_time and end_time > ex.start_time:
+                            shared_str = ', '.join([d.title() for d in shared])
+                            ex_time = f"{ex.start_time.strftime('%I:%M %p').lstrip('0')} \u2013 {ex.end_time.strftime('%I:%M %p').lstrip('0')}"
+                            if ex.truck == truck:
+                                errors['truck'] = [f"Truck {truck.plate_number} is already scheduled on {shared_str} ({ex_time})."]
+                            if ex.driver == driver:
+                                errors['driver'] = [f"Driver {driver.full_name} is already scheduled on {shared_str} ({ex_time})."]
+                                
+                    if errors:
+                        raise ValidationError(errors)
+                        
+        return attrs
 
     def get_dumpsite_detail(self, obj):
         ds = obj.dumpsite

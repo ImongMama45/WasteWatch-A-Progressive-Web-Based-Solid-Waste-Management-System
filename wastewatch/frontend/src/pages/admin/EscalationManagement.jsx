@@ -1,7 +1,11 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import DashboardLayout from '../../components/DashboardLayout'
+import { ICONS } from '../../api/navConfig'
 import { useEscalations } from '../../hooks/useEscalations'
 import { useUsers } from '../../hooks/useUsers'
+
+import { useAuth } from '../../context/AuthContext'
 
 const PRIORITY = {
   high: { label: 'High', color: '#e74c3c', bg: 'rgba(231,76,60,0.08)', border: 'rgba(231,76,60,0.3)', bar: '#e74c3c' },
@@ -10,18 +14,19 @@ const PRIORITY = {
 }
 
 const STATUS_META = {
-  open: { label: 'Open', color: '#e74c3c', bg: 'rgba(231,76,60,0.1)' },
-  in_progress: { label: 'In Progress', color: '#f39c12', bg: 'rgba(243,156,18,0.1)' },
+  pending: { label: 'Pending', color: '#e74c3c', bg: 'rgba(231,76,60,0.1)' },
+  approved: { label: 'In Progress', color: '#f39c12', bg: 'rgba(243,156,18,0.1)' },
+  rejected: { label: 'Rejected', color: '#95a5a6', bg: 'rgba(149,165,166,0.1)' },
   resolved: { label: 'Resolved', color: '#2ecc71', bg: 'rgba(46,204,113,0.1)' },
 }
 
 const TYPE_ICON = {
-  'Overflow': '🗑️',
-  'Illegal Dumping': '🚯',
-  'Missed Pickup': '📭',
-  'Road Blockage': '🚧',
-  'Littering': '🍂',
-  'Health Hazard': '⚠️',
+  'Overflow': ICONS.trash,
+  'Illegal Dumping': ICONS.waste,
+  'Missed Pickup': ICONS.box,
+  'Road Blockage': ICONS.barrier,
+  'Littering': ICONS.waste,
+  'Health Hazard': ICONS.warning,
 }
 
 function PriorityBadge({ p }) {
@@ -30,43 +35,43 @@ function PriorityBadge({ p }) {
 }
 
 function StatusBadge({ s }) {
-  const m = STATUS_META[s] || STATUS_META.open
+  const m = STATUS_META[s] || STATUS_META.pending
   return <span style={{ background: m.bg, color: m.color, borderRadius: 20, padding: '2px 10px', fontSize: 9, fontWeight: 800 }}>{m.label.toUpperCase()}</span>
 }
 
-function AssignModal({ esc, onSave, onClose, staff }) {
-  const [assignee, setAssignee] = useState(esc.assignee || '')
+function AssignModal({ esc, onSave, onClose, staff, currentUser }) {
+  const [assignee, setAssignee] = useState(esc.assignee || (currentUser ? currentUser.id : ''))
   const [deadline, setDeadline] = useState(esc.deadline || '')
   const [notes, setNotes] = useState(esc.notes || '')
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={onClose}>
       <div style={{ background: 'var(--surface)', borderRadius: 16, padding: 24, width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-          <h3 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 16, margin: 0 }}>Assign &amp; Set Deadline</h3>
+          <h3 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 16, margin: 0 }}>Log Disciplinary Action</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#888' }}>×</button>
         </div>
         <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: '10px 12px', marginBottom: 16, fontSize: 12 }}>
           <div style={{ fontWeight: 700 }}>{esc.title}</div>
-          <div style={{ color: 'var(--text-muted)', marginTop: 2 }}>{esc.barangay_name} · {esc.report_count} reports</div>
+          <div style={{ color: 'var(--text-muted)', marginTop: 2 }}>{esc.barangay_name} · {esc.reports_count || 1} reports</div>
         </div>
         <div style={{ marginBottom: 12 }}>
-          <label className="form-label">Assign To</label>
+          <label className="form-label">Reviewing Admin</label>
           <select className="form-input" value={assignee} onChange={e => setAssignee(e.target.value)}>
-            <option value="">— Select staff —</option>
+            <option value="">— Select admin —</option>
             {staff.map(a => <option key={a.id} value={a.id}>{a.full_name}</option>)}
           </select>
         </div>
         <div style={{ marginBottom: 12 }}>
-          <label className="form-label">Deadline</label>
+          <label className="form-label">Action Deadline</label>
           <input className="form-input" type="date" value={deadline} onChange={e => setDeadline(e.target.value)} />
         </div>
         <div style={{ marginBottom: 20 }}>
-          <label className="form-label">Notes</label>
+          <label className="form-label">Disciplinary Action Taken (Notes)</label>
           <textarea className="form-input" rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Action taken, instructions…" style={{ resize: 'vertical' }} />
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => onSave({ assignee, deadline, notes, status: assignee ? 'in_progress' : esc.status })}>Save</button>
+          <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => onSave({ assignee, deadline, notes, status: assignee ? 'approved' : esc.status })}>Save</button>
         </div>
       </div>
     </div>
@@ -74,10 +79,11 @@ function AssignModal({ esc, onSave, onClose, staff }) {
 }
 
 export default function EscalationManagement() {
+  const { user } = useAuth()
   const { items, loading, saveEscalation, resolveEscalation } = useEscalations()
   const { users } = useUsers()
 
-  const staff = useMemo(() => users.filter(u => u.role !== 'citizen'), [users])
+  const staff = useMemo(() => users.filter(u => u.role === 'admin'), [users])
 
   const [priorityFilter, setPriorityFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -85,6 +91,23 @@ export default function EscalationManagement() {
   const [expanded, setExpanded] = useState(null)
   const [assignModal, setAssignModal] = useState(null)
   const [toast, setToast] = useState(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const focusDoneRef = useRef(false)
+
+  useEffect(() => {
+    const focusId = searchParams.get('focus')
+    if (!focusId || loading || focusDoneRef.current) return
+    focusDoneRef.current = true
+    setSearchParams({}, { replace: true })
+    const target = items.find(e => String(e.id) === focusId)
+    if (!target) { showToast('Escalation not found or already closed.'); return }
+    setPriorityFilter('all')
+    setStatusFilter('all')
+    setSearch('')
+    setExpanded(target.id)
+    setTimeout(() => document.getElementById(`esc-${target.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
+  }, [searchParams, items, loading, setSearchParams])
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
@@ -92,7 +115,7 @@ export default function EscalationManagement() {
     const res = await resolveEscalation(id)
     if (res.ok) {
       setExpanded(null)
-      showToast('✅ Escalation marked as resolved.')
+      showToast('Escalation marked as resolved.')
     }
   }
 
@@ -100,16 +123,18 @@ export default function EscalationManagement() {
     const res = await saveEscalation(id, data)
     if (res.ok) {
       setAssignModal(null)
-      showToast('✅ Task assigned successfully.')
+      showToast('Task assigned successfully.')
     }
   }
 
   const counts = useMemo(() => ({
     all: items.length,
-    open: items.filter(e => e.status === 'open').length,
-    in_progress: items.filter(e => e.status === 'in_progress').length,
+    pending: items.filter(e => e.status === 'pending').length,
+    approved: items.filter(e => e.status === 'approved').length,
     resolved: items.filter(e => e.status === 'resolved').length,
     high: items.filter(e => e.priority === 'high').length,
+    medium: items.filter(e => e.priority === 'medium').length,
+    low: items.filter(e => e.priority === 'low').length,
   }), [items])
 
   const filtered = useMemo(() => items.filter(e => {
@@ -121,7 +146,7 @@ export default function EscalationManagement() {
 
   const sorted = useMemo(() => [...filtered].sort((a, b) => {
     const order = { high: 0, medium: 1, low: 2 }
-    const so = { open: 0, in_progress: 1, resolved: 2 }
+    const so = { pending: 0, approved: 1, rejected: 2, resolved: 3 }
     return (so[a.status] - so[b.status]) || (order[a.priority] - order[b.priority])
   }), [filtered])
 
@@ -132,7 +157,7 @@ export default function EscalationManagement() {
         <div style={{ position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', background: '#0f172a', color: '#fff', padding: '10px 22px', borderRadius: 12, zIndex: 9999, fontSize: 13, fontWeight: 600, border: '1px solid rgba(46,204,113,0.3)', whiteSpace: 'nowrap' }}>{toast}</div>
       )}
       {assignModal && (
-        <AssignModal esc={assignModal} onSave={data => saveAssign(assignModal.id, data)} onClose={() => setAssignModal(null)} />
+        <AssignModal esc={assignModal} staff={staff} currentUser={user} onSave={data => handleSaveAssign(assignModal.id, data)} onClose={() => setAssignModal(null)} />
       )}
 
       <style>{`
@@ -150,9 +175,9 @@ export default function EscalationManagement() {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 3 }}>
               <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 22, fontWeight: 800, margin: 0 }}>Escalation Management</h2>
-              {counts.open > 0 && (
+              {counts.pending > 0 && (
                 <span style={{ background: 'rgba(231,76,60,0.1)', color: '#e74c3c', border: '1px solid rgba(231,76,60,0.3)', fontSize: 9, fontWeight: 800, padding: '3px 10px', borderRadius: 20 }}>
-                  {counts.open} OPEN
+                  {counts.pending} PENDING
                 </span>
               )}
             </div>
@@ -164,8 +189,8 @@ export default function EscalationManagement() {
         <div className="stat-grid" style={{ marginBottom: 20 }}>
           {[
             { label: 'Total', value: counts.all, color: '#ffffffff' },
-            { label: 'Open', value: counts.open, color: '#e74c3c' },
-            { label: 'In Progress', value: counts.in_progress, color: '#f39c12' },
+            { label: 'Pending', value: counts.pending, color: '#e74c3c' },
+            { label: 'In Progress', value: counts.approved, color: '#f39c12' },
             { label: 'Resolved', value: counts.resolved, color: '#2ecc71' },
           ].map(s => (
             <div key={s.label} className="stat-card">
@@ -178,12 +203,12 @@ export default function EscalationManagement() {
         {/* Critical alert banner */}
         {counts.high > 0 && items.some(e => e.priority === 'high' && e.status !== 'resolved') && (
           <div style={{ background: 'rgba(231,76,60,0.05)', border: '1.5px solid rgba(231,76,60,0.3)', borderRadius: 12, padding: '12px 16px', marginBottom: 18, display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(231,76,60,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>🚨</div>
+            <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(231,76,60,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#e74c3c', flexShrink: 0 }}><div style={{ width: 20, height: 20 }}>{ICONS.warning}</div></div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#e74c3c', marginBottom: 1 }}>
-                {items.filter(e => e.priority === 'high' && e.status !== 'resolved').length} high-priority escalation(s) need immediate attention
+                {items.filter(e => e.priority === 'high' && e.status !== 'resolved').length} high-priority driver infraction(s) need immediate attention
               </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Assign tasks and set deadlines to resolve critical issues.</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Log disciplinary actions to resolve these critical issues.</div>
             </div>
           </div>
         )}
@@ -208,7 +233,7 @@ export default function EscalationManagement() {
 
           {/* Status pills */}
           <div style={{ display: 'flex', gap: 6 }}>
-            {[['all', 'All'], ['open', 'Open'], ['in_progress', 'In Progress'], ['resolved', 'Resolved']].map(([v, l]) => (
+            {[['all', 'All'], ['pending', 'Pending'], ['approved', 'In Progress'], ['rejected', 'Rejected'], ['resolved', 'Resolved']].map(([v, l]) => (
               <button key={v} onClick={() => setStatusFilter(v)} style={{
                 padding: '5px 12px', borderRadius: 20, fontSize: 11, fontWeight: 600,
                 border: '1px solid', fontFamily: 'var(--font-body)', cursor: 'pointer', transition: 'all .15s',
@@ -225,7 +250,7 @@ export default function EscalationManagement() {
         {/* List */}
         {sorted.length === 0 && (
           <div className="card" style={{ textAlign: 'center', padding: '40px 20px' }}>
-            <div style={{ fontSize: 32, marginBottom: 10 }}>✅</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10, color: 'var(--accent)' }}><div style={{ width: 32, height: 32 }}>{ICONS.check}</div></div>
             <div style={{ fontWeight: 700, marginBottom: 4 }}>No escalations found</div>
             <div className="text-muted text-sm">Adjust your filters or check back later.</div>
           </div>
@@ -234,13 +259,13 @@ export default function EscalationManagement() {
         {sorted.map(e => {
           const p = PRIORITY[e.priority] || PRIORITY.low
           const isOpen = expanded === e.id
-          const isResolved = e.status === 'resolved'
+          const isTerminal = ['resolved', 'rejected'].includes(e.status)
           return (
-            <div key={e.id} className="esc-card" style={{
-              background: isResolved ? 'rgba(0,0,0,0.02)' : 'var(--surface)',
+            <div id={`esc-${e.id}`} key={e.id} className="esc-card" style={{
+              background: isTerminal ? 'rgba(0,0,0,0.02)' : 'var(--surface)',
               border: isOpen ? `1.5px solid ${p.border}` : '1px solid var(--border)',
               borderRadius: 14, marginBottom: 10, overflow: 'hidden',
-              opacity: isResolved ? 0.7 : 1,
+              opacity: isTerminal ? 0.7 : 1,
             }}>
               {/* Row */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px' }}
@@ -250,7 +275,7 @@ export default function EscalationManagement() {
 
                 {/* Icon */}
                 <div style={{ width: 38, height: 38, borderRadius: 10, flexShrink: 0, background: p.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17 }}>
-                  {TYPE_ICON[e.type] || '⚠️'}
+                  <div style={{ width: 20, height: 20, color: p.color }}>{TYPE_ICON[e.type] || ICONS.warning}</div>
                 </div>
 
                 {/* Info */}
@@ -260,19 +285,19 @@ export default function EscalationManagement() {
                     <PriorityBadge p={e.priority} />
                     <StatusBadge s={e.status} />
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <span>📋 {e.type}</span>
-                    <span>📣 {e.report_count} reports</span>
-                    <span>📍 Brgy. {e.barangay_name}</span>
-                    <span>👤 {e.raised_by_name}</span>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><div style={{ width: 14, height: 14, display: 'flex' }}>{ICONS.report}</div> {e.issue_type || e.type}</span>
+                    {e.driver_name && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><div style={{ width: 14, height: 14, display: 'flex' }}>{ICONS.driver}</div> Driver: {e.driver_name} {e.points_deducted ? <span style={{ color: '#e74c3c' }}>({e.points_deducted} pts)</span> : ''}</span>}
+                    {e.truck_plate && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><div style={{ width: 14, height: 14, display: 'flex' }}>{ICONS.truck}</div> Truck {e.truck_plate}</span>}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><div style={{ width: 14, height: 14, display: 'flex' }}>{ICONS.pin}</div> Brgy. {e.barangay_name}</span>
                   </div>
                 </div>
 
                 {/* Right meta */}
-                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>{e.ago || 'recently'}</div>
-                  {e.deadline && <div style={{ fontSize: 10, color: '#f39c12', fontWeight: 700 }}>⏰ {e.deadline}</div>}
-                  <div style={{ fontSize: 14, color: 'var(--text-muted)', transform: isOpen ? 'rotate(90deg)' : 'rotate(0)', transition: 'transform .2s' }}>›</div>
+                <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'center', gap: 4 }}>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{e.ago || 'recently'}</div>
+                  {e.deadline && <div style={{ fontSize: 10, color: '#f39c12', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 5 }}><div style={{ width: 12, height: 12, display: 'flex' }}>{ICONS.clock}</div> {e.deadline}</div>}
+                  <div style={{ fontSize: 16, color: 'var(--text-muted)', transform: isOpen ? 'rotate(90deg)' : 'rotate(0)', transition: 'transform .2s' }}>›</div>
                 </div>
               </div>
 
@@ -283,8 +308,10 @@ export default function EscalationManagement() {
 
                   {/* Context info */}
                   <div style={{ background: p.bg, border: `1px solid ${p.border}`, borderRadius: 8, padding: '9px 12px', marginBottom: 14, fontSize: 12, lineHeight: 1.6, color: 'var(--text-muted)' }}>
-                    <strong style={{ color: p.color }}>Escalated by {e.raised_by_name}</strong> — {e.type} with {e.report_count} community reports in Barangay {e.barangay_name}.
+                    <strong style={{ color: p.color }}>Escalated by {e.raised_by || e.raised_by_name}</strong>
+                    {e.driver_name ? ` — Regarding driver ${e.driver_name} on Truck ${e.truck_plate}` : ` — ${e.issue_type || e.type}`} in Barangay {e.barangay_name}.
                     {e.notes && <> Notes: <em>{e.notes}</em></>}
+                    {e.points_deducted ? <div style={{ marginTop: 4, fontWeight: 700, color: '#e74c3c' }}>Penalty: {e.points_deducted} pts</div> : null}
                   </div>
 
                   {/* Assignee / deadline */}
@@ -292,40 +319,67 @@ export default function EscalationManagement() {
                     <div style={{ display: 'flex', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
                       <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: '8px 12px', flex: 1, minWidth: 120 }}>
                         <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.06em', marginBottom: 3 }}>ASSIGNED TO</div>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>👤 {e.assignee_name || 'Assigned'}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}><div style={{ width: 14, height: 14, display: 'flex' }}>{ICONS.profile}</div> {e.assignee_name || 'Assigned'}</div>
                       </div>
                       {e.deadline && (
                         <div style={{ background: 'rgba(243,156,18,0.07)', border: '1px solid rgba(243,156,18,0.25)', borderRadius: 8, padding: '8px 12px', flex: 1, minWidth: 120 }}>
                           <div style={{ fontSize: 9, fontWeight: 700, color: '#f39c12', letterSpacing: '.06em', marginBottom: 3 }}>DEADLINE</div>
-                          <div style={{ fontSize: 13, fontWeight: 600 }}>⏰ {e.deadline}</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}><div style={{ width: 14, height: 14, display: 'flex' }}>{ICONS.clock}</div> {e.deadline}</div>
                         </div>
                       )}
                     </div>
                   )}
 
                   {/* Actions */}
-                  {!isResolved && (
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <button className="esc-act" onClick={() => setAssignModal(e)} style={{
-                        flex: 1, minWidth: 100, background: 'rgba(93,173,226,0.08)',
-                        border: '1px solid rgba(93,173,226,0.35)', color: '#5dade2',
-                        borderRadius: 10, padding: '9px', fontWeight: 700, fontSize: 12, fontFamily: 'var(--font-body)',
-                      }}>
-                        👤 {e.assignee ? 'Reassign' : 'Assign Task'}
-                      </button>
-                      <button className="esc-act" onClick={() => handleResolve(e.id)} style={{
-                        flex: 1, minWidth: 100, background: 'var(--accent)', color: '#0d1117',
-                        border: 'none', borderRadius: 10, padding: '9px',
-                        fontWeight: 700, fontSize: 12, fontFamily: 'var(--font-body)',
-                      }}>
-                        ✓ Mark Resolved
-                      </button>
+                  {!isTerminal && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {e.driver_name && (
+                        <div style={{
+                          padding: '10px 12px', borderRadius: 8, fontSize: 12,
+                          background: 'rgba(52,152,219,0.08)', border: '1px solid rgba(52,152,219,0.3)', color: '#3498db'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, marginBottom: 2 }}>
+                            <div style={{ width: 14, height: 14, display: 'flex' }}>{ICONS.info}</div> Suspension Auto-Lift
+                          </div>
+                          {(() => {
+                            const openOther = e.driver_open_escalations || 0;
+                            return openOther === 0
+                              ? "This is their only open escalation — resolving it WILL lift their suspension."
+                              : `This driver has ${openOther} other open escalation(s) — resolving this one will NOT lift their suspension.`;
+                          })()}
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button className="esc-act" onClick={() => setAssignModal(e)} style={{
+                          flex: 1, minWidth: 100, background: 'rgba(93,173,226,0.08)',
+                          border: '1px solid rgba(93,173,226,0.35)', color: '#5dade2',
+                          borderRadius: 10, padding: '9px', fontWeight: 700, fontSize: 12, fontFamily: 'var(--font-body)',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}><div style={{ width: 14, height: 14, display: 'flex' }}>{ICONS.edit}</div> {e.assignee ? 'Update Disciplinary Note' : 'Log Disciplinary Action'}</div>
+                        </button>
+                        <button className="esc-act" onClick={() => handleResolve(e.id)} style={{
+                          flex: 1, minWidth: 100, background: 'var(--accent)', color: '#0d1117',
+                          border: 'none', borderRadius: 10, padding: '9px',
+                          fontWeight: 700, fontSize: 12, fontFamily: 'var(--font-body)',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}><div style={{ width: 14, height: 14, display: 'flex' }}>{ICONS.check}</div> Mark Resolved</div>
+                        </button>
+                      </div>
                     </div>
                   )}
 
-                  {isResolved && (
-                    <div style={{ background: 'rgba(46,204,113,0.08)', border: '1px solid rgba(46,204,113,0.25)', borderRadius: 8, padding: '10px 12px', fontSize: 12, color: '#2ecc71', fontWeight: 600, textAlign: 'center' }}>
-                      ✅ This escalation has been resolved.
+                  {isTerminal && (
+                    <div style={{
+                      background: e.status === 'rejected' ? 'rgba(149,165,166,0.08)' : 'rgba(46,204,113,0.08)',
+                      border: `1px solid ${e.status === 'rejected' ? 'rgba(149,165,166,0.25)' : 'rgba(46,204,113,0.25)'}`,
+                      borderRadius: 8, padding: '10px 12px', fontSize: 12,
+                      color: e.status === 'rejected' ? '#95a5a6' : '#2ecc71',
+                      fontWeight: 600, textAlign: 'center'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                        <div style={{ width: 14, height: 14, display: 'flex' }}>{e.status === 'rejected' ? ICONS.x : ICONS.check}</div>
+                        {e.status === 'rejected' ? 'This escalation has been rejected.' : 'This escalation has been resolved.'}
+                      </div>
                     </div>
                   )}
                 </div>

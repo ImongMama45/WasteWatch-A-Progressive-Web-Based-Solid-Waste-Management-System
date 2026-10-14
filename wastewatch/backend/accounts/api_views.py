@@ -30,7 +30,7 @@ from .serializers import UserSerializer, BarangaySerializer, RegisterSerializer,
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.select_related('barangay', 'dumpsite').order_by('-id')
+    queryset = User.objects.select_related('barangay', 'dumpsite', 'driverprofile').prefetch_related('suspension_overrides').order_by('-id')
     permission_classes = [permissions.IsAuthenticated]
 
     def get_serializer_class(self):
@@ -46,6 +46,37 @@ class UserViewSet(viewsets.ModelViewSet):
             return queryset.filter(role=role)
         return queryset
 
+    @action(detail=True, methods=['patch'], url_path='lift_suspension')
+    def lift_suspension(self, request, pk=None):
+        if getattr(request.user, 'role', None) != 'admin':
+            return Response({'error': 'Only admins can lift suspensions.'}, status=status.HTTP_403_FORBIDDEN)
+            
+        driver = self.get_object()
+        
+        if driver.role != 'driver':
+            return Response({'error': 'User is not a driver.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if not hasattr(driver, 'driverprofile') or not driver.driverprofile.is_suspended:
+            return Response({'error': 'Driver is not currently suspended.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        reason = request.data.get('reason', '').strip()
+        if not reason:
+            return Response({'error': 'A reason is required to lift a suspension manually.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        from .models import SuspensionOverride
+        
+        profile = driver.driverprofile
+        profile.is_suspended = False
+        profile.save(update_fields=['is_suspended'])
+        
+        SuspensionOverride.objects.create(
+            driver=driver,
+            admin=request.user,
+            reason=reason
+        )
+        
+        return Response({'status': 'suspension_lifted'})
+
 class BarangayViewSet(viewsets.ModelViewSet):
     queryset = Barangay.objects.all()
     serializer_class = BarangaySerializer
@@ -58,7 +89,7 @@ def user_to_dict(user):
     Helper to convert a User model instance into a JSON-serializable dict.
     Used by /api/auth/me/ and admin user list.
     """
-    return {
+    data = {
         'id':            user.id,
         'full_name':     user.full_name or '',
         'email':         user.email or '',
@@ -74,6 +105,27 @@ def user_to_dict(user):
         'profile_pic':   user.profile_pic.url if user.profile_pic else None,
         'created_at':    user.created_at.isoformat() if user.created_at else None,
     }
+    
+    if user.role == 'driver':
+        if hasattr(user, 'driverprofile'):
+            data['points'] = user.driverprofile.points
+            data['is_suspended'] = user.driverprofile.is_suspended
+        else:
+            data['points'] = 0
+            data['is_suspended'] = False
+            
+        overrides = user.suspension_overrides.all().order_by('-created_at')
+        data['suspension_overrides'] = [
+            {
+                "id": o.id,
+                "reason": o.reason,
+                "admin_name": o.admin.full_name if o.admin else "System",
+                "created_at": o.created_at.isoformat()
+            }
+            for o in overrides
+        ]
+            
+    return data
 
 
 def _json_body(request):
@@ -179,7 +231,7 @@ def user_list_view(request):
         return JsonResponse({'error': 'Unauthorized'}, status=403)
 
     role_filter = request.GET.get('role')
-    users = User.objects.all()
+    users = User.objects.select_related('barangay', 'dumpsite', 'driverprofile').prefetch_related('suspension_overrides')
     if role_filter:
         users = users.filter(role=role_filter)
     

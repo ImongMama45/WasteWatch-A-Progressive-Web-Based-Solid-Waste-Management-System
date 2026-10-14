@@ -115,6 +115,31 @@ export default function DriverDashboard() {
   const [status, setStatus] = useState('on_route')
   const [loading, setLoading] = useState(true)
   const [issueOpen, setIssueOpen] = useState(false)
+  
+  const [blockingEscalation, setBlockingEscalation] = useState(null)
+  const [ackLoading, setAckLoading] = useState(false)
+
+  const [urgentDispatch, setUrgentDispatch] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function poll() {
+      try {
+        const res = await api.get('/api/watcher/hotspots/assigned/')
+        const unacked = (res.data || []).find(h => h.assigned_truck_id && !h.dispatch_acknowledged)
+        if (unacked && !cancelled) setUrgentDispatch(prev => prev?.id === unacked.id ? prev : unacked)
+      } catch { /* silent */ }
+    }
+    poll()
+    const id = setInterval(poll, 15000) // tune as needed
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
+
+  async function ackDispatch() {
+    if (!urgentDispatch) return
+    try { await api.post(`/api/watcher/hotspots/${urgentDispatch.id}/acknowledge-dispatch/`) }
+    finally { setUrgentDispatch(null) }
+  }
 
   const {
     shiftActive, startTime, formattedTime,
@@ -177,6 +202,12 @@ export default function DriverDashboard() {
           barangay: profileRes.data.barangay || '—',
         })
       }
+
+      // ── Blocking Escalations ──
+      api.get('/api/escalations/?status=approved&driver_acknowledged=false').then(res => {
+        const unacked = res.data.find(e => e.status === 'approved' && !e.driver_acknowledged)
+        if (unacked) setBlockingEscalation(unacked)
+      }).catch(err => console.error(err))
 
       // ── Shift sync ──
 
@@ -283,6 +314,10 @@ export default function DriverDashboard() {
 
   // ── Shift toggle ─────────────────────────────────────────────────────────────
   async function handleShiftToggle() {
+    if (user?.is_suspended) {
+      notify({ variant: 'error-dark', message: 'Your account is suspended. You cannot start a shift.' })
+      return
+    }
     if (!shiftActive) {
       if (!hasScheduleToday || !schedule?.id) return
       try {
@@ -323,6 +358,11 @@ export default function DriverDashboard() {
   // ── Carousel: Start/Continue Route ──────────────────────────────────────────
   async function handleCarouselStartRoute() {
     if (carouselLoading.route) return
+    
+    if (user?.is_suspended) {
+      notify({ variant: 'error-dark', message: 'Your account is suspended. You cannot start a shift.' })
+      return
+    }
 
     if (shiftActive) {
       navigate('/driver/flow')
@@ -361,9 +401,43 @@ export default function DriverDashboard() {
     navigate('/announcements')
   }
 
+  // ── Acknowledgment ──────────────────────────────────────────────────────────
+  async function handleAcknowledge() {
+    if (!blockingEscalation) return
+    setAckLoading(true)
+    try {
+      await api.patch(`/api/escalations/${blockingEscalation.id}/acknowledge/`)
+      setBlockingEscalation(null)
+    } catch (err) {
+      console.error(err)
+      if (err.response?.status === 400) {
+        // Admin resolved it while driver was viewing the modal
+        setBlockingEscalation(null)
+      } else {
+        notify({ variant: 'error-dark', message: 'Failed to acknowledge.' })
+      }
+    } finally {
+      setAckLoading(false)
+    }
+  }
+
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <>
+      {urgentDispatch && (
+        <div style={{ position:'fixed', inset:0, zIndex:99999, background:'rgba(15,23,42,0.85)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <div style={{ background:'var(--surface)', borderRadius:16, padding:28, maxWidth:360, textAlign:'center', border:'2px solid var(--danger)' }}>
+            <div style={{ fontSize:32, marginBottom:10 }}>🚨</div>
+            <h3 style={{ margin:'0 0 8px' }}>Urgent Pickup Added</h3>
+            <p style={{ fontSize:13, color:'var(--text-muted)', marginBottom:18 }}>
+              Brgy. {urgentDispatch.barangay} — {urgentDispatch.address}
+            </p>
+            <button onClick={ackDispatch} style={{ width:'100%', padding:'10px', background:'var(--danger)', color:'#fff', border:'none', borderRadius:8, fontWeight:700 }}>
+              Acknowledge
+            </button>
+          </div>
+        </div>
+      )}
       <style>{`
         @keyframes fadeSlideIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
         @keyframes slideDown   { from{opacity:0;transform:translateY(-5px)} to{opacity:1;transform:translateY(0)} }
@@ -401,6 +475,25 @@ export default function DriverDashboard() {
           <p className="text-muted text-sm">
             {profile.truck} · {profile.barangay} · {profile.route}
           </p>
+
+          {/* ── SUSPENDED BANNER ── */}
+          {user?.is_suspended && (
+            <div style={{
+              background: 'rgba(220, 38, 38, 0.1)', border: '1px solid rgba(220, 38, 38, 0.4)',
+              borderRadius: 10, padding: '12px 16px', marginTop: 10, marginBottom: 15,
+              display: 'flex', alignItems: 'flex-start', gap: 12,
+            }}>
+              <Ban size={24} color="#dc2626" style={{ flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 14, color: '#991b1b', marginBottom: 4 }}>
+                  Account Suspended
+                </div>
+                <div style={{ fontSize: 13, color: '#7f1d1d', lineHeight: 1.4 }}>
+                  Your account has been suspended due to unresolved escalations. You cannot start new shifts until this is resolved.
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ── GPS SYNC WARNING ── */}
           {shiftActive && syncFailed && (
@@ -487,7 +580,7 @@ export default function DriverDashboard() {
                   ? (schedule.waypoints[displayStats.completedStops + 1].label || schedule.waypoints[displayStats.completedStops + 1].address || 'Next Stop')
                   : 'N/A',
                 startTime: schedule.start_time || '—',
-                status: isRouteDone ? 'done' : shiftActive ? 'in_progress' : 'pending'
+                status: user?.is_suspended ? 'suspended' : isRouteDone ? 'done' : shiftActive ? 'in_progress' : 'pending'
               } : undefined}
             />
           </div>
@@ -714,31 +807,34 @@ export default function DriverDashboard() {
               <div style={{ display: 'flex', gap: 10, marginBottom: 24 }}>
                 <button id="driver-main-cta" className="abtn btn"
                   onClick={() => shiftActive ? navigate('/driver/flow') : handleShiftToggle()}
-                  disabled={(!shiftActive && !hasScheduleToday) || (!shiftActive && isShiftDone)}
+                  disabled={(!shiftActive && user?.is_suspended) || (!shiftActive && !hasScheduleToday) || (!shiftActive && isShiftDone)}
                   style={{
                     flex: 2, padding: '16px 20px', borderRadius: 14,
                     fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 800,
-                    background: (!shiftActive && !hasScheduleToday) || (!shiftActive && isShiftDone)
+                    background: (!shiftActive && (user?.is_suspended || !hasScheduleToday || isShiftDone))
                       ? 'rgba(148,163,184,0.15)'
                       : shiftActive
                         ? 'linear-gradient(135deg,#2ecc71,#27ae60)'
                         : 'linear-gradient(135deg,#3b82f6,#2563eb)',
-                    color: (!shiftActive && !hasScheduleToday) || (!shiftActive && isShiftDone) ? '#94a3b8' : '#fff',
-                    border: (!shiftActive && !hasScheduleToday) || (!shiftActive && isShiftDone) ? '1.5px solid var(--border)' : 'none',
-                    cursor: (!shiftActive && !hasScheduleToday) || (!shiftActive && isShiftDone) ? 'not-allowed' : 'pointer',
-                    boxShadow: (!shiftActive && !hasScheduleToday) || (!shiftActive && isShiftDone)
+                    color: (!shiftActive && (user?.is_suspended || !hasScheduleToday || isShiftDone)) ? '#94a3b8' : '#fff',
+                    border: (!shiftActive && (user?.is_suspended || !hasScheduleToday || isShiftDone)) ? '1.5px solid var(--border)' : 'none',
+                    cursor: (!shiftActive && (user?.is_suspended || !hasScheduleToday || isShiftDone)) ? 'not-allowed' : 'pointer',
+                    boxShadow: (!shiftActive && (user?.is_suspended || !hasScheduleToday || isShiftDone))
                       ? 'none'
                       : shiftActive
                         ? '0 4px 18px rgba(46,204,113,0.35)'
                         : '0 4px 18px rgba(59,130,246,0.35)',
                   }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {!shiftActive && !hasScheduleToday && <Ban size={18} />}
+                    {!shiftActive && user?.is_suspended && <Ban size={18} />}
+                    {!shiftActive && !user?.is_suspended && !hasScheduleToday && <Ban size={18} />}
                     {!shiftActive && hasScheduleToday && isShiftDone && <CheckCircle2 size={18} />}
                     {shiftActive && hasScheduleToday && <Truck size={18} />}
-                    {!shiftActive && hasScheduleToday && !isShiftDone && <Play size={18} fill="currentColor" />}
+                    {!shiftActive && !user?.is_suspended && hasScheduleToday && !isShiftDone && <Play size={18} fill="currentColor" />}
                     <span>
-                      {!shiftActive && !hasScheduleToday
+                      {!shiftActive && user?.is_suspended
+                        ? 'Account Suspended'
+                        : !shiftActive && !hasScheduleToday
                         ? 'No Collection Today'
                         : !shiftActive && isRouteDone
                           ? 'Route Completed'
@@ -979,6 +1075,16 @@ export default function DriverDashboard() {
                     borderRadius: 20, letterSpacing: '.07em', display: 'inline-block',
                   }}>DRIVER</span>
                 </div>
+                <div>
+                  <div className="form-label" style={{ marginTop: 8 }}>Trust Score / Points</div>
+                  <div style={{
+                    fontSize: 22, fontWeight: 800, 
+                    color: user?.points < 0 ? 'var(--danger)' : user?.points < 500 ? 'var(--warning)' : 'var(--accent)',
+                    fontFamily: 'var(--font-head)'
+                  }}>
+                    {user?.points !== undefined ? user.points : '—'}
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1012,6 +1118,62 @@ export default function DriverDashboard() {
         onClose={() => setIssueOpen(false)}
         gpsPosition={gpsPosition}
       />
+
+      {/* ── MANDATORY ACKNOWLEDGMENT MODAL ── */}
+      {blockingEscalation && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          background: 'rgba(0,0,0,0.6)', zIndex: 9999,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+        }}>
+          <div style={{
+            background: 'var(--surface)', borderRadius: 16, width: '100%', maxWidth: 400,
+            overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+            animation: 'fadeSlideIn .3s ease'
+          }}>
+            <div style={{
+              background: 'linear-gradient(135deg, #ef4444, #dc2626)', padding: '24px 20px',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+              color: '#fff', textAlign: 'center'
+            }}>
+              <div style={{
+                width: 54, height: 54, borderRadius: '50%', background: 'rgba(255,255,255,0.2)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }}>
+                <AlertTriangle size={28} color="#fff" />
+              </div>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Formal Warning Issued</h2>
+            </div>
+            <div style={{ padding: 20 }}>
+              <p style={{ margin: '0 0 16px 0', fontSize: 14, lineHeight: 1.5, color: 'var(--text)' }}>
+                An escalation has been approved against your shift profile.
+              </p>
+              <div style={{
+                background: 'var(--surface-2)', padding: 12, borderRadius: 8, marginBottom: 20,
+                border: '1px solid var(--border)'
+              }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Reason</div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{blockingEscalation.title}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8, marginBottom: 4 }}>Penalty</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--danger)' }}>
+                  -{blockingEscalation.points_deducted} Points
+                </div>
+              </div>
+              <p style={{ margin: '0 0 24px 0', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                You must acknowledge this warning to continue using your dashboard. Repeated escalations may lead to suspension.
+              </p>
+              <button 
+                className="abtn btn btn-primary btn-full" 
+                onClick={handleAcknowledge}
+                disabled={ackLoading}
+                style={{ fontSize: 14, padding: 14, background: '#dc2626', borderColor: '#dc2626' }}
+              >
+                {ackLoading ? 'Acknowledging...' : 'I Acknowledge'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

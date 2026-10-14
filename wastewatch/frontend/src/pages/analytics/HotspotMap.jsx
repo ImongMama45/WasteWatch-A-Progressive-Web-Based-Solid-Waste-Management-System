@@ -65,12 +65,14 @@ export default function HotspotMap({ userBarangay, mapData }) {
   const containerRef   = useRef(null)
   const mapRef         = useRef(null)
   const geoLayerRef    = useRef(null)
-  const [tip, setTip]  = useState(null)   // { name, score, hotspots }
+  const [tip, setTip]  = useState(null)   // { name, score, hotspots, reports }
   const [ready, setReady] = useState(false)
+  const [displayMode, setDisplayMode] = useState('hotspots')
 
   // Extract from prop or use defaults
-  const getBrgyScore = (name) => mapData?.[name]?.score ?? 75
+  const getBrgyScore = (name) => mapData?.[name]?.score ?? 100
   const getBrgyHotspots = (name) => mapData?.[name]?.hotspots ?? 0
+  const getBrgyReports = (name) => mapData?.[name]?.reports ?? 0
 
   // ── Init map ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -92,9 +94,9 @@ export default function HotspotMap({ userBarangay, mapData }) {
       attributionControl: false,
     })
 
-    // Subtle dark-ish tile for contrast
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19,
+    // Subtle dark-ish tile for contrast (Esri Dark Gray Base - No API key required)
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 16,
     }).addTo(map)
 
     mapRef.current = map
@@ -126,33 +128,38 @@ export default function HotspotMap({ userBarangay, mapData }) {
             const name     = feature.properties.brgy_name
             const score    = getBrgyScore(name)
             const hotspots = getBrgyHotspots(name)
+            const reports  = getBrgyReports(name)
             const isUser   = userBarangay && name.toLowerCase() === userBarangay.toLowerCase()
 
             flayer.on('mouseover', () => {
               flayer.setStyle({ fillOpacity: 0.85, weight: 2 })
-              setTip({ name, score, hotspots, isUser })
+              setTip({ name, score, hotspots, reports, isUser })
             })
             flayer.on('mouseout', () => {
               layer.resetStyle(flayer)
               setTip(null)
             })
             flayer.on('click', () => {
-              setTip({ name, score, hotspots, isUser })
+              setTip({ name, score, hotspots, reports, isUser })
               map.fitBounds(flayer.getBounds(), { padding: [20, 20], maxZoom: 15 })
             })
 
-            // Hotspot dot for problematic barangays
-            if (hotspots > 0) {
+            // Hotspot or Report dot for problematic barangays
+            const value = displayMode === 'hotspots' ? hotspots : reports;
+            const dotColor = displayMode === 'hotspots' ? '#ef4444' : '#f97316';
+            const label = displayMode === 'hotspots' ? 'hotspot cluster' : 'reported spot';
+            
+            if (value > 0) {
               const center = flayer.getBounds().getCenter()
               const dot = L.circleMarker(center, {
-                radius:      hotspots > 5 ? 7 : 5,
-                fillColor:   '#ef4444',
+                radius:      value > 5 ? 7 : 5,
+                fillColor:   dotColor,
                 color:       '#fff',
                 weight:      1.5,
                 fillOpacity: 0.95,
               }).addTo(map)
 
-              dot.bindTooltip(`${name}: ${hotspots} hotspot${hotspots > 1 ? 's' : ''}`, {
+              dot.bindTooltip(`${name}: ${value} ${label}${value > 1 ? 's' : ''}`, {
                 direction: 'top',
                 className: 'ww-mini-tip',
               })
@@ -177,7 +184,7 @@ export default function HotspotMap({ userBarangay, mapData }) {
         mapRef.current = null
       }
     }
-  }, [ready, mapData]) // Trigger re-creation or update on mapData change
+  }, [ready, mapData, displayMode]) // Trigger re-creation or update on mapData change
 
   // Re-style when userBarangay changes
   useEffect(() => {
@@ -213,8 +220,33 @@ export default function HotspotMap({ userBarangay, mapData }) {
         .ww-mini-tip::before { display: none !important; }
       `}</style>
 
-      {/* Legend */}
-      
+      {/* Controls */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <div style={{ display: 'flex', background: 'var(--surface)', padding: 3, borderRadius: 6, border: '1px solid var(--border)' }}>
+          <button
+            onClick={() => setDisplayMode('hotspots')}
+            style={{
+              padding: '4px 12px', fontSize: 10, fontWeight: 700, borderRadius: 4, cursor: 'pointer',
+              background: displayMode === 'hotspots' ? 'var(--bg)' : 'transparent',
+              color: displayMode === 'hotspots' ? 'var(--danger)' : 'var(--text-muted)',
+              border: 'none', transition: 'all 0.2s', boxShadow: displayMode === 'hotspots' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+            }}
+          >
+            HOTSPOTS
+          </button>
+          <button
+            onClick={() => setDisplayMode('reports')}
+            style={{
+              padding: '4px 12px', fontSize: 10, fontWeight: 700, borderRadius: 4, cursor: 'pointer',
+              background: displayMode === 'reports' ? 'var(--bg)' : 'transparent',
+              color: displayMode === 'reports' ? 'var(--warning)' : 'var(--text-muted)',
+              border: 'none', transition: 'all 0.2s', boxShadow: displayMode === 'reports' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+            }}
+          >
+            REPORTED SPOTS
+          </button>
+        </div>
+      </div>
 
       {/* Map container */}
       <div style={{
@@ -257,6 +289,7 @@ export default function HotspotMap({ userBarangay, mapData }) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               {[
                 { label: 'SCORE',    value: `${tip.score}%`,     color: tip.score >= 80 ? '#4ade80' : tip.score >= 60 ? '#eab308' : '#ef4444' },
+                { label: 'REPORTS',  value: tip.reports || '0',  color: tip.reports > 5 ? '#f97316' : '#94a3b8' },
                 { label: 'HOTSPOTS', value: tip.hotspots || '0', color: tip.hotspots > 3 ? '#ef4444' : '#94a3b8' },
               ].map(s => (
                 <div key={s.label} style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 6, padding: '6px 8px', textAlign: 'center' }}>

@@ -17,6 +17,7 @@ const RANK_COLORS = ['#f59e0b', '#94a3b8', '#b45309']
 export default function BarangayRankingCard({ brgy, rank, isUser = false, style = {} }) {
   const trend = TREND[brgy.trend] || TREND.same
   const scoreColor =
+    brgy.score == null ? 'var(--text-muted)' :
     brgy.score >= 90 ? 'var(--accent)' :
     brgy.score >= 80 ? 'var(--warning)' : 'var(--text-muted)'
   const ri = rank - 1
@@ -65,7 +66,7 @@ export default function BarangayRankingCard({ brgy, rank, isUser = false, style 
         <div style={{ height: 4, borderRadius: 20, background: 'var(--border)', overflow: 'hidden' }}>
           <div style={{
             height: '100%', borderRadius: 20,
-            width: `${brgy.score}%`, background: scoreColor,
+            width: `${brgy.score ?? 0}%`, background: scoreColor,
           }} />
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
@@ -75,7 +76,7 @@ export default function BarangayRankingCard({ brgy, rank, isUser = false, style 
 
       {/* Score + trend */}
       <div style={{ textAlign: 'right', flexShrink: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 15, color: scoreColor }}>{brgy.compliance}%</div>
+        <div style={{ fontWeight: 700, fontSize: 15, color: scoreColor }}>{brgy.compliance == null ? '—' : `${brgy.compliance}%`}</div>
         <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 2 }}>compliance</div>
         {(() => {
           const TrendIcon = trend.icon;

@@ -8,7 +8,7 @@ const STATUS_COLORS = {
   offline: '#64748b',
 }
 
-export default function ZonePanel({ zone, barangayData, schedules = [], onClearFocus }) {
+export default function ZonePanel({ zone, barangayData, schedules = [], onClearFocus, zoneStats, stopStatusMap }) {
   const [activeModal, setActiveModal] = useState(null)
 
   const meta = {
@@ -57,8 +57,8 @@ export default function ZonePanel({ zone, barangayData, schedules = [], onClearF
                     <strong style={{ color: '#14b8a6', fontSize: 15 }}>{sched.days || 'Regular'}</strong>
                     <span style={{ color: '#94a3b8', fontSize: 12 }}>{sched.start_time ? sched.start_time.slice(0, 5) : 'N/A'} - {sched.end_time ? sched.end_time.slice(0, 5) : 'N/A'}</span>
                   </div>
-                  <div style={{ color: '#cbd5e1', fontSize: 13, marginBottom: 4 }}>
-                    🚛 {sched.truck_plate || 'Unassigned'} ({sched.driver_name || 'No driver'})
+                  <div style={{ color: '#cbd5e1', fontSize: 13, marginBottom: 4, display: 'flex', alignItems: 'center' }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: 16, marginRight: 6 }}>local_shipping</span> {sched.truck_plate || 'Unassigned'} ({sched.driver_name || 'No driver'})
                   </div>
                   <div style={{ color: '#64748b', fontSize: 12 }}>
                     Stops: {sched.waypoints?.length || 0}
@@ -182,9 +182,68 @@ export default function ZonePanel({ zone, barangayData, schedules = [], onClearF
         )}
       </div>
 
+      {/* Stats computed from MapView */}
+      {zoneStats && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+          <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.07)' }}>
+            <div style={{ color: '#94a3b8', fontSize: 10, fontWeight: 700, marginBottom: 8, letterSpacing: '.04em' }}>REPORTS</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+              <span style={{ color: '#cbd5e1' }}>Pending:</span>
+              <span style={{ color: '#f59e0b', fontWeight: 700 }}>{zoneStats.reportsByStatus.pending}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 8 }}>
+              <span style={{ color: '#cbd5e1' }}>Resolved:</span>
+              <span style={{ color: '#22c55e', fontWeight: 700 }}>{zoneStats.reportsByStatus.resolved}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 2, height: 4, borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{ flex: zoneStats.reportsBySeverity.high, background: '#ef4444' }} title="High" />
+              <div style={{ flex: zoneStats.reportsBySeverity.medium, background: '#f59e0b' }} title="Medium" />
+              <div style={{ flex: zoneStats.reportsBySeverity.low, background: '#22c55e' }} title="Low" />
+            </div>
+          </div>
+          
+          <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.07)' }}>
+            <div style={{ color: '#94a3b8', fontSize: 10, fontWeight: 700, marginBottom: 8, letterSpacing: '.04em' }}>COLLECTION</div>
+            {zoneStats.collectionProgress.total > 0 ? (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+                  <span style={{ color: '#cbd5e1' }}>Progress:</span>
+                  <span style={{ color: 'white', fontWeight: 700 }}>
+                    {Math.round((zoneStats.collectionProgress.verified / zoneStats.collectionProgress.total) * 100)}%
+                  </span>
+                </div>
+                <div style={{ background: 'rgba(255,255,255,0.1)', height: 6, borderRadius: 3, overflow: 'hidden', marginBottom: 8 }}>
+                  <div style={{ width: `${(zoneStats.collectionProgress.verified / zoneStats.collectionProgress.total) * 100}%`, height: '100%', background: '#14b8a6' }} />
+                </div>
+                {zoneStats.lastCollectedTimestamp && (
+                  <div style={{ fontSize: 10, color: '#94a3b8', textAlign: 'center', background: 'rgba(20, 184, 166, 0.1)', padding: '2px 0', borderRadius: 4 }}>
+                    Last: {zoneStats.lastCollectedTimestamp}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ color: '#64748b', fontSize: 11, textAlign: 'center', padding: '10px 0' }}>No route active</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {zoneStats?.dumpsite && (
+        <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 14, marginBottom: 16, border: '1px solid rgba(255,255,255,0.07)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ color: '#94a3b8', fontSize: 11, fontWeight: 700, letterSpacing: '.04em' }}>LOCAL DUMPSITE</div>
+            <div style={{ color: '#14b8a6', fontSize: 12, fontWeight: 700 }}>{zoneStats.dumpsite.capacity_percent}%</div>
+          </div>
+          <div style={{ color: 'white', fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{zoneStats.dumpsite.name}</div>
+          <div style={{ background: 'rgba(255,255,255,0.1)', height: 6, borderRadius: 3, overflow: 'hidden' }}>
+            <div style={{ width: `${zoneStats.dumpsite.capacity_percent}%`, height: '100%', background: zoneStats.dumpsite.capacity_percent > 80 ? '#ef4444' : '#14b8a6' }} />
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div style={{ textAlign: 'center', padding: '24px 0', color: '#64748b', fontSize: 13 }}>
-          <div style={{ fontSize: 20, marginBottom: 8 }}>🔄</div>
+          <div style={{ marginBottom: 8 }}><span className="material-symbols-outlined" style={{ fontSize: 24 }}>sync</span></div>
           Loading trucks &amp; stops…
         </div>
       ) : trucks.length === 0 ? (
@@ -260,13 +319,13 @@ export default function ZonePanel({ zone, barangayData, schedules = [], onClearF
       <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
         <button
           onClick={() => setActiveModal('schedule')}
-          style={{ flex: 1, background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.4)", color: "#93c5fd", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer", transition: 'all 0.15s' }}>
-          🗓️ Schedule
+          style={{ flex: 1, background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.4)", color: "#93c5fd", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer", transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>calendar_month</span> Schedule
         </button>
         <button
           onClick={() => setActiveModal('analytics')}
-          style={{ flex: 1, background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.4)", color: "#fcd34d", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer", transition: 'all 0.15s' }}>
-          📊 Analytics
+          style={{ flex: 1, background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.4)", color: "#fcd34d", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: "pointer", transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>bar_chart</span> Analytics
         </button>
       </div>
       

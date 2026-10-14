@@ -81,7 +81,7 @@ export default function AuthModal({ defaultMode = 'login', onClose }) {
         email: form.email,
         password: form.password,
         password2: form.password2,
-        barangay: form.barangay,
+        barangay: form.barangay || null,
         role: 'citizen'
       };
       console.log('DEBUG: Sending Payload', payload);

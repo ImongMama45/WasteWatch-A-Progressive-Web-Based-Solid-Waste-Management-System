@@ -44,10 +44,15 @@ class NewsItemSerializer(serializers.ModelSerializer):
     def get_image_url(self, obj):
         if not obj.image:
             return None
+        url = obj.image.url
+        if url.startswith('res.cloudinary.com'):
+            return f'https://{url}'
+        if url.startswith('//res.cloudinary.com'):
+            return f'https:{url}'
         request = self.context.get('request')
-        if request:
-            return request.build_absolute_uri(obj.image.url)
-        return obj.image.url
+        if request and not url.startswith('http'):
+            return request.build_absolute_uri(url)
+        return url
 
 
 class EmergencyAlertSerializer(serializers.ModelSerializer):

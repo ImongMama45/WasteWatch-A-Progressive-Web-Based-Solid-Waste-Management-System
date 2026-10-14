@@ -51,6 +51,7 @@ def public_stats_view(request):
     from dumpsite.models import WasteDelivery
     from django.contrib.auth import get_user_model
     from django.utils import timezone
+    from django.conf import settings
     from datetime import timedelta
     from django.db.models import Sum, Count
     
@@ -68,13 +69,13 @@ def public_stats_view(request):
         hotspots         = GarbageHotspot.objects.count()
 
         now = timezone.now()
-        cutoff = now - timedelta(minutes=5)
+        staleness_cutoff = now - timedelta(hours=getattr(settings, 'SHIFT_STALE_HOURS', 6))
         online_trucks = Truck.objects.filter(
-            shifts__ended_at__isnull=True,
-            shifts__started_at__lte=now,
-            shifts__driver__role='driver',
-            shifts__driver__last_activity__gte=cutoff,
+            shifts__is_active=True,
+            shifts__last_location_update__gte=staleness_cutoff,
         ).distinct().count()
+
+        cutoff = now - timedelta(minutes=5)
 
         online_counts = (
             User.objects
@@ -168,14 +169,16 @@ def public_live_view(request):
     from driver.models import DriverShift
     from django.utils import timezone
     from datetime import timedelta
+    from django.conf import settings
 
     now = timezone.now()
-    staleness_cutoff = now - timedelta(hours=24)
+    staleness_cutoff = now - timedelta(hours=getattr(settings, 'SHIFT_STALE_HOURS', 6))
+    from django.db.models import Q
     
     active_shifts = DriverShift.objects.filter(
+        Q(last_location_update__gte=staleness_cutoff) | Q(last_location_update__isnull=True, started_at__gte=staleness_cutoff),
         is_active=True,
         ended_at__isnull=True,
-        started_at__gte=staleness_cutoff
     ).select_related('truck', 'schedule')
 
     data = []
@@ -197,9 +200,7 @@ def public_live_view(request):
         
         data.append({
             'id': shift.id,
-            'truck_plate': shift.truck.plate_number if shift.truck else 'Unknown',
             'truck_model': shift.truck.model if shift.truck else 'Unknown',
-            'driver_name': shift.driver.get_full_name() if shift.driver else 'Unknown',
             'latitude': float(shift.current_latitude) if shift.current_latitude else None,
             'longitude': float(shift.current_longitude) if shift.current_longitude else None,
             'op_status': shift.op_status,

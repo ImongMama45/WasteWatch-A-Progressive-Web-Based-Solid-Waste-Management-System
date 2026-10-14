@@ -1,5 +1,15 @@
 import { useState, useEffect } from 'react'
 import api from '../../api/client'
+import TrucksOverlay from './components/TrucksOverlay'
+
+const Ico = ({ d, size = 14, color = 'currentColor', sw = 1.75, style = {}, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={sw}
+    strokeLinecap="round" strokeLinejoin="round" className={className} style={{ flexShrink: 0, display: 'block', ...style }}>
+    {Array.isArray(d) ? d.map((p, i) => <path key={i} d={p} />) : <path d={d} />}
+  </svg>
+);
+const IcoChartBar = p => <Ico {...p} d={["M18 20V10", "M12 20V4", "M6 20v-6"]} />;
+const IcoTruck = p => <Ico {...p} d={["M1 3h15v13H1z", "M16 8h4l3 3v5h-7V8z", "M5.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z", "M18.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"]} />;
 
 const PERIOD_OPTS = [
   { value: 'day',   label: 'Today' },
@@ -12,6 +22,7 @@ export default function BarangayBreakdown() {
   const [period,  setPeriod]  = useState('day')
   const [data,    setData]    = useState([])
   const [loading, setLoading] = useState(true)
+  const [overlayOpen, setOverlayOpen] = useState(false)
 
   useEffect(() => {
     api.get('/api/dumpsite/dumpsites/').then(res => {
@@ -36,8 +47,17 @@ export default function BarangayBreakdown() {
           <h1 style={{ fontSize: '1.5rem', fontWeight: 900, letterSpacing: '-0.03em', color: 'var(--surface-3)' }}>Barangay Breakdown</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: 2 }}>Waste collected by barangay, sorted by volume</p>
         </div>
-        <div style={{ display: 'flex', gap: '0.4rem', background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: 14, padding: '4px' }}>
-          {PERIOD_OPTS.map(o => (
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <button onClick={() => setOverlayOpen(true)} style={{
+            background: 'var(--surface-1)', border: '1px solid var(--border)', color: 'var(--surface-3)',
+            borderRadius: 12, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s'
+          }}>
+            <IcoTruck size={14} /> Assigned Trucks
+          </button>
+          
+          <div style={{ display: 'flex', gap: '0.4rem', background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: 14, padding: '4px' }}>
+            {PERIOD_OPTS.map(o => (
             <button key={o.value} onClick={() => setPeriod(o.value)}
               style={{
                 padding: '6px 16px', borderRadius: 10, fontSize: 12, fontWeight: 700,
@@ -49,6 +69,7 @@ export default function BarangayBreakdown() {
               {o.label}
             </button>
           ))}
+          </div>
         </div>
       </header>
 
@@ -56,7 +77,7 @@ export default function BarangayBreakdown() {
         <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>Loading...</div>
       ) : data.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '3rem', border: '2px dashed var(--border)', borderRadius: 20, color: 'var(--text-muted)' }}>
-          <div style={{ fontSize: 36, marginBottom: 8 }}>📊</div>
+          <IcoChartBar size={36} style={{ marginBottom: 8, margin: '0 auto', opacity: 0.5 }} />
           <p style={{ fontWeight: 600 }}>No data for this period.</p>
         </div>
       ) : (
@@ -98,12 +119,14 @@ export default function BarangayBreakdown() {
                   <span style={{ fontWeight: 700, fontSize: '0.875rem' }}>{row.barangay}</span>
                 </div>
                 <div style={{ fontWeight: 800, color: 'var(--accent)', fontSize: '0.9rem' }}>{row.total_kg.toLocaleString()} kg</div>
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>🚛 {row.truck_count}</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: 6 }}><IcoTruck size={14} /> {row.truck_count}</div>
               </div>
             ))}
           </div>
         </>
       )}
+
+      <TrucksOverlay open={overlayOpen} onClose={() => setOverlayOpen(false)} siteId={siteId} />
     </div>
   )
 }

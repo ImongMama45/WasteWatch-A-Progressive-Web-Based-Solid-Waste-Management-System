@@ -186,7 +186,8 @@ function AssignTruckModal({ truck, trucks, onSave, onClose, drivers, crewPool })
       setAssignedDrivers(t.drivers || [])
       setAssignedCrew(t.crew || [])
     }
-  }, [selectedTruckId, trucks])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTruckId])
 
   const getMemberName = (id) => {
     const u = crewPool.find(x => x.id === id) || drivers.find(x => x.id === id)
@@ -577,7 +578,7 @@ export default function TruckManagement() {
   }
 
   async function handleSave(form, truckId = null) {
-    const id = truckId;
+    const id = (truckId !== null && truckId !== undefined && truckId !== '') ? Number(truckId) : null;
 
     if (id) {
       const originalTruck = trucks.find(t => t.id === id)
@@ -594,7 +595,7 @@ export default function TruckManagement() {
 
   async function executeSave(id, form) {
     const payload = form instanceof FormData ? form : { ...form }
-    if (!(payload instanceof FormData) && !payload.last_service) payload.last_service = null
+    if (!(payload instanceof FormData) && 'last_service' in payload && !payload.last_service) payload.last_service = null
 
     const res = await saveTruck(id, payload)
     if (res.ok) {
@@ -1023,32 +1024,39 @@ export default function TruckManagement() {
                 </div>
               </>
             ) : (
-              <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, color: '#d97706' }}>
-                  <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(217,119,6,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <div style={{ fontSize: 20 }}>⚠️</div>
-                  </div>
-                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Change Status</h3>
-                </div>
-                <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.5 }}>
-                  You are changing this truck's status to <strong>{warningModal.form.status}</strong>.
-                  {warningModal.form.status === 'inactive' && ' This will unassign the truck, driver, and crew from all active routes.'}
-                </p>
-                <div style={{ marginBottom: 24 }}>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 8 }}>Reason for {warningModal.form.status}</label>
-                  <textarea
-                    id="statusReasonInput"
-                    style={{ width: '100%', minHeight: 80, padding: 12, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontSize: 13, resize: 'vertical' }}
-                    placeholder={`Why is this truck ${warningModal.form.status}?`}
-                  />
-                </div>
-                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-                  <button className="btn btn-outline" onClick={() => setWarningModal(null)}>Cancel</button>
-                  <button className="btn btn-primary" onClick={() => confirmStatusChange(document.getElementById('statusReasonInput').value)}>
-                    Confirm Change
-                  </button>
-                </div>
-              </>
+              (() => {
+                const pendingStatus = warningModal?.form instanceof FormData
+                  ? warningModal.form.get('status')
+                  : warningModal?.form?.status;
+                return (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, color: '#d97706' }}>
+                      <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(217,119,6,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div style={{ fontSize: 20 }}>⚠️</div>
+                      </div>
+                      <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Change Status</h3>
+                    </div>
+                    <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.5 }}>
+                      You are changing this truck's status to <strong>{pendingStatus}</strong>.
+                      {pendingStatus === 'inactive' && ' This will unassign the truck, driver, and crew from all active routes.'}
+                    </p>
+                    <div style={{ marginBottom: 24 }}>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 8 }}>Reason for {pendingStatus}</label>
+                      <textarea
+                        id="statusReasonInput"
+                        style={{ width: '100%', minHeight: 80, padding: 12, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontSize: 13, resize: 'vertical' }}
+                        placeholder={`Why is this truck ${pendingStatus}?`}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                      <button className="btn btn-outline" onClick={() => setWarningModal(null)}>Cancel</button>
+                      <button className="btn btn-primary" onClick={() => confirmStatusChange(document.getElementById('statusReasonInput').value)}>
+                        Confirm Change
+                      </button>
+                    </div>
+                  </>
+                );
+              })()
             )}
 
           </div>

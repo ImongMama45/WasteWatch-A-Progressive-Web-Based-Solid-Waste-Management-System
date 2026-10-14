@@ -8,15 +8,17 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = 'django-insecure-change-this-in-production-use-env-variable'
-
 import os
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
-DEBUG = os.environ.get('DEBUG', 'True') == 'True'
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    raise ValueError("The SECRET_KEY environment variable is not set. Add it to your Render Environment settings.")
+
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = [
     'localhost',
@@ -79,9 +81,9 @@ import os
 import cloudinary
 
 CLOUDINARY_STORAGE = {
-    'CLOUD_NAME': os.environ.get('CLOUDINARY_CLOUD_NAME', 'dr5ba1lmn'),
-    'API_KEY': os.environ.get('CLOUDINARY_API_KEY', '771269991353945'),
-    'API_SECRET': os.environ.get('CLOUDINARY_API_SECRET', '7ynzBQqgrGYNRiERvAsKfM0iqmY'),
+    'CLOUD_NAME': os.environ.get('CLOUDINARY_CLOUD_NAME', ''),
+    'API_KEY': os.environ.get('CLOUDINARY_API_KEY', ''),
+    'API_SECRET': os.environ.get('CLOUDINARY_API_SECRET', ''),
 }
 
 cloudinary.config(
@@ -113,19 +115,8 @@ TEMPLATES = [
 WSGI_APPLICATION = 'wastewatch.wsgi.application'
 
 # ---------------------------------------------------------------------------
-# Database — PostgreSQL
+# Database — PostgreSQL (Configured via DATABASE_URL)
 # ---------------------------------------------------------------------------
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': 'wastewatch_db',
-#         'USER': 'wastewatch_user',
-#         'PASSWORD': 'taequert123',    
-#         'HOST': 'localhost',
-#         'PORT': '5432',
-#     }
-# }
-
 import dj_database_url
 
 DATABASES = {
@@ -276,5 +267,11 @@ REST_FRAMEWORK = {
         'anon': '5/minute',
         'user': '30/minute',
         'report_submission': '3/minute',
+        'tracker': '30/minute',
     }
 }
+
+# ---------------------------------------------------------------------------
+#                           App-Specific Settings
+# ---------------------------------------------------------------------------
+SHIFT_STALE_HOURS = 6

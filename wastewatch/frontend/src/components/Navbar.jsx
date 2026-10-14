@@ -531,7 +531,8 @@ export default function Navbar() {
 
   const desktopLinks = [
     { path: '/', label: 'Home' },
-    { path: '/map', label: 'Map' },
+    // Show map only to authorized staff roles
+    ...(['admin', 'brgy_official', 'watcher'].includes(role) ? [{ path: '/map', label: 'Map' }] : []),
     { path: '/schedule', label: 'Schedule' },
     { path: '/about', label: 'About' },
     { path: '/announcements', label: 'Announcements' },

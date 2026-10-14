@@ -12,8 +12,8 @@ export function useEscalations() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  const refresh = useCallback(async () => {
-    setLoading(true)
+  const refresh = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const res = await api.get('/api/watcher/escalations/')
       setItems(res.data)

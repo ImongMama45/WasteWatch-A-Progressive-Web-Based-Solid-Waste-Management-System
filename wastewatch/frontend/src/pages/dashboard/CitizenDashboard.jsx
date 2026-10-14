@@ -23,6 +23,9 @@ import OfflineReportBuilder from '../../components/OfflineReportBuilder'
 import { useOfflineReports } from '../../hooks/useOfflineReports'
 import { ICONS } from '../../api/navConfig'
 import DispatchCard from '../../components/DispatchCard'
+import ReportDetail from '../admin/ReportDetail'
+import { useBarangayTracker } from '../../hooks/useBarangayTracker'
+import LiveTrackerCard from '../../components/analytics/LiveTrackerCard'
 const STATUS_META = {
   pending: { label: 'Pending', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' },
   approved: { label: 'Approved', color: '#22c55e', bg: 'rgba(34,197,94,0.1)' },
@@ -53,6 +56,7 @@ export default function CitizenDashboard() {
   const [reportsTab, setReportsTab] = useState('all')   // all | pending | resolved
   const [crewAssignment, setCrewAssignment] = useState(null)
   const [showBuilder, setShowBuilder] = useState(false)
+  const [selectedReportId, setSelectedReportId] = useState(null)
   const [announcements, setAnnouncements] = useState([])
 
   const userBrgy = user?.barangay_name || user?.barangay?.name || '';
@@ -63,9 +67,14 @@ export default function CitizenDashboard() {
 
   const nextDay = filteredSchedule.find(s => s.isNext) || filteredSchedule[0]
 
+  const userBrgyId = user?.barangay || user?.barangay_id
+  const tracker = useBarangayTracker(userBrgyId)
+
   const [activeDispatch, setActiveDispatch] = useState(null)
 
   useEffect(() => {
+    let cancelled = false;
+
     Promise.all([
       api.get('/api/news/items/for-dashboard/').catch(() => ({ data: [] })),
       api.get('/api/watcher/reports/mine/').catch(() => ({ data: [] })),
@@ -75,24 +84,17 @@ export default function CitizenDashboard() {
       api.get('/api/public/live/').catch(() => ({ data: [] })),
     ])
       .then(([newsRes, reportsRes, statsRes, hotspotsRes, scheduleRes, liveRes]) => {
+        if (cancelled) return;
         if (newsRes.data) setAnnouncements(newsRes.data)
         if (reportsRes.data) setMyReports(reportsRes.data.slice(0, 5))
         if (statsRes.data) setStats(statsRes.data)
         if (hotspotsRes.data) {
-          setHotspots(hotspotsRes.data.slice(0, 4).map(h => {
-            let pType = 'Mixed';
-            if (h.name) {
-              if (h.name.includes('—')) pType = h.name.split('—')[1].trim();
-              else if (h.name.includes('-')) pType = h.name.split('-')[1].trim();
-              else pType = h.name;
-            }
-            return {
-              ...h,
-              count: h.report_count || 0,
-              type: pType,
-              status: h.severity || 'low'
-            }
-          }))
+          setHotspots(hotspotsRes.data.slice(0, 4).map(h => ({
+            ...h,
+            count: h.report_count || 0,
+            type: h.type || 'Mixed',
+            status: h.severity || 'low'
+          })))
         }
         if (scheduleRes.data) setSchedule(scheduleRes.data)
 
@@ -104,14 +106,22 @@ export default function CitizenDashboard() {
           }
         }
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
 
     // Fetch crew assignment only if user is a crew member
     if (user?.employee_type === 'crew_member') {
       api.get('/api/driver/crew-assignments/my-assignment/')
-        .then(res => setCrewAssignment(res.data))
-        .catch(() => setCrewAssignment(null))
+        .then(res => {
+          if (!cancelled) setCrewAssignment(res.data)
+        })
+        .catch(() => {
+          if (!cancelled) setCrewAssignment(null)
+        })
     }
+
+    return () => { cancelled = true; }
   }, [user?.employee_type, user?.barangay_name, user?.barangay?.name])
 
   const handleSubmitReport = useCallback(async (fields) => {
@@ -158,10 +168,14 @@ export default function CitizenDashboard() {
           </p>
         </div>
 
-        <DispatchCard
-          dispatchData={activeDispatch}
-          userBarangay={user?.barangay_name || user?.barangay?.name}
-        />
+        {tracker.data?.trucks?.length > 0 ? (
+          tracker.data.trucks.map(t => <LiveTrackerCard key={t.schedule_id} truck={t} />)
+        ) : (
+          <DispatchCard
+            dispatchData={activeDispatch}
+            userBarangay={user?.barangay_name || user?.barangay?.name}
+          />
+        )}
 
         <div className='mobile-schedule'>
           <HomeCarousel role="citizen" userBarangay={user?.barangay_name} onReport={() => setShowBuilder(true)} />
@@ -350,7 +364,7 @@ export default function CitizenDashboard() {
             <div style={{ marginBottom: 20 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                 <h3 className="section-title" style={{ margin: 0 }}>Nearby Collection Points</h3>
-                <button onClick={() => navigate('/map')}
+                <button onClick={() => navigate('/public-map')}
                   style={{
                     background: 'none', border: 'none', color: 'var(--accent)',
                     fontSize: 12, fontWeight: 700, cursor: 'pointer'
@@ -484,7 +498,7 @@ export default function CitizenDashboard() {
                           padding: '12px 16px',
                           borderBottom: i < filteredReports.length - 1 ? '1px solid var(--border)' : 'none',
                         }}
-                        onClick={() => navigate(`/report/${report.id}`)}>
+                        onClick={() => setSelectedReportId(report.id)}>
 
                         <div style={{
                           width: 38, height: 38, borderRadius: 10, flexShrink: 0,
@@ -756,6 +770,12 @@ export default function CitizenDashboard() {
         onClose={() => setShowBuilder(false)}
         onSubmit={handleSubmitReport}
       />
+      {selectedReportId && (
+        <ReportDetail 
+          reportId={selectedReportId} 
+          onClose={() => setSelectedReportId(null)} 
+        />
+      )}
     </>
   )
 }

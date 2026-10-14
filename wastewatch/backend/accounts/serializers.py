@@ -43,6 +43,9 @@ class BarangaySerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     barangay_name = serializers.CharField(source='barangay.name', read_only=True)
     dumpsite_name = serializers.CharField(source='dumpsite.name', read_only=True)
+    points = serializers.SerializerMethodField()
+    is_suspended = serializers.SerializerMethodField()
+    suspension_overrides = serializers.SerializerMethodField()
 
     class Meta:
         model  = User
@@ -52,8 +55,42 @@ class UserSerializer(serializers.ModelSerializer):
             'barangay', 'barangay_name',
             'dumpsite', 'dumpsite_name',
             'is_active', 'created_at',
+            'points', 'is_suspended', 'suspension_overrides'
         ]
-        read_only_fields = ['created_at', 'role']
+        read_only_fields = ['created_at', 'role', 'points', 'is_suspended', 'suspension_overrides']
+
+    def get_points(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        if obj.role == 'driver' and (getattr(request.user, 'role', '') == 'admin' or request.user.id == obj.id):
+            return getattr(obj.driverprofile, 'points', 0) if hasattr(obj, 'driverprofile') else 0
+        return None
+
+    def get_is_suspended(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        if obj.role == 'driver' and (getattr(request.user, 'role', '') == 'admin' or request.user.id == obj.id):
+            return getattr(obj.driverprofile, 'is_suspended', False) if hasattr(obj, 'driverprofile') else False
+        return None
+
+    def get_suspension_overrides(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        if obj.role == 'driver' and getattr(request.user, 'role', '') == 'admin':
+            overrides = obj.suspension_overrides.all().order_by('-created_at')
+            return [
+                {
+                    "id": o.id,
+                    "reason": o.reason,
+                    "admin_name": o.admin.full_name if o.admin else "System",
+                    "created_at": o.created_at.isoformat() if o.created_at else None
+                }
+                for o in overrides
+            ]
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +105,9 @@ class AdminUserSerializer(serializers.ModelSerializer):
     password      = serializers.CharField(write_only=True, required=False, min_length=6)
     barangay_name = serializers.CharField(source='barangay.name', read_only=True)
     dumpsite_name = serializers.CharField(source='dumpsite.name', read_only=True)
+    points = serializers.SerializerMethodField()
+    is_suspended = serializers.SerializerMethodField()
+    suspension_overrides = serializers.SerializerMethodField()
 
     class Meta:
         model  = User
@@ -77,8 +117,42 @@ class AdminUserSerializer(serializers.ModelSerializer):
             'barangay', 'barangay_name',
             'dumpsite', 'dumpsite_name',
             'is_active', 'password', 'created_at',
+            'points', 'is_suspended', 'suspension_overrides'
         ]
-        read_only_fields = ['created_at']
+        read_only_fields = ['created_at', 'points', 'is_suspended', 'suspension_overrides']
+
+    def get_points(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        if obj.role == 'driver' and (getattr(request.user, 'role', '') == 'admin' or request.user.id == obj.id):
+            return getattr(obj.driverprofile, 'points', 0) if hasattr(obj, 'driverprofile') else 0
+        return None
+
+    def get_is_suspended(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        if obj.role == 'driver' and (getattr(request.user, 'role', '') == 'admin' or request.user.id == obj.id):
+            return getattr(obj.driverprofile, 'is_suspended', False) if hasattr(obj, 'driverprofile') else False
+        return None
+
+    def get_suspension_overrides(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        if obj.role == 'driver' and getattr(request.user, 'role', '') == 'admin':
+            overrides = obj.suspension_overrides.all().order_by('-created_at')
+            return [
+                {
+                    "id": o.id,
+                    "reason": o.reason,
+                    "admin_name": o.admin.full_name if o.admin else "System",
+                    "created_at": o.created_at.isoformat() if o.created_at else None
+                }
+                for o in overrides
+            ]
+        return None
 
     def validate_email(self, value):
         value = value.strip().lower()
@@ -182,7 +256,7 @@ class RegisterSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         password = validated_data.pop('password')
-        barangay = validated_data.pop('barangay')
+        barangay = validated_data.pop('barangay', None)
         
         print(f"DEBUG: RegisterSerializer.create - Saving user with barangay_id: {barangay.id if barangay else None} ({barangay.name if barangay else 'None'})")
         

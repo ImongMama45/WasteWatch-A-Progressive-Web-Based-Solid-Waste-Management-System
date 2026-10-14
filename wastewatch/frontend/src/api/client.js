@@ -37,4 +37,29 @@ api.interceptors.request.use((config) => {
 
 // ← NO response interceptor at all — let each page handle errors itself
 
+export function handleStaleShift(err) {
+  // NOTE: This catches both 403 and 400 statuses.
+  // To avoid reloading the app inappropriately, backend endpoints MUST ONLY set
+  // `code: 'no_active_shift'` for fatal "shift is gone" errors, and never for
+  // minor validation failures.
+  if (
+    (err.response?.status === 403 || err.response?.status === 400) && 
+    err.response?.data?.code === 'no_active_shift'
+  ) {
+    console.warn("Active shift closed remotely. Reloading app to prompt new shift.")
+    try { sessionStorage.setItem('ww_shift_closed_notice', String(Date.now())) } catch {}
+    try {
+      const last = Number(sessionStorage.getItem('ww_shift_reload_at') || 0)
+      if (Date.now() - last > 60_000) {
+        sessionStorage.setItem('ww_shift_reload_at', String(Date.now()))
+        window.location.reload()
+      }
+    } catch (e) {
+      window.location.reload()
+    }
+    return true
+  }
+  return false
+}
+
 export default api
