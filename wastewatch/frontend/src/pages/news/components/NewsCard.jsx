@@ -3,6 +3,7 @@
  * -------------
  * Three card variants: news | announcement | emergency
  * Uses Lucide React icons. Matches .card design system.
+ * Zero emojis.
  */
 
 import { Newspaper, Megaphone, AlertTriangle, MapPin, Calendar, ChevronRight, Pin } from 'lucide-react'
@@ -19,7 +20,7 @@ const TYPE_CONFIG = {
   },
   announcement: {
     Icon: Megaphone,
-    badgeColor: 'var(--accent)', // WasteWatch Green
+    badgeColor: 'var(--accent)',
     badgeBg: 'rgba(46,204,113,.08)',
     badgeBorder: 'rgba(46,204,113,.25)',
     accentBorder: 'transparent',
@@ -65,7 +66,7 @@ function inject() {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-export default function NewsCard({ item, style = {}, animDelay = 0 }) {
+export default function NewsCard({ item, onReadMore, style = {}, animDelay = 0 }) {
   inject()
   const type     = item.type || 'news'
   const cfg      = TYPE_CONFIG[type] || TYPE_CONFIG.news
@@ -78,8 +79,27 @@ export default function NewsCard({ item, style = {}, animDelay = 0 }) {
     } catch { return item.date }
   })()
 
+  const brgyName = item.barangay_name || (typeof item.barangay === 'string' ? item.barangay : null)
+  const isPinned = Boolean(item.is_pinned ?? item.isPinned)
+  const imageUrl = item.image_url || (typeof item.image === 'string' ? item.image : null)
+
+  function handleClick() {
+    onReadMore?.(item)
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      onReadMore?.(item)
+    }
+  }
+
   return (
     <div
+      role="article"
+      tabIndex={0}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
       className="nc-card"
       style={{
         background: 'var(--surface)',
@@ -88,6 +108,9 @@ export default function NewsCard({ item, style = {}, animDelay = 0 }) {
         borderRadius: '16px',
         padding: '18px 22px',
         animationDelay: `${animDelay}ms`,
+        outline: 'none',
+        display: 'flex',
+        flexDirection: 'column',
         ...style,
       }}
     >
@@ -106,7 +129,7 @@ export default function NewsCard({ item, style = {}, animDelay = 0 }) {
             {item.category || cfg.label}
           </span>
           {/* Pinned badge */}
-          {item.isPinned && (
+          {isPinned && (
             <span style={{
               display: 'inline-flex', alignItems: 'center', gap: 3,
               fontSize: 9, fontWeight: 700, letterSpacing: '.06em',
@@ -130,21 +153,35 @@ export default function NewsCard({ item, style = {}, animDelay = 0 }) {
         </span>
       </div>
 
-      {/* Title */}
-      <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)', lineHeight: 1.3, marginBottom: 6 }}>
-        {item.title}
-      </div>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {/* Title */}
+          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)', lineHeight: 1.3, marginBottom: 6 }}>
+            {item.title}
+          </div>
 
-      {/* Body */}
-      <div style={{
-        fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 12,
-        display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-      }}>
-        {item.description}
+          {/* Body */}
+          <div style={{
+            fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 12,
+            display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+          }}>
+            {item.description || item.body}
+          </div>
+        </div>
+
+        {/* Thumbnail preview if available */}
+        {imageUrl && (
+          <div style={{
+            width: 80, height: 70, borderRadius: 10, overflow: 'hidden',
+            flexShrink: 0, border: '1px solid var(--border)',
+          }}>
+            <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          </div>
+        )}
       </div>
 
       {/* Meta row */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginTop: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {/* Date */}
           <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)' }}>
@@ -152,20 +189,28 @@ export default function NewsCard({ item, style = {}, animDelay = 0 }) {
             {formattedDate}
           </span>
           {/* Barangay */}
-          {item.barangay && (
+          {brgyName && (
             <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: 'var(--text-muted)' }}>
               <MapPin size={11} strokeWidth={2} />
-              {item.barangay}
+              {brgyName}
             </span>
           )}
         </div>
-        {/* Read more */}
-        <button className="nc-read-btn" style={{
-          display: 'flex', alignItems: 'center', gap: 3,
-          fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
-          background: 'none', border: 'none', cursor: 'pointer',
-          fontFamily: 'var(--font-body)', padding: 0,
-        }}>
+        {/* Read more button */}
+        <button
+          type="button"
+          className="nc-read-btn"
+          onClick={(e) => {
+            e.stopPropagation()
+            handleClick()
+          }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 3,
+            fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
+            background: 'none', border: 'none', cursor: 'pointer',
+            fontFamily: 'var(--font-body)', padding: 0,
+          }}
+        >
           Read More
           <ChevronRight size={13} strokeWidth={2.5} />
         </button>

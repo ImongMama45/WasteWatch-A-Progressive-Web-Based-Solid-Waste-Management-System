@@ -2,27 +2,17 @@
  * NewsFeed.jsx
  * -------------
  * Filtered, searchable vertical list of NewsCard items.
+ * Uses shared filterNews and sortNews utils to prevent runtime crashes.
+ * Zero emojis.
  */
 
 import { FileSearch } from 'lucide-react'
 import NewsCard from './NewsCard'
-import { NEWS_ITEMS } from '../data/newsData'
+import { filterNews, sortNews } from '../utils/newsUtils'
 
-export default function NewsFeed({ items = NEWS_ITEMS, category = 'All', search = '' }) {
-  // Filter
-  const filtered = items.filter(item => {
-    const matchCat    = category === 'All' || item.category === category
-    const q           = search.toLowerCase()
-    const matchSearch = !q || item.title.toLowerCase().includes(q) || item.description.toLowerCase().includes(q) || (item.barangay || '').toLowerCase().includes(q)
-    return matchCat && matchSearch
-  })
-
-  // Sort: pinned first, then by date desc
-  const sorted = [...filtered].sort((a, b) => {
-    if (a.isPinned && !b.isPinned) return -1
-    if (!a.isPinned && b.isPinned) return 1
-    return new Date(b.date) - new Date(a.date)
-  })
+export default function NewsFeed({ items = [], category = 'All', search = '', onReadMore }) {
+  const filtered = filterNews(items, category, search)
+  const sorted = sortNews(filtered)
 
   if (!sorted.length) {
     return (
@@ -47,6 +37,7 @@ export default function NewsFeed({ items = NEWS_ITEMS, category = 'All', search 
           key={item.id}
           item={item}
           animDelay={i * 30}
+          onReadMore={onReadMore}
         />
       ))}
     </div>
