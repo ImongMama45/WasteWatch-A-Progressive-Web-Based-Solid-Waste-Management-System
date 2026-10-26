@@ -2,10 +2,11 @@
  * ArticleDetailModal.jsx
  * ----------------------
  * Accessible modal displaying full article details with deep-linking support.
+ * Uses shared newsConfig and useModal hook for body scroll locking.
  * Material / Lucide icons only. Zero emojis.
  */
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import {
   X,
   Calendar,
@@ -13,47 +14,90 @@ import {
   Pin,
   Share2,
   Check,
-  Megaphone,
-  Newspaper,
-  AlertTriangle,
+  AlertCircle,
 } from 'lucide-react'
+import { TYPE_CONFIG } from '../utils/newsConfig'
+import { useModal } from '../../../hooks/useModal'
 
-const TYPE_CONFIG = {
-  emergency: {
-    Icon: AlertTriangle,
-    badgeColor: '#e74c3c',
-    badgeBg: 'rgba(231,76,60,.1)',
-    badgeBorder: 'rgba(231,76,60,.3)',
-    label: 'Emergency Alert',
-  },
-  announcement: {
-    Icon: Megaphone,
-    badgeColor: 'var(--accent)',
-    badgeBg: 'rgba(46,204,113,.1)',
-    badgeBorder: 'rgba(46,204,113,.3)',
-    label: 'Announcement',
-  },
-  news: {
-    Icon: Newspaper,
-    badgeColor: 'var(--text-muted)',
-    badgeBg: 'var(--surface-2)',
-    badgeBorder: 'var(--border)',
-    label: 'News',
-  },
-}
-
-export default function ArticleDetailModal({ item, onClose }) {
+export default function ArticleDetailModal({ item, notFound = false, onClose }) {
   const [copied, setCopied] = useState(false)
+  const isOpen = Boolean(item || notFound)
 
-  useEffect(() => {
-    function handleKeyDown(e) {
-      if (e.key === 'Escape') onClose?.()
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  useModal(isOpen, onClose)
 
-  if (!item) return null
+  if (!isOpen) return null
+
+  // Not Found State
+  if (notFound) {
+    return (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="article-not-found-title"
+        onClick={e => e.target === e.currentTarget && onClose?.()}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.65)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: 20,
+        }}
+      >
+        <div
+          style={{
+            background: 'var(--surface)',
+            borderRadius: '16px',
+            padding: '28px',
+            maxWidth: 420,
+            width: '100%',
+            boxShadow: '0 24px 60px rgba(0,0,0,0.4)',
+            border: '1px solid var(--border)',
+            textAlign: 'center',
+          }}
+        >
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              background: 'rgba(231,76,60,0.1)',
+              color: '#e74c3c',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 14px',
+            }}
+          >
+            <AlertCircle size={22} strokeWidth={2} />
+          </div>
+
+          <h2
+            id="article-not-found-title"
+            style={{ fontSize: 18, fontWeight: 800, margin: '0 0 8px', color: 'var(--text)' }}
+          >
+            Article Not Available
+          </h2>
+
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, margin: '0 0 20px' }}>
+            This article is no longer available or may have been removed.
+          </p>
+
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onClose}
+            style={{ width: '100%' }}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   const type = item.type || 'news'
   const cfg = TYPE_CONFIG[type] || TYPE_CONFIG.news
@@ -191,6 +235,7 @@ export default function ArticleDetailModal({ item, onClose }) {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button
+              type="button"
               onClick={handleShare}
               title="Share article link"
               aria-label="Share article link"
@@ -215,6 +260,7 @@ export default function ArticleDetailModal({ item, onClose }) {
             </button>
 
             <button
+              type="button"
               onClick={onClose}
               title="Close"
               aria-label="Close"

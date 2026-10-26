@@ -4,7 +4,7 @@
  * Horizontally scrollable filter tabs.
  */
 
-import { CATEGORIES } from '../data/newsData'
+import { CATEGORY_TABS } from '../utils/newsConfig'
 
 export default function CategoryTabs({ active, onChange }) {
   return (
@@ -12,7 +12,7 @@ export default function CategoryTabs({ active, onChange }) {
       display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4,
       scrollbarWidth: 'none', marginBottom: 16,
     }}>
-      {CATEGORIES.map(cat => {
+      {CATEGORY_TABS.map(cat => {
         const isActive = active === cat
         return (
           <button

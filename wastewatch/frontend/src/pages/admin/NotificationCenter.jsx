@@ -6,9 +6,12 @@
  *   - Atomic backend broadcasts via POST /api/notifications/broadcast/
  *   - Atomic deletion via DELETE /api/notifications/broadcast/<bid>/
  *   - Grouped broadcast history with ?broadcast=1
- *   - Preset templates for rapid composing
+ *   - Accurate delivery scopes (zero fabricated reach numbers)
+ *   - Standard Lucide Loader2 animation
+ *   - Responsive 2-column grid that folds neatly on mobile screens
  *   - Live resident mobile device preview card
- *   - Dynamic barangay chip cloud from AuthContext / API
+ *   - Preset templates for rapid composing
+ *   - Body scroll locking via useModal hook
  *   - Zero emojis — Material / Lucide React SVG icons only
  */
 
@@ -20,22 +23,22 @@ import {
   Copy,
   AlertTriangle,
   Megaphone,
-  Calendar,
   MapPin,
   Users,
   Search,
   Check,
   RotateCcw,
   Smartphone,
-  Info,
   Clock,
   Sparkles,
   ChevronRight,
   X,
+  Loader2,
 } from 'lucide-react'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useAuth } from '../../context/AuthContext'
 import { useNotification } from '../../context/NotificationContext'
+import { useModal } from '../../hooks/useModal'
 import api from '../../api/client'
 import { getApiErrorMessage } from '../../utils/notificationHelpers'
 
@@ -110,12 +113,16 @@ export default function NotificationCenter() {
   const [selectedBroadcast, setSelectedBroadcast] = useState(null)
   const [confirmDeleteModal, setConfirmDeleteModal] = useState(null)
 
+  // Modal scroll locking
+  useModal(Boolean(selectedBroadcast), () => setSelectedBroadcast(null))
+  useModal(Boolean(confirmDeleteModal), () => setConfirmDeleteModal(null))
+
   // Fetch barangays if not provided by context
   useEffect(() => {
     if (authBarangays && authBarangays.length > 0) {
       setBarangayList(authBarangays)
     } else {
-      api.get('/api/barangays/')
+      api.get('/api/auth/barangays/')
         .then(res => {
           if (Array.isArray(res.data)) setBarangayList(res.data)
         })
@@ -140,10 +147,11 @@ export default function NotificationCenter() {
       // Group rows by broadcast_id
       const grouped = new Map()
       raw.forEach(n => {
-        const bid = n.broadcast_id || `single-${n.id}`
+        if (!n.broadcast_id) return // Server-side ?broadcast=1 only delivers rows with broadcast_id
+        const bid = n.broadcast_id
         if (!grouped.has(bid)) {
           grouped.set(bid, {
-            broadcast_id: n.broadcast_id,
+            broadcast_id: bid,
             sample_id: n.id,
             title: n.title,
             message: n.message,
@@ -151,7 +159,7 @@ export default function NotificationCenter() {
             created_at: n.created_at,
             barangay_ids: [],
             barangay_names: [],
-            is_citywide: !n.barangay && !n.broadcast_id ? false : !n.barangay,
+            is_citywide: !n.barangay,
             total_count: 0,
           })
         }
@@ -281,17 +289,12 @@ export default function NotificationCenter() {
   }
 
   async function executeDelete(broadcast) {
-    if (!broadcast) return
+    if (!broadcast || !broadcast.broadcast_id) return
     const bid = broadcast.broadcast_id
 
-    setDeletingId(bid || broadcast.sample_id)
+    setDeletingId(bid)
     try {
-      if (bid) {
-        await api.delete(`/api/notifications/broadcast/${bid}/`)
-      } else {
-        // Fallback for legacy single notification
-        await api.delete(`/api/notifications/${broadcast.sample_id}/`)
-      }
+      await api.delete(`/api/notifications/broadcast/${bid}/`)
 
       notify({
         variant: 'success',
@@ -329,18 +332,39 @@ export default function NotificationCenter() {
     })
   }, [broadcasts, filterType, search])
 
-  // Estimated reach calculation
-  const estimatedReachText = useMemo(() => {
+  // Accurate target scope label (zero fabricated reach numbers)
+  const targetScopeText = useMemo(() => {
     if (form.target === 'city-wide') {
-      return '~12,500 residents across Lucena City'
+      return 'City-Wide Audience (All Barangays)'
     }
     const count = form.barangayIds.length
-    if (count === 0) return '0 residents'
-    return `~${(count * 650).toLocaleString()} residents across ${count} ${count === 1 ? 'barangay' : 'barangays'}`
+    if (count === 0) return 'No Barangays Selected'
+    return `${count} Selected Barangay${count === 1 ? '' : 's'}`
   }, [form.target, form.barangayIds.length])
 
   return (
     <DashboardLayout>
+      <style>{`
+        .nc-main-grid {
+          display: grid;
+          grid-template-columns: minmax(320px, 460px) 1fr;
+          gap: 20px;
+          align-items: start;
+        }
+        @media (max-width: 920px) {
+          .nc-main-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+        @keyframes nc-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .nc-spin {
+          animation: nc-spin 1s linear infinite;
+        }
+      `}</style>
+
       <div className="page" style={{ maxWidth: 1280, margin: '0 auto', paddingBottom: 40 }}>
         {/* Page Header */}
         <div style={{ marginBottom: 20 }}>
@@ -464,8 +488,8 @@ export default function NotificationCenter() {
           </div>
         </div>
 
-        {/* 2-Column Layout: Left Compose & Presets | Right History & Preview */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 480px) 1fr', gap: 20, alignItems: 'start' }}>
+        {/* 2-Column Responsive Layout */}
+        <div className="nc-main-grid">
           
           {/* ── Left Column: Compose & Resident Preview ── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -761,7 +785,7 @@ export default function NotificationCenter() {
                 )}
               </div>
 
-              {/* Estimated Reach Stat */}
+              {/* Target Scope Status */}
               <div
                 style={{
                   background: 'var(--surface-2)',
@@ -776,10 +800,10 @@ export default function NotificationCenter() {
               >
                 <div>
                   <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.05em' }}>
-                    ESTIMATED RECIPIENTS
+                    DELIVERY TARGET
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginTop: 2 }}>
-                    {estimatedReachText}
+                    {targetScopeText}
                   </div>
                 </div>
                 <Users size={18} strokeWidth={1.8} style={{ color: 'var(--accent)' }} />
@@ -810,16 +834,7 @@ export default function NotificationCenter() {
               >
                 {sending ? (
                   <>
-                    <div
-                      style={{
-                        width: 14,
-                        height: 14,
-                        border: '2px solid #0d1117',
-                        borderTopColor: 'transparent',
-                        borderRadius: '50%',
-                        animation: 'spin .7s linear infinite',
-                      }}
-                    />
+                    <Loader2 size={16} strokeWidth={2.5} className="nc-spin" />
                     Broadcasting...
                   </>
                 ) : (
@@ -1023,6 +1038,7 @@ export default function NotificationCenter() {
             {/* List */}
             {loading ? (
               <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                <Loader2 size={24} className="nc-spin" style={{ display: 'block', margin: '0 auto 10px' }} />
                 Loading broadcasts...
               </div>
             ) : filteredBroadcasts.length === 0 ? (
@@ -1062,11 +1078,11 @@ export default function NotificationCenter() {
                     }
                   })()
 
-                  const isDeleting = deletingId === (b.broadcast_id || b.sample_id)
+                  const isDeleting = deletingId === b.broadcast_id
 
                   return (
                     <div
-                      key={b.broadcast_id || b.sample_id}
+                      key={b.broadcast_id}
                       style={{
                         background: 'var(--surface)',
                         border: '1px solid var(--border)',
@@ -1269,6 +1285,7 @@ export default function NotificationCenter() {
           <div
             role="dialog"
             aria-modal="true"
+            aria-labelledby="broadcast-detail-title"
             onClick={e => e.target === e.currentTarget && setSelectedBroadcast(null)}
             style={{
               position: 'fixed',
@@ -1294,13 +1311,14 @@ export default function NotificationCenter() {
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <span style={{ fontWeight: 800, fontSize: 16, color: 'var(--text)' }}>
+                <span id="broadcast-detail-title" style={{ fontWeight: 800, fontSize: 16, color: 'var(--text)' }}>
                   Broadcast Details
                 </span>
                 <button
                   type="button"
                   onClick={() => setSelectedBroadcast(null)}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                  aria-label="Close details"
                 >
                   <X size={18} />
                 </button>
@@ -1337,13 +1355,13 @@ export default function NotificationCenter() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>
                   <span style={{ color: 'var(--text-muted)' }}>Broadcast ID</span>
                   <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--text-muted)' }}>
-                    {selectedBroadcast.broadcast_id || 'Legacy Entry'}
+                    {selectedBroadcast.broadcast_id}
                   </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Total Records</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Notification Rows</span>
                   <span style={{ fontWeight: 700, color: 'var(--text)' }}>
-                    {selectedBroadcast.total_count} recipient row(s)
+                    {selectedBroadcast.total_count} recipient row{selectedBroadcast.total_count === 1 ? '' : 's'}
                   </span>
                 </div>
               </div>
@@ -1378,6 +1396,7 @@ export default function NotificationCenter() {
           <div
             role="dialog"
             aria-modal="true"
+            aria-labelledby="confirm-delete-title"
             onClick={e => e.target === e.currentTarget && setConfirmDeleteModal(null)}
             style={{
               position: 'fixed',
@@ -1417,7 +1436,7 @@ export default function NotificationCenter() {
                 >
                   <AlertTriangle size={18} strokeWidth={2.2} />
                 </div>
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--text)' }}>
+                <h3 id="confirm-delete-title" style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--text)' }}>
                   Delete Broadcast?
                 </h3>
               </div>

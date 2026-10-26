@@ -19,7 +19,8 @@ import {
 import api from '../../../api/client'
 import { getApiErrorMessage } from '../../../utils/notificationHelpers'
 import { useNotification } from '../../../context/NotificationContext'
-import { CATEGORIES } from '../data/newsData'
+import { NEWS_CATEGORIES } from '../utils/newsConfig'
+import { useModal } from '../../../hooks/useModal'
 
 const TYPE_OPTIONS = [
   { value: 'announcement', label: 'Announcement', Icon: Megaphone, desc: 'City advisories & updates' },
@@ -37,7 +38,7 @@ const INITIAL_FORM = {
   type: 'announcement',
   title: '',
   body: '',
-  category: 'Announcement',
+  category: 'Announcements',
   priority: 'low',
   barangay: '',
   is_pinned: false,
@@ -54,13 +55,7 @@ export default function CreatePostModal({ barangays = [], onClose, onPublished }
   const fileInputRef = useRef(null)
   const { notify } = useNotification()
 
-  useEffect(() => {
-    function handleKeyDown(e) {
-      if (e.key === 'Escape') onClose?.()
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  useModal(true, onClose)
 
   function set(key, val) {
     setForm(prev => ({ ...prev, [key]: val }))
@@ -418,7 +413,7 @@ export default function CreatePostModal({ barangays = [], onClose, onPublished }
                       value={form.category}
                       onChange={e => set('category', e.target.value)}
                     >
-                      {CATEGORIES.map(c => (
+                      {NEWS_CATEGORIES.map(c => (
                         <option key={c} value={c}>{c}</option>
                       ))}
                     </select>

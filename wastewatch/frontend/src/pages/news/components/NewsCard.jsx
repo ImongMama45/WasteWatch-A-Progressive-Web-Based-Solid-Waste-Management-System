@@ -6,41 +6,8 @@
  * Zero emojis.
  */
 
-import { Newspaper, Megaphone, AlertTriangle, MapPin, Calendar, ChevronRight, Pin } from 'lucide-react'
-
-// ─── Config ───────────────────────────────────────────────────────────────────
-const TYPE_CONFIG = {
-  emergency: {
-    Icon: AlertTriangle,
-    badgeColor: '#e74c3c',
-    badgeBg: 'rgba(231,76,60,.08)',
-    badgeBorder: 'rgba(231,76,60,.25)',
-    accentBorder: 'rgba(231,76,60,.3)',
-    label: 'Emergency',
-  },
-  announcement: {
-    Icon: Megaphone,
-    badgeColor: 'var(--accent)',
-    badgeBg: 'rgba(46,204,113,.08)',
-    badgeBorder: 'rgba(46,204,113,.25)',
-    accentBorder: 'transparent',
-    label: 'Announcement',
-  },
-  news: {
-    Icon: Newspaper,
-    badgeColor: 'var(--text-muted)',
-    badgeBg: 'var(--surface-2)',
-    badgeBorder: 'var(--border)',
-    accentBorder: 'transparent',
-    label: 'News',
-  },
-}
-
-const PRIORITY_CONFIG = {
-  high:   { label: 'HIGH',   color: '#e74c3c',  bg: 'rgba(231,76,60,.08)',  border: 'rgba(231,76,60,.2)'  },
-  medium: { label: 'MED',    color: '#f39c12',  bg: 'rgba(243,156,18,.08)', border: 'rgba(243,156,18,.2)' },
-  low:    { label: 'LOW',    color: 'var(--text-muted)', bg: 'var(--surface-2)', border: 'var(--border)' },
-}
+import { MapPin, Calendar, ChevronRight, Pin } from 'lucide-react'
+import { TYPE_CONFIG, PRIORITY_CONFIG } from '../utils/newsConfig'
 
 // ─── Animated card CSS injected once ─────────────────────────────────────────
 const CSS = `
@@ -196,9 +163,11 @@ export default function NewsCard({ item, onReadMore, style = {}, animDelay = 0 }
             </span>
           )}
         </div>
-        {/* Read more button */}
+        {/* Read more visual CTA */}
         <button
           type="button"
+          tabIndex={-1}
+          aria-hidden="true"
           className="nc-read-btn"
           onClick={(e) => {
             e.stopPropagation()

@@ -5,12 +5,13 @@
  * Features:
  *   - Search and category filtering (preventing runtime type errors)
  *   - Featured news carousel with image support
- *   - Article detail modal with deep-linking (?article=<id>)
+ *   - Article detail modal with deep-linking (?article=<id>) and 404 not-found handling
+ *   - History replacement ({ replace: true }) to prevent Back button traps
  *   - Create post modal for admin users with file size validation
  *   - Responsive, zero emojis, Material/Lucide SVG icons only.
  */
 
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Bell, PlusCircle } from 'lucide-react'
 import Navbar from '../../components/Navbar'
@@ -33,22 +34,25 @@ import { filterNews } from './utils/newsUtils'
 
 export default function NewsPage() {
   const { user, barangays: authBarangays } = useAuth()
-  const isAdmin = user?.role?.toLowerCase() === 'admin'
+  // Admin role check matches backend permissions exactly (role === 'admin' || is_staff)
+  const isAdmin = Boolean(user && (user.role === 'admin' || user.is_staff))
 
   const [searchParams, setSearchParams] = useSearchParams()
   const articleParam = searchParams.get('article')
 
   const { items: newsItems, isRefreshing: itemsLoading, refresh: refreshNews } = useNewsItems()
   const { alerts, isRefreshing: alertsLoading, refresh: refreshAlerts } = useEmergencyAlerts()
-  const { spotlights, isRefreshing: spotsLoading, refresh: refreshSpots } = useBarangaySpotlights()
+  const { spotlights } = useBarangaySpotlights()
 
   const [category, setCategory] = useState('All')
   const [search, setSearch] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [selectedArticle, setSelectedArticle] = useState(null)
+  const [articleNotFound, setArticleNotFound] = useState(false)
   const [barangays, setBarangays] = useState(authBarangays || [])
+  const hasLoadedRef = useRef(false)
 
-  // Sync barangays from auth context or fetch if empty
+  // Sync barangays from auth context or fetch lightweight auth endpoint
   useEffect(() => {
     if (authBarangays && authBarangays.length > 0) {
       setBarangays(authBarangays)
@@ -58,7 +62,7 @@ export default function NewsPage() {
   const openCreateModal = useCallback(async () => {
     if (barangays.length === 0) {
       try {
-        const res = await api.get('/api/barangays/')
+        const res = await api.get('/api/auth/barangays/')
         if (res.data && Array.isArray(res.data)) {
           setBarangays(res.data)
         }
@@ -69,67 +73,67 @@ export default function NewsPage() {
     setModalOpen(true)
   }, [barangays.length])
 
-  // Handle URL deep-linking for articles: ?article=<id>
+  // Handle URL deep-linking for news articles only: ?article=<id>
   useEffect(() => {
     if (!articleParam) {
       setSelectedArticle(null)
+      setArticleNotFound(false)
       return
     }
 
-    // Check if article is already loaded in news items or alerts
-    const found =
-      newsItems.find(i => String(i.id) === String(articleParam)) ||
-      alerts.find(i => String(i.id) === String(articleParam))
+    const targetId = String(articleParam)
 
+    // Check if article is already in the loaded newsItems list
+    const found = newsItems.find(i => String(i.id) === targetId)
     if (found) {
       setSelectedArticle(found)
-    } else {
-      // Fallback fetch single item from API
-      let isMounted = true
-      api
-        .get(`/api/news/items/${articleParam}/`)
-        .then(res => {
-          if (isMounted && res.data) {
-            setSelectedArticle(res.data)
-          }
-        })
-        .catch(() => {
-          api
-            .get(`/api/news/alerts/${articleParam}/`)
-            .then(res => {
-              if (isMounted && res.data) {
-                setSelectedArticle(res.data)
-              }
-            })
-            .catch(() => {
-              // Not found, ignore
-            })
-        })
-
-      return () => {
-        isMounted = false
-      }
+      setArticleNotFound(false)
+      hasLoadedRef.current = true
+      return
     }
-  }, [articleParam, newsItems, alerts])
+
+    // Only fetch single article once initial loading settles or if not yet fetched
+    let active = true
+    api
+      .get(`/api/news/items/${targetId}/`)
+      .then(res => {
+        if (active && res.data) {
+          setSelectedArticle(res.data)
+          setArticleNotFound(false)
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setSelectedArticle(null)
+          setArticleNotFound(true)
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [articleParam, newsItems.length]) // Depend on length rather than full object identity to avoid re-triggering on background refresh
 
   function handleReadMore(article) {
     setSelectedArticle(article)
+    setArticleNotFound(false)
     setSearchParams(prev => {
       const next = new URLSearchParams(prev)
       if (article?.id) {
         next.set('article', article.id)
       }
       return next
-    })
+    }, { replace: true })
   }
 
   function handleCloseArticle() {
     setSelectedArticle(null)
+    setArticleNotFound(false)
     setSearchParams(prev => {
       const next = new URLSearchParams(prev)
       next.delete('article')
       return next
-    })
+    }, { replace: true })
   }
 
   function handlePostPublished(type) {
@@ -198,7 +202,7 @@ export default function NewsPage() {
           </div>
           <p className="text-muted text-sm" style={{ margin: 0, paddingLeft: 30 }}>
             Stay updated with waste management activities and city advisories for Lucena City.
-            {(itemsLoading || alertsLoading || spotsLoading) && (
+            {(itemsLoading || alertsLoading) && (
               <span style={{ marginLeft: 8, color: 'var(--accent)' }}>Updating...</span>
             )}
           </p>
@@ -243,10 +247,11 @@ export default function NewsPage() {
         />
       )}
 
-      {/* Article Detail Modal (Deep-linkable) */}
-      {selectedArticle && (
+      {/* Article Detail Modal (Deep-linkable or 404 state) */}
+      {(selectedArticle || articleNotFound) && (
         <ArticleDetailModal
           item={selectedArticle}
+          notFound={articleNotFound}
           onClose={handleCloseArticle}
         />
       )}
