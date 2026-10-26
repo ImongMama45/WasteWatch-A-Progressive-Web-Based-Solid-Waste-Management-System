@@ -27,11 +27,15 @@ from django.contrib.auth            import authenticate, login, logout
 from rest_framework import viewsets, permissions, serializers
 from .models import User, Barangay
 from .serializers import UserSerializer, BarangaySerializer, RegisterSerializer, AdminUserSerializer
+from .permissions import IsAdminRole, is_admin_user
 
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.select_related('barangay', 'dumpsite', 'driverprofile').prefetch_related('suspension_overrides').order_by('-id')
-    permission_classes = [permissions.IsAuthenticated]
+    # Admin only for EVERY method. Writes use AdminUserSerializer (role + password
+    # writable), and list/retrieve expose every user's email, so a plain
+    # IsAuthenticated check let any citizen PATCH themselves to role='admin'.
+    permission_classes = [permissions.IsAuthenticated, IsAdminRole]
 
     def get_serializer_class(self):
         # Admin writes use the full serializer (password + role writable)
@@ -48,7 +52,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['patch'], url_path='lift_suspension')
     def lift_suspension(self, request, pk=None):
-        if getattr(request.user, 'role', None) != 'admin':
+        if not is_admin_user(request.user):
             return Response({'error': 'Only admins can lift suspensions.'}, status=status.HTTP_403_FORBIDDEN)
             
         driver = self.get_object()
