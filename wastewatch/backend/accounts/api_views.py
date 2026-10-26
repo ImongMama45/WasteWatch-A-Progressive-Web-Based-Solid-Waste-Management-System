@@ -24,10 +24,10 @@ from django.views.decorators.http   import require_http_methods
 from django.views.decorators.csrf   import ensure_csrf_cookie
 from django.contrib.auth            import authenticate, login, logout
 
-from rest_framework import viewsets, permissions, serializers
-from .models import User, Barangay
+from rest_framework import viewsets, permissions, serializers, status
+from .models import User, Barangay, UserRole
 from .serializers import UserSerializer, BarangaySerializer, RegisterSerializer, AdminUserSerializer
-from .permissions import IsAdminRole, is_admin_user
+from .permissions import IsAdminRole, IsAdminRoleOrReadOnly, is_admin_user
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -84,7 +84,7 @@ class UserViewSet(viewsets.ModelViewSet):
 class BarangayViewSet(viewsets.ModelViewSet):
     queryset = Barangay.objects.all()
     serializer_class = BarangaySerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [IsAdminRoleOrReadOnly]
 
 
 # ── Helper: serialize a User to a safe dict ──────────────────────────────────
@@ -300,7 +300,7 @@ def online_users_view(request):
     return JsonResponse({'users': result})
 
 class BarangayManagementViewSet(viewsets.ReadOnlyModelViewSet):
-    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated, IsAdminRole]
 
     def get_queryset(self):
         if self.action == 'list':
@@ -341,6 +341,8 @@ class BarangayManagementViewSet(viewsets.ReadOnlyModelViewSet):
         
         if not user_id or not role:
             return Response({"error": "user_id and role are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if role not in UserRole.values:
+            return Response({"error": "Invalid role."}, status=status.HTTP_400_BAD_REQUEST)
             
         try:
             user = User.objects.get(pk=user_id)

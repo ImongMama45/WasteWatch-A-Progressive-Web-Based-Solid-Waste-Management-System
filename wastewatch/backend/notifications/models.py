@@ -39,6 +39,9 @@ class Notification(models.Model):
         default=NotificationType.ANNOUNCEMENT,
     )
 
+    # Atomic broadcast tracking
+    broadcast_id = models.UUIDField(null=True, blank=True, db_index=True)
+
     # Read state: per-user; for barangay-wide notifications
     # this stays False until explicitly marked by each recipient.
     is_read    = models.BooleanField(default=False)

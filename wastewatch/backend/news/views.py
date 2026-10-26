@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db.models import Q
 
+from accounts.permissions import IsAdminRoleOrReadOnly
 from .models import NewsItem, EmergencyAlert, BarangaySpotlight
 from .serializers import (
     NewsItemSerializer,
@@ -14,7 +15,7 @@ from notifications.services import notify_announcement
 class NewsItemViewSet(viewsets.ModelViewSet):
     queryset = NewsItem.objects.filter(is_active=True)
     serializer_class = NewsItemSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminRoleOrReadOnly]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['date', 'priority', 'is_pinned']
 
@@ -86,10 +87,10 @@ class NewsItemViewSet(viewsets.ModelViewSet):
 class EmergencyAlertViewSet(viewsets.ModelViewSet):
     queryset           = EmergencyAlert.objects.filter(is_active=True)
     serializer_class   = EmergencyAlertSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminRoleOrReadOnly]
 
 
 class BarangaySpotlightViewSet(viewsets.ModelViewSet):
     queryset           = BarangaySpotlight.objects.select_related('barangay').all()
     serializer_class   = BarangaySpotlightSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminRoleOrReadOnly]
