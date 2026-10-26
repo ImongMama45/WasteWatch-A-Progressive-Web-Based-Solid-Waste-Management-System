@@ -28,7 +28,7 @@ import {
   Search,
   Check,
   RotateCcw,
-  Smartphone,
+  Eye,
   Clock,
   Sparkles,
   ChevronRight,
@@ -80,7 +80,7 @@ const PRESET_TEMPLATES = [
     name: 'Typhoon Alert',
     type: 'ANNOUNCEMENT',
     title: 'Typhoon Advisory: Secure Waste Bins',
-    body: 'Lucena City CDRRMO advises all residents to secure garbage bins indoors and refrain from putting out waste during high winds.',
+    body: 'Residents are advised to secure garbage bins indoors and refrain from putting out waste during high winds.',
   },
   {
     name: 'Cleanup Drive',
@@ -112,6 +112,7 @@ export default function NotificationCenter() {
   const [search, setSearch] = useState('')
   const [selectedBroadcast, setSelectedBroadcast] = useState(null)
   const [confirmDeleteModal, setConfirmDeleteModal] = useState(null)
+  const mouseDownTargetRef = useRef(null)
 
   // Modal scroll locking
   useModal(Boolean(selectedBroadcast), () => setSelectedBroadcast(null))
@@ -130,16 +131,8 @@ export default function NotificationCenter() {
     }
   }, [authBarangays])
 
-  // Lookup map for barangay names
-  const barangayMap = useMemo(() => {
-    const map = new Map()
-    barangayList.forEach(b => map.set(Number(b.id), b.name))
-    return map
-  }, [barangayList])
-
   // Fetch broadcast notifications (?broadcast=1)
   const fetchBroadcasts = useCallback(async () => {
-    setLoading(true)
     try {
       const res = await api.get('/api/notifications/?broadcast=1')
       const raw = Array.isArray(res.data) ? res.data : []
@@ -168,7 +161,7 @@ export default function NotificationCenter() {
         if (n.barangay) {
           entry.is_citywide = false
           entry.barangay_ids.push(n.barangay)
-          const bName = n.barangay_name || barangayMap.get(Number(n.barangay)) || `Barangay ${n.barangay}`
+          const bName = n.barangay_name || `Barangay ${n.barangay}`
           if (!entry.barangay_names.includes(bName)) {
             entry.barangay_names.push(bName)
           }
@@ -186,7 +179,7 @@ export default function NotificationCenter() {
     } finally {
       setLoading(false)
     }
-  }, [barangayMap, notify])
+  }, [notify])
 
   useEffect(() => {
     fetchBroadcasts()
@@ -846,7 +839,7 @@ export default function NotificationCenter() {
               </button>
             </div>
 
-            {/* ── Resident Mobile Preview Card ── */}
+            {/* ── Resident Preview Card ── */}
             <div
               style={{
                 background: 'var(--surface)',
@@ -856,77 +849,74 @@ export default function NotificationCenter() {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
-                <Smartphone size={15} strokeWidth={2} style={{ color: 'var(--accent)' }} />
+                <Eye size={15} strokeWidth={2} style={{ color: 'var(--accent)' }} />
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
-                  Resident Mobile Notification Preview
+                  Resident preview
                 </span>
               </div>
 
-              {/* Phone Shell representation */}
+              {/* Mirrored card matching resident NotificationsPage */}
               <div
                 style={{
-                  background: '#090d16',
-                  borderRadius: 16,
-                  padding: '12px 14px',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  color: '#fff',
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+                  background: '#fff',
+                  borderRadius: '12px',
+                  padding: '16px',
+                  display: 'flex',
+                  gap: '12px',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
+                  border: '1px solid #e2e8f0',
+                  position: 'relative',
                 }}
               >
-                {/* Status Bar */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, color: 'rgba(255,255,255,0.6)', marginBottom: 10 }}>
-                  <span>9:41 AM</span>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    <span>5G</span>
-                    <span>100%</span>
-                  </div>
-                </div>
-
-                {/* Banner Notification Card */}
+                {/* Red unread dot */}
                 <div
                   style={{
-                    background: 'rgba(255,255,255,0.08)',
-                    borderRadius: 12,
-                    padding: '10px 12px',
-                    backdropFilter: 'blur(10px)',
-                    border: '1px solid rgba(255,255,255,0.12)',
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    background: '#ef4444',
+                    flexShrink: 0,
+                    marginTop: '4px',
                   }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                    <div
-                      style={{
-                        width: 22,
-                        height: 22,
-                        borderRadius: 6,
-                        background: 'var(--accent)',
-                        color: '#0d1117',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontWeight: 900,
-                        fontSize: 10,
-                      }}
-                    >
-                      WW
-                    </div>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.9)' }}>
-                      WasteWatch Lucena
-                    </span>
-                    <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.45)', marginLeft: 'auto' }}>
-                      now
-                    </span>
-                  </div>
+                />
 
-                  <div style={{ fontWeight: 700, fontSize: 12, color: '#fff', marginBottom: 2 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      color: '#1a2e1a',
+                      marginBottom: '4px',
+                      lineHeight: 1.4,
+                    }}
+                  >
                     {form.title.trim() || 'Notification Title Preview'}
                   </div>
 
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', lineHeight: 1.4 }}>
+                  <div
+                    style={{
+                      fontSize: '13px',
+                      color: '#64748b',
+                      lineHeight: 1.5,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}
+                  >
                     {form.body.trim() || 'Enter title and message above to preview real-time delivery to residents.'}
                   </div>
 
-                  <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--accent)' }}>
-                    <MapPin size={10} />
+                  <div
+                    style={{
+                      marginTop: 8,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      fontSize: 11,
+                      color: 'var(--accent)',
+                      fontWeight: 600,
+                    }}
+                  >
+                    <MapPin size={11} />
                     <span>
                       {form.target === 'city-wide'
                         ? 'City-Wide Alert'
@@ -935,6 +925,10 @@ export default function NotificationCenter() {
                         : `${form.barangayIds.length} Selected Barangays`}
                     </span>
                   </div>
+                </div>
+
+                <div style={{ fontSize: '11px', color: '#94a3b8', flexShrink: 0, paddingTop: '2px' }}>
+                  Just now
                 </div>
               </div>
             </div>
@@ -1286,7 +1280,12 @@ export default function NotificationCenter() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="broadcast-detail-title"
-            onClick={e => e.target === e.currentTarget && setSelectedBroadcast(null)}
+            onMouseDown={e => { mouseDownTargetRef.current = e.target }}
+            onClick={e => {
+              if (mouseDownTargetRef.current === e.currentTarget && e.target === e.currentTarget) {
+                setSelectedBroadcast(null)
+              }
+            }}
             style={{
               position: 'fixed',
               inset: 0,
@@ -1397,7 +1396,12 @@ export default function NotificationCenter() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="confirm-delete-title"
-            onClick={e => e.target === e.currentTarget && setConfirmDeleteModal(null)}
+            onMouseDown={e => { mouseDownTargetRef.current = e.target }}
+            onClick={e => {
+              if (mouseDownTargetRef.current === e.currentTarget && e.target === e.currentTarget) {
+                setConfirmDeleteModal(null)
+              }
+            }}
             style={{
               position: 'fixed',
               inset: 0,

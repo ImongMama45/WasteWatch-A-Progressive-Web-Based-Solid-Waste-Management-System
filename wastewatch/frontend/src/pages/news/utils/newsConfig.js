@@ -42,6 +42,7 @@ export const PRIORITY_CONFIG = {
 }
 
 export const NEWS_CATEGORIES = [
+  'General',
   'Announcements',
   'News',
   'Cleanup Drives',

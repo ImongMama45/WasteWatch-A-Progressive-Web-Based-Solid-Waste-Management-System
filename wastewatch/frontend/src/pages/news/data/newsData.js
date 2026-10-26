@@ -7,5 +7,5 @@
 
 import { CATEGORY_TABS, NEWS_CATEGORIES } from '../utils/newsConfig'
 
-export const CATEGORIES = CATEGORY_TABS
+export const CATEGORIES = NEWS_CATEGORIES
 export { CATEGORY_TABS, NEWS_CATEGORIES }

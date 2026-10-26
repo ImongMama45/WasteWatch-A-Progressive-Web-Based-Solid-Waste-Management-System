@@ -38,7 +38,7 @@ const INITIAL_FORM = {
   type: 'announcement',
   title: '',
   body: '',
-  category: 'Announcements',
+  category: 'General',
   priority: 'low',
   barangay: '',
   is_pinned: false,
@@ -53,6 +53,7 @@ export default function CreatePostModal({ barangays = [], onClose, onPublished }
   const [imagePreview, setImagePreview] = useState(null)
   const [dragging, setDragging] = useState(false)
   const fileInputRef = useRef(null)
+  const mouseDownTargetRef = useRef(null)
   const { notify } = useNotification()
 
   useModal(true, onClose)
@@ -140,7 +141,12 @@ export default function CreatePostModal({ barangays = [], onClose, onPublished }
     <div
       role="dialog"
       aria-modal="true"
-      onClick={e => e.target === e.currentTarget && onClose?.()}
+      onMouseDown={e => { mouseDownTargetRef.current = e.target }}
+      onClick={e => {
+        if (mouseDownTargetRef.current === e.currentTarget && e.target === e.currentTarget) {
+          onClose?.()
+        }
+      }}
       style={{
         position: 'fixed',
         inset: 0,

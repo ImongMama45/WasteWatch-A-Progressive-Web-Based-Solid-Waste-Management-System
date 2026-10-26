@@ -142,7 +142,12 @@ export default function NewsCard({ item, onReadMore, style = {}, animDelay = 0 }
             width: 80, height: 70, borderRadius: 10, overflow: 'hidden',
             flexShrink: 0, border: '1px solid var(--border)',
           }}>
-            <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+            <img
+              src={imageUrl}
+              alt=""
+              onError={e => { e.currentTarget.parentElement.style.display = 'none' }}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
           </div>
         )}
       </div>

@@ -47,10 +47,9 @@ export default function NewsPage() {
   const [category, setCategory] = useState('All')
   const [search, setSearch] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
-  const [selectedArticle, setSelectedArticle] = useState(null)
+  const [fetchedArticle, setFetchedArticle] = useState(null)
   const [articleNotFound, setArticleNotFound] = useState(false)
   const [barangays, setBarangays] = useState(authBarangays || [])
-  const hasLoadedRef = useRef(false)
 
   // Sync barangays from auth context or fetch lightweight auth endpoint
   useEffect(() => {
@@ -73,38 +72,46 @@ export default function NewsPage() {
     setModalOpen(true)
   }, [barangays.length])
 
-  // Handle URL deep-linking for news articles only: ?article=<id>
+  // Derived active article: found in loaded newsItems or fetched fallback
+  const activeArticle = useMemo(() => {
+    if (!articleParam) return null
+    const targetId = String(articleParam)
+    const inList = (newsItems || []).find(i => String(i.id) === targetId)
+    if (inList) return inList
+    if (fetchedArticle && String(fetchedArticle.id) === targetId) return fetchedArticle
+    return null
+  }, [articleParam, newsItems, fetchedArticle])
+
+  // Fetch article if deep linked and not already present
   useEffect(() => {
     if (!articleParam) {
-      setSelectedArticle(null)
+      setFetchedArticle(null)
       setArticleNotFound(false)
       return
     }
 
     const targetId = String(articleParam)
-
-    // Check if article is already in the loaded newsItems list
-    const found = newsItems.find(i => String(i.id) === targetId)
-    if (found) {
-      setSelectedArticle(found)
+    if ((newsItems || []).some(i => String(i.id) === targetId)) {
       setArticleNotFound(false)
-      hasLoadedRef.current = true
       return
     }
 
-    // Only fetch single article once initial loading settles or if not yet fetched
+    if (fetchedArticle && String(fetchedArticle.id) === targetId) {
+      return
+    }
+
     let active = true
     api
       .get(`/api/news/items/${targetId}/`)
       .then(res => {
         if (active && res.data) {
-          setSelectedArticle(res.data)
+          setFetchedArticle(res.data)
           setArticleNotFound(false)
         }
       })
       .catch(() => {
         if (active) {
-          setSelectedArticle(null)
+          setFetchedArticle(null)
           setArticleNotFound(true)
         }
       })
@@ -112,22 +119,20 @@ export default function NewsPage() {
     return () => {
       active = false
     }
-  }, [articleParam, newsItems.length]) // Depend on length rather than full object identity to avoid re-triggering on background refresh
+  }, [articleParam, newsItems, fetchedArticle])
 
   function handleReadMore(article) {
-    setSelectedArticle(article)
+    if (!article?.id) return
     setArticleNotFound(false)
     setSearchParams(prev => {
       const next = new URLSearchParams(prev)
-      if (article?.id) {
-        next.set('article', article.id)
-      }
+      next.set('article', article.id)
       return next
     }, { replace: true })
   }
 
   function handleCloseArticle() {
-    setSelectedArticle(null)
+    setFetchedArticle(null)
     setArticleNotFound(false)
     setSearchParams(prev => {
       const next = new URLSearchParams(prev)
@@ -155,7 +160,7 @@ export default function NewsPage() {
   return (
     <div>
       <Navbar />
-      <div className="page" style={{ maxWidth: 1200, margin: '0 auto' }}>
+      <div className="page" style={{ maxWidth: 1200, margin: '0 auto', paddingTop: 24 }}>
         {/* Header */}
         <div style={{ marginBottom: 18 }}>
           <div
@@ -248,9 +253,9 @@ export default function NewsPage() {
       )}
 
       {/* Article Detail Modal (Deep-linkable or 404 state) */}
-      {(selectedArticle || articleNotFound) && (
+      {(activeArticle || articleNotFound) && (
         <ArticleDetailModal
-          item={selectedArticle}
+          item={activeArticle}
           notFound={articleNotFound}
           onClose={handleCloseArticle}
         />

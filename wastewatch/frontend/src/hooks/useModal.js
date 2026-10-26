@@ -6,15 +6,20 @@
  *  - Body scroll locking while open, safely restored on close or unmount
  */
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 
 export function useModal(isOpen, onClose) {
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  })
+
   useEffect(() => {
     if (!isOpen) return
 
     function handleKeyDown(e) {
       if (e.key === 'Escape') {
-        onClose?.()
+        onCloseRef.current?.()
       }
     }
 
@@ -26,5 +31,5 @@ export function useModal(isOpen, onClose) {
       window.removeEventListener('keydown', handleKeyDown)
       document.body.style.overflow = prevOverflow
     }
-  }, [isOpen, onClose])
+  }, [isOpen])
 }

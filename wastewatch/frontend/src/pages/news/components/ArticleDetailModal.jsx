@@ -6,7 +6,7 @@
  * Material / Lucide icons only. Zero emojis.
  */
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import {
   X,
   Calendar,
@@ -21,6 +21,8 @@ import { useModal } from '../../../hooks/useModal'
 
 export default function ArticleDetailModal({ item, notFound = false, onClose }) {
   const [copied, setCopied] = useState(false)
+  const [shareFallbackUrl, setShareFallbackUrl] = useState(null)
+  const mouseDownTargetRef = useRef(null)
   const isOpen = Boolean(item || notFound)
 
   useModal(isOpen, onClose)
@@ -34,7 +36,12 @@ export default function ArticleDetailModal({ item, notFound = false, onClose }) 
         role="dialog"
         aria-modal="true"
         aria-labelledby="article-not-found-title"
-        onClick={e => e.target === e.currentTarget && onClose?.()}
+        onMouseDown={e => { mouseDownTargetRef.current = e.target }}
+        onClick={e => {
+          if (mouseDownTargetRef.current === e.currentTarget && e.target === e.currentTarget) {
+            onClose?.()
+          }
+        }}
         style={{
           position: 'fixed',
           inset: 0,
@@ -138,9 +145,10 @@ export default function ArticleDetailModal({ item, notFound = false, onClose }) 
         document.body.removeChild(input)
       }
       setCopied(true)
+      setShareFallbackUrl(null)
       setTimeout(() => setCopied(false), 2200)
     } catch {
-      // Fallback silent fail
+      setShareFallbackUrl(shareUrl)
     }
   }
 
@@ -149,7 +157,12 @@ export default function ArticleDetailModal({ item, notFound = false, onClose }) 
       role="dialog"
       aria-modal="true"
       aria-labelledby="article-modal-title"
-      onClick={e => e.target === e.currentTarget && onClose?.()}
+      onMouseDown={e => { mouseDownTargetRef.current = e.target }}
+      onClick={e => {
+        if (mouseDownTargetRef.current === e.currentTarget && e.target === e.currentTarget) {
+          onClose?.()
+        }
+      }}
       style={{
         position: 'fixed',
         inset: 0,
@@ -280,6 +293,28 @@ export default function ArticleDetailModal({ item, notFound = false, onClose }) 
           </div>
         </div>
 
+        {/* Share Fallback Input */}
+        {shareFallbackUrl && (
+          <div style={{ padding: '10px 20px', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Copy link manually:</div>
+            <input
+              readOnly
+              value={shareFallbackUrl}
+              onFocus={e => e.target.select()}
+              style={{
+                width: '100%',
+                fontSize: 12,
+                padding: '6px 10px',
+                borderRadius: 6,
+                border: '1px solid var(--border)',
+                background: 'var(--surface)',
+                color: 'var(--text)',
+              }}
+              autoFocus
+            />
+          </div>
+        )}
+
         {/* Content Container */}
         <div style={{ padding: '22px 24px' }}>
           {/* Cover image if available */}
@@ -296,6 +331,7 @@ export default function ArticleDetailModal({ item, notFound = false, onClose }) 
               <img
                 src={imageUrl}
                 alt={item.title}
+                onError={e => { e.currentTarget.parentElement.style.display = 'none' }}
                 style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
               />
             </div>

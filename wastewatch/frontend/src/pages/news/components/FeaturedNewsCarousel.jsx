@@ -39,6 +39,7 @@ const CSS = `
   background: linear-gradient(135deg, rgba(0,0,0,.75) 0%, rgba(0,0,0,.35) 100%);
 }
 .fc-content { position: relative; z-index: 1; }
+@media(min-width:640px){ .fc-content { padding: 0 52px; } }
 .fc-badge {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 9px; font-weight: 800; letter-spacing: .09em;
@@ -91,17 +92,11 @@ export default function FeaturedNewsCarousel({ items = [], onReadMore }) {
   inject()
   const TOTAL = items.length
   const [active, setActive] = useState(0)
+  const idx = Math.min(active, Math.max(0, TOTAL - 1))
   const startX   = useRef(0)
   const dragging = useRef(false)
   const timer    = useRef(null)
   const pause    = useRef(null)
-
-  // Clamp active index on items change
-  useEffect(() => {
-    if (active >= TOTAL && TOTAL > 0) {
-      setActive(0)
-    }
-  }, [TOTAL, active])
 
   // Start auto-play only if items exist
   const startAuto = useCallback(() => {
@@ -145,7 +140,7 @@ export default function FeaturedNewsCarousel({ items = [], onReadMore }) {
         onTouchStart={onDown} onTouchEnd={onUp}
       >
         {/* Track */}
-        <div className="fc-track" style={{ transform: `translateX(-${active * 100}%)` }}>
+        <div className="fc-track" style={{ transform: `translateX(-${idx * 100}%)` }}>
           {items.map(item => {
             const { Icon, label } = TYPE_ICONS[item.type] || TYPE_ICONS.news
             const imageUrl = item.image_url || (typeof item.image === 'string' ? item.image : null)
@@ -223,7 +218,7 @@ export default function FeaturedNewsCarousel({ items = [], onReadMore }) {
           <button
             key={i}
             type="button"
-            className={`fc-dot ${i === active ? 'fc-dot-on' : 'fc-dot-off'}`}
+            className={`fc-dot ${i === idx ? 'fc-dot-on' : 'fc-dot-off'}`}
             onClick={() => { setActive(i); pauseAuto() }}
             aria-label={`Slide ${i + 1}`}
           />
