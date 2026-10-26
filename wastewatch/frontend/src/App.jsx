@@ -1,16 +1,17 @@
 /**
- * App.jsx — WasteWatch PWA Router
+ * App.jsx - WasteWatch PWA Router
  * ---------------------------------
  * Key changes from original:
  *
- * 1. `/` → PublicDashboard (no auth required, works offline)
- * 2. `/dashboard` → role-based authenticated dashboard
+ * 1. `/` -> PublicDashboard (no auth required, works offline)
+ * 2. `/dashboard` -> role-based authenticated dashboard
  * 3. Login/Register are accessible but not forced
  * 4. PrivateRoute redirects with ?next= so users return after login
  * 5. Route-based pages are available on all screen sizes
  */
 
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useSearchParams, Link } from 'react-router-dom'
+import { Trash2, ArrowLeft } from 'lucide-react'
 import { AuthProvider } from './context/AuthContext'
 import PrivateRoute from './components/PrivateRoute'
 import DashboardLayout from './components/DashboardLayout'
@@ -294,9 +295,14 @@ export default function App() {
               fontFamily: 'var(--font-head)',
               background: 'var(--bg)',
             }}>
-              <div style={{ fontSize: 48, marginBottom: 16 }}>🗑️</div>
+              <div style={{ color: 'var(--text-muted)', marginBottom: 16 }}>
+                <Trash2 size={48} strokeWidth={1.5} />
+              </div>
               <h1 style={{ fontSize: 24, marginBottom: 8 }}>Page not found</h1>
-              <a href="/" style={{ color: 'var(--accent)' }}>← Back to Home</a>
+              <Link to="/" style={{ color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}>
+                <ArrowLeft size={16} />
+                Back to Home
+              </Link>
             </div>
           } />
 

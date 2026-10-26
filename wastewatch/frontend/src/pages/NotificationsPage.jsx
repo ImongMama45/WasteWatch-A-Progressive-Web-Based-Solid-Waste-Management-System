@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ChevronLeft, Trash2, Sparkles, Eye, XCircle } from 'lucide-react'
 import DashboardLayout from '../components/DashboardLayout'
 import { useNotifications } from '../hooks/useNotifications'
 
@@ -52,7 +53,7 @@ export default function NotificationsPage() {
               padding: 0, width: 'fit-content'
             }}
           >
-            &lt; BACK
+            <ChevronLeft size={16} /> BACK
           </button>
 
           <h1 style={{
@@ -151,7 +152,15 @@ export default function NotificationsPage() {
                             {stop.image ? (
                               <img src={stop.image} alt={`Stop ${stop.stop_order}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                             ) : (
-                              stop.status === 'Present' ? '🗑️' : stop.status === 'Empty' ? '✨' : stop.status === 'Inspected' ? '👁️' : '❌'
+                              stop.status === 'Present' ? (
+                                <Trash2 size={24} style={{ color: '#059669' }} />
+                              ) : stop.status === 'Empty' ? (
+                                <Sparkles size={24} style={{ color: '#d97706' }} />
+                              ) : stop.status === 'Inspected' ? (
+                                <Eye size={24} style={{ color: '#2563eb' }} />
+                              ) : (
+                                <XCircle size={24} style={{ color: '#dc2626' }} />
+                              )
                             )}
                           </div>
                           <div style={{ flex: 1, fontSize: '14px', color: '#0f172a' }}>
