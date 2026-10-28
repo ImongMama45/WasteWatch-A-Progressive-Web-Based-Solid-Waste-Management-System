@@ -7,13 +7,13 @@ class TruckAPITests(TestCase):
     def setUp(self):
         self.client = APIClient()
         
-        self.admin = User.objects.create_user(email='admin@test.com', password='pw', role=UserRole.ADMIN, full_name='Admin')
-        self.driver1 = User.objects.create_user(email='driver1@test.com', password='pw', role=UserRole.DRIVER, full_name='Driver 1')
-        self.driver2 = User.objects.create_user(email='driver2@test.com', password='pw', role=UserRole.DRIVER, full_name='Driver 2')
-        self.driver3 = User.objects.create_user(email='driver3@test.com', password='pw', role=UserRole.DRIVER, full_name='Driver 3')
-        self.citizen = User.objects.create_user(email='citizen@test.com', password='pw', role=UserRole.CITIZEN, full_name='Citizen')
-        self.crew1 = User.objects.create_user(email='crew1@test.com', password='pw', role=UserRole.CITIZEN, employee_type=EmployeeType.CREW_MEMBER, full_name='Crew 1')
-        self.crew2 = User.objects.create_user(email='crew2@test.com', password='pw', role=UserRole.CITIZEN, employee_type=EmployeeType.CREW_MEMBER, full_name='Crew 2')
+        self.admin = User.objects.create_user(username='admin_truck', email='admin@test.com', password='pw', role=UserRole.ADMIN, full_name='Admin')
+        self.driver1 = User.objects.create_user(username='driver1_truck', email='driver1@test.com', password='pw', role=UserRole.DRIVER, full_name='Driver 1')
+        self.driver2 = User.objects.create_user(username='driver2_truck', email='driver2@test.com', password='pw', role=UserRole.DRIVER, full_name='Driver 2')
+        self.driver3 = User.objects.create_user(username='driver3_truck', email='driver3@test.com', password='pw', role=UserRole.DRIVER, full_name='Driver 3')
+        self.citizen = User.objects.create_user(username='citizen_truck', email='citizen@test.com', password='pw', role=UserRole.CITIZEN, full_name='Citizen')
+        self.crew1 = User.objects.create_user(username='crew1_truck', email='crew1@test.com', password='pw', role=UserRole.CITIZEN, employee_type=EmployeeType.CREW_MEMBER, full_name='Crew 1')
+        self.crew2 = User.objects.create_user(username='crew2_truck', email='crew2@test.com', password='pw', role=UserRole.CITIZEN, employee_type=EmployeeType.CREW_MEMBER, full_name='Crew 2')
         
         self.truck_a = Truck.objects.create(plate_number='TRK-A', model='Model A', status=TruckStatus.ACTIVE)
         self.truck_a.drivers.add(self.driver1)

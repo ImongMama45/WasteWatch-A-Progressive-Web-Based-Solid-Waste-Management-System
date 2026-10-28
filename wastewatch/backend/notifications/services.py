@@ -11,9 +11,10 @@ Import pattern used by callers:
 """
 
 import logging
-from django.core.cache import cache
+from django.db import transaction
 
 from .models import Notification, NotificationType
+from .deduplication import claim_deduplication_key
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,7 @@ def notify_collection_done(schedule, stop_order, driver=None):
 # ── 4. TRUCK_NEAR ────────────────────────────────────────────────────────────
 
 # Notification is suppressed if one was already sent for this
-# (shift, stop_order) pair within this window (seconds).
+# (shift, schedule, stop_order) tuple within this window (seconds).
 _TRUCK_NEAR_COOLDOWN_S = 1800   # 30 minutes
 _TRUCK_NEAR_RADIUS_M   = 300    # trigger distance from stop
 
@@ -134,52 +135,62 @@ def notify_truck_near(shift, schedule, stop_order, stop_lat, stop_lng,
     Called from TruckLocationViewSet.create() when a GPS ping is processed.
 
     Checks:
-      1. Distance between driver and the upcoming stop is within _TRUCK_NEAR_RADIUS_M.
-      2. No TRUCK_NEAR notification has been sent for this (shift, stop) in the
-         last _TRUCK_NEAR_COOLDOWN_S seconds (enforced via Django cache).
+      1. Distance between driver and upcoming stop is within _TRUCK_NEAR_RADIUS_M.
+      2. Recipients exist on the schedule (returns early before claiming if empty).
+      3. No TRUCK_NEAR notification has been sent for this (shift, schedule, stop)
+         within the last _TRUCK_NEAR_COOLDOWN_S seconds (enforced via database deduplication).
 
-    Uses django.core.cache — works with any backend (LocMemCache in dev,
-    Memcached/Redis in prod) with zero extra dependencies.
+    Guarantees:
+      - Deduplication claim and creation of all recipient Notification rows
+        participate in the same atomic transaction block.
+      - If any notification insert fails, the transaction rolls back both the claim
+        and any notification rows created during that attempt.
     """
     try:
-        import math
-
         # ── Distance check ───────────────────────────────────────────────────
         dist = _haversine(driver_lat, driver_lng, stop_lat, stop_lng)
         if dist > _TRUCK_NEAR_RADIUS_M:
             return  # not close enough yet
 
-        # ── Deduplication via cache ──────────────────────────────────────────
-        cache_key = f'truck_near_{shift.id}_{stop_order}'
-        if cache.get(cache_key):
-            return  # already notified for this stop in this shift
+        # ── Resolve recipients early ─────────────────────────────────────────
+        barangays = list(schedule.barangays.all())
+        if not barangays:
+            return  # No recipients; do not consume deduplication claim
 
-        # Mark as sent before writing DB row to avoid race on concurrent pings
-        cache.set(cache_key, True, timeout=_TRUCK_NEAR_COOLDOWN_S)
+        # ── Database-backed deduplication & atomic notification dispatch ─────
+        dedup_key = f'truck_near_{shift.id}_{schedule.id}_{stop_order}'
 
-        # ── Resolve stop address ─────────────────────────────────────────────
-        waypoints = schedule.waypoints or []
-        address   = ''
-        if stop_order < len(waypoints) and isinstance(waypoints[stop_order], dict):
-            address = (
-                waypoints[stop_order].get('label')
-                or waypoints[stop_order].get('address')
-                or ''
+        with transaction.atomic():
+            claimed = claim_deduplication_key(
+                key=dedup_key,
+                cooldown_seconds=_TRUCK_NEAR_COOLDOWN_S,
             )
-        location_str = f' near {address}' if address else ''
+            if not claimed:
+                return  # Cooldown active; safely suppressed
 
-        # ── Create one notification per barangay ─────────────────────────────
-        for brgy in schedule.barangays.all():
-            Notification.objects.create(
-                user=None,
-                barangay=brgy,
-                title='Garbage Truck is Nearby!',
-                message=(
-                    f'A collection truck is{location_str} in {brgy.name}. '
-                    f'Please place your garbage out now.'
-                ),
-                type=NotificationType.TRUCK_NEAR,
-            )
+            # ── Resolve stop address ─────────────────────────────────────────
+            waypoints = schedule.waypoints or []
+            address = ''
+            if stop_order < len(waypoints) and isinstance(waypoints[stop_order], dict):
+                address = (
+                    waypoints[stop_order].get('label')
+                    or waypoints[stop_order].get('address')
+                    or ''
+                )
+            location_str = f' near {address}' if address else ''
+
+            # ── Create one notification per barangay ─────────────────────────
+            for brgy in barangays:
+                Notification.objects.create(
+                    user=None,
+                    barangay=brgy,
+                    title='Garbage Truck is Nearby!',
+                    message=(
+                        f'A collection truck is{location_str} in {brgy.name}. '
+                        f'Please place your garbage out now.'
+                    ),
+                    type=NotificationType.TRUCK_NEAR,
+                )
 
     except Exception:
         logger.exception(

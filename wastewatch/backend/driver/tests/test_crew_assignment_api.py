@@ -7,11 +7,11 @@ from django.utils import timezone
 class CrewAssignmentAPITests(TestCase):
     def setUp(self):
         self.client = APIClient()
-        self.admin = User.objects.create_user(email='admin@test.com', password='pw', role=UserRole.ADMIN)
-        self.driver1 = User.objects.create_user(email='driver1@test.com', password='pw', role=UserRole.DRIVER, full_name='Driver 1')
-        self.crew1 = User.objects.create_user(email='crew1@test.com', password='pw', role=UserRole.CITIZEN, employee_type=EmployeeType.CREW_MEMBER, full_name='Crew 1')
-        self.crew2 = User.objects.create_user(email='crew2@test.com', password='pw', role=UserRole.CITIZEN, employee_type=EmployeeType.CREW_MEMBER, full_name='Crew 2')
-        self.non_crew = User.objects.create_user(email='citizen@test.com', password='pw', role=UserRole.CITIZEN)
+        self.admin = User.objects.create_user(username='admin_crew', email='admin@test.com', password='pw', role=UserRole.ADMIN)
+        self.driver1 = User.objects.create_user(username='driver1_crew', email='driver1@test.com', password='pw', role=UserRole.DRIVER, full_name='Driver 1')
+        self.crew1 = User.objects.create_user(username='crew1_crew', email='crew1@test.com', password='pw', role=UserRole.CITIZEN, employee_type=EmployeeType.CREW_MEMBER, full_name='Crew 1')
+        self.crew2 = User.objects.create_user(username='crew2_crew', email='crew2@test.com', password='pw', role=UserRole.CITIZEN, employee_type=EmployeeType.CREW_MEMBER, full_name='Crew 2')
+        self.non_crew = User.objects.create_user(username='citizen_crew', email='citizen@test.com', password='pw', role=UserRole.CITIZEN)
         
         self.truck_a = Truck.objects.create(plate_number='TRK-A', status=TruckStatus.ACTIVE)
         self.truck_a.drivers.add(self.driver1)

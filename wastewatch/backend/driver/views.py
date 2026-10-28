@@ -33,7 +33,10 @@ from .serializers import (
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
+import logging
 from accounts.models import UserRole
+
+logger = logging.getLogger(__name__)
 
 _MAP_FULL_ACCESS_ROLES = {'admin', 'watcher', 'brgy_official', 'driver'}
 import math
@@ -612,21 +615,13 @@ class TruckLocationViewSet(viewsets.ModelViewSet):
         try:
             from notifications.services import notify_truck_near
 
-            # Resolve today's schedule for this driver
-            _schedule = (
-                CollectionSchedule.objects
-                .filter(driver=driver, date=timezone.localdate())
-                .prefetch_related('barangays')
-                .first()
-            ) or (
-                CollectionSchedule.objects
-                .filter(driver=driver)
-                .prefetch_related('barangays')
-                .order_by('-id')
-                .first()
-            )
-
-            if _schedule and _schedule.waypoints:
+            _schedule = active_shift.schedule
+            if not _schedule:
+                logger.warning(
+                    "Active shift pk=%s has no assigned schedule; skipping truck-near checks.",
+                    active_shift.pk,
+                )
+            elif _schedule.waypoints:
                 # Find the next uncompleted stop to check proximity against
                 from watcher.models import StopValidation, StopValidationStatus
                 today_date = timezone.localdate()

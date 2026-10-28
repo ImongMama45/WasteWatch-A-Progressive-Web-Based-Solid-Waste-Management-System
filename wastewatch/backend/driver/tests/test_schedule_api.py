@@ -6,10 +6,10 @@ from driver.models import Truck, TruckStatus, CollectionSchedule
 class ScheduleAPITests(TestCase):
     def setUp(self):
         self.client = APIClient()
-        self.admin = User.objects.create_user(email='admin@test.com', password='pw', role=UserRole.ADMIN, full_name='Admin')
-        self.driver1 = User.objects.create_user(email='driver1@test.com', password='pw', role=UserRole.DRIVER, full_name='Driver 1')
-        self.driver2 = User.objects.create_user(email='driver2@test.com', password='pw', role=UserRole.DRIVER, full_name='Driver 2')
-        self.citizen = User.objects.create_user(email='citizen@test.com', password='pw', role=UserRole.CITIZEN, full_name='Citizen')
+        self.admin = User.objects.create_user(username='admin_sched', email='admin@test.com', password='pw', role=UserRole.ADMIN, full_name='Admin')
+        self.driver1 = User.objects.create_user(username='driver1_sched', email='driver1@test.com', password='pw', role=UserRole.DRIVER, full_name='Driver 1')
+        self.driver2 = User.objects.create_user(username='driver2_sched', email='driver2@test.com', password='pw', role=UserRole.DRIVER, full_name='Driver 2')
+        self.citizen = User.objects.create_user(username='citizen_sched', email='citizen@test.com', password='pw', role=UserRole.CITIZEN, full_name='Citizen')
         
         self.truck_a = Truck.objects.create(plate_number='TRK-A', status=TruckStatus.ACTIVE)
         self.truck_a.drivers.add(self.driver1)

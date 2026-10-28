@@ -63,3 +63,19 @@ class Notification(models.Model):
             self.barangay.name if self.barangay else 'System-wide'
         )
         return f'[{self.type}] {self.title} → {target}'
+
+
+class NotificationDeduplication(models.Model):
+    key = models.CharField(max_length=150)
+    expires_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['key'],
+                name='unique_notification_deduplication_key',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.key} (expires {self.expires_at})'
