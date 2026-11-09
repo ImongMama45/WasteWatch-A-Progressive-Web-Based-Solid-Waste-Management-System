@@ -4,16 +4,17 @@
  * Auto-playing horizontal swipeable carousel for featured news.
  * Native CSS transitions — no external carousel library.
  * Desktop: ChevronLeft/Right arrows. Mobile: swipe + dots.
+ * Zero emojis.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ChevronLeft, ChevronRight, AlertTriangle, Megaphone, Newspaper, Trophy } from 'lucide-react'
 
 const TYPE_ICONS = {
-  emergency:    { Icon: AlertTriangle, label: 'Emergency' },
-  announcement: { Icon: Megaphone,    label: 'Announcement' },
-  news:         { Icon: Newspaper,    label: 'News' },
-  rankings:     { Icon: Trophy,       label: 'Rankings' },
+  emergency: { Icon: AlertTriangle, label: 'Emergency' },
+  announcement: { Icon: Megaphone, label: 'Announcement' },
+  news: { Icon: Newspaper, label: 'News' },
+  rankings: { Icon: Trophy, label: 'Rankings' },
 }
 
 const CSS = `
@@ -29,33 +30,36 @@ const CSS = `
 .fc-slide-bg {
   position: absolute; inset: 0;
   background: var(--surface-3, #1e2633);
+  background-size: cover;
+  background-position: center;
 }
 .fc-slide-bg::after {
   content: '';
   position: absolute; inset: 0;
-  background: linear-gradient(135deg, rgba(0,0,0,.3) 0%, rgba(0,0,0,0) 100%);
+  background: linear-gradient(135deg, rgba(0,0,0,.75) 0%, rgba(0,0,0,.35) 100%);
 }
 .fc-content { position: relative; z-index: 1; }
+@media(min-width:640px){ .fc-content { padding: 0 52px; } }
 .fc-badge {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 9px; font-weight: 800; letter-spacing: .09em;
   text-transform: uppercase; padding: 3px 9px;
   border-radius: 20px; border: 1px solid rgba(255,255,255,.25);
-  color: rgba(255,255,255,.85); background: rgba(255,255,255,.1);
+  color: rgba(255,255,255,.9); background: rgba(255,255,255,.15);
   backdrop-filter: blur(4px); margin-bottom: 10px; width: fit-content;
 }
 .fc-title { font-size: 17px; font-weight: 700; color: #fff; line-height: 1.25; margin-bottom: 6px; }
-.fc-desc  { font-size: 12px; color: rgba(255,255,255,.6); line-height: 1.5;
+.fc-desc  { font-size: 12px; color: rgba(255,255,255,.75); line-height: 1.5;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 14px; }
 .fc-read-more {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 7px 14px; border-radius: 8px; border: none;
-  background: rgba(255,255,255,.15); color: #fff;
+  background: rgba(255,255,255,.18); color: #fff;
   font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit;
-  border: 1px solid rgba(255,255,255,.2);
+  border: 1px solid rgba(255,255,255,.25);
   transition: background .15s; backdrop-filter: blur(4px);
 }
-.fc-read-more:hover { background: rgba(255,255,255,.25); }
+.fc-read-more:hover { background: rgba(255,255,255,.3); }
 /* Nav arrows (desktop) */
 .fc-arrow {
   position: absolute; top: 50%; transform: translateY(-50%);
@@ -75,7 +79,7 @@ const CSS = `
 .fc-dot-on  { width: 22px; background: var(--accent, #2ecc71); }
 .fc-dot-off { width: 6px;  background: rgba(0,0,0,.18); }
 /* Date strip */
-.fc-date { font-size: 10px; color: rgba(255,255,255,.45); font-weight: 500; margin-bottom: 8px; }
+.fc-date { font-size: 10px; color: rgba(255,255,255,.6); font-weight: 500; margin-bottom: 8px; }
 `
 
 let _injected = false
@@ -88,10 +92,11 @@ export default function FeaturedNewsCarousel({ items = [], onReadMore }) {
   inject()
   const TOTAL = items.length
   const [active, setActive] = useState(0)
-  const startX   = useRef(0)
+  const idx = Math.min(active, Math.max(0, TOTAL - 1))
+  const startX = useRef(0)
   const dragging = useRef(false)
-  const timer    = useRef(null)
-  const pause    = useRef(null)
+  const timer = useRef(null)
+  const pause = useRef(null)
 
   // Start auto-play only if items exist
   const startAuto = useCallback(() => {
@@ -107,9 +112,9 @@ export default function FeaturedNewsCarousel({ items = [], onReadMore }) {
     pause.current = setTimeout(startAuto, 4000)
   }, [startAuto, TOTAL])
 
-  useEffect(() => { 
+  useEffect(() => {
     if (TOTAL > 0) startAuto()
-    return () => { clearInterval(timer.current); clearTimeout(pause.current) } 
+    return () => { clearInterval(timer.current); clearTimeout(pause.current) }
   }, [startAuto, TOTAL])
 
   if (TOTAL === 0) return null
@@ -121,7 +126,7 @@ export default function FeaturedNewsCarousel({ items = [], onReadMore }) {
   function onUp(e) {
     if (!dragging.current) return; dragging.current = false
     const ex = (e.clientX ?? e.changedTouches?.[0]?.clientX) || startX.current
-    const d  = startX.current - ex
+    const d = startX.current - ex
     if (d > 40) next()
     else if (d < -40) prev()
   }
@@ -135,36 +140,50 @@ export default function FeaturedNewsCarousel({ items = [], onReadMore }) {
         onTouchStart={onDown} onTouchEnd={onUp}
       >
         {/* Track */}
-        <div className="fc-track" style={{ transform: `translateX(-${active * 100}%)` }}>
+        <div className="fc-track" style={{ transform: `translateX(-${idx * 100}%)` }}>
           {items.map(item => {
             const { Icon, label } = TYPE_ICONS[item.type] || TYPE_ICONS.news
+            const imageUrl = item.image_url || (typeof item.image === 'string' ? item.image : null)
+            const accent = item.accent_color || item.accentColor || 'var(--accent)'
+            const brgyName = item.barangay_name || (typeof item.barangay === 'string' ? item.barangay : null)
+
             return (
               <div key={item.id} className="fc-slide">
                 {/* Background overlay */}
-                <div className="fc-slide-bg" style={{ background: item.bgColor ?? 'var(--surface-3)' }} />
+                <div
+                  className="fc-slide-bg"
+                  style={{
+                    backgroundColor: item.bg_color || item.bgColor || 'var(--surface-3)',
+                    backgroundImage: imageUrl ? `url(${imageUrl})` : 'none',
+                  }}
+                />
                 {/* Accent bar */}
                 <div style={{
                   position: 'absolute', left: 0, top: 0, bottom: 0, width: 4,
-                  background: item.accentColor ?? 'var(--accent)',
+                  background: accent,
                 }} />
 
                 <div className="fc-content">
                   {/* Badge */}
                   <div className="fc-badge">
                     <Icon size={10} strokeWidth={2.5} />
-                    {item.category}
+                    {item.category || label}
                   </div>
                   {/* Date */}
                   <div className="fc-date">
                     {new Date(item.date).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}
-                    {item.barangay && ` · ${item.barangay}`}
+                    {brgyName && ` · ${brgyName}`}
                   </div>
                   {/* Title */}
                   <div className="fc-title">{item.title}</div>
                   {/* Desc */}
-                  <div className="fc-desc">{item.description}</div>
+                  <div className="fc-desc">{item.description || item.body}</div>
                   {/* CTA */}
-                  <button className="fc-read-more" onClick={() => onReadMore?.(item)}>
+                  <button
+                    type="button"
+                    className="fc-read-more"
+                    onClick={() => onReadMore?.(item)}
+                  >
                     Read More
                     <ChevronRight size={13} strokeWidth={2.5} />
                   </button>
@@ -175,10 +194,20 @@ export default function FeaturedNewsCarousel({ items = [], onReadMore }) {
         </div>
 
         {/* Arrows */}
-        <button className="fc-arrow fc-arrow-l" onClick={prev} aria-label="Previous">
+        <button
+          type="button"
+          className="fc-arrow fc-arrow-l"
+          onClick={prev}
+          aria-label="Previous slide"
+        >
           <ChevronLeft size={18} strokeWidth={2} />
         </button>
-        <button className="fc-arrow fc-arrow-r" onClick={next} aria-label="Next">
+        <button
+          type="button"
+          className="fc-arrow fc-arrow-r"
+          onClick={next}
+          aria-label="Next slide"
+        >
           <ChevronRight size={18} strokeWidth={2} />
         </button>
       </div>
@@ -188,7 +217,8 @@ export default function FeaturedNewsCarousel({ items = [], onReadMore }) {
         {Array.from({ length: TOTAL }).map((_, i) => (
           <button
             key={i}
-            className={`fc-dot ${i === active ? 'fc-dot-on' : 'fc-dot-off'}`}
+            type="button"
+            className={`fc-dot ${i === idx ? 'fc-dot-on' : 'fc-dot-off'}`}
             onClick={() => { setActive(i); pauseAuto() }}
             aria-label={`Slide ${i + 1}`}
           />

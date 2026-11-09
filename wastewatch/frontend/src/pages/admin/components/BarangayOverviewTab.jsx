@@ -1,11 +1,16 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import { ClipboardList, Flame, AlertTriangle, Users } from 'lucide-react'
+import { MapSkeleton } from '../../../components/ui/Skeleton'
 
-export default function BarangayOverviewTab({ detail, barangayId }) {
+export default function BarangayOverviewTab({ detail, barangayId, leafletReady = !!window.L }) {
   const mapContainerRef = useRef(null)
+  const [mapReady, setMapReady] = useState(false)
 
   useEffect(() => {
-    if (!window.L || !mapContainerRef.current || !detail) return
+    setMapReady(false)
+    if (!leafletReady || !window.L || !mapContainerRef.current || !detail) return
 
+    let active = true
     const L = window.L
     const map = L.map(mapContainerRef.current, {
       zoomControl: true,
@@ -15,30 +20,55 @@ export default function BarangayOverviewTab({ detail, barangayId }) {
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map)
 
-    // Boundary polygon — muted fill so tile layer shows through
+    // Boundary polygon fetching
     let geojson = detail.boundary_geojson
     if (typeof geojson === 'string') {
-      try { geojson = JSON.parse(geojson) } catch (e) {}
+      try { geojson = JSON.parse(geojson) } catch (e) { geojson = null }
+    }
+
+    const drawBoundary = (geoFeature) => {
+      const normalized = geoFeature.type === 'FeatureCollection' || geoFeature.type === 'Feature'
+        ? geoFeature
+        : { type: 'Feature', geometry: geoFeature, properties: {} }
+      const poly = L.geoJSON(normalized, {
+        style: { color: '#2563EB', weight: 2.5, fillColor: '#3B82F6', fillOpacity: 0.15 }
+      }).addTo(map)
+      map.fitBounds(poly.getBounds(), { padding: [24, 24] })
     }
 
     if (geojson) {
-      const normalized = geojson.type === 'FeatureCollection' || geojson.type === 'Feature'
-        ? geojson
-        : { type: 'Feature', geometry: geojson, properties: {} }
-      const poly = L.geoJSON(normalized, {
-        style: { color: '#2563EB', weight: 2, fillColor: '#2563EB', fillOpacity: 0.08 }
-      }).addTo(map)
-      map.fitBounds(poly.getBounds(), { padding: [24, 24] })
+      drawBoundary(geojson)
+      setMapReady(true)
+    } else if (detail.name) {
+      // Fallback: fetch from static file and match by name
+      fetch('/data/lucena_barangays.geojson')
+        .then(res => res.json())
+        .then(data => {
+          if (!active || !mapContainerRef.current) return
+          const feature = data.features?.find(f => 
+            f.properties?.brgy_name?.toLowerCase() === detail.name.toLowerCase() ||
+            f.properties?.name?.toLowerCase() === detail.name.toLowerCase()
+          )
+          if (feature) {
+            drawBoundary(feature)
+          } else {
+            // Ultimate fallback if no match
+            if (detail.latitude && detail.longitude) {
+              map.setView([Number(detail.latitude), Number(detail.longitude)], 15)
+            } else {
+              map.setView([13.93, 121.61], 13) // Default Lucena
+            }
+          }
+          setMapReady(true)
+        })
+        .catch(() => {
+          if (!active) return
+          map.setView([13.93, 121.61], 13)
+          setMapReady(true)
+        })
     } else {
-      // Fallback: centroid marker if no polygon
-      if (detail.latitude && detail.longitude) {
-        map.setView([Number(detail.latitude), Number(detail.longitude)], 15)
-        L.marker([Number(detail.latitude), Number(detail.longitude)], {
-          icon: L.divIcon({ html: '<div style="font-size:20px">📍</div>', className: '', iconAnchor: [10, 20] })
-        }).bindPopup('Boundary not yet mapped').addTo(map)
-      } else {
-        map.setView([13.93, 121.61], 13) // Default to Lucena
-      }
+      map.setView([13.93, 121.61], 13)
+      setMapReady(true)
     }
 
     // Hotspot pins — color by severity if available, else default red
@@ -50,8 +80,11 @@ export default function BarangayOverviewTab({ detail, barangayId }) {
         .addTo(map)
     })
 
-    return () => { map.remove() }
-  }, [barangayId, detail])
+    return () => {
+      active = false
+      map.remove()
+    }
+  }, [barangayId, detail, leafletReady])
 
   const statCards = [
     { 
@@ -60,7 +93,8 @@ export default function BarangayOverviewTab({ detail, barangayId }) {
         ? detail.pending_concerns.length 
         : (detail.pending_concern_count ?? 0), 
       warn: (Array.isArray(detail.pending_concerns) ? detail.pending_concerns.length : detail.pending_concern_count) > 5, 
-      icon: '📋' 
+      icon: <ClipboardList size={24} />,
+      bg: '#F8FAFC', color: '#475569', warnBg: '#FEF2F2', warnColor: '#DC2626'
     },
     { 
       label: 'Active Hotspots', 
@@ -68,7 +102,8 @@ export default function BarangayOverviewTab({ detail, barangayId }) {
         ? detail.hotspots.filter(h => h.is_active !== false).length 
         : (detail.active_hotspot_count ?? 0),
       warn: (Array.isArray(detail.hotspots) ? detail.hotspots.length : detail.active_hotspot_count) > 3, 
-      icon: '🔥' 
+      icon: <Flame size={24} />,
+      bg: '#FEF2F2', color: '#DC2626', warnBg: '#FEF2F2', warnColor: '#DC2626'
     },
     { 
       label: 'Open Escalations', 
@@ -76,37 +111,61 @@ export default function BarangayOverviewTab({ detail, barangayId }) {
         ? detail.escalations.filter(e => !e.resolved).length 
         : (detail.open_escalation_count ?? 0),
       warn: (Array.isArray(detail.escalations) ? detail.escalations.length : detail.open_escalation_count) > 0, 
-      icon: '⚠️' 
+      icon: <AlertTriangle size={24} />,
+      bg: '#FFFBEB', color: '#D97706', warnBg: '#FFFBEB', warnColor: '#D97706'
     },
     { 
       label: 'Personnel', 
       value: (detail.officials?.length || 0) + (detail.watchers?.length || 0) + (detail.drivers?.length || 0), 
       warn: detail.has_unassigned_roles, 
-      icon: '👥' 
+      icon: <Users size={24} />,
+      bg: '#EFF6FF', color: '#3B82F6', warnBg: '#FEF2F2', warnColor: '#DC2626'
     },
   ]
 
   return (
     <div>
-      <div ref={mapContainerRef} style={{ height: 280, borderRadius: 12, border: '1px solid #E2E8F0', marginBottom: 20, zIndex: 1 }} />
+      <div style={{ position: 'relative', height: 280, borderRadius: 16, overflow: 'hidden', border: '1px solid #E2E8F0', marginBottom: 20, boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
+        <style>{`.leaflet-control-container { z-index: 1 !important; }`}</style>
+        <div ref={mapContainerRef} style={{ height: '100%', width: '100%', zIndex: 0 }} />
+        {!mapReady && (
+          <div style={{ position: 'absolute', inset: 0, zIndex: 5 }}>
+            <MapSkeleton height="100%" dark={false} label="Loading boundary map..." showControls={false} />
+          </div>
+        )}
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-        {statCards.map(stat => (
-          <div key={stat.label} style={{
-            background: '#fff', padding: 20, borderRadius: 12,
-            border: `1px solid ${stat.warn ? '#FCA5A5' : '#E2E8F0'}`,
-            display: 'flex', alignItems: 'center', gap: 16
-          }}>
-            <div style={{ fontSize: 24 }}>{stat.icon}</div>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '.05em' }}>
-                {stat.label}
+        {statCards.map(stat => {
+          const isZero = stat.value === 0;
+          let appliedBg = stat.warn ? stat.warnBg : stat.bg;
+          let appliedColor = stat.warn ? stat.warnColor : stat.color;
+          
+          if (isZero && stat.label !== 'Personnel' && stat.label !== 'Pending Concerns') {
+            appliedBg = '#F0FDF4'; // Green success state for 0 hotspots/escalations
+            appliedColor = '#10B981';
+          }
+          
+          return (
+            <div key={stat.label} style={{
+              background: '#fff', padding: 20, borderRadius: 16,
+              border: `1px solid ${stat.warn ? stat.warnColor : 'rgba(0,0,0,0.06)'}`,
+              display: 'flex', alignItems: 'center', gap: 16,
+              boxShadow: '0 4px 20px rgba(0,0,0,0.02)'
+            }}>
+              <div style={{ width: 48, height: 48, borderRadius: 12, background: appliedBg, color: appliedColor, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {stat.icon}
               </div>
-              <div style={{ fontSize: 24, fontWeight: 800, color: '#0F172A', marginTop: 2 }}>
-                {stat.value}
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                  {stat.label}
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: '#0F172A', marginTop: 2 }}>
+                  {stat.value}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

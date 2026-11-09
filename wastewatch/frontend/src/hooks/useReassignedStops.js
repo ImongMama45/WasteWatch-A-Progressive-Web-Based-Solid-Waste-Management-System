@@ -30,6 +30,12 @@ export default function useReassignedStops({
   const seenIds = useRef(new Set())
   // Track the last seen status of each id so we can detect removals
   const pendingIds = useRef(new Set())
+  
+  // Keep latest callbacks in refs to avoid stale closures in the interval
+  const callbacksRef = useRef({ onNewStops, onStopResolved })
+  useEffect(() => {
+    callbacksRef.current = { onNewStops, onStopResolved }
+  }, [onNewStops, onStopResolved])
 
   useEffect(() => {
     if (!enabled) return
@@ -46,13 +52,15 @@ export default function useReassignedStops({
 
         // IDs currently PENDING from server
         const serverPendingIds = new Set(stops.map(s => s.id))
+        
+        const { onNewStops: latestOnNewStops, onStopResolved: latestOnStopResolved } = callbacksRef.current
 
         // Detect stops that were seen before but are now gone (resolved/claimed)
-        if (onStopResolved) {
+        if (latestOnStopResolved) {
           for (const id of pendingIds.current) {
             if (!serverPendingIds.has(id)) {
               pendingIds.current.delete(id)
-              onStopResolved(id)
+              latestOnStopResolved(id)
             }
           }
         }
@@ -70,7 +78,9 @@ export default function useReassignedStops({
           pendingIds.current.add(s.id)
         })
 
-        onNewStops(newStops)
+        if (latestOnNewStops) {
+          latestOnNewStops(newStops)
+        }
       } catch {
         // Silently ignore network errors — next poll will retry
       }
@@ -79,5 +89,5 @@ export default function useReassignedStops({
     poll()
     const interval = setInterval(poll, intervalMs)
     return () => clearInterval(interval)
-  }, [enabled, driverLat, driverLng]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled, driverLat, driverLng, intervalMs]) 
 }

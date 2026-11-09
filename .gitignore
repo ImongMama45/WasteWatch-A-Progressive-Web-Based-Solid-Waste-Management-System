@@ -1,25 +1,66 @@
 # =====================
 # Python
 # =====================
-venv/
+**/__pycache__/
 __pycache__/
+*.py[cod]
+*$py.class
 *.pyc
 *.pyo
 *.pyd
+venv/
+.venv/
+env/
+*/venv/
+*/.venv/
 
 # =====================
-# Django
+# Django & Databases
 # =====================
 media/
+**/media/*
+!**/media/.gitkeep
+staticfiles/
 db.sqlite3
+*.sqlite3
+*.sqlite3.*
+*.sqlite3-journal
+
+# =====================
+# Environment & Secrets
+# =====================
 .env
+.env.*
+!.env.example
+*.pem
+*.key
 
 # =====================
 # Node / React / Vite
 # =====================
 node_modules/
 dist/
+dist-ssr/
 .vite/
+*.local
+
+# =====================
+# Temporary & Scratch Files
+# =====================
+claude_*.txt
+scratch_*
+compiled_*.txt
+append_*.py
+build_audit_bundle.py
+generate_citizen.py
+*.tmp
+*.zip
+*_Audit*
+*_Bundle*
+docs/*_BUNDLE.*
+
+
+
 
 # =====================
 # Logs
@@ -36,6 +77,7 @@ yarn-error.log*
 Thumbs.db
 
 # =====================
-# VS Code
+# IDEs
 # =====================
 .vscode/
+.idea/

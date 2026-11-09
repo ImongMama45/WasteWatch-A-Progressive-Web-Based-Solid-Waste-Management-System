@@ -43,6 +43,68 @@ class ReportStatus(models.TextChoices):
 
 
 # ---------------------------------------------------------------------------
+# WatcherReportedSpot
+# ---------------------------------------------------------------------------
+class WatcherSpotStatus(models.TextChoices):
+    ACTIVE         = 'active',         'Active'
+    ADDED_TO_ROUTE = 'added_to_route', 'Added to Route'
+    REJECTED       = 'rejected',       'Rejected'
+
+
+class WatcherReportedSpot(models.Model):
+    """
+    A spot identified by a Watcher while on duty. Repeat reports from the same
+    vicinity (see services.WATCHER_SPOT_MERGE_RADIUS_M) are merged into one spot;
+    each individual report is kept as a GarbageReport linked through `reports`.
+
+    A spot is NOT part of any route until an admin adds it in Route Builder.
+    The report counts are derived from the linked reports, never stored.
+    """
+    latitude  = models.DecimalField(max_digits=9,  decimal_places=6)
+    longitude = models.DecimalField(max_digits=10, decimal_places=6)
+    barangay = models.ForeignKey(
+        'accounts.Barangay',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='watcher_spots',
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=WatcherSpotStatus.choices,
+        default=WatcherSpotStatus.ACTIVE,
+        db_index=True,
+    )
+    first_reported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+',
+    )
+    last_reported_at = models.DateTimeField(null=True, blank=True)
+
+    rejected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+',
+    )
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-last_reported_at', '-id']
+
+    def __str__(self):
+        return f'WatcherSpot #{self.pk} [{self.status}] @ {self.barangay}'
+
+
+# ---------------------------------------------------------------------------
 # GarbageReport
 # ---------------------------------------------------------------------------
 class GarbageReport(models.Model):
@@ -84,14 +146,14 @@ class GarbageReport(models.Model):
     address = models.CharField(max_length=255, blank=True)
 
     # Photo evidence
-    image = models.ImageField(
-        upload_to='reports/',
+    image = CloudinaryField('image',
+
         null=True,
         blank=True,
     )
-    image_2 = models.ImageField(upload_to='reports/', null=True, blank=True)
-    image_3 = models.ImageField(upload_to='reports/', null=True, blank=True)
-    image_4 = models.ImageField(upload_to='reports/', null=True, blank=True)
+    image_2 = CloudinaryField('image', null=True, blank=True)
+    image_3 = CloudinaryField('image', null=True, blank=True)
+    image_4 = CloudinaryField('image', null=True, blank=True)
 
     # Classification
     issue_type = models.CharField(
@@ -145,6 +207,19 @@ class GarbageReport(models.Model):
     )
     rejected_at = models.DateTimeField(null=True, blank=True)
     rejection_reason = models.TextField(blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    is_archived = models.BooleanField(default=False)
+
+    # Watcher-reported spot: filed by a Watcher on duty, auto-approved (skips barangay
+    # and admin approval) and only visible to staff and watchers.
+    is_watcher_spot = models.BooleanField(default=False, db_index=True)
+    watcher_spot = models.ForeignKey(
+        'WatcherReportedSpot',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reports',
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)  # Tracks when status changes
@@ -155,6 +230,132 @@ class GarbageReport(models.Model):
     def __str__(self):
         user_name = self.user.full_name if self.user else "Anonymous"
         return f'[{self.status.upper()}] {self.issue_type} @ {self.barangay} by {user_name}'
+
+    @property
+    def time_to_approval(self):
+        """Duration between submission and approval. Only defined for approved or resolved reports."""
+        if self.status in [ReportStatus.APPROVED, ReportStatus.RESOLVED] and self.approved_at and self.created_at:
+            return self.approved_at - self.created_at
+        return None
+
+
+    @property
+    def time_to_resolution(self):
+        """Duration between submission and most recent resolution."""
+        if self.status == ReportStatus.RESOLVED and self.resolved_at and self.created_at:
+            return self.resolved_at - self.created_at
+        return None
+
+    @property
+    def resolution_duration_after_approval(self):
+        """Duration between approval and resolution."""
+        if self.status == ReportStatus.RESOLVED and self.resolved_at and self.approved_at:
+            return self.resolved_at - self.approved_at
+        return None
+
+    @property
+    def upvote_count(self):
+        if hasattr(self, 'annotated_upvotes'):
+            return self.annotated_upvotes
+        return self.votes.filter(vote_type=1).count()
+
+    @property
+    def downvote_count(self):
+        if hasattr(self, 'annotated_downvotes'):
+            return self.annotated_downvotes
+        return self.votes.filter(vote_type=-1).count()
+
+    @property
+    def net_votes(self):
+        return self.upvote_count - self.downvote_count
+
+
+# ---------------------------------------------------------------------------
+# ReportVote
+# ---------------------------------------------------------------------------
+class ReportVote(models.Model):
+    """
+    Community status verification vote on a GarbageReport.
+    +1: Upvote (Confirms issue / Still uncollected)
+    -1: Downvote (Confirms cleared / Already resolved)
+    """
+    report = models.ForeignKey(
+        GarbageReport,
+        on_delete=models.CASCADE,
+        related_name='votes',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='report_votes',
+    )
+    vote_type = models.SmallIntegerField(
+        choices=[(1, 'Confirm Issue (+1)'), (-1, 'Confirm Resolved (-1)')],
+        help_text="1 = Still an issue / uncollected, -1 = Resolved / cleared",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Report Vote'
+        verbose_name_plural = 'Report Votes'
+        constraints = [
+            models.UniqueConstraint(fields=['report', 'user'], name='unique_report_vote_per_user'),
+            models.CheckConstraint(check=models.Q(vote_type__in=[1, -1]), name='valid_vote_type_values'),
+        ]
+        indexes = [
+            models.Index(fields=['report', 'vote_type']),
+        ]
+
+    def __str__(self):
+        vote_label = "+1 (Issue)" if self.vote_type == 1 else "-1 (Resolved)"
+        return f"Vote {vote_label} on Report #{self.report_id} by {self.user.username}"
+
+
+
+# ---------------------------------------------------------------------------
+# ReportStatusHistory
+# ---------------------------------------------------------------------------
+class ReportStatusHistory(models.Model):
+    """
+    Historical record of report status transitions.
+    Preserves audit trail across multiple approval, resolution, rejection,
+    and reopening cycles for future predictive and resolution-time analytics.
+    """
+    report = models.ForeignKey(
+        GarbageReport,
+        on_delete=models.CASCADE,
+        related_name='status_history',
+    )
+    previous_status = models.CharField(
+        max_length=20,
+        choices=ReportStatus.choices,
+        blank=True,
+    )
+    new_status = models.CharField(
+        max_length=20,
+        choices=ReportStatus.choices,
+    )
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+',
+    )
+    timestamp = models.DateTimeField(auto_now_add=True)
+    remarks = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+        verbose_name = 'Report Status History'
+        verbose_name_plural = 'Report Status Histories'
+        indexes = [
+            models.Index(fields=['report', '-timestamp']),
+        ]
+
+    def __str__(self):
+        return f"Report #{self.report_id}: {self.previous_status} -> {self.new_status} at {self.timestamp}"
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +373,9 @@ class CollectionConfirmation(models.Model):
 
     confirmed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name='confirmations',
     )
 
@@ -204,7 +407,8 @@ class CollectionConfirmation(models.Model):
         ordering = ['-confirmed_at']
 
     def __str__(self):
-        return f'Confirmed by {self.confirmed_by.full_name} @ {self.barangay} on {self.confirmed_at:%Y-%m-%d}'
+        user_name = self.confirmed_by.full_name if self.confirmed_by else "Deleted User"
+        return f'Confirmed by {user_name} @ {self.barangay} on {self.confirmed_at:%Y-%m-%d}'
 
 class HotspotSeverity(models.TextChoices):
     LOW    = 'low',    'Low'
@@ -224,10 +428,18 @@ class GarbageHotspot(models.Model):
         'GarbageReport', on_delete=models.CASCADE, null=True, blank=True, related_name='hotspots',
         help_text='The report that created this hotspot, if any.'
     )
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+        help_text='False when hotspot is retired, resolved, or rejected. Preserves historical records.'
+    )
+    dispatch_acknowledged = models.BooleanField(default=True, help_text='False = driver has not yet acknowledged this dispatch')
+    dispatched_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f'{self.name} ({self.severity})'
+
 
 class StopValidationStatus(models.TextChoices):
     PENDING_INSPECTION = 'PENDING_INSPECTION', 'Pending Inspection'
@@ -356,8 +568,12 @@ class Escalation(models.Model):
     barangay = models.ForeignKey('accounts.Barangay', on_delete=models.CASCADE, related_name='escalations')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     assignee = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_escalations')
+    driver = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='driver_escalations', help_text='The driver this escalation is filed against')
+    truck = models.ForeignKey('driver.Truck', on_delete=models.SET_NULL, null=True, blank=True, related_name='escalations', help_text='The truck involved in this escalation')
     deadline = models.DateField(null=True, blank=True)
     notes = models.TextField(blank=True)
+    points_deducted = models.IntegerField(default=0, help_text='Points penalized from the driver for this escalation.')
+    driver_acknowledged = models.BooleanField(default=False, help_text='True if the driver has seen and acknowledged this write-up.')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -376,3 +592,47 @@ class SystemSetting(models.Model):
 
     def __str__(self):
         return self.key
+
+class InterventionType(models.TextChoices):
+    DISPATCH = 'dispatch', 'Dispatch'
+    FLAG = 'flag', 'Flag'
+
+class InterventionStatus(models.TextChoices):
+    CREATED = 'created', 'Created'
+    FLAGGED = 'flagged', 'Flagged'
+    ACKNOWLEDGED = 'acknowledged', 'Acknowledged'
+    COLLECTED = 'collected', 'Collected'
+    RESOLVED = 'resolved', 'Resolved'
+    CANCELLED = 'cancelled', 'Cancelled'
+
+class HotspotIntervention(models.Model):
+    hotspot = models.ForeignKey(
+        'GarbageHotspot', on_delete=models.PROTECT, related_name='interventions',
+        help_text='Anchor hotspot (lowest id in the cluster at creation time).'
+    )
+    intervention_type = models.CharField(max_length=10, choices=InterventionType.choices)
+    status = models.CharField(max_length=15, choices=InterventionStatus.choices)
+
+    truck = models.ForeignKey('driver.Truck', on_delete=models.SET_NULL, null=True, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    acknowledged_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+
+    resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolution_notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['hotspot', 'intervention_type'],
+                condition=models.Q(status__in=['created', 'flagged', 'acknowledged']),
+                name='one_active_intervention_per_type_per_hotspot',
+            )
+        ]
+        
+    def __str__(self):
+        return f'{self.intervention_type} on {self.hotspot.name} - {self.status}'

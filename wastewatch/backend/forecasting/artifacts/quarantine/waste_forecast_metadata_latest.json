@@ -1,0 +1,61 @@
+{
+  "model_version": "ridge_v20261101_155555",
+  "model_type": "ridge_regression",
+  "trained_at": "2026-11-01T15:55:55.449932+00:00",
+  "training_window": {
+    "start_date": "2026-09-02",
+    "end_date": "2026-10-31",
+    "days": 60
+  },
+  "training_samples": 312,
+  "feature_count": 35,
+  "baseline_metrics": {
+    "overall_mae": 2913.25
+  },
+  "validation_metrics": {
+    "overall_mae": 1548.29,
+    "overall_rmse": 2047.45,
+    "overall_wape": 1.4395,
+    "mean_bias": 297.63,
+    "horizon_q80": {
+      "1": 2427.6,
+      "2": 2442.2,
+      "3": 2289.66,
+      "4": 2572.34,
+      "5": 2273.15,
+      "6": 2459.84,
+      "7": 2503.86
+    },
+    "empirical_coverage": {
+      "1": 0.806,
+      "2": 0.806,
+      "3": 0.806,
+      "4": 0.806,
+      "5": 0.806,
+      "6": 0.806,
+      "7": 0.806
+    },
+    "average_interval_width": {
+      "1": 4855.21,
+      "2": 4884.4,
+      "3": 4579.33,
+      "4": 5144.69,
+      "5": 4546.31,
+      "6": 4919.68,
+      "7": 5007.72
+    },
+    "best_alphas": {
+      "1": 50.0,
+      "2": 50.0,
+      "3": 50.0,
+      "4": 50.0,
+      "5": 50.0,
+      "6": 100.0,
+      "7": 50.0
+    },
+    "cv_samples": 312
+  },
+  "relative_improvement_pct": 46.85,
+  "promoted_to_production": true,
+  "gate_threshold_pct": 5.0
+}

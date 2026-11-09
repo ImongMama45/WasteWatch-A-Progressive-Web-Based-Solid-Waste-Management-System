@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { CheckCircle, AlertTriangle, AlertCircle, RefreshCw } from 'lucide-react'
+import { CheckCircle, AlertTriangle, AlertCircle, RefreshCw, X } from 'lucide-react'
 
 const NotificationContext = createContext(null)
 
@@ -140,7 +140,7 @@ function NotificationItem({ item, onDismiss }) {
           aria-label="Dismiss notification"
           style={{ color: styles.buttonColor }}
         >
-          ×
+          <X size={14} strokeWidth={2.2} />
         </button>
       ) : (
         <button
@@ -150,7 +150,7 @@ function NotificationItem({ item, onDismiss }) {
           aria-label="Dismiss notification"
           style={{ color: styles.buttonColor }}
         >
-          ×
+          <X size={14} strokeWidth={2.2} />
         </button>
       )}
     </div>
@@ -236,9 +236,6 @@ function NotificationHost({ items, position, onDismiss }) {
           justify-content: center;
           flex-shrink: 0;
           cursor: pointer;
-          font-size: 20px;
-          line-height: 1;
-          font-weight: 700;
           padding: 0;
         }
         .ww-notification__close:hover {

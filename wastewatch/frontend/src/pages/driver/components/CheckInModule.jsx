@@ -18,10 +18,12 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
+import { MapPin, AlertTriangle } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import useShiftTimer from '../../../hooks/useShiftTimer'
 import api from '../../../api/client'
-import Navbar from '../../../components/Navbar'
+import { resolveDriverSchedule } from '../../../utils/driverSchedule'
+import { MapSkeleton } from '../../../components/ui/Skeleton'
 
 function decodePolyline(encoded) {
   let pts = [], i = 0, lat = 0, lng = 0
@@ -92,9 +94,13 @@ export default function CheckInModule({ onAdvance, shift }) {
   useEffect(() => {
     if (!user?.id) return
     setMapLoading(true)
-    api.get('/api/driver/collection-schedules/')
+    api.get('/api/driver/collection-schedules/?paginate=false')
       .then(res => {
-        const match = res.data.find(s => String(s.driver) === String(user.id))
+        const match = resolveDriverSchedule(
+          res.data,
+          user.id,
+          shift?.schedule_id ?? shift?.schedule ?? null
+        )
         setSchedule(match || null)
       })
       .catch(() => setSchedule(null))
@@ -102,7 +108,6 @@ export default function CheckInModule({ onAdvance, shift }) {
   }, [user?.id])
 
   // ── Draw Leaflet map ─────────────────────────────────────────────────────────
-  // 4. Draw map once Leaflet + schedule are ready ───────────────────────────────
   useEffect(() => {
     if (!leafletReady || !mapRef.current || mapInstance.current || mapLoading) return
 
@@ -122,8 +127,8 @@ export default function CheckInModule({ onAdvance, shift }) {
 
     // ── Start marker ──────────────────────────────────────────────────────
     const startIcon = L.divIcon({
-      html: `<div style="background:#1e2633;border:2px solid #2ecc71;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;box-shadow:0 2px 6px rgba(0,0,0,.5);">🏛️</div>`,
-      className: '', iconSize: [22, 22], iconAnchor: [11, 11],
+      html: `<div style="background:#1e2633;border:2px solid #2ecc71;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;color:#2ecc71;box-shadow:0 2px 6px rgba(0,0,0,.5);"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></div>`,
+      className: '', iconSize: [24, 24], iconAnchor: [12, 12],
     })
     L.marker([wps[0].lat, wps[0].lng], { icon: startIcon }).addTo(map).bindPopup('<b>Start Point</b>')
 
@@ -249,7 +254,6 @@ export default function CheckInModule({ onAdvance, shift }) {
       setCompleted(c => [...c, 'gps'])
 
       // ── Step 2: Log shift start ──────────────────────────────────────────
-      // Step 2: Log shift start
       setStepIndex(2)
       var shiftTs = new Date().toISOString()
       var lat = sessionStorage.getItem('ww_gps_lat')
@@ -304,7 +308,6 @@ export default function CheckInModule({ onAdvance, shift }) {
 
   return (
     <>
-      <Navbar />
       <div style={{
         minHeight: '100vh',
         display: 'flex',
@@ -362,14 +365,8 @@ export default function CheckInModule({ onAdvance, shift }) {
 
             {/* Loading overlay */}
             {(mapLoading || !leafletReady) && (
-              <div style={{
-                position: 'absolute', inset: 0,
-                background: 'rgba(30,41,59,0.88)',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                color: '#fff', gap: 8,
-              }}>
-                <div style={{ fontSize: 28 }}>🗺️</div>
-                <div style={{ fontSize: 12, fontWeight: 600 }}>{mapLoading ? 'Loading route…' : 'Preparing map…'}</div>
+              <div style={{ position: 'absolute', inset: 0, zIndex: 500 }}>
+                <MapSkeleton height="100%" dark label={mapLoading ? 'Loading route...' : 'Preparing map...'} showControls={false} />
               </div>
             )}
 
@@ -381,7 +378,7 @@ export default function CheckInModule({ onAdvance, shift }) {
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                 color: '#fff', gap: 6, padding: 16, textAlign: 'center',
               }}>
-                <div style={{ fontSize: 28 }}>📍</div>
+                <MapPin size={26} color="#94a3b8" />
                 <div style={{ fontSize: 12, fontWeight: 700, color: '#f87171' }}>No route configured yet</div>
                 <div style={{ fontSize: 11, color: '#94a3b8' }}>{assignment.barangay}</div>
               </div>
@@ -394,8 +391,9 @@ export default function CheckInModule({ onAdvance, shift }) {
                 background: 'rgba(15,23,42,0.75)', backdropFilter: 'blur(4px)',
                 color: '#fff', borderRadius: 20, padding: '3px 10px',
                 fontSize: 11, fontWeight: 600,
+                display: 'inline-flex', alignItems: 'center', gap: 4,
               }}>
-                📍 {assignment.barangay}
+                <MapPin size={11} /> {assignment.barangay}
               </div>
             )}
           </div>
@@ -513,7 +511,7 @@ export default function CheckInModule({ onAdvance, shift }) {
               animation: 'ciFadeIn .25s ease',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 20 }}>⚠️</span>
+                <AlertTriangle size={18} color="#ef4444" />
                 <span style={{ fontWeight: 800, color: '#ef4444', fontSize: 14 }}>
                   Shift Initialization Failed
                 </span>

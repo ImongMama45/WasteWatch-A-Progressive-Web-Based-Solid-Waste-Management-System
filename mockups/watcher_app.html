@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Watcher App - Wireframe</title>
+    <style>
+        body {
+            font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            padding: 20px;
+        }
+        .mobile-frame {
+            width: 375px;
+            height: 812px;
+            background: white;
+            border: 4px solid #333;
+            border-radius: 30px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+        .status-bar {
+            height: 30px;
+            border-bottom: 2px solid #333;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 15px;
+            align-items: center;
+            font-size: 12px;
+        }
+        .header {
+            padding: 15px;
+            border-bottom: 2px solid #333;
+            text-align: center;
+            font-weight: bold;
+        }
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid #333;
+        }
+        .tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            border-right: 2px solid #333;
+            background: #eee;
+        }
+        .tab:last-child { border-right: none; }
+        .tab.active { background: white; font-weight: bold; }
+        
+        .content {
+            padding: 15px;
+            overflow-y: auto;
+            height: calc(100% - 190px);
+        }
+        .verification-card {
+            border: 2px solid #333;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+        }
+        .photo-placeholder {
+            height: 100px;
+            border: 2px dashed #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 10px 0;
+            color: #666;
+        }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+        .btn {
+            flex: 1;
+            padding: 10px;
+            border: 2px solid #333;
+            background: #fff;
+            text-align: center;
+            font-family: inherit;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .btn.primary { background: #d4d4d4; }
+        
+        .escalate-btn {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #333;
+            background: #fff;
+            text-align: center;
+            font-family: inherit;
+            font-weight: bold;
+            margin-top: 10px;
+            cursor: pointer;
+            box-sizing: border-box;
+        }
+
+        .bottom-nav {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            height: 60px;
+            background: white;
+            border: 2px solid #333;
+            border-radius: 30px;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .nav-item {
+            width: 40px;
+            height: 40px;
+            border: 2px solid #333;
+            border-radius: 50%;
+        }
+    </style>
+</head>
+<body>
+    <div class="mobile-frame">
+        <div class="status-bar">
+            <span>9:41 AM</span>
+            <span>LTE []</span>
+        </div>
+        <div class="header">
+            Barangay Watcher Dashboard
+        </div>
+        <div class="tabs">
+            <div class="tab active">Pending Verifications</div>
+            <div class="tab">Map View</div>
+        </div>
+        
+        <div class="content">
+            <div class="verification-card">
+                <strong>Stop: Market Area</strong><br>
+                Driver: John Doe (Truck 4)
+                <div class="photo-placeholder">
+                    [ Driver Uploaded Photo ]
+                </div>
+                <div class="btn-group">
+                    <button class="btn">Reject</button>
+                    <button class="btn primary">Verify Collection</button>
+                </div>
+            </div>
+            
+            <div class="verification-card">
+                <strong>Resident Report: Overflowing Bin</strong>
+                <div class="photo-placeholder">
+                    [ Open Camera Modal ]
+                </div>
+                <button class="btn primary" style="width:100%">Verify Hotspot</button>
+            </div>
+
+            <button class="escalate-btn">! Escalate Issue to Admin</button>
+        </div>
+
+        <div class="bottom-nav">
+            <div class="nav-item" title="Dashboard"></div>
+            <div class="nav-item" title="Verifications"></div>
+            <div class="nav-item" title="Escalations"></div>
+            <div class="nav-item" title="Profile"></div>
+        </div>
+    </div>
+</body>
+</html>

@@ -156,6 +156,29 @@ class User(AbstractUser):
         help_text="User's profile picture."
     )
 
+    phone_number = models.CharField(
+        max_length=20,
+        blank=True,
+        default='',
+        help_text="Contact number for citizen notifications and collection coordination.",
+    )
+
+    address_line = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text="Street, Purok, or house number within the selected barangay.",
+    )
+
+    email_verified = models.BooleanField(
+        default=False,
+        help_text="True if the user's email address has been verified.",
+    )
+
+    email_verified_at = models.DateTimeField(null=True, blank=True)
+
+    terms_accepted_at = models.DateTimeField(null=True, blank=True)
+
     last_activity = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -232,4 +255,60 @@ class User(AbstractUser):
         if not self.username:
             # Use the part before @ as username, e.g. "juan.dela.cruz"
             self.username = self.email.split('@')[0]
+        # Superusers are automatically granted the admin role and cannot be crew
+        if self.is_superuser and self.role != UserRole.ADMIN:
+            self.role = UserRole.ADMIN
+        # Only citizens can be designated as crew members
+        if self.role != UserRole.CITIZEN:
+            self.employee_type = ''
         super().save(*args, **kwargs)
+
+# ---------------------------------------------------------------------------
+# 4. Driver Profile & Points Ledger
+# ---------------------------------------------------------------------------
+class DriverProfile(models.Model):
+    """
+    Dedicated profile for Driver users to track gamification points,
+    suspensions, and disciplinary strikes without polluting the main User model.
+    """
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='driverprofile')
+    points = models.IntegerField(default=0, help_text="Gamification points. Can be negative.")
+    is_suspended = models.BooleanField(default=False, help_text="If true, driver is blocked from starting shifts.")
+
+    def __str__(self):
+        return f"{self.user.full_name} Profile"
+
+class PointTransaction(models.Model):
+    """
+    Ledger for tracking point additions and deductions.
+    Provides an audit trail for why a driver has their current point balance.
+    """
+    driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='point_transactions')
+    escalation = models.ForeignKey('watcher.Escalation', on_delete=models.SET_NULL, null=True, blank=True, related_name='point_transactions', help_text="The escalation that triggered this deduction, if applicable.")
+    points = models.IntegerField(help_text="Amount added or deducted (e.g. +50, -100)")
+    description = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        sign = "+" if self.points >= 0 else ""
+        return f"{self.driver.full_name}: {sign}{self.points} ({self.description})"
+
+
+class SuspensionOverride(models.Model):
+    """
+    Audit trail for when an Admin manually lifts a driver's suspension.
+    Preserves the history of overrides since DriverProfile.is_suspended is just a snapshot.
+    """
+    driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='suspension_overrides')
+    admin = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='suspensions_lifted')
+    reason = models.TextField(help_text="Justification provided by the admin for lifting the suspension.")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Override for {self.driver.full_name} by {self.admin.full_name if self.admin else 'System'}"

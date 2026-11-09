@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>WasteWatch - Stage 2C: Navigation camera model (isolated PoC)</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    body {
+      background: #0b1120;
+      color: #e2e8f0;
+      font: 13px system-ui;
+      margin: 16px;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    #viewport {
+      position: relative;
+      overflow: hidden;
+      background: #1c2430;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      width: 390px;
+      height: 784px;
+    }
+    #map {
+      position: absolute;
+    }
+    .panel {
+      width: 430px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    button, select {
+      background: #334155;
+      color: #fff;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    #log {
+      background: #020617;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 8px;
+      font: 11px monospace;
+      white-space: pre-wrap;
+      height: 430px;
+      overflow: auto;
+    }
+    .pivot {
+      position: absolute;
+      left: 50%;
+      width: 10px;
+      height: 10px;
+      margin: -5px;
+      border: 2px solid #f43f5e;
+      border-radius: 50%;
+      z-index: 9999;
+      pointer-events: none;
+    }
+    .ww-truck-sprite-wrapper {
+      width: 56px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.45));
+    }
+    .ww-truck-sprite-wrapper img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      pointer-events: none;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="viewport">
+    <div id="map"></div>
+    <div class="pivot" id="pivot"></div>
+  </div>
+
+  <div class="panel">
+    <b>Stage 2C PoC - Navigation Camera Model with Authentic 3D Sprites</b>
+    <div>
+      Mode:
+      <button onclick="setMode('3D')">3D course-up</button>
+      <button onclick="setMode('2D')">2D north-up</button>
+      Viewport:
+      <select id="vp" onchange="resizeVp()">
+        <option value="390,784">phone 390x784</option>
+        <option value="844,330">landscape 844x330</option>
+        <option value="820,1100">tablet 820x1100</option>
+      </select>
+    </div>
+    <div>
+      Sprite:
+      <button onclick="setAvatar('chase')">3D Chase Sprite</button>
+      <button onclick="setAvatar('topdown')">2D Top-Down Sprite</button>
+    </div>
+    <div>
+      Heading:
+      <button onclick="hd(0)">N</button>
+      <button onclick="hd(90)">E</button>
+      <button onclick="hd(180)">S</button>
+      <button onclick="hd(270)">W</button>
+      <button onclick="hd(359)">359</button>
+      <button onclick="hd(1)">1</button>
+      <button onclick="sweep()">sweep 0-360</button>
+    </div>
+    <div>
+      Zoom:
+      <button onclick="map.zoomIn()">+</button>
+      <button onclick="map.zoomOut()">-</button>
+      (tap/drag in 3D exits to 2D, by design)
+    </div>
+    <button style="background:#0284c7" onclick="runChecks()">Run deterministic checks</button>
+    <div id="log">ready</div>
+  </div>
+
+  <script type="module">
+    import { NavCamera } from '/wastewatch/frontend/src/pages/driver/components/navCamera.js'
+    import * as nm from '/wastewatch/frontend/src/pages/driver/components/navMapMath.js'
+
+    const $ = id => document.getElementById(id)
+    const log = m => {
+      $('log').textContent += '\n' + m
+      $('log').scrollTop = 1e9
+      console.log(m)
+    }
+
+    const LL = [13.9314, 121.6172]
+    const map = L.map('map', {
+      center: LL,
+      zoom: 18,
+      zoomControl: false,
+      attributionControl: false
+    })
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map)
+
+    let currentAvatar = 'topdown'
+    function getMarkerHtml(avatar = currentAvatar) {
+      const src = avatar === 'chase' ? './truck-chase.webp' : './truck-topdown.webp'
+      return `<div class="ww-truck-sprite-wrapper" style="transform-origin: 28px 28px;"><img id="truck-sprite-img" src="${src}" alt="WasteWatch Truck" /></div>`
+    }
+
+    const marker = L.marker(LL, {
+      zIndexOffset: 1000,
+      icon: L.divIcon({
+        className: '',
+        iconSize: [56, 56],
+        iconAnchor: [28, 28],
+        html: getMarkerHtml('topdown')
+      })
+    }).addTo(map)
+
+    const cam = new NavCamera({
+      viewportEl: $('viewport'),
+      mapEl: $('map'),
+      getMap: () => map,
+      getMarker: () => marker
+    })
+    cam.setTargetPosition(...LL)
+
+    window.cam = cam
+    window.map = map
+
+    window.setAvatar = type => {
+      currentAvatar = type
+      const img = document.getElementById('truck-sprite-img')
+      if (img) {
+        img.src = type === 'chase' ? './truck-chase.webp' : './truck-topdown.webp'
+      }
+      log('Truck sprite set to: ' + type)
+    }
+
+    function placePivot() {
+      const r = $('viewport').getBoundingClientRect()
+      $('pivot').style.top = (cam.mode === '3D' ? cam.cfg.pivotY * r.height : r.height / 2) + 'px'
+    }
+
+    window.setMode = m => {
+      log('mode -> ' + cam.setMode(m) + (m === '3D' && cam.mode !== '3D' ? ' (3D refused: too heavy / horizon visible)' : ''))
+      if (m === '3D') setAvatar('chase')
+      else setAvatar('topdown')
+      placePivot()
+    }
+
+    window.hd = d => {
+      cam.setTargetHeading(d)
+      log('target heading ' + d + ' (unwrapped target ' + cam.targetH + ')')
+    }
+
+    window.sweep = async () => {
+      for (let d = 0; d <= 360; d += 15) {
+        cam.setTargetHeading(d)
+        await new Promise(r => setTimeout(r, 120))
+      }
+    }
+
+    window.resizeVp = () => {
+      const [w, h] = $('vp').value.split(',')
+      $('viewport').style.width = w + 'px'
+      $('viewport').style.height = h + 'px'
+      setMode(cam.mode)
+    }
+
+    $('viewport').addEventListener('pointerdown', () => {
+      if (cam.mode === '3D') {
+        cam.setMode('2D')
+        placePivot()
+        log('pointerdown in 3D -> exited to 2D (intended interaction model)')
+      }
+    }, true)
+
+    window.runChecks = async () => {
+      let fail = 0
+      const ok = (n, c, x = '') => {
+        log((c ? 'PASS ' : 'FAIL ') + n + (x ? '  ' + x : ''))
+        if (!c) fail++
+      }
+      log('--- deterministic checks (no timers sampled) ---')
+      const r = $('viewport').getBoundingClientRect()
+      const applied = cam.setMode('3D')
+      placePivot()
+      ok('3D accepted for this viewport', applied === '3D', 'mode=' + applied)
+
+      if (applied === '3D') {
+        // 1 pivot stability: truck stays on pivot for every heading (cam.step with huge dt = settle instantly)
+        let worst = 0
+        for (let d = 0; d < 360; d += 30) {
+          cam.setTargetHeading(d)
+          cam.step(1e5)
+          const m = marker.getElement().getBoundingClientRect()
+          const c = [m.left + m.width / 2 - r.left, m.top + m.height / 2 - r.top]
+          worst = Math.max(worst, Math.hypot(c[0] - r.width / 2, c[1] - cam.cfg.pivotY * r.height))
+        }
+        ok('truck stays on pivot for headings 0..330', worst <= 4, 'worst ' + worst.toFixed(2) + ' px (bbox-centre estimate under perspective)')
+
+        // 2 truck points screen-up in course-up (R - M = 0), N/E/S/W
+        for (const d of [0, 90, 180, 270]) {
+          cam.setTargetHeading(d)
+          cam.step(1e5)
+          const R = parseFloat(/rotate\(([-\d.]+)deg\)/.exec(marker.getElement().querySelector('.ww-truck-sprite-wrapper').style.transform)[1])
+          const M = parseFloat(/rotateZ\(([-\d.]+)deg\)/.exec($('map').style.transform)[1]) * -1
+          ok('course-up screen heading, H=' + d, Math.abs(nm.screenHeading(R, M)) < 1e-6 || Math.abs(nm.screenHeading(R, M) - 360) < 1e-6, 'R=' + R + ' M=' + M)
+        }
+
+        // 3 coverage: every screen sample (below the hazed top band) back-projects inside the container, all headings
+        const D = parseFloat($('map').style.width)
+        const half = D / 2
+        let bad = 0
+        for (let M = 0; M < 360; M += 5) {
+          for (let x = -r.width / 2; x <= r.width / 2; x += 13) {
+            for (let y = -cam.cfg.pivotY * r.height + 0.12 * r.height; y <= r.height * (1 - cam.cfg.pivotY); y += 13) {
+              const p = nm.screenToPlane(x, y, M, cam.cfg)
+              if (!p || Math.abs(p[0]) > half || Math.abs(p[1]) > half) bad++
+            }
+          }
+        }
+        ok('no exposed edge below haze band', bad === 0, 'container ' + D + 'px, bad samples ' + bad)
+
+        // 4 interaction model
+        ok('Leaflet drag/touch/wheel disabled in 3D', !map.dragging.enabled() && !map.touchZoom.enabled() && !map.scrollWheelZoom.enabled())
+
+        // 5 no CSS transition animations running (animation is rAF-driven)
+        ok('no CSS transitions on map or marker', $('map').getAnimations().length === 0 && marker.getElement().getAnimations({ subtree: true }).length === 0)
+      }
+
+      // 6 wrap
+      ok('359 -> 1 unwraps to +2', nm.unwrapHeading(359, 1) === 361)
+      ok('1 -> 359 unwraps to -2', nm.unwrapHeading(1, 359) === -1)
+
+      cam.setMode('2D')
+      placePivot()
+      ok('2D restores Leaflet drag', map.dragging.enabled() && $('map').style.transform === 'none')
+
+      log(fail ? 'RESULT: ' + fail + ' FAILED' : 'RESULT: all checks passed (geometry only; tiles/visuals/touch still need a human or device test)')
+      document.body.setAttribute('data-poc-status', fail === 0 ? 'PASSED' : 'FAILED')
+    }
+
+    map.whenReady(() => {
+      placePivot()
+      document.body.setAttribute('data-poc-ready', 'TRUE')
+    })
+  </script>
+</body>
+</html>

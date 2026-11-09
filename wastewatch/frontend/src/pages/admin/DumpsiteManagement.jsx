@@ -15,15 +15,29 @@ import { useDumpsites } from '../../hooks/useDumpsites'
 import { useNotification } from '../../context/NotificationContext'
 import api from '../../api/client'
 import { getApiErrorMessage } from '../../utils/notificationHelpers'
+import { FeedCardSkeleton, MapSkeleton } from '../../components/ui/Skeleton'
 
 const LUCENA_CENTER = [13.9373, 121.617]
 
 const TYPES = [
-  { value: 'landfill', label: 'Landfill', emoji: '🏔️', color: '#e74c3c' },
-  { value: 'dumpsite', label: 'Open Dumpsite', emoji: '🗑️', color: '#f39c12' },
-  { value: 'transfer', label: 'Transfer Station', emoji: '🏭', color: '#5dade2' },
-  { value: 'composting', label: 'Composting Area', emoji: '🌿', color: '#2ecc71' },
+  { value: 'landfill', label: 'Landfill', color: '#dc2626' },
+  { value: 'dumpsite', label: 'Open Dumpsite', color: '#d97706' },
+  { value: 'transfer', label: 'Transfer Station', color: '#2563eb' },
+  { value: 'composting', label: 'Composting Area', color: '#16a34a' },
 ]
+
+function TypeIcon({ type, size = 16, color = 'currentColor' }) {
+  if (type === 'landfill') {
+    return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3l4 8 5-5 5 15H2L8 3z"/></svg>
+  }
+  if (type === 'transfer') {
+    return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/></svg>
+  }
+  if (type === 'composting') {
+    return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 0 0-9.95 9h11.64L9.74 7.05a1 1 0 0 1 1.41-1.41l5.66 5.65a1 1 0 0 1 0 1.42l-5.66 5.65a1 1 0 0 1-1.41-1.41L13.69 13H2.05A10 10 0 1 0 12 2z"/></svg>
+  }
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+}
 
 const typeMap = Object.fromEntries(TYPES.map(t => [t.value, t]))
 
@@ -63,21 +77,33 @@ const matchName = (dbName, geoName) => {
 
 function markerHtml(type) {
   const t = typeMap[type] || TYPES[1]
+  const svgIcons = {
+    landfill: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3l4 8 5-5 5 15H2L8 3z"/></svg>`,
+    dumpsite: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`,
+    transfer: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/></svg>`,
+    composting: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0 0-9.95 9h11.64L9.74 7.05a1 1 0 0 1 1.41-1.41l5.66 5.65a1 1 0 0 1 0 1.42l-5.66 5.65a1 1 0 0 1-1.41-1.41L13.69 13H2.05A10 10 0 1 0 12 2z"/></svg>`
+  }
+  const innerSvg = svgIcons[type] || svgIcons.dumpsite
   return `<div style="
-    background:${t.color};border:2.5px solid white;border-radius:50% 50% 50% 0;
-    transform:rotate(-45deg);width:36px;height:36px;
+    background:${t.color};border:2px solid white;border-radius:50% 50% 50% 0;
+    transform:rotate(-45deg);width:34px;height:34px;
     display:flex;align-items:center;justify-content:center;
-    box-shadow:0 4px 14px rgba(0,0,0,0.4);">
-    <div style="transform:rotate(45deg);font-size:16px;">${t.emoji}</div>
+    box-shadow:0 3px 10px rgba(0,0,0,0.35);">
+    <div style="transform:rotate(45deg);display:flex;align-items:center;justify-content:center;">${innerSvg}</div>
   </div>`
 }
 
 function pendingMarkerHtml() {
   return `<div style="
-    background:#fff;border:3px dashed #f39c12;border-radius:50%;
-    width:36px;height:36px;display:flex;align-items:center;justify-content:center;
-    font-size:18px;box-shadow:0 4px 14px rgba(0,0,0,0.3);
-    animation:ww-blink 1s infinite;">📍</div>`
+    background:#fff;border:2.5px dashed #d97706;border-radius:50%;
+    width:34px;height:34px;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 3px 10px rgba(0,0,0,0.25);
+    animation:ww-blink 1s infinite;">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1 1 18 0z"/>
+      <circle cx="12" cy="10" r="3"/>
+    </svg>
+  </div>`
 }
 
 // ── Modal ─────────────────────────────────────────────────────────────────
@@ -136,46 +162,47 @@ function SiteModal({ site, coords, onSave, onClose, barangays, barangayGeo }) {
 
   const SectionHead = ({ label }) => (
     <div style={{
-      fontSize: 9, fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase',
-      color: 'var(--text-muted)', marginBottom: 10, marginTop: 6,
-      paddingBottom: 6, borderBottom: '1px solid var(--border)',
+      fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase',
+      color: '#65676b', marginBottom: 10, marginTop: 8,
+      paddingBottom: 6, borderBottom: '1px solid #e4e6eb',
     }}>{label}</div>
   )
 
   return (
-    <div className="dm-modal-ov" style={{ zIndex: 2000 }} onClick={onClose}>
-      <div className="dm-modal" style={{ padding: 0, maxWidth: 460, display: 'flex', flexDirection: 'column', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+    <div className="dm-modal-ov" style={{ zIndex: 2000, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
+      <div className="meta-card" style={{ padding: 0, width: '100%', maxWidth: 480, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 8, boxShadow: '0 8px 30px rgba(0,0,0,0.15)' }} onClick={e => e.stopPropagation()}>
 
         {/* Header */}
-        <div style={{ padding: '18px 22px 14px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 17, margin: 0 }}>
-            {isEdit ? 'Edit Site' : '+ Add New Site'}
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid #e4e6eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ fontFamily: 'var(--font-head, inherit)', fontWeight: 700, fontSize: 17, margin: 0, color: '#1c1e21' }}>
+            {isEdit ? 'Edit Site' : 'Add New Disposal Site'}
           </h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#888' }}>×</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#65676b', padding: '0 4px', lineHeight: 1 }}>×</button>
         </div>
 
         {/* Scrollable body */}
-        <div style={{ overflowY: 'auto', padding: '16px 22px' }}>
+        <div style={{ overflowY: 'auto', padding: '16px 20px', maxHeight: '78vh' }}>
 
           {/* Coords + auto-detect status */}
           {coords && !isEdit && (
             <div style={{
-              background: 'rgba(46,204,113,0.08)', border: '1px solid rgba(46,204,113,0.25)',
-              borderRadius: 9, padding: '8px 12px', fontSize: 11, marginBottom: 16,
-              display: 'flex', alignItems: 'center', gap: 8,
+              background: '#e7f5eb', border: '1px solid #bbf7d0',
+              borderRadius: 6, padding: '8px 12px', fontSize: 12, marginBottom: 16,
+              display: 'flex', alignItems: 'center', gap: 8, color: '#15803d'
             }}>
-              <span style={{ color: '#2ecc71', fontWeight: 700 }}>📍 Pinned Location</span>
-              {detecting && <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Detecting barangay…</span>}
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+              <span style={{ fontWeight: 700 }}>Pinned Coordinates</span>
+              {detecting && <span style={{ color: '#65676b', fontStyle: 'italic' }}>Detecting barangay…</span>}
               {!detecting && detectedName && (
-                <span style={{ color: 'var(--text-muted)' }}>· detected: <strong style={{ color: 'var(--text)' }}>{detectedName}</strong></span>
+                <span style={{ color: '#65676b' }}>· Detected: <strong style={{ color: '#1c1e21' }}>{detectedName}</strong></span>
               )}
             </div>
           )}
 
           {err && (
             <div style={{
-              background: 'rgba(231,76,60,0.08)', border: '1px solid rgba(231,76,60,0.3)',
-              borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#e74c3c', marginBottom: 14,
+              background: '#fee2e2', border: '1px solid #fecaca',
+              borderRadius: 6, padding: '8px 12px', fontSize: 12, color: '#b91c1c', marginBottom: 14, fontWeight: 500
             }}>{err}</div>
           )}
 
@@ -183,104 +210,111 @@ function SiteModal({ site, coords, onSave, onClose, barangays, barangayGeo }) {
           <SectionHead label="Site Information" />
 
           <div style={{ marginBottom: 12 }}>
-            <label className="dm-label">Site Name</label>
-            <input className="dm-input" value={form.name}
+            <label className="dm-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Site Name</label>
+            <input className="meta-input" value={form.name}
               onChange={e => set('name', e.target.value)}
-              placeholder="e.g. Main Landfill — Gulang-Gulang" />
+              placeholder="e.g. Main Landfill — Gulang-Gulang"
+              style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }} />
           </div>
 
           <SectionHead label="Location Coordinates" />
           <div style={{
             display: 'grid',
             gridTemplateColumns: window.innerWidth < 768 ? '1fr' : '1fr 1fr',
-            gap: 16,
-            marginBottom: 16,
+            gap: 12,
+            marginBottom: 14,
           }}>
             <div>
-              <label className="dm-label">Latitude</label>
-              <input className="dm-input" type="number" step="any" value={form.lat}
+              <label className="dm-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Latitude</label>
+              <input className="meta-input" type="number" step="any" value={form.lat}
                 onChange={e => set('lat', e.target.value)}
-                placeholder="e.g. 13.9373" />
+                placeholder="e.g. 13.9373"
+                style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }} />
             </div>
             <div>
-              <label className="dm-label">Longitude</label>
-              <input className="dm-input" type="number" step="any" value={form.lng}
+              <label className="dm-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Longitude</label>
+              <input className="meta-input" type="number" step="any" value={form.lng}
                 onChange={e => set('lng', e.target.value)}
-                placeholder="e.g. 121.617" />
+                placeholder="e.g. 121.617"
+                style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }} />
             </div>
           </div>
 
           <div style={{
             display: 'grid',
             gridTemplateColumns: window.innerWidth < 768 ? '1fr' : '1fr 1fr',
-            gap: 16,
-            marginBottom: 16,
+            gap: 12,
+            marginBottom: 14,
           }}>
             <div>
-              <label className="dm-label">Type</label>
-              <select className="dm-select" value={form.type} onChange={e => set('type', e.target.value)}>
-                {TYPES.map(t => <option key={t.value} value={t.value}>{t.emoji} {t.label}</option>)}
+              <label className="dm-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Facility Type</label>
+              <select className="meta-input" value={form.type} onChange={e => set('type', e.target.value)} style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }}>
+                {TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
             </div>
             <div>
-              <label className="dm-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <label className="dm-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
                 Barangay
-                {detecting && <span style={{ fontSize: 9, color: 'var(--text-muted)', fontStyle: 'italic', fontWeight: 400 }}>auto-detecting…</span>}
+                {detecting && <span style={{ fontSize: 10, color: '#65676b', fontStyle: 'italic', fontWeight: 400 }}>detecting…</span>}
               </label>
-              <select className="dm-select" value={form.barangay} onChange={e => set('barangay', e.target.value)}>
-                <option value="">{detecting ? 'Detecting…' : '— Select —'}</option>
+              <select className="meta-input" value={form.barangay} onChange={e => set('barangay', e.target.value)} style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }}>
+                <option value="">{detecting ? 'Detecting…' : '— Select Barangay —'}</option>
                 {barangays.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </div>
           </div>
 
           <div style={{ marginBottom: 16 }}>
-            <label className="dm-label">Notes (optional)</label>
-            <textarea className="dm-textarea" rows={2} value={form.notes}
-              onChange={e => set('notes', e.target.value)} placeholder="Additional info…"
-              style={{ resize: 'vertical' }} />
+            <label className="dm-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Notes (optional)</label>
+            <textarea className="meta-input" rows={2} value={form.notes}
+              onChange={e => set('notes', e.target.value)} placeholder="Operational instructions or access notes…"
+              style={{ width: '100%', minHeight: 64, borderRadius: 6, border: '1px solid #ced0d4', padding: '8px 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21', resize: 'vertical', height: 'auto' }} />
           </div>
 
           {/* ── Account Credentials (Add only) ── */}
           {!isEdit && (
             <>
-              <SectionHead label="Dumpsite Account Credentials" />
+              <SectionHead label="Dumpsite Operator Account" />
               <div style={{
-                background: 'rgba(93,173,226,0.06)', border: '1px solid rgba(93,173,226,0.2)',
-                borderRadius: 9, padding: '8px 12px', fontSize: 11, color: 'var(--info)',
-                marginBottom: 14,
+                background: '#eff6ff', border: '1px solid #bfdbfe',
+                borderRadius: 6, padding: '8px 12px', fontSize: 12, color: '#1e40af',
+                marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8
               }}>
-                🔑 These credentials will be used to log in as this dumpsite’s account.
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2l-2 2m-1.5 1.5L16 7l-4 4-2-2-4 4 2 2-3 3H2v-3l3-3 2 2 4-4-2-2 4-4 1.5-1.5z"/></svg>
+                <span>Credentials created here allow the operator to log in to this facility portal.</span>
               </div>
 
               <div style={{ marginBottom: 12 }}>
-                <label className="dm-label">Full Name</label>
-                <input className="dm-input" value={account.full_name}
+                <label className="dm-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Full Name</label>
+                <input className="meta-input" value={account.full_name}
                   onChange={e => setAc('full_name', e.target.value)}
-                  placeholder="e.g. Gulang-Gulang Dumpsite" />
+                  placeholder="e.g. Gulang-Gulang Facility Operator"
+                  style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }} />
               </div>
 
               <div style={{ marginBottom: 12 }}>
-                <label className="dm-label">Email (username)</label>
-                <input className="dm-input" type="email" value={account.email}
+                <label className="dm-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Email (Username)</label>
+                <input className="meta-input" type="email" value={account.email}
                   onChange={e => setAc('email', e.target.value)}
-                  placeholder="e.g. dumpsite.gulang@lucena.gov.ph" />
+                  placeholder="e.g. dumpsite.gulang@lucena.gov.ph"
+                  style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }} />
               </div>
 
               <div style={{ marginBottom: 16 }}>
-                <label className="dm-label">Password</label>
-                <input className="dm-input" type="password" value={account.password}
+                <label className="dm-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Password</label>
+                <input className="meta-input" type="password" value={account.password}
                   onChange={e => setAc('password', e.target.value)}
-                  placeholder="Min. 6 characters" />
+                  placeholder="Min. 6 characters"
+                  style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }} />
               </div>
             </>
           )}
         </div>
 
         {/* Footer */}
-        <div style={{ padding: '14px 22px', borderTop: '1px solid var(--border)', display: 'flex', gap: 10 }}>
-          <button className="dm-btn-ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
-          <button className="dm-btn-primary" style={{ flex: 1 }} onClick={submit}>
+        <div style={{ padding: '12px 20px', borderTop: '1px solid #e4e6eb', display: 'flex', gap: 10, background: '#f8fafc' }}>
+          <button className="meta-btn-secondary" style={{ flex: 1, height: 36, borderRadius: 6, border: '1px solid #ccd0d5', background: '#ffffff', color: '#1c1e21', fontWeight: 600, fontSize: 13, cursor: 'pointer' }} onClick={onClose}>Cancel</button>
+          <button className="meta-btn-primary" style={{ flex: 1, height: 36, borderRadius: 6, border: 'none', background: '#16a34a', color: '#ffffff', fontWeight: 600, fontSize: 13, cursor: 'pointer' }} onClick={submit}>
             {isEdit ? 'Save Changes' : 'Add Site & Create Account'}
           </button>
         </div>
@@ -297,111 +331,113 @@ function SiteDetailModal({ site, barangays, onClose }) {
   const bName = barangays.find(b => b.id === site.barangay || b.id === site.barangay?.id)?.name
     || site.barangay_name || 'Unknown'
   const capacity = site.fill_percent ?? site.capacity_used ?? site.capacity ?? 0
-  const capColor = capacity > 80 ? '#e74c3c' : capacity > 60 ? '#f39c12' : '#2ecc71'
+  const capColor = capacity > 80 ? '#b91c1c' : capacity > 60 ? '#b45309' : '#15803d'
   const staff = site.staff_accounts || []
 
   const Row = ({ label, value, mono }) => (
-    <div style={{ display: 'flex', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
-      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', width: 130, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '.05em' }}>{label}</span>
-      <span style={{ fontSize: 12, color: 'var(--text)', fontFamily: mono ? 'monospace' : undefined, wordBreak: 'break-all' }}>{value ?? '—'}</span>
+    <div style={{ display: 'flex', gap: 10, padding: '8px 0', borderBottom: '1px solid #e4e6eb' }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: '#65676b', width: 130, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '.05em' }}>{label}</span>
+      <span style={{ fontSize: 13, color: '#1c1e21', fontFamily: mono ? 'monospace' : undefined, wordBreak: 'break-all' }}>{value ?? '—'}</span>
     </div>
   )
 
   return (
-    <div className="dm-modal-ov" style={{ zIndex: 2100 }} onClick={onClose}>
-      <div className="dm-modal" style={{ padding: 0, maxWidth: 520, display: 'flex', flexDirection: 'column', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+    <div className="dm-modal-ov" style={{ zIndex: 2100, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
+      <div className="meta-card" style={{ padding: 0, width: '100%', maxWidth: 520, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 8, boxShadow: '0 8px 30px rgba(0,0,0,0.15)' }} onClick={e => e.stopPropagation()}>
 
         {/* Header */}
         <div style={{
-          background: `linear-gradient(135deg, ${t.color}22, ${t.color}08)`,
-          borderBottom: `1px solid ${t.color}33`,
-          padding: '18px 22px', display: 'flex', alignItems: 'center', gap: 12,
+          background: '#ffffff',
+          borderBottom: '1px solid #e4e6eb',
+          padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 12,
         }}>
           <div style={{
-            width: 44, height: 44, borderRadius: 12, flexShrink: 0,
-            background: `${t.color}22`, border: `1px solid ${t.color}44`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22,
-          }}>{t.emoji}</div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 800, color: 'var(--text)', marginBottom: 2 }}>{site.name}</div>
-            <div style={{ fontSize: 11, color: t.color, fontWeight: 700 }}>{t.label} · {bName}</div>
+            width: 40, height: 40, borderRadius: 6, flexShrink: 0,
+            background: `${t.color}15`, border: `1px solid ${t.color}35`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <TypeIcon type={site.type} size={20} color={t.color} />
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#888', flexShrink: 0 }}>×</button>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: 'var(--font-head, inherit)', fontSize: 17, fontWeight: 700, color: '#1c1e21', marginBottom: 2 }}>{site.name}</div>
+            <div style={{ fontSize: 12, color: t.color, fontWeight: 600 }}>{t.label} · {bName}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#65676b', flexShrink: 0, padding: '0 4px', lineHeight: 1 }}>×</button>
         </div>
 
         {/* Scrollable body */}
-        <div style={{ overflowY: 'auto', padding: '16px 22px' }}>
+        <div style={{ overflowY: 'auto', padding: '16px 20px', maxHeight: '75vh' }}>
 
           {/* ── Site Details ── */}
-          <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 8 }}>Site Details</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#65676b', letterSpacing: '.05em', textTransform: 'uppercase', marginBottom: 8 }}>Facility Overview</div>
           <Row label="Site ID" value={`#${site.id}`} mono />
           <Row label="Name" value={site.name} />
-          <Row label="Type" value={`${t.emoji} ${t.label}`} />
+          <Row label="Type" value={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TypeIcon type={site.type} size={14} color={t.color} /> {t.label}</span>} />
           <Row label="Barangay" value={bName} />
           <Row label="Notes" value={site.notes || '—'} />
 
           {/* Capacity bar */}
-          <div style={{ display: 'flex', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', width: 130, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '.05em' }}>Capacity Used</span>
+          <div style={{ display: 'flex', gap: 10, padding: '8px 0', borderBottom: '1px solid #e4e6eb', alignItems: 'center' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#65676b', width: 130, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '.05em' }}>Capacity Used</span>
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ flex: 1, background: 'var(--border)', borderRadius: 20, height: 7, overflow: 'hidden' }}>
-                <div style={{ width: `${capacity}%`, height: '100%', background: capColor, borderRadius: 20, transition: 'width .5s' }} />
+              <div style={{ flex: 1, background: '#e4e6eb', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                <div style={{ width: `${capacity}%`, height: '100%', background: capColor, borderRadius: 4, transition: 'width .4s' }} />
               </div>
               <span style={{ fontSize: 12, fontWeight: 700, color: capColor, minWidth: 36, textAlign: 'right' }}>{capacity}%</span>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', width: 130, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '.05em' }}>Current Fill (KG)</span>
-            <span style={{ fontSize: 12, color: 'var(--text)', fontFamily: 'monospace' }}>
+          <div style={{ display: 'flex', gap: 10, padding: '8px 0', borderBottom: '1px solid #e4e6eb', alignItems: 'center' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#65676b', width: 130, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '.05em' }}>Current Fill (KG)</span>
+            <span style={{ fontSize: 13, color: '#1c1e21', fontFamily: 'monospace' }}>
               {Number(site.current_fill_kg || 0).toLocaleString()} / {Number(site.max_capacity_kg || 50000).toLocaleString()} kg
             </span>
           </div>
 
           {/* ── Coordinates ── */}
-          <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '.1em', textTransform: 'uppercase', margin: '14px 0 8px' }}>Coordinates</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#65676b', letterSpacing: '.05em', textTransform: 'uppercase', margin: '14px 0 8px' }}>Coordinates</div>
           <Row label="Latitude" value={Number(site.latitude).toFixed(6)} mono />
           <Row label="Longitude" value={Number(site.longitude).toFixed(6)} mono />
 
           {/* ── Linked Accounts ── */}
-          <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '.1em', textTransform: 'uppercase', margin: '14px 0 8px' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#65676b', letterSpacing: '.05em', textTransform: 'uppercase', margin: '14px 0 8px' }}>
             Linked Accounts ({staff.length})
           </div>
           {staff.length === 0 ? (
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '10px 0', fontStyle: 'italic' }}>No accounts linked to this site.</div>
+            <div style={{ fontSize: 12, color: '#65676b', padding: '10px 0', fontStyle: 'italic' }}>No staff accounts linked to this site.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {staff.map(u => (
                 <div key={u.id} style={{
-                  background: 'var(--bg)', border: '1px solid var(--border)',
-                  borderRadius: 10, padding: '10px 12px',
+                  background: '#f8fafc', border: '1px solid #e2e8f0',
+                  borderRadius: 6, padding: '10px 12px',
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
                     <div style={{
-                      width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
-                      background: 'rgba(93,173,226,.15)', border: '1px solid rgba(93,173,226,.3)',
+                      width: 28, height: 28, borderRadius: 4, flexShrink: 0,
+                      background: '#eff6ff', border: '1px solid #bfdbfe',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 13, fontWeight: 800, color: 'var(--info)',
+                      fontSize: 12, fontWeight: 700, color: '#1e40af',
                     }}>{u.full_name?.[0]?.toUpperCase() || '?'}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.full_name}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: '#1c1e21', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.full_name}</div>
+                      <div style={{ fontSize: 11, color: '#65676b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
                     </div>
                     <span style={{
-                      fontSize: 8, fontWeight: 800, padding: '2px 8px', borderRadius: 20, flexShrink: 0,
-                      background: u.is_active ? 'rgba(46,204,113,.12)' : 'rgba(231,76,60,.12)',
-                      color: u.is_active ? 'var(--accent)' : 'var(--danger)',
-                      border: u.is_active ? '1px solid rgba(46,204,113,.3)' : '1px solid rgba(231,76,60,.3)',
-                      textTransform: 'uppercase',
+                      fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4, flexShrink: 0,
+                      background: u.is_active ? '#e7f5eb' : '#fee2e2',
+                      color: u.is_active ? '#15803d' : '#b91c1c',
+                      border: u.is_active ? '1px solid #bbf7d0' : '1px solid #fecaca',
+                      textTransform: 'uppercase', letterSpacing: '.04em'
                     }}>{u.is_active ? 'Active' : 'Inactive'}</span>
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     {[{ label: 'Role', val: u.role }, { label: 'Barangay', val: u.barangay || '—' }, { label: 'Joined', val: u.created_at }].map(p => (
                       <div key={p.label} style={{
                         display: 'flex', gap: 4, alignItems: 'center',
-                        background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 20, padding: '2px 8px',
+                        background: '#ffffff', border: '1px solid #ced0d4', borderRadius: 4, padding: '2px 6px',
                       }}>
-                        <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600 }}>{p.label}:</span>
-                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text)' }}>{p.val}</span>
+                        <span style={{ fontSize: 10, color: '#65676b', fontWeight: 600 }}>{p.label}:</span>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: '#1c1e21' }}>{p.val}</span>
                       </div>
                     ))}
                   </div>
@@ -411,8 +447,8 @@ function SiteDetailModal({ site, barangays, onClose }) {
           )}
         </div>
 
-        <div style={{ padding: '12px 22px', borderTop: '1px solid var(--border)' }}>
-          <button className="dm-btn-ghost" style={{ width: '100%' }} onClick={onClose}>Close</button>
+        <div style={{ padding: '12px 20px', borderTop: '1px solid #e4e6eb', background: '#f8fafc' }}>
+          <button className="meta-btn-secondary" style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #ccd0d5', background: '#ffffff', color: '#1c1e21', fontWeight: 600, fontSize: 13, cursor: 'pointer' }} onClick={onClose}>Close</button>
         </div>
       </div>
     </div>
@@ -423,13 +459,13 @@ function SiteDetailModal({ site, barangays, onClose }) {
 
 function CapBar({ pct }) {
   const p = Number(pct) || 0
-  const color = p > 80 ? '#e74c3c' : p > 60 ? '#f39c12' : '#2ecc71'
+  const color = p > 80 ? '#b91c1c' : p > 60 ? '#b45309' : '#15803d'
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <div style={{ flex: 1, background: '#ddd', borderRadius: 20, height: 5, overflow: 'hidden' }}>
-        <div style={{ width: `${p}%`, height: '100%', background: color, borderRadius: 20 }} />
+      <div style={{ flex: 1, background: '#e4e6eb', borderRadius: 4, height: 5, overflow: 'hidden' }}>
+        <div style={{ width: `${p}%`, height: '100%', background: color, borderRadius: 4 }} />
       </div>
-      <span style={{ fontSize: 10, color: '#888', width: 28, textAlign: 'right' }}>{p}%</span>
+      <span style={{ fontSize: 11, color: '#65676b', width: 28, textAlign: 'right', fontWeight: 600 }}>{p}%</span>
     </div>
   )
 }
@@ -439,24 +475,24 @@ function CapBar({ pct }) {
 function DeleteConfirmModal({ site, onConfirm, onClose }) {
   if (!site) return null
   return (
-    <div className="dm-modal-ov" style={{ zIndex: 3000 }} onClick={onClose}>
-      <div className="dm-modal" style={{ padding: 0, maxWidth: 420, overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
-        <div style={{ padding: '24px 24px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-          <div style={{ width: 56, height: 56, background: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/></svg>
+    <div className="dm-modal-ov" style={{ zIndex: 3000, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
+      <div className="meta-card" style={{ padding: 0, width: '100%', maxWidth: 420, overflow: 'hidden', borderRadius: 8, boxShadow: '0 8px 30px rgba(0,0,0,0.15)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: '20px 24px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          <div style={{ width: 44, height: 44, background: '#fee2e2', color: '#b91c1c', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/></svg>
           </div>
-          <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', marginBottom: 8, fontFamily: 'var(--font-head)' }}>Delete Dumpsite?</h3>
-          <p style={{ fontSize: 14, color: 'var(--text)', marginBottom: 16 }}>
-            You are about to permanently delete <strong>{site.name}</strong>.
+          <h3 style={{ fontSize: 17, fontWeight: 700, color: '#1c1e21', marginBottom: 6, fontFamily: 'var(--font-head, inherit)' }}>Delete Dumpsite?</h3>
+          <p style={{ fontSize: 13, color: '#65676b', marginBottom: 14 }}>
+            You are about to permanently delete <strong style={{ color: '#1c1e21' }}>{site.name}</strong>.
           </p>
-          <div style={{ background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '12px 16px', borderRadius: 8, fontSize: 13, color: '#EF4444', textAlign: 'left', lineHeight: 1.5 }}>
-            <strong style={{ display: 'block', marginBottom: 4 }}>⚠️ Impact Warning:</strong>
-            This action cannot be undone. All collection logs and routes associated with this facility may lose relational integrity, and linked accounts will be orphaned.
+          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '10px 14px', borderRadius: 6, fontSize: 12, color: '#991b1b', textAlign: 'left', lineHeight: 1.5 }}>
+            <strong style={{ display: 'block', marginBottom: 3 }}>Impact Warning:</strong>
+            This action cannot be undone. All collection logs and routes associated with this facility may lose relational integrity, and linked operator accounts will be removed.
           </div>
         </div>
-        <div style={{ padding: '16px 24px 24px', display: 'flex', gap: 12 }}>
-          <button className="dm-btn-ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
-          <button className="dm-btn-primary" style={{ flex: 1, background: '#EF4444' }} onClick={() => { onConfirm(site.id); onClose() }}>Delete Permanently</button>
+        <div style={{ padding: '12px 24px 20px', display: 'flex', gap: 10, borderTop: '1px solid #e4e6eb', background: '#f8fafc' }}>
+          <button className="meta-btn-secondary" style={{ flex: 1, height: 36, borderRadius: 6, border: '1px solid #ccd0d5', background: '#ffffff', color: '#1c1e21', fontWeight: 600, fontSize: 13, cursor: 'pointer' }} onClick={onClose}>Cancel</button>
+          <button className="meta-btn-primary" style={{ flex: 1, height: 36, borderRadius: 6, border: 'none', background: '#b91c1c', color: '#ffffff', fontWeight: 600, fontSize: 13, cursor: 'pointer' }} onClick={() => { onConfirm(site.id); onClose() }}>Delete Permanently</button>
         </div>
       </div>
     </div>
@@ -466,23 +502,23 @@ function DeleteConfirmModal({ site, onConfirm, onClose }) {
 function OutOfBoundsModal({ warning, onClose }) {
   if (!warning) return null
   return (
-    <div className="dm-modal-ov" style={{ zIndex: 3000 }} onClick={onClose}>
-      <div className="dm-modal" style={{ padding: 0, maxWidth: 420, overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
-        <div style={{ padding: '24px 24px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-          <div style={{ width: 56, height: 56, background: 'rgba(245, 158, 11, 0.1)', color: '#F59E0B', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01"/></svg>
+    <div className="dm-modal-ov" style={{ zIndex: 3000, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
+      <div className="meta-card" style={{ padding: 0, width: '100%', maxWidth: 420, overflow: 'hidden', borderRadius: 8, boxShadow: '0 8px 30px rgba(0,0,0,0.15)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: '20px 24px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          <div style={{ width: 44, height: 44, background: '#fef3c7', color: '#b45309', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01"/></svg>
           </div>
-          <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', marginBottom: 8, fontFamily: 'var(--font-head)' }}>{warning.title}</h3>
-          <p style={{ fontSize: 14, color: 'var(--text)', marginBottom: 16 }}>
+          <h3 style={{ fontSize: 17, fontWeight: 700, color: '#1c1e21', marginBottom: 6, fontFamily: 'var(--font-head, inherit)' }}>{warning.title}</h3>
+          <p style={{ fontSize: 13, color: '#65676b', marginBottom: 14 }}>
             {warning.message}
           </p>
-          <div style={{ background: 'rgba(245, 158, 11, 0.05)', border: '1px solid rgba(245, 158, 11, 0.2)', padding: '12px 16px', borderRadius: 8, fontSize: 13, color: '#B45309', textAlign: 'left', lineHeight: 1.5 }}>
-            <strong style={{ display: 'block', marginBottom: 4 }}>ℹ️ Why?</strong>
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: '10px 14px', borderRadius: 6, fontSize: 12, color: '#92400e', textAlign: 'left', lineHeight: 1.5 }}>
+            <strong style={{ display: 'block', marginBottom: 3 }}>Jurisdiction Notice:</strong>
             {warning.reason}
           </div>
         </div>
-        <div style={{ padding: '16px 24px 24px', display: 'flex' }}>
-          <button className="dm-btn-primary" style={{ width: '100%', background: '#F59E0B', color: '#fff' }} onClick={onClose}>Acknowledge</button>
+        <div style={{ padding: '12px 24px 20px', display: 'flex', borderTop: '1px solid #e4e6eb', background: '#f8fafc' }}>
+          <button className="meta-btn-primary" style={{ width: '100%', height: 36, borderRadius: 6, border: 'none', background: '#16a34a', color: '#ffffff', fontWeight: 600, fontSize: 13, cursor: 'pointer' }} onClick={onClose}>Acknowledge</button>
         </div>
       </div>
     </div>
@@ -514,6 +550,7 @@ export default function DumpsiteManagement() {
   const [addMode, setAddMode] = useState(false)
   const [detailSite, setDetailSite] = useState(null)  // site to show in detail popup
   const [moveConfirm, setMoveConfirm] = useState(null)
+  const [searchTerm, setSearchTerm] = useState('')
   const addModeRef = useRef(false)
   addModeRef.current = addMode
 
@@ -597,11 +634,11 @@ export default function DumpsiteManagement() {
       const t = typeMap[site.type] || TYPES[1]
       const bName = typeof site.barangay === 'object' ? site.barangay.name : site.barangay_name
       marker.bindPopup(`
-        <div style="font-family:sans-serif;min-width:160px;">
-          <strong style="color:${t.color}">${t.emoji} ${site.name}</strong><br/>
-          <span style="color:#555;font-size:11px;">${t.label} · ${bName || 'Unknown'}</span><br/>
-          <span style="color:#888;font-size:11px;">Capacity: ${site.fill_percent ?? site.capacity_used ?? 0}% full</span><br/>
-          <span style="color:#3498db;font-size:10px;font-style:italic;margin-top:4px;display:inline-block;">💡 Drag marker to move</span>
+        <div style="font-family:sans-serif;min-width:160px;padding:2px 0;">
+          <strong style="color:${t.color};font-size:13px;">${site.name}</strong><br/>
+          <span style="color:#65676b;font-size:11px;">${t.label} · ${bName || 'Unknown'}</span><br/>
+          <span style="color:#65676b;font-size:11px;">Capacity: ${site.fill_percent ?? site.capacity_used ?? 0}% full</span><br/>
+          <span style="color:#2563eb;font-size:10px;margin-top:4px;display:inline-block;">Drag marker to relocate</span>
         </div>`)
       
       marker.on('dragend', (e) => {
@@ -660,9 +697,9 @@ export default function DumpsiteManagement() {
         // Create dumpsite account
         const accRes = await createAccount(res.data.id, accountData)
         if (!accRes.ok) {
-          showToast(`✅ Site added. ⚠️ Account error: ${accRes.error}`)
+          showToast(`Site added. Account notice: ${accRes.error}`)
         } else {
-          showToast('✅ Site added and account created.')
+          showToast('Site added and account created successfully.')
         }
         // Refresh site so staff_accounts is populated in detail modal
         const fresh = { ...res.data, staff_accounts: accRes.ok ? [accRes.data] : [] }
@@ -678,7 +715,7 @@ export default function DumpsiteManagement() {
         notes: form.notes || '',
       }
       res = await saveSite(modal.id, payload)
-      if (res.ok) showToast('✅ Site updated.')
+      if (res.ok) showToast('Site updated successfully.')
     }
     if (res.ok) setModal(null)
     else notify({ variant: 'error-outline', message: getApiErrorMessage(res.error, 'Failed to save site.') })
@@ -688,7 +725,7 @@ export default function DumpsiteManagement() {
     const res = await apiDeleteSite(id)
     if (res.ok) {
       if (selected?.id === id) setSelected(null)
-      showToast('🗑 Site removed.')
+      showToast('Site removed successfully.')
     }
   }
 
@@ -698,9 +735,17 @@ export default function DumpsiteManagement() {
     setSelected(site)
   }
 
-  const filtered = useMemo(() =>
-    typeFilter === 'all' ? sites : sites.filter(s => s.type === typeFilter)
-    , [sites, typeFilter])
+  const filtered = useMemo(() => {
+    let res = typeFilter === 'all' ? sites : sites.filter(s => s.type === typeFilter)
+    if (searchTerm.trim()) {
+      const q = searchTerm.toLowerCase().trim()
+      res = res.filter(s => {
+        const bName = (typeof s.barangay === 'object' ? s.barangay?.name : barangays.find(b => b.id === s.barangay)?.name) || s.barangay_name || ''
+        return (s.name || '').toLowerCase().includes(q) || bName.toLowerCase().includes(q)
+      })
+    }
+    return res
+  }, [sites, typeFilter, searchTerm, barangays])
 
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768)
   const [showMap, setShowMap] = useState(false)
@@ -723,64 +768,66 @@ export default function DumpsiteManagement() {
     @keyframes ww-blink  { 0%,100%{opacity:1} 50%{opacity:0.5} }
     @keyframes dmSpin    { to { transform:rotate(360deg) } }
 
+    /* ── Map-First Workbench Layout ── */
+    .dm-workbench { height: calc(100vh - 60px); display: flex; flex-direction: column; background: #f0f2f5; overflow: hidden; font-family: var(--font-body, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif); }
+    .dm-top-toolbar { height: 56px; background: #ffffff; border-bottom: 1px solid #e4e6eb; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; flex-shrink: 0; z-index: 10; }
+    .dm-workspace { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+    .dm-sidebar-left { width: 320px; background: #ffffff; border-right: 1px solid #e4e6eb; display: flex; flex-direction: column; min-height: 0; flex-shrink: 0; }
+    .dm-map-canvas { flex: 1; position: relative; min-width: 0; height: 100%; background: #e4e6eb; }
+    .dm-command-panel { width: 380px; background: #ffffff; border-left: 1px solid #e4e6eb; display: flex; flex-direction: column; min-height: 0; flex-shrink: 0; }
+
     /* ── Page layout ── */
-    .dm-page { padding: 24px; max-width: 1280px; margin: 0 auto; }
+    .meta-page-canvas { background: #f0f2f5; min-height: 100vh; padding: 20px 24px; font-family: var(--font-body, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif); }
+    .meta-card { background: #ffffff; border: 1px solid #e4e6eb; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
 
     /* ── Builder grid ── */
-    .dm-builder-grid { display:grid; grid-template-columns:1fr 360px; gap:18px; align-items:start; }
-    .dm-map-wrap { position:relative; border-radius:14px; overflow:hidden; height:640px; background:var(--surface-2); border:1px solid var(--border); box-shadow:var(--shadow-sm); }
+    .dm-builder-grid { display:grid; grid-template-columns:1fr 380px; gap:16px; align-items:start; }
+    .dm-map-wrap { position:relative; border-radius:8px; overflow:hidden; height:640px; background:#e4e6eb; border:1px solid #ced0d4; box-shadow:0 1px 2px rgba(0,0,0,0.04); }
     .dm-map-toggle { display:none; }
 
     /* ── Panel card ── */
-    .dm-panel { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:20px; box-shadow:var(--shadow-sm); animation:dmFadeUp .18s; }
-    .dm-panel-title { font-family:var(--font-head); font-size:15px; font-weight:700; color:var(--text); margin:0 0 2px; }
-    .dm-panel-sub   { font-size:12px; color:var(--text-muted); margin:0 0 18px; }
+    .dm-panel { background:#ffffff; border:1px solid #e4e6eb; border-radius:8px; padding:18px; box-shadow:0 1px 2px rgba(0,0,0,0.04); }
+    .dm-panel-title { font-size:15px; font-weight:700; color:#1c1e21; margin:0 0 2px; }
+    .dm-panel-sub   { font-size:12px; color:#65676b; margin:0 0 14px; }
 
     /* ── Form ── */
-    .dm-label { display:block; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--text-muted); margin-bottom:5px; }
-    .dm-input, .dm-select, .dm-textarea { width:100%; background:var(--surface); border:1.5px solid var(--border); border-radius:9px; padding:9px 12px; font-size:13px; color:var(--text); transition:border-color .14s,box-shadow .14s; outline:none; box-sizing:border-box; font-family:var(--font-body); box-shadow:var(--shadow-xs); }
-    .dm-input:focus, .dm-select:focus, .dm-textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(22,163,74,.1); }
-    .dm-input::placeholder, .dm-textarea::placeholder { color:var(--text-light); }
-    .dm-select option { background:#fff; color:var(--text); }
+    .dm-label { display:block; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#65676b; margin-bottom:5px; }
+    .meta-input { width:100%; height:36px; background:#ffffff; border:1px solid #ced0d4; border-radius:6px; padding:0 12px; font-size:13px; color:#1c1e21; outline:none; transition:border-color .15s, box-shadow .15s; }
+    .meta-input:focus { border-color:#16a34a; box-shadow:0 0 0 2px rgba(22,163,74,.15); }
+    .meta-input::placeholder { color:#8a8d91; }
 
     /* ── Dumpsite card ── */
-    .dm-ds-card { border-radius:10px; padding:13px 14px; margin-bottom:9px; display:flex; align-items:center; gap:12px; cursor:pointer; transition:all .13s; border:1.5px solid var(--border); background:var(--surface); }
-    .dm-ds-card:hover { border-color:rgba(22,163,74,.35); background:rgba(22,163,74,.03); }
-    .dm-ds-card.sel { border-color:var(--accent); background:rgba(22,163,74,.06); }
+    .dm-ds-card { border-radius:6px; padding:12px 14px; margin-bottom:8px; display:flex; cursor:pointer; transition:all .14s; border:1px solid #e4e6eb; background:#ffffff; }
+    .dm-ds-card:hover { border-color:#ced0d4; box-shadow:0 2px 6px rgba(0,0,0,.05); }
+    .dm-ds-card.sel { border-color:#16a34a; background:rgba(22,163,74,.03); }
 
     /* ── Buttons ── */
-    .dm-btn-primary { background:var(--accent); color:#fff; border:none; border-radius:9px; padding:9px 17px; font-size:13px; font-weight:600; cursor:pointer; transition:all .14s; display:inline-flex; align-items:center; gap:6px; font-family:var(--font-body); justify-content:center; box-shadow:0 1px 3px rgba(22,163,74,.25); }
-    .dm-btn-primary:hover { background:var(--accent-dim); }
-    .dm-btn-primary:active { transform:scale(.97); }
-    .dm-btn-primary:disabled { opacity:.35; cursor:not-allowed; transform:none; }
+    .meta-btn-primary { height:36px; background:#16a34a; color:#ffffff; border:none; border-radius:6px; padding:0 16px; font-size:13px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:6px; transition:background .15s; }
+    .meta-btn-primary:hover { background:#15803d; }
+    .meta-btn-primary:active { transform:scale(.98); }
+    .meta-btn-primary:disabled { opacity:.4; cursor:not-allowed; }
     
-    .dm-btn-ghost { background:var(--surface-2); color:var(--text-muted); border:1px solid var(--border); border-radius:9px; padding:9px 17px; font-size:13px; font-weight:600; cursor:pointer; transition:all .14s; font-family:var(--font-body); justify-content:center; }
-    .dm-btn-ghost:hover { color:var(--text); border-color:var(--border-2); background:var(--surface-3); }
+    .meta-btn-secondary { height:36px; background:#ffffff; color:#1c1e21; border:1px solid #ccd0d5; border-radius:6px; padding:0 14px; font-size:13px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:6px; transition:background .15s, border-color .15s; }
+    .meta-btn-secondary:hover { background:#f2f3f5; border-color:#bec3c9; }
 
-    .dm-btn-edit  { background:rgba(37,99,235,.06); color:#2563EB; border:1px solid rgba(37,99,235,.2); border-radius:7px; padding:5px 11px; font-size:11px; font-weight:600; cursor:pointer; transition:all .13s; display:inline-flex; align-items:center; gap:5px; font-family:var(--font-body); }
-    .dm-btn-edit:hover { background:rgba(37,99,235,.12); }
-
-    .dm-btn-del   { background:rgba(220,38,38,.06); color:#DC2626; border:1px solid rgba(220,38,38,.18); border-radius:7px; padding:5px 11px; font-size:11px; font-weight:600; cursor:pointer; transition:all .13s; display:inline-flex; align-items:center; gap:5px; font-family:var(--font-body); }
-    .dm-btn-del:hover { background:rgba(220,38,38,.12); }
-    
-    .dm-btn-sm { padding:6px 12px; font-size:12px; border-radius:8px; }
+    /* ── Tabs ── */
+    .meta-tabs-wrapper { display:flex; background:#e4e6eb; padding:3px; border-radius:8px; gap:2px; flex-wrap:wrap; }
+    .meta-tab-btn { padding:5px 11px; border-radius:6px; border:none; font-size:11px; font-weight:600; cursor:pointer; transition:all 0.15s ease; color:#65676b; background:transparent; display:inline-flex; align-items:center; gap:5px; }
+    .meta-tab-btn.active { background:#ffffff; color:#1c1e21; box-shadow:0 1px 2px rgba(0,0,0,0.08); font-weight:700; }
 
     /* ── Modal overlay ── */
-    .dm-modal-ov { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:9998; display:flex; align-items:center; justify-content:center; padding:16px; backdrop-filter:blur(4px); }
-    .dm-modal    { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:24px; width:100%; max-width:440px; max-height:85vh; overflow-y:auto; animation:dmModalIn .18s; box-shadow:var(--shadow-lg); }
-    .dm-modal::-webkit-scrollbar { width:4px; }
-    .dm-modal::-webkit-scrollbar-thumb { background:var(--border-2); border-radius:2px; }
+    .dm-modal-ov { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:9998; display:flex; align-items:center; justify-content:center; padding:16px; backdrop-filter:blur(3px); }
 
     /* ── Toast ── */
-    .dm-toast { position:fixed; top:70px; left:50%; transform:translateX(-50%); background:var(--surface); color:var(--text); padding:10px 20px; border-radius:10px; z-index:9999; font-size:13px; font-weight:600; border:1px solid var(--border); white-space:nowrap; animation:dmToastIn .2s; box-shadow:var(--shadow-lg); }
+    .dm-toast { position:fixed; top:70px; left:50%; transform:translateX(-50%); background:#ffffff; color:#1c1e21; padding:10px 20px; border-radius:8px; z-index:9999; font-size:13px; font-weight:600; border:1px solid #e4e6eb; border-left:4px solid #16a34a; white-space:nowrap; animation:dmToastIn .2s; box-shadow:0 4px 14px rgba(0,0,0,.1); }
 
-    .dm-spinner { width:10px; height:10px; border-radius:50%; border:2px solid var(--border); border-top-color:var(--accent); animation:dmSpin .75s linear infinite; flex-shrink:0; }
+    .dm-spinner { width:12px; height:12px; border-radius:50%; border:2px solid #e4e6eb; border-top-color:#16a34a; animation:dmSpin .75s linear infinite; flex-shrink:0; }
 
     @media (max-width:900px) {
       .dm-builder-grid { grid-template-columns:1fr; }
       .dm-map-wrap { height:360px; display:none; }
       .dm-map-wrap.vis { display:block; }
-      .dm-map-toggle { display:flex; width:100%; align-items:center; justify-content:center; gap:8px; padding:10px; margin-bottom:12px; border-radius:10px; border:1px solid var(--border); background:var(--surface); font-size:13px; font-weight:600; color:var(--text); cursor:pointer; }
+      .dm-map-toggle { display:flex; width:100%; align-items:center; justify-content:center; gap:8px; padding:10px; margin-bottom:12px; border-radius:6px; border:1px solid #ccd0d5; background:#ffffff; font-size:13px; font-weight:600; color:#1c1e21; cursor:pointer; }
     }
   `
 
@@ -797,28 +844,30 @@ export default function DumpsiteManagement() {
           moveConfirm.target.setLatLng([moveConfirm.oldLat, moveConfirm.oldLng])
           setMoveConfirm(null)
         }}>
-          <div className="dm-modal" style={{ maxWidth: 400, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
-            <h3 style={{ margin: '0 0 12px 0', fontSize: 18, color: 'var(--text)' }}>Move Dumpsite?</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 24, lineHeight: 1.5 }}>
-              Are you sure you want to move <strong>{moveConfirm.site.name}</strong> to the new location?
+          <div className="meta-card" style={{ width: '100%', maxWidth: 400, textAlign: 'center', padding: '24px 20px', borderRadius: 8, boxShadow: '0 8px 30px rgba(0,0,0,0.15)' }} onClick={e => e.stopPropagation()}>
+            <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#fef3c7', color: '#b45309', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01"/></svg>
+            </div>
+            <h3 style={{ margin: '0 0 8px 0', fontSize: 17, fontWeight: 700, color: '#1c1e21' }}>Relocate Facility?</h3>
+            <p style={{ color: '#65676b', fontSize: 13, marginBottom: 20, lineHeight: 1.5 }}>
+              Are you sure you want to move <strong>{moveConfirm.site.name}</strong> to the newly dropped map location?
             </p>
-            <div style={{ display: 'flex', gap: 12 }}>
-              <button className="dm-btn-ghost" style={{ flex: 1 }} onClick={() => {
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="meta-btn-secondary" style={{ flex: 1 }} onClick={() => {
                 moveConfirm.target.setLatLng([moveConfirm.oldLat, moveConfirm.oldLng])
                 setMoveConfirm(null)
               }}>Cancel</button>
-              <button className="dm-btn-primary" style={{ flex: 1, background: '#e74c3c' }} onClick={async () => {
+              <button className="meta-btn-primary" style={{ flex: 1, background: '#16a34a' }} onClick={async () => {
                 const payload = { lat: moveConfirm.newLat, lng: moveConfirm.newLng }
                 const res = await saveSite(moveConfirm.site.id, payload)
                 if (res.ok) {
-                  showToast('✅ Site moved successfully.')
+                  showToast('Site moved successfully.')
                 } else {
-                  showToast('❌ Failed to move site.')
+                  showToast('Failed to move site.')
                   moveConfirm.target.setLatLng([moveConfirm.oldLat, moveConfirm.oldLng])
                 }
                 setMoveConfirm(null)
-              }}>Yes, Move It</button>
+              }}>Confirm Move</button>
             </div>
           </div>
         </div>
@@ -862,137 +911,256 @@ export default function DumpsiteManagement() {
         />
       )}
 
-      <div className="dm-page">
+      <div className="dm-workbench">
 
-        {/* ── Header ── */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 22, flexWrap: 'wrap', gap: 12 }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 4 }}>
-              <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0, color: 'var(--text)', fontFamily: 'var(--font-head)', letterSpacing: '-.02em' }}>Dumpsite Management</h2>
-              <span style={{ background: 'rgba(231,76,60,0.1)', color: '#e74c3c', border: '1px solid rgba(231,76,60,0.3)', fontSize: 9, fontWeight: 800, padding: '3px 9px', borderRadius: 20, letterSpacing: '.06em' }}>ADMIN</span>
-            </div>
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Manage disposal facilities, landfills, and transfer stations.</p>
-          </div>
-          <button className="dm-btn-primary" onClick={() => setAddMode(a => !a)} style={{ background: addMode ? '#D97706' : 'var(--accent)' }}>
-            {addMode ? '✕ Cancel — Click Map' : '+ Add Site (Click Map)'}
-          </button>
-        </div>
-
-        {addMode && (
-          <div style={{ padding: '8px 11px', background: 'rgba(217,119,6,.06)', border: '1px solid rgba(217,119,6,.2)', borderRadius: 9, fontSize: 11, color: 'var(--warning)', marginBottom: 16 }}>
-            🖱️ Click anywhere on the map below to place a new site pin.
-          </div>
-        )}
-
-
-
-        {/* ── Two-column layout: map + side list ── */}
-
-        <button className="dm-map-toggle" onClick={() => { setShowMap(v => !v); setTimeout(() => { try { mapInstance.current?.invalidateSize() } catch { } }, 50) }}>
-          <IcoMap size={14} color="var(--text-muted)" />
-          {showMap ? 'Hide Map' : 'Show Map'}
-          <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>{showMap ? '▲' : '▼'}</span>
-        </button>
-
-        <div className="dm-builder-grid">
-
-          {/* MAP */}
-          <div className={`dm-map-wrap${showMap ? ' vis' : ''}`}>
-            <div ref={mapRef} style={{ position: 'absolute', inset: 0, zIndex: 1 }} />
-            {!mapReady && (
-              <div style={{ position: 'absolute', inset: 0, background: 'var(--surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5 }}>
+        {/* ── Top Header Toolbar ── */}
+        <div className="dm-top-toolbar">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: 6,
+                background: '#e7f5eb', color: '#16a34a',
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }}>
+                <IcoMap size={18} color="#16a34a" />
+              </div>
+              <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div className="dm-spinner" /><span style={{ color: 'var(--accent)', fontWeight: 600, fontSize: 13 }}>Loading Map…</span>
+                  <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: '#1c1e21', letterSpacing: '-.02em' }}>
+                    Dumpsite Management
+                  </h2>
+                  <span style={{
+                    background: '#e7f5eb', color: '#15803d', border: '1px solid #bbf7d0',
+                    fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4, letterSpacing: '.04em'
+                  }}>ADMIN</span>
+                </div>
+                <div style={{ fontSize: 11, color: '#65676b', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span>Disposal facilities & transfer hubs across Lucena City</span>
                 </div>
               </div>
-            )}
-
-            {/* Legend overlay */}
-            <div style={{
-              position: 'absolute', bottom: 14, left: 14, zIndex: 400,
-              background: 'rgba(255,255,255,.94)', backdropFilter: 'blur(6px)', borderRadius: 10, padding: '9px 13px',
-              border: '1px solid var(--border)', fontSize: 11, color: 'var(--text-muted)', boxShadow: 'var(--shadow-sm)'
-            }}>
-              {TYPES.map(t => (
-                <div key={t.value} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  <span style={{ fontSize: 13 }}>{t.emoji}</span>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: t.color }} />
-                  <span style={{ color: 'var(--text-muted)' }}>{t.label}</span>
-                </div>
-              ))}
             </div>
           </div>
 
-          {/* SIDE LIST */}
-          <div className="dm-panel" style={{ display: 'flex', flexDirection: 'column', gap: 0, padding: 16, maxHeight: 640 }}>
-            <p className="dm-panel-title">Sites Directory</p>
-            <p className="dm-panel-sub" style={{ marginBottom: 12 }}>Filter and manage locations.</p>
-
-            {/* Type filter pills */}
-            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 14 }}>
-              <button onClick={() => setTypeFilter('all')} style={{
-                padding: '4px 12px', borderRadius: 20, border: '1px solid',
-                fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', cursor: 'pointer', transition: 'all .12s',
-                borderColor: typeFilter === 'all' ? 'var(--accent)' : 'transparent',
-                color: typeFilter === 'all' ? 'var(--accent)' : 'var(--text-muted)',
-                background: typeFilter === 'all' ? 'rgba(22,163,74,.08)' : 'var(--surface-2)',
-              }}>All ({sites.length})</button>
-              {TYPES.map(t => (
-                <button key={t.value} onClick={() => setTypeFilter(t.value)} style={{
-                  padding: '4px 12px', borderRadius: 20, border: '1px solid',
-                  fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', cursor: 'pointer', transition: 'all .12s',
-                  borderColor: typeFilter === t.value ? t.color : 'transparent',
-                  color: typeFilter === t.value ? t.color : 'var(--text-muted)',
-                  background: typeFilter === t.value ? `${t.color}18` : 'var(--surface-2)',
-                }}>{t.emoji} {sites.filter(s => s.type === t.value).length}</button>
-              ))}
+          {/* Quick KPI Metrics */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: '#f0f2f5', padding: '4px 10px', borderRadius: 6,
+              fontSize: 12, fontWeight: 600, color: '#1c1e21', border: '1px solid #e4e6eb'
+            }}>
+              <span style={{ color: '#65676b', fontSize: 11, textTransform: 'uppercase' }}>Total Sites:</span>
+              <span>{sites.length}</span>
             </div>
 
-            <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4 }}>
-              {/* Site cards */}
-              {filtered.length === 0 && (
-                <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-muted)', fontSize: 13 }}>
-                  No sites found.
-                </div>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: '#fef2f2', padding: '4px 10px', borderRadius: 6,
+              fontSize: 12, fontWeight: 600, color: '#b91c1c', border: '1px solid #fecaca'
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#dc2626' }} />
+              <span>{sites.filter(s => s.type === 'landfill').length} Landfills</span>
+            </div>
+
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: '#fffbeb', padding: '4px 10px', borderRadius: 6,
+              fontSize: 12, fontWeight: 600, color: '#92400e', border: '1px solid #fde68a'
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#d97706' }} />
+              <span>{sites.filter(s => s.type === 'dumpsite').length} Dumpsites</span>
+            </div>
+
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: '#eff6ff', padding: '4px 10px', borderRadius: 6,
+              fontSize: 12, fontWeight: 600, color: '#1e40af', border: '1px solid #bfdbfe'
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#2563eb' }} />
+              <span>{sites.filter(s => s.type === 'transfer').length} Transfer</span>
+            </div>
+          </div>
+
+          {/* Top Actions */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              className="meta-btn-primary"
+              onClick={() => setAddMode(a => !a)}
+              style={{
+                background: addMode ? '#d97706' : '#16a34a',
+                height: 34,
+                fontSize: 12
+              }}
+            >
+              {addMode ? (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  Cancel Pin Drop
+                </>
+              ) : (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  + Add Site (Click Map)
+                </>
               )}
+            </button>
+          </div>
+        </div>
+
+        {/* ── 3-Pane Workbench Workspace ── */}
+        <div className="dm-workspace">
+
+          {/* 1. LEFT SIDEBAR: Sites Directory */}
+          <div className="dm-sidebar-left">
+            <div style={{ padding: '14px 16px 10px', borderBottom: '1px solid #e4e6eb' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#1c1e21', textTransform: 'uppercase', letterSpacing: '.03em' }}>
+                  Sites Directory
+                </span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#65676b', background: '#f0f2f5', padding: '2px 8px', borderRadius: 10 }}>
+                  {filtered.length} of {sites.length}
+                </span>
+              </div>
+
+              {/* Search Bar */}
+              <div style={{ position: 'relative', marginBottom: 10 }}>
+                <input
+                  type="text"
+                  placeholder="Search site name or barangay..."
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  style={{
+                    width: '100%',
+                    height: 32,
+                    fontSize: 12,
+                    padding: '0 10px 0 30px',
+                    borderRadius: 6,
+                    border: '1px solid #ced0d4',
+                    background: '#f8f9fa',
+                    outline: 'none',
+                    color: '#1c1e21',
+                    boxSizing: 'border-box'
+                  }}
+                />
+                <div style={{ position: 'absolute', left: 9, top: 8, color: '#8a8d91', pointerEvents: 'none' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                </div>
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm('')}
+                    style={{ position: 'absolute', right: 8, top: 7, border: 'none', background: 'transparent', cursor: 'pointer', color: '#8a8d91', padding: 0 }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                )}
+              </div>
+
+              {/* Type Filter Pills */}
+              <div className="meta-tabs-wrapper" style={{ gap: 2, padding: 2 }}>
+                <button
+                  className={`meta-tab-btn ${typeFilter === 'all' ? 'active' : ''}`}
+                  onClick={() => setTypeFilter('all')}
+                  style={{ fontSize: 10, padding: '4px 7px' }}
+                >
+                  All ({sites.length})
+                </button>
+                {TYPES.map(t => (
+                  <button
+                    key={t.value}
+                    className={`meta-tab-btn ${typeFilter === t.value ? 'active' : ''}`}
+                    onClick={() => setTypeFilter(t.value)}
+                    style={{ fontSize: 10, padding: '4px 7px' }}
+                  >
+                    <TypeIcon type={t.value} size={10} color={typeFilter === t.value ? t.color : '#65676b'} />
+                    {t.label} ({sites.filter(s => s.type === t.value).length})
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Scrollable Facility Cards */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
+              {loading && sites.length === 0 ? (
+                <FeedCardSkeleton count={4} compact />
+              ) : filtered.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px 16px', color: '#65676b', fontSize: 13 }}>
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ced0d4" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ margin: '0 auto 8px', display: 'block' }}>
+                    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+                  </svg>
+                  No facilities found matching your criteria.
+                </div>
+              ) : null}
 
               {filtered.map(site => {
                 const t = typeMap[site.type] || TYPES[1]
                 const isSelected = selected?.id === site.id
+                const bName = (typeof site.barangay === 'object' ? site.barangay?.name : barangays.find(b => b.id === site.barangay)?.name) || site.barangay_name || 'Lucena City'
+                const capPct = site.fill_percent ?? site.capacity_used ?? site.capacity ?? 0
+
                 return (
-                  <div key={site.id} className={`dm-ds-card${isSelected ? ' sel' : ''}`} onClick={() => flyTo(site)} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{ width: 34, height: 34, borderRadius: 9, background: isSelected ? `${t.color}22` : 'var(--surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, flexShrink: 0 }}>
-                        {t.emoji}
+                  <div
+                    key={site.id}
+                    className={`dm-ds-card${isSelected ? ' sel' : ''}`}
+                    onClick={() => flyTo(site)}
+                    style={{
+                      flexDirection: 'column',
+                      alignItems: 'stretch',
+                      borderLeft: isSelected ? '3px solid #16a34a' : '1px solid #e4e6eb',
+                      padding: '10px 12px',
+                      marginBottom: 8,
+                      borderRadius: 6,
+                      background: isSelected ? '#f0fdf4' : '#ffffff'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                      <div style={{
+                        width: 30, height: 30, borderRadius: 6,
+                        background: `${t.color}15`, border: `1px solid ${t.color}35`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+                      }}>
+                        <TypeIcon type={site.type} size={15} color={t.color} />
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)', marginBottom: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontWeight: 600, fontSize: 12.5, color: '#1c1e21', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {site.name}
                         </div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                          {t.label} · {(typeof site.barangay === 'object' ? site.barangay?.name : barangays.find(b => b.id === site.barangay)?.name) || site.barangay_name || 'Unknown'}
+                        <div style={{ fontSize: 11, color: '#65676b', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span style={{ color: t.color, fontWeight: 600 }}>{t.label}</span>
+                          <span>•</span>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bName}</span>
                         </div>
                       </div>
                     </div>
-                    
-                    <div style={{ marginTop: 6, marginBottom: 2 }}>
-                      <CapBar pct={site.fill_percent ?? site.capacity_used ?? site.capacity ?? 0} />
+
+                    <div style={{ marginTop: 8, marginBottom: 2 }}>
+                      <CapBar pct={capPct} />
                     </div>
 
                     {site.notes && (
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2, fontStyle: 'italic' }}>
+                      <div style={{ fontSize: 11, color: '#65676b', marginTop: 3, fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {site.notes}
                       </div>
                     )}
 
-                    <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                      <button className="dm-btn-edit" style={{ flex: 1, justifyContent: 'center' }} onClick={e => { e.stopPropagation(); setDetailSite(site) }}>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+                      <button
+                        className="meta-btn-secondary"
+                        style={{ flex: 1, height: 26, fontSize: 11, padding: 0 }}
+                        onClick={() => setDetailSite(site)}
+                      >
                         Details
                       </button>
-                      <button className="dm-btn-edit" style={{ flex: 1, justifyContent: 'center' }} onClick={e => { e.stopPropagation(); setModal(site) }}>
+                      <button
+                        className="meta-btn-secondary"
+                        style={{ flex: 1, height: 26, fontSize: 11, padding: 0 }}
+                        onClick={() => setModal(site)}
+                      >
                         Edit
                       </button>
-                      <button className="dm-btn-del" style={{ flex: 1, justifyContent: 'center' }} onClick={e => { e.stopPropagation(); setDeleteConfirm(site) }}>
+                      <button
+                        className="meta-btn-secondary"
+                        style={{ flex: 1, height: 26, fontSize: 11, padding: 0, color: '#b91c1c', borderColor: '#fca5a5' }}
+                        onClick={() => setDeleteConfirm(site)}
+                      >
                         Delete
                       </button>
                     </div>
@@ -1001,6 +1169,274 @@ export default function DumpsiteManagement() {
               })}
             </div>
           </div>
+
+          {/* 2. CENTER CANVAS: Expansive Map */}
+          <div className="dm-map-canvas">
+            <div ref={mapRef} style={{ position: 'absolute', inset: 0, zIndex: 1 }} />
+            {!mapReady && (
+              <div style={{ position: 'absolute', inset: 0, zIndex: 5 }}>
+                <MapSkeleton height="100%" dark label="Loading facilities map..." />
+              </div>
+            )}
+
+            {/* Add Mode Floating Alert Banner */}
+            {addMode && (
+              <div style={{
+                position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)',
+                zIndex: 400, background: '#fffbeb', border: '1px solid #fde68a',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.12)', borderRadius: 8,
+                padding: '10px 18px', display: 'flex', alignItems: 'center', gap: 10,
+                fontSize: 12.5, fontWeight: 600, color: '#92400e', animation: 'dmFadeUp .2s'
+              }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="M13 13l6 6"/></svg>
+                <span>Click anywhere on the map to drop a pin and register a new disposal site.</span>
+                <button
+                  onClick={() => setAddMode(false)}
+                  style={{
+                    background: '#fef3c7', border: '1px solid #fcd34d',
+                    borderRadius: 4, padding: '2px 8px', fontSize: 11,
+                    fontWeight: 700, color: '#78350f', cursor: 'pointer', marginLeft: 6
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {/* Type Legend Overlay */}
+            <div style={{
+              position: 'absolute', bottom: 18, left: 18, zIndex: 400,
+              background: '#ffffff', borderRadius: 8, padding: '10px 14px',
+              border: '1px solid #ced0d4', fontSize: 11, color: '#65676b',
+              boxShadow: '0 4px 12px rgba(0,0,0,.08)'
+            }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: '#8a8d91', marginBottom: 6 }}>
+                Facility Legend
+              </div>
+              {TYPES.map(t => (
+                <div key={t.value} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <div style={{ width: 9, height: 9, borderRadius: '50%', background: t.color }} />
+                  <TypeIcon type={t.value} size={13} color={t.color} />
+                  <span style={{ color: '#1c1e21', fontWeight: 500 }}>{t.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 3. RIGHT COMMAND PANEL: Facility Inspector */}
+          <div className="dm-command-panel">
+            {selected ? (
+              (() => {
+                const curSite = sites.find(s => s.id === selected.id) || selected
+                const t = typeMap[curSite.type] || TYPES[1]
+                const bName = (typeof curSite.barangay === 'object' ? curSite.barangay?.name : barangays.find(b => b.id === curSite.barangay)?.name) || curSite.barangay_name || 'Lucena City'
+                const capPct = curSite.fill_percent ?? curSite.capacity_used ?? curSite.capacity ?? 0
+                const capColor = capPct > 80 ? '#b91c1c' : capPct > 60 ? '#b45309' : '#15803d'
+                const staff = curSite.staff_accounts || []
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                    {/* Panel Header */}
+                    <div style={{ padding: '16px 20px', borderBottom: '1px solid #e4e6eb', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{
+                          width: 40, height: 40, borderRadius: 8,
+                          background: `${t.color}15`, border: `1px solid ${t.color}35`,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+                        }}>
+                          <TypeIcon type={curSite.type} size={20} color={t.color} />
+                        </div>
+                        <div>
+                          <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: '#1c1e21' }}>
+                            {curSite.name}
+                          </h3>
+                          <div style={{ fontSize: 12, color: '#65676b', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                            <span style={{ color: t.color, fontWeight: 600 }}>{t.label}</span>
+                            <span>•</span>
+                            <span>{bName}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setSelected(null)}
+                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#8a8d91', padding: 4 }}
+                        title="Close Inspector"
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      </button>
+                    </div>
+
+                    {/* Panel Scrollable Content */}
+                    <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                      {/* Capacity Card */}
+                      <div style={{ background: '#f8f9fa', borderRadius: 8, border: '1px solid #e4e6eb', padding: '14px 16px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                            Current Capacity Utilization
+                          </span>
+                          <span style={{ fontSize: 14, fontWeight: 800, color: capColor }}>
+                            {capPct}%
+                          </span>
+                        </div>
+                        <div style={{ height: 8, background: '#e4e6eb', borderRadius: 4, overflow: 'hidden', marginBottom: 6 }}>
+                          <div style={{ width: `${capPct}%`, height: '100%', background: capColor, borderRadius: 4, transition: 'width .3s' }} />
+                        </div>
+                        <div style={{ fontSize: 11, color: '#65676b', display: 'flex', justifyContent: 'space-between' }}>
+                          <span>0% (Empty)</span>
+                          <span style={{ fontWeight: 600, color: capColor }}>
+                            {capPct > 80 ? 'Critical Capacity' : capPct > 60 ? 'Moderate Inflow' : 'Optimal Capacity'}
+                          </span>
+                          <span>100% (Full)</span>
+                        </div>
+                      </div>
+
+                      {/* Geolocation Details */}
+                      <div style={{ background: '#ffffff', borderRadius: 8, border: '1px solid #e4e6eb', padding: '14px 16px' }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 10 }}>
+                          Location & Geofence
+                        </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#65676b' }}>Barangay</span>
+                            <span style={{ fontWeight: 600, color: '#1c1e21' }}>{bName}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#65676b' }}>Coordinates</span>
+                            <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#1c1e21' }}>
+                              {Number(curSite.latitude).toFixed(6)}, {Number(curSite.longitude).toFixed(6)}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#65676b' }}>City Jurisdiction</span>
+                            <span style={{ color: '#16a34a', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                              Lucena City (Verified)
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Operational Staff */}
+                      <div style={{ background: '#ffffff', borderRadius: 8, border: '1px solid #e4e6eb', padding: '14px 16px' }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 8 }}>
+                          Assigned Staff ({staff.length})
+                        </span>
+                        {staff.length === 0 ? (
+                          <div style={{ fontSize: 12, color: '#8a8d91', fontStyle: 'italic' }}>
+                            No dedicated facility operator accounts registered.
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {staff.map((ac, idx) => (
+                              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '4px 0' }}>
+                                <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: '#65676b' }}>
+                                  {ac.full_name?.[0]?.toUpperCase() || 'S'}
+                                </div>
+                                <div>
+                                  <div style={{ fontWeight: 600, color: '#1c1e21' }}>{ac.full_name || 'Staff Member'}</div>
+                                  <div style={{ fontSize: 11, color: '#65676b' }}>{ac.email}</div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Site Notes */}
+                      {curSite.notes && (
+                        <div style={{ background: '#ffffff', borderRadius: 8, border: '1px solid #e4e6eb', padding: '14px 16px' }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 6 }}>
+                            Operational Notes
+                          </span>
+                          <div style={{ fontSize: 12, color: '#4b5563', lineHeight: 1.5 }}>
+                            {curSite.notes}
+                          </div>
+                        </div>
+                      )}
+
+                    </div>
+
+                    {/* Bottom Action Footer */}
+                    <div style={{ padding: '14px 20px', borderTop: '1px solid #e4e6eb', background: '#f8f9fa', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          className="meta-btn-secondary"
+                          style={{ flex: 1, height: 34, fontSize: 12 }}
+                          onClick={() => setDetailSite(curSite)}
+                        >
+                          View Full Details
+                        </button>
+                        <button
+                          className="meta-btn-secondary"
+                          style={{ flex: 1, height: 34, fontSize: 12 }}
+                          onClick={() => setModal(curSite)}
+                        >
+                          Edit Facility
+                        </button>
+                      </div>
+                      <button
+                        className="meta-btn-secondary"
+                        style={{ width: '100%', height: 32, fontSize: 12, color: '#b91c1c', borderColor: '#fca5a5' }}
+                        onClick={() => setDeleteConfirm(curSite)}
+                      >
+                        Delete Facility
+                      </button>
+                    </div>
+                  </div>
+                )
+              })()
+            ) : (
+              /* Empty State */
+              <div style={{
+                flex: 1, display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center',
+                padding: '40px 24px', textAlign: 'center', color: '#65676b'
+              }}>
+                <div style={{
+                  width: 54, height: 54, borderRadius: '50%',
+                  background: '#f0f2f5', border: '1px solid #ced0d4',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  marginBottom: 16, color: '#8a8d91'
+                }}>
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1 1 18 0z"/>
+                    <circle cx="12" cy="10" r="3"/>
+                  </svg>
+                </div>
+                <h4 style={{ fontSize: 15, fontWeight: 700, color: '#1c1e21', margin: '0 0 6px' }}>
+                  Facility Inspector
+                </h4>
+                <p style={{ fontSize: 12, color: '#65676b', margin: 0, maxWidth: 280, lineHeight: 1.5 }}>
+                  Click any facility marker on the map or select from the directory list on the left to inspect its real-time capacity, location, and operational controls.
+                </p>
+
+                <div style={{
+                  marginTop: 24, width: '100%', background: '#f8f9fa',
+                  borderRadius: 8, border: '1px solid #e4e6eb', padding: '14px',
+                  display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, textAlign: 'left'
+                }}>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#65676b', textTransform: 'uppercase' }}>Landfills</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: '#dc2626' }}>{sites.filter(s => s.type === 'landfill').length}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#65676b', textTransform: 'uppercase' }}>Dumpsites</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: '#d97706' }}>{sites.filter(s => s.type === 'dumpsite').length}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#65676b', textTransform: 'uppercase' }}>Transfer Hubs</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: '#2563eb' }}>{sites.filter(s => s.type === 'transfer').length}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#65676b', textTransform: 'uppercase' }}>Composting</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: '#16a34a' }}>{sites.filter(s => s.type === 'composting').length}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
         </div>
 
       </div>

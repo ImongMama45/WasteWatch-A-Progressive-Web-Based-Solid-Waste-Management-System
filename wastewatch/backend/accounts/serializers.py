@@ -8,7 +8,11 @@ Three serializers:
 """
 
 from rest_framework import serializers
+from django.utils import timezone
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from .models import User, Barangay, UserRole, BarangayEstablishment
+from .validators import normalize_ph_phone
 
 
 # ---------------------------------------------------------------------------
@@ -43,17 +47,55 @@ class BarangaySerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     barangay_name = serializers.CharField(source='barangay.name', read_only=True)
     dumpsite_name = serializers.CharField(source='dumpsite.name', read_only=True)
+    points = serializers.SerializerMethodField()
+    is_suspended = serializers.SerializerMethodField()
+    suspension_overrides = serializers.SerializerMethodField()
 
     class Meta:
         model  = User
         fields = [
             'id', 'username', 'email', 'full_name', 'first_name', 'last_name', 'role', 'employee_type',
+            'phone_number', 'address_line', 'email_verified', 'email_verified_at',
             'profile_pic',
             'barangay', 'barangay_name',
             'dumpsite', 'dumpsite_name',
-            'is_active', 'created_at',
+            'is_active', 'is_staff', 'is_superuser', 'created_at',
+            'points', 'is_suspended', 'suspension_overrides'
         ]
-        read_only_fields = ['created_at', 'role']
+        read_only_fields = ['created_at', 'role', 'points', 'is_suspended', 'suspension_overrides', 'email_verified', 'email_verified_at', 'is_staff', 'is_superuser']
+
+    def get_points(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        if obj.role == 'driver' and (getattr(request.user, 'role', '') == 'admin' or request.user.id == obj.id):
+            return getattr(obj.driverprofile, 'points', 0) if hasattr(obj, 'driverprofile') else 0
+        return None
+
+    def get_is_suspended(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        if obj.role == 'driver' and (getattr(request.user, 'role', '') == 'admin' or request.user.id == obj.id):
+            return getattr(obj.driverprofile, 'is_suspended', False) if hasattr(obj, 'driverprofile') else False
+        return None
+
+    def get_suspension_overrides(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        if obj.role == 'driver' and getattr(request.user, 'role', '') == 'admin':
+            overrides = obj.suspension_overrides.all().order_by('-created_at')
+            return [
+                {
+                    "id": o.id,
+                    "reason": o.reason,
+                    "admin_name": o.admin.full_name if o.admin else "System",
+                    "created_at": o.created_at.isoformat() if o.created_at else None
+                }
+                for o in overrides
+            ]
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -68,17 +110,64 @@ class AdminUserSerializer(serializers.ModelSerializer):
     password      = serializers.CharField(write_only=True, required=False, min_length=6)
     barangay_name = serializers.CharField(source='barangay.name', read_only=True)
     dumpsite_name = serializers.CharField(source='dumpsite.name', read_only=True)
+    points = serializers.SerializerMethodField()
+    is_suspended = serializers.SerializerMethodField()
+    suspension_overrides = serializers.SerializerMethodField()
 
     class Meta:
         model  = User
         fields = [
             'id', 'username', 'email', 'full_name', 'first_name', 'last_name', 'role', 'employee_type',
+            'phone_number', 'address_line', 'email_verified', 'email_verified_at',
             'profile_pic',
             'barangay', 'barangay_name',
             'dumpsite', 'dumpsite_name',
             'is_active', 'password', 'created_at',
+            'points', 'is_suspended', 'suspension_overrides'
         ]
-        read_only_fields = ['created_at']
+        read_only_fields = ['created_at', 'points', 'is_suspended', 'suspension_overrides']
+
+    def get_points(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        if obj.role == 'driver' and (getattr(request.user, 'role', '') == 'admin' or request.user.id == obj.id):
+            return getattr(obj.driverprofile, 'points', 0) if hasattr(obj, 'driverprofile') else 0
+        return None
+
+    def get_is_suspended(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        if obj.role == 'driver' and (getattr(request.user, 'role', '') == 'admin' or request.user.id == obj.id):
+            return getattr(obj.driverprofile, 'is_suspended', False) if hasattr(obj, 'driverprofile') else False
+        return None
+
+    def get_suspension_overrides(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        if obj.role == 'driver' and getattr(request.user, 'role', '') == 'admin':
+            overrides = obj.suspension_overrides.all().order_by('-created_at')
+            return [
+                {
+                    "id": o.id,
+                    "reason": o.reason,
+                    "admin_name": o.admin.full_name if o.admin else "System",
+                    "created_at": o.created_at.isoformat() if o.created_at else None
+                }
+                for o in overrides
+            ]
+        return None
+
+    def validate(self, attrs):
+        role = attrs.get('role', getattr(self.instance, 'role', None))
+        employee_type = attrs.get('employee_type', getattr(self.instance, 'employee_type', ''))
+        if employee_type == 'crew_member' and role != 'citizen':
+            raise serializers.ValidationError({
+                'employee_type': 'Only citizens can be designated as crew members.'
+            })
+        return attrs
 
     def validate_email(self, value):
         value = value.strip().lower()
@@ -91,6 +180,11 @@ class AdminUserSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         password = validated_data.pop('password', None)
+        # Admin-created staff/official/driver accounts are auto-verified
+        if 'email_verified' not in validated_data:
+            validated_data['email_verified'] = True
+            validated_data['email_verified_at'] = timezone.now()
+
         user = User(**validated_data)
         if password:
             user.set_password(password)
@@ -110,97 +204,141 @@ class AdminUserSerializer(serializers.ModelSerializer):
 
 
 # ---------------------------------------------------------------------------
-# Registration
+# Registration (Citizens Only)
 # ---------------------------------------------------------------------------
 class RegisterSerializer(serializers.Serializer):
     """
-    Accepts the public registration payload.
-    password2 is only used for validation; it is NOT stored.
-    barangay is required for valid citizens.
+    Public registration serializer strictly for Citizen accounts.
+    Specialized accounts (Admins, Watchers, Drivers, Brgy Officials, Dumpsite Operators)
+    are provisioned directly by system administrators.
     """
 
-    username = serializers.CharField(
-        max_length=150, 
-        required=True,
-        error_messages={'required': 'Mangyaring ilagay ang iyong username.'}
-    )
-    profile_pic = serializers.ImageField(required=False, allow_null=True)
-
     first_name = serializers.CharField(
-        max_length=150, 
+        max_length=150,
         required=True,
-        error_messages={'required': 'Mangyaring ilagay ang iyong unang pangalan (First Name).'}
+        error_messages={'required': 'Please enter your first name.'}
     )
     last_name = serializers.CharField(
-        max_length=150, 
+        max_length=150,
         required=True,
-        error_messages={'required': 'Mangyaring ilagay ang iyong huling pangalan (Last Name).'}
+        error_messages={'required': 'Please enter your last name.'}
     )
-    email     = serializers.EmailField(
+    email = serializers.EmailField(
         required=True,
-        error_messages={'required': 'Mangyaring ilagay ang iyong email.'}
+        error_messages={'required': 'Please enter your email address.'}
     )
-    password  = serializers.CharField(
-        write_only=True, 
-        min_length=8, 
+    phone_number = serializers.CharField(
+        max_length=20,
+        required=True,
+        error_messages={'required': 'Please enter your Philippine mobile number.'}
+    )
+    barangay = serializers.PrimaryKeyRelatedField(
+        queryset=Barangay.objects.all(),
+        required=True,
+        error_messages={'required': 'Please select your barangay in Lucena City.'}
+    )
+    address_line = serializers.CharField(
+        max_length=255,
+        required=False,
+        allow_blank=True,
+        default=''
+    )
+    password = serializers.CharField(
+        write_only=True,
+        min_length=8,
         required=True,
         error_messages={
-            'required': 'Mangyaring ilagay ang iyong password.',
-            'min_length': 'Ang password ay dapat hindi bababa sa 8 characters.'
+            'required': 'Please create a password.',
+            'min_length': 'Password must be at least 8 characters long.'
         }
     )
     password2 = serializers.CharField(
-        write_only=True, 
+        write_only=True,
         required=True,
-        error_messages={'required': 'Mangyaring i-confirm ang iyong password.'}
+        error_messages={'required': 'Please confirm your password.'}
     )
-    barangay  = serializers.PrimaryKeyRelatedField(
-        queryset=Barangay.objects.all(),
+    accept_terms = serializers.BooleanField(
+        required=True,
+        error_messages={'required': 'You must agree to the terms and privacy policy.'}
+    )
+    username = serializers.CharField(
+        max_length=150,
         required=False,
-        allow_null=True,
+        allow_blank=True
     )
-    role      = serializers.CharField(required=False, default=UserRole.CITIZEN)
+    profile_pic = serializers.ImageField(required=False, allow_null=True)
 
     # ── Validation ──────────────────────────────────────────────────────────
 
-    def validate_username(self, value):
-        if User.objects.filter(username__iexact=value).exists():
-            raise serializers.ValidationError('Ang username na ito ay ginagamit na.')
-        return value.lower()
-
     def validate_email(self, value):
-        if User.objects.filter(email__iexact=value).exists():
-            raise serializers.ValidationError('Ang email na ito ay may account na.')
-        return value.lower()
+        cleaned = value.strip().lower()
+        if User.objects.filter(email__iexact=cleaned).exists():
+            raise serializers.ValidationError('An account with this email address already exists.')
+        return cleaned
+
+    def validate_phone_number(self, value):
+        normalized = normalize_ph_phone(value)
+        # Check if phone number is already registered
+        if normalized and User.objects.filter(phone_number=normalized).exists():
+            raise serializers.ValidationError('This mobile number is already registered to an account.')
+        return normalized
+
+    def validate_accept_terms(self, value):
+        if not value:
+            raise serializers.ValidationError('You must agree to the terms of service to create an account.')
+        return value
 
     def validate(self, data):
-        if data.get('password') != data.pop('password2', None):
-            raise serializers.ValidationError({'password': 'Ang password ay hindi tugma.'})
+        if data.get('password') != data.get('password2'):
+            raise serializers.ValidationError({'password2': 'Passwords do not match.'})
+
+        # Run Django password validators
+        password = data.get('password')
+        try:
+            validate_password(password)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({'password': list(exc.messages)})
+
         return data
 
     # ── Create ──────────────────────────────────────────────────────────────
 
     def create(self, validated_data):
         password = validated_data.pop('password')
-        barangay = validated_data.pop('barangay')
-        
-        print(f"DEBUG: RegisterSerializer.create - Saving user with barangay_id: {barangay.id if barangay else None} ({barangay.name if barangay else 'None'})")
-        
-        # Ensure role is popped if it exists in validated_data to avoid multiple values
-        validated_data.pop('role', None) 
-        
-        # Public registration is ALWAYS citizen.
-        role     = UserRole.CITIZEN
+        validated_data.pop('password2', None)
+        validated_data.pop('accept_terms', None)
+        validated_data.pop('role', None)  # Guaranteed citizen only
 
-        # Auto-generate full_name for backend models
-        first_name = validated_data.get('first_name', '')
-        last_name = validated_data.get('last_name', '')
-        validated_data['full_name'] = f"{first_name} {last_name}".strip()
+        first_name = validated_data.get('first_name', '').strip()
+        last_name = validated_data.get('last_name', '').strip()
+        full_name = f"{first_name} {last_name}".strip()
 
+        email = validated_data.get('email', '').strip().lower()
+        username = validated_data.pop('username', '').strip().lower()
+        validated_data.pop('full_name', None)
+
+        # Generate a unique username if not provided or already taken
+        if not username:
+            base_user = email.split('@')[0]
+            candidate = base_user
+            idx = 1
+            while User.objects.filter(username__iexact=candidate).exists():
+                candidate = f"{base_user}_{idx}"
+                idx += 1
+            username = candidate
+        else:
+            if User.objects.filter(username__iexact=username).exists():
+                username = f"{username}_{int(timezone.now().timestamp()) % 10000}"
+
+        now = timezone.now()
         user = User(
-            role=role,
-            barangay=barangay,
-            **validated_data,
+            role=UserRole.CITIZEN,
+            username=username,
+            full_name=full_name,
+            email_verified=False,
+            email_verified_at=None,
+            terms_accepted_at=now,
+            **validated_data
         )
         user.set_password(password)
         user.save()
@@ -279,7 +417,7 @@ class BarangayDetailSerializer(serializers.ModelSerializer):
 
     def get_hotspots(self, obj):
         SerializerClass = get_hotspot_serializer()
-        return SerializerClass(obj.hotspots.all(), many=True).data
+        return SerializerClass(obj.hotspots.filter(is_active=True), many=True).data
 
     def get_escalations(self, obj):
         SerializerClass = get_escalation_serializer()
@@ -297,7 +435,7 @@ class BarangayDetailSerializer(serializers.ModelSerializer):
         return obj.reports.filter(status=ReportStatus.PENDING).count()
 
     def get_active_hotspot_count(self, obj):
-        return obj.hotspots.count() # assuming all returned hotspots are active or is_active isn't filtered here. We can use count.
+        return obj.hotspots.filter(is_active=True).count()
 
     def get_open_escalation_count(self, obj):
         return obj.escalations.filter(status='pending').count()

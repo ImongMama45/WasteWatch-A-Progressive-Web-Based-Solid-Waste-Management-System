@@ -10,6 +10,7 @@ class NotificationType(models.TextChoices):
     DUMPSITE_INBOUND = 'DUMPSITE_INBOUND', 'Dumpsite Inbound'
     WATCHER_STOP_VERIFIED = 'WATCHER_STOP_VERIFIED', 'Watcher Stop Verified'
     WATCHER_ROUTE_SUMMARY = 'WATCHER_ROUTE_SUMMARY', 'Watcher Route Summary'
+    REPORT_UPDATE = 'REPORT_UPDATE', 'Report Update'
 
 
 class Notification(models.Model):
@@ -38,6 +39,9 @@ class Notification(models.Model):
         default=NotificationType.ANNOUNCEMENT,
     )
 
+    # Atomic broadcast tracking
+    broadcast_id = models.UUIDField(null=True, blank=True, db_index=True)
+
     # Read state: per-user; for barangay-wide notifications
     # this stays False until explicitly marked by each recipient.
     is_read    = models.BooleanField(default=False)
@@ -59,3 +63,19 @@ class Notification(models.Model):
             self.barangay.name if self.barangay else 'System-wide'
         )
         return f'[{self.type}] {self.title} → {target}'
+
+
+class NotificationDeduplication(models.Model):
+    key = models.CharField(max_length=150)
+    expires_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['key'],
+                name='unique_notification_deduplication_key',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.key} (expires {self.expires_at})'

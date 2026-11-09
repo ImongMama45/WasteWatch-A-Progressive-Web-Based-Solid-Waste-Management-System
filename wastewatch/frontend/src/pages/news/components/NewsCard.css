@@ -1,0 +1,287 @@
+/**
+ * NewsCard.css
+ * ------------
+ * Light-themed municipal editorial styling for announcement cards and news feed grid.
+ * Zero emojis. Material / Lucide icons only.
+ */
+
+@keyframes nc-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes nc-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* ── Responsive News Feed Grid ─────────────────────────────────────────────── */
+.ww-news-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .ww-news-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .ww-news-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 20px;
+  }
+}
+
+/* ── Editorial Card Container ──────────────────────────────────────────────── */
+.nc-editorial-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.2s ease;
+  animation: nc-in 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+  cursor: pointer;
+}
+
+.nc-editorial-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px -4px rgba(22, 163, 74, 0.12),
+              0 4px 8px -2px rgba(15, 23, 42, 0.04);
+  border-color: #86efac;
+}
+
+/* ── Primary Visual Accent Precedence (Left Border) ────────────────────────── */
+.nc-editorial-card.nc-accent-emergency {
+  border-left: 3px solid #dc2626;
+}
+.nc-editorial-card.nc-accent-emergency:hover {
+  border-color: #fca5a5;
+  border-left-color: #dc2626;
+  box-shadow: 0 10px 24px -4px rgba(220, 38, 38, 0.12),
+              0 4px 8px -2px rgba(15, 23, 42, 0.04);
+}
+
+.nc-editorial-card.nc-accent-high_priority {
+  border-left: 3px solid #d97706;
+}
+.nc-editorial-card.nc-accent-high_priority:hover {
+  border-color: #fde68a;
+  border-left-color: #d97706;
+  box-shadow: 0 10px 24px -4px rgba(217, 119, 6, 0.12),
+              0 4px 8px -2px rgba(15, 23, 42, 0.04);
+}
+
+.nc-editorial-card.nc-accent-pinned {
+  border-left: 3px solid #16a34a;
+}
+.nc-editorial-card.nc-accent-pinned:hover {
+  border-color: #86efac;
+  border-left-color: #16a34a;
+}
+
+.nc-editorial-card.nc-accent-standard {
+  border-left: 1px solid #e2e8f0;
+}
+
+/* ── Media Slot (Strict 160px Height) ──────────────────────────────────────── */
+.nc-media-wrap {
+  width: 100%;
+  height: 160px;
+  background: #f1f5f9;
+  position: relative;
+  overflow: hidden;
+}
+
+.nc-media-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.35s ease;
+}
+
+.nc-editorial-card:hover .nc-media-img {
+  transform: scale(1.03);
+}
+
+/* ── Thematic Fallback Banner (Strict 160px Height) ────────────────────────── */
+.nc-fallback-banner {
+  width: 100%;
+  height: 160px;
+  background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 50%, #f8fafc 100%);
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+.nc-fallback-watermark {
+  position: absolute;
+  right: -12px;
+  bottom: -18px;
+  opacity: 0.07;
+  color: #16a34a;
+  pointer-events: none;
+}
+
+/* ── Body Content ──────────────────────────────────────────────────────────── */
+.nc-body-content {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+/* ── Badges Strip ──────────────────────────────────────────────────────────── */
+.nc-badges-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.nc-badges-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.nc-badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 20px;
+}
+
+.nc-priority-chip {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  padding: 2px 8px;
+  border-radius: 20px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+}
+
+/* ── Typography Clamping ───────────────────────────────────────────────────── */
+.nc-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.35;
+  margin: 0 0 8px 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.nc-card-desc {
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.55;
+  margin: 0 0 16px 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Footer Meta Row ───────────────────────────────────────────────────────── */
+.nc-card-footer {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nc-meta-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.nc-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+/* ── Genuine Accessible Action Button ──────────────────────────────────────── */
+.nc-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #16a34a;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.nc-action-btn:hover {
+  color: #15803d;
+  background: rgba(22, 163, 74, 0.08);
+  gap: 7px;
+}
+
+.nc-action-btn:focus-visible {
+  outline: 2px solid #16a34a;
+  outline-offset: 2px;
+}
+
+/* ── Skeleton Loading Presentation ─────────────────────────────────────────── */
+.nc-skeleton-media {
+  width: 100%;
+  height: 160px;
+  background: #f1f5f9;
+}
+
+.nc-skeleton-pulse {
+  animation: nc-pulse 1.5s ease-in-out infinite;
+}

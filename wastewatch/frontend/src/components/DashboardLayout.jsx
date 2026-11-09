@@ -20,6 +20,9 @@ import { ICONS, getRoleNavItems } from '../api/navConfig'
 import { DriverGpsProvider } from '../context/DriverGpsContext'
 import { useNotifications } from '../hooks/useNotifications'
 import DumpsiteArrivalAlert from '../pages/dumpsite/components/DumpsiteArrivalAlert'
+import { AlertTriangle } from 'lucide-react'
+import { SidebarWidgetSkeleton } from './ui/Skeleton'
+import { GlobalActiveTracker } from './analytics/LiveTrackerCard'
 
 // ─── NavGroup: collapsible sidebar section ────────────────────────────────────
 function NavGroup({ group, currentPath, onNavigate, onExpandSidebar }) {
@@ -535,7 +538,7 @@ export default function DashboardLayout({ children }) {
   const navigate = useNavigate()
   const location = useLocation()
   const isOnline = useOnline()
-  const { notifications, unreadCount, markRead } = useNotifications()
+  const { notifications, unreadCount, loading: notifLoading, markRead } = useNotifications()
 
   useHeartbeat();
 
@@ -716,7 +719,9 @@ export default function DashboardLayout({ children }) {
             >×</button>
           </div>
 
-          {notifications.length === 0 ? (
+          {notifLoading && notifications.length === 0 ? (
+            <SidebarWidgetSkeleton rows={3} style={{ padding: '14px 16px' }} />
+          ) : notifications.length === 0 ? (
             <div style={{ padding: '24px 16px', textAlign: 'center', color: 'rgba(0,0,0,0.4)', fontSize: 13 }}>
               No new notifications
             </div>
@@ -769,14 +774,19 @@ export default function DashboardLayout({ children }) {
 
       <main className="dashboard-main">
         {role === 'driver' ? (
-          <DriverGpsProvider>{children}</DriverGpsProvider>
-        ) : children}
+          <DriverGpsProvider><div key={location.pathname} className="ww-page-enter">{children}</div></DriverGpsProvider>
+        ) : <div key={location.pathname} className="ww-page-enter">{children}</div>}
       </main>
 
       {/* ── MOBILE: bottom nav ── */}
       <div className="layout-mobile">
         <BottomNav />
       </div>
+
+      {/* Global Floating Live Tracker across pages when collection is active */}
+      {role !== 'driver' && location.pathname !== '/dashboard' && !location.pathname.startsWith('/map') && !location.pathname.startsWith('/public-map') && (
+        <GlobalActiveTracker user={user} />
+      )}
 
       {notifOpen && (
         <div className="nav-backdrop" onClick={() => setNotifOpen(false)} aria-hidden="true" />
@@ -792,7 +802,7 @@ export default function DashboardLayout({ children }) {
             width: '100%', maxWidth: 360, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
             textAlign: 'center',
           }} onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+            <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(231,76,60,0.1)', color: '#e74c3c', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}><AlertTriangle size={26} /></div>
             <h3 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 8px 0', color: '#1a2e1a' }}>
               Sign Out?
             </h3>

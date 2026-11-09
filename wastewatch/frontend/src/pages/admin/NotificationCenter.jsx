@@ -1,425 +1,1535 @@
-import { useState, useEffect, useCallback } from 'react'
-import DashboardLayout from '../../components/DashboardLayout'
-import api from '../../api/client'
+/**
+ * NotificationCenter.jsx
+ * ----------------------
+ * Admin command center for broadcasting city-wide and barangay-level notifications.
+ * Features:
+ *   - Atomic backend broadcasts via POST /api/notifications/broadcast/
+ *   - Atomic deletion via DELETE /api/notifications/broadcast/<bid>/
+ *   - Grouped broadcast history with ?broadcast=1
+ *   - Accurate delivery scopes (zero fabricated reach numbers)
+ *   - Standard Lucide Loader2 animation
+ *   - Responsive 2-column grid that folds neatly on mobile screens
+ *   - Live resident mobile device preview card
+ *   - Preset templates for rapid composing
+ *   - Body scroll locking via useModal hook
+ *   - Zero emojis — Material / Lucide React SVG icons only
+ */
 
-const BARANGAYS = [
-  'Isabang', 'Cotta', 'Kanlurang Cotta', 'Ibabang Dupay',
-  'Gulang-Gulang', 'Mayao Crossing', 'Barangay 1', 'Barangay 2',
-  'Barangay 3', 'Ilayang Dupay',
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import {
+  Bell,
+  Send,
+  Trash2,
+  Copy,
+  AlertTriangle,
+  Megaphone,
+  MapPin,
+  Users,
+  Search,
+  Check,
+  RotateCcw,
+  Eye,
+  Clock,
+  Sparkles,
+  ChevronRight,
+  X,
+  Loader2,
+} from 'lucide-react'
+import DashboardLayout from '../../components/DashboardLayout'
+import { useAuth } from '../../context/AuthContext'
+import { useNotification } from '../../context/NotificationContext'
+import { useModal } from '../../hooks/useModal'
+import api from '../../api/client'
+import { getApiErrorMessage } from '../../utils/notificationHelpers'
+import { StatCardSkeleton, FeedCardSkeleton } from '../../components/ui/Skeleton'
+import Pagination from '../../components/ui/Pagination'
+
+// ─── Notification Types ────────────────────────────────────────────────────────
+const BROADCAST_TYPES = {
+  ANNOUNCEMENT: {
+    label: 'Announcement',
+    color: 'var(--accent)',
+    bg: 'rgba(46,204,113,0.08)',
+    border: 'rgba(46,204,113,0.25)',
+    Icon: Megaphone,
+    desc: 'Official city notices & general updates',
+  },
+  SCHEDULE_CHANGE: {
+    label: 'Schedule Shift',
+    color: '#f39c12',
+    bg: 'rgba(243,156,18,0.08)',
+    border: 'rgba(243,156,18,0.25)',
+    Icon: Clock,
+    desc: 'Truck delay or collection route adjustments',
+  },
+}
+
+// ─── Quick Presets ─────────────────────────────────────────────────────────────
+const PRESET_TEMPLATES = [
+  {
+    name: 'Schedule Delay',
+    type: 'SCHEDULE_CHANGE',
+    title: 'Garbage Collection Delayed',
+    body: 'Waste collection trucks are running approximately 1-2 hours behind schedule today due to road maintenance.',
+  },
+  {
+    name: 'Holiday Shift',
+    type: 'SCHEDULE_CHANGE',
+    title: 'Holiday Collection Schedule',
+    body: 'Please note there will be no garbage collection on the upcoming public holiday. Normal collection resumes the following day.',
+  },
+  {
+    name: 'Typhoon Alert',
+    type: 'ANNOUNCEMENT',
+    title: 'Typhoon Advisory: Secure Waste Bins',
+    body: 'Residents are advised to secure garbage bins indoors and refrain from putting out waste during high winds.',
+  },
+  {
+    name: 'Cleanup Drive',
+    type: 'ANNOUNCEMENT',
+    title: 'Community Clean-Up Drive',
+    body: 'Join our city-wide cleanup drive this Saturday morning. Segregated biodegradable and recyclable waste will be collected.',
+  },
 ]
 
-const TYPES = {
-  alert: { label: 'Alert', color: '#e74c3c', bg: 'rgba(231,76,60,0.08)', border: 'rgba(231,76,60,0.3)', icon: '🚨' },
-  announcement: { label: 'Announcement', color: '#5dade2', bg: 'rgba(93,173,226,0.08)', border: 'rgba(93,173,226,0.3)', icon: '📢' },
-  reminder: { label: 'Reminder', color: '#f39c12', bg: 'rgba(243,156,18,0.08)', border: 'rgba(243,156,18,0.3)', icon: '⏰' },
-  info: { label: 'Info', color: '#2ecc71', bg: 'rgba(46,204,113,0.08)', border: 'rgba(46,204,113,0.3)', icon: 'ℹ️' },
-}
-
-const TYPE_TO_NOTIF = {
-  alert: 'ANNOUNCEMENT',
-  announcement: 'ANNOUNCEMENT',
-  reminder: 'SCHEDULE_CHANGE',
-  info: 'COLLECTION_DONE',
-}
-
-const EMPTY = { type: 'announcement', title: '', body: '', target: 'city-wide', barangays: [] }
-
-function TypeBadge({ t }) {
-  const m = TYPES[t] || TYPES.info
-  return <span style={{ background: m.bg, border: `1px solid ${m.border}`, color: m.color, borderRadius: 20, padding: '2px 10px', fontSize: 9, fontWeight: 800, letterSpacing: '.06em' }}>{m.icon} {m.label.toUpperCase()}</span>
+const INITIAL_FORM = {
+  type: 'ANNOUNCEMENT',
+  title: '',
+  body: '',
+  target: 'city-wide', // 'city-wide' | 'barangay'
+  barangayIds: [],
 }
 
 export default function NotificationCenter() {
-  const [notifications, setNotifications] = useState([])
+  const { barangays: authBarangays } = useAuth()
+  const { notify } = useNotification()
+
+  const [broadcasts, setBroadcasts] = useState([])
   const [loading, setLoading] = useState(true)
-  const [form, setForm] = useState({ ...EMPTY })
+  const [barangayList, setBarangayList] = useState(authBarangays || [])
+  const [form, setForm] = useState(INITIAL_FORM)
+  const [sending, setSending] = useState(false)
+  const [deletingId, setDeletingId] = useState(null)
   const [filterType, setFilterType] = useState('all')
   const [search, setSearch] = useState('')
-  const [toast, setToast] = useState(null)
-  const [preview, setPreview] = useState(null)
-  const [sending, setSending] = useState(false)
+  const [page, setPage] = useState(1)
+  const [selectedBroadcast, setSelectedBroadcast] = useState(null)
+  const [confirmDeleteModal, setConfirmDeleteModal] = useState(null)
+  const mouseDownTargetRef = useRef(null)
 
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  // Modal scroll locking
+  useModal(Boolean(selectedBroadcast), () => setSelectedBroadcast(null))
+  useModal(Boolean(confirmDeleteModal), () => setConfirmDeleteModal(null))
 
-  function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
+  // Fetch barangays if not provided by context
+  useEffect(() => {
+    if (authBarangays && authBarangays.length > 0) {
+      setBarangayList(authBarangays)
+    } else {
+      api.get('/api/auth/barangays/')
+        .then(res => {
+          if (Array.isArray(res.data)) setBarangayList(res.data)
+        })
+        .catch(() => {})
+    }
+  }, [authBarangays])
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
+  // Fetch broadcast notifications (?broadcast=1)
+  const fetchBroadcasts = useCallback(async () => {
     try {
-      const res = await api.get('/api/notifications/')
-      // Shape the API data to match the existing display format
-      setNotifications(
-        res.data.map(n => ({
-          id: n.id,
-          type: _notifTypeToLocal(n.type),
-          title: n.title,
-          body: n.message,
-          target: n.barangay_name || 'City-wide',
-          sentBy: 'System',
-          sentAt: new Date(n.created_at).toLocaleString('en-PH', {
-            year: 'numeric', month: '2-digit', day: '2-digit',
-            hour: '2-digit', minute: '2-digit',
-          }),
-          reach: 0,   // not tracked in model; show 0 or omit
-          is_read: n.is_read,
-          barangay: n.barangay,
-        }))
+      const res = await api.get('/api/notifications/?broadcast=1')
+      const raw = Array.isArray(res.data) ? res.data : []
+
+      // Group rows by broadcast_id
+      const grouped = new Map()
+      raw.forEach(n => {
+        if (!n.broadcast_id) return // Server-side ?broadcast=1 only delivers rows with broadcast_id
+        const bid = n.broadcast_id
+        if (!grouped.has(bid)) {
+          grouped.set(bid, {
+            broadcast_id: bid,
+            sample_id: n.id,
+            title: n.title,
+            message: n.message,
+            type: n.type || 'ANNOUNCEMENT',
+            created_at: n.created_at,
+            barangay_ids: [],
+            barangay_names: [],
+            is_citywide: !n.barangay,
+            total_count: 0,
+          })
+        }
+        const entry = grouped.get(bid)
+        entry.total_count += 1
+        if (n.barangay) {
+          entry.is_citywide = false
+          entry.barangay_ids.push(n.barangay)
+          const bName = n.barangay_name || `Barangay ${n.barangay}`
+          if (!entry.barangay_names.includes(bName)) {
+            entry.barangay_names.push(bName)
+          }
+        }
+      })
+
+      // Sort newest first
+      const list = Array.from(grouped.values()).sort(
+        (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)
       )
-    } catch {
-      showToast('⚠️ Could not load notifications.')
+      setBroadcasts(list)
+    } catch (err) {
+      console.error('Failed to load broadcasts:', err)
+      notify({ variant: 'error-solid', message: 'Could not load broadcast history.' })
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [notify])
 
-  useEffect(() => { fetchAll() }, [fetchAll])
+  useEffect(() => {
+    fetchBroadcasts()
+  }, [fetchBroadcasts])
 
-  function toggleBrgy(b) {
-    setForm(f => ({
-      ...f,
-      barangays: f.barangays.includes(b)
-        ? f.barangays.filter(x => x !== b)
-        : [...f.barangays, b],
+  function setField(key, value) {
+    setForm(prev => ({ ...prev, [key]: value }))
+  }
+
+  function toggleBarangay(id) {
+    const numId = Number(id)
+    setForm(prev => {
+      const exists = prev.barangayIds.includes(numId)
+      return {
+        ...prev,
+        barangayIds: exists
+          ? prev.barangayIds.filter(x => x !== numId)
+          : [...prev.barangayIds, numId],
+      }
+    })
+  }
+
+  function selectAllBarangays() {
+    setForm(prev => ({
+      ...prev,
+      barangayIds: barangayList.map(b => Number(b.id)),
     }))
   }
 
-  function targetLabel(f) {
-    if (f.target === 'city-wide') return 'City-wide'
-    if (f.barangays.length === 0) return 'No barangay selected'
-    if (f.barangays.length === 1) return f.barangays[0]
-    return `${f.barangays.length} Barangays`
+  function clearAllBarangays() {
+    setForm(prev => ({ ...prev, barangayIds: [] }))
   }
 
-  function estimatedReach(f) {
-    if (f.target === 'city-wide') return '~1,240 residents'
-    return f.barangays.length === 0 ? '0' : `~${f.barangays.length * 195} residents`
+  function applyPreset(preset) {
+    setForm(prev => ({
+      ...prev,
+      type: preset.type,
+      title: preset.title,
+      body: preset.body,
+    }))
+    notify({ variant: 'success', message: `Preset "${preset.name}" applied.`, duration: 3000 })
   }
 
-  function validate() {
-    if (!form.title.trim()) return 'Title is required.'
-    if (!form.body.trim()) return 'Message body is required.'
-    if (form.target === 'barangay' && form.barangays.length === 0)
-      return 'Please select at least one barangay.'
-    return ''
+  function cloneBroadcast(b) {
+    setForm({
+      type: b.type,
+      title: b.title,
+      body: b.message,
+      target: b.is_citywide ? 'city-wide' : 'barangay',
+      barangayIds: b.barangay_ids ? [...b.barangay_ids] : [],
+    })
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    notify({ variant: 'success', message: 'Broadcast template cloned into compose form.', duration: 3000 })
   }
 
   async function handleSend() {
-    const err = validate()
-    if (err) { showToast('⚠️ ' + err); return }
+    const trimmedTitle = form.title.trim()
+    const trimmedBody = form.body.trim()
+
+    if (!trimmedTitle) {
+      notify({ variant: 'error-solid', message: 'Please enter a notification title.' })
+      return
+    }
+    if (!trimmedBody) {
+      notify({ variant: 'error-solid', message: 'Please enter a message body.' })
+      return
+    }
+
+    if (form.target === 'barangay' && form.barangayIds.length === 0) {
+      notify({ variant: 'error-solid', message: 'Please select at least one target barangay.' })
+      return
+    }
+
     setSending(true)
     try {
-      const notifType = TYPE_TO_NOTIF[form.type] || 'ANNOUNCEMENT'
-
-      if (form.target === 'city-wide') {
-        // Single system-wide notification (user=null, barangay=null)
-        await api.post('/api/notifications/', {
-          title: form.title,
-          message: form.body,
-          type: notifType,
-          user: null,
-          barangay: null,
-        })
-      } else {
-        // One row per selected barangay — fetch barangay IDs first
-        const brgyRes = await api.get('/api/barangays/')
-        const brgyMap = Object.fromEntries(brgyRes.data.map(b => [b.name, b.id]))
-        await Promise.all(
-          form.barangays.map(name =>
-            api.post('/api/notifications/', {
-              title: form.title,
-              message: form.body,
-              type: notifType,
-              user: null,
-              barangay: brgyMap[name] ?? null,
-            })
-          )
-        )
+      const payload = {
+        title: trimmedTitle,
+        message: trimmedBody,
+        type: form.type,
+        barangay_ids: form.target === 'city-wide' ? null : form.barangayIds,
       }
 
-      await fetchAll()
-      setForm({ ...EMPTY })
-      showToast('✅ Notification sent successfully!')
-    } catch (e) {
-      showToast('⚠️ Failed to send: ' + (e.response?.data?.detail || e.message))
+      const res = await api.post('/api/notifications/broadcast/', payload)
+      const count = res.data?.count || (form.target === 'city-wide' ? 1 : form.barangayIds.length)
+
+      notify({
+        variant: 'success',
+        message: `Notification broadcast sent successfully to ${count} ${count === 1 ? 'target' : 'targets'}.`,
+        duration: 6000,
+      })
+
+      setForm(INITIAL_FORM)
+      await fetchBroadcasts()
+    } catch (err) {
+      console.error('Broadcast failed:', err)
+      notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed to send broadcast.') })
     } finally {
       setSending(false)
     }
   }
 
+  async function executeDelete(broadcast) {
+    if (!broadcast || !broadcast.broadcast_id) return
+    const bid = broadcast.broadcast_id
 
-  const filtered = notifications.filter(n => {
-    const mt = filterType === 'all' || n.type === filterType
-    const mq = !search ||
-      n.title.toLowerCase().includes(search.toLowerCase()) ||
-      n.target.toLowerCase().includes(search.toLowerCase())
-    return mt && mq
-  })
+    setDeletingId(bid)
+    try {
+      await api.delete(`/api/notifications/broadcast/${bid}/`)
 
-  const typeCounts = Object.fromEntries(
-    Object.keys(TYPES).map(t => [t, notifications.filter(n => n.type === t).length])
-  )
+      notify({
+        variant: 'success',
+        message: 'Broadcast and associated notifications deleted.',
+        duration: 6000,
+      })
+      setConfirmDeleteModal(null)
+      if (selectedBroadcast?.broadcast_id === bid) {
+        setSelectedBroadcast(null)
+      }
+      await fetchBroadcasts()
+    } catch (err) {
+      console.error('Delete failed:', err)
+      notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed to delete broadcast.') })
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  // Filtered list
+  const filteredBroadcasts = useMemo(() => {
+    return broadcasts.filter(b => {
+      const matchType = filterType === 'all' || b.type === filterType
+      if (!matchType) return false
+
+      if (!search.trim()) return true
+      const q = search.toLowerCase().trim()
+      const inTitle = (b.title || '').toLowerCase().includes(q)
+      const inMsg = (b.message || '').toLowerCase().includes(q)
+      const inTarget = b.is_citywide
+        ? 'city-wide'.includes(q)
+        : (b.barangay_names || []).some(n => n.toLowerCase().includes(q))
+
+      return inTitle || inMsg || inTarget
+    })
+  }, [broadcasts, filterType, search])
+
+  const totalPages = Math.ceil(filteredBroadcasts.length / 10) || 1
+  const paginatedBroadcasts = useMemo(() => {
+    const start = (page - 1) * 10
+    return filteredBroadcasts.slice(start, start + 10)
+  }, [filteredBroadcasts, page])
+
+  // Accurate target scope label (zero fabricated reach numbers)
+  const targetScopeText = useMemo(() => {
+    if (form.target === 'city-wide') {
+      return 'City-Wide Audience (All Barangays)'
+    }
+    const count = form.barangayIds.length
+    if (count === 0) return 'No Barangays Selected'
+    return `${count} Selected Barangay${count === 1 ? '' : 's'}`
+  }, [form.target, form.barangayIds.length])
 
   return (
     <DashboardLayout>
-      {toast && (
-        <div style={{ position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', background: '#0f172a', color: '#fff', padding: '10px 22px', borderRadius: 12, zIndex: 9999, fontSize: 13, fontWeight: 600, border: '1px solid rgba(46,204,113,0.3)', whiteSpace: 'nowrap' }}>
-          {toast}
-        </div>
-      )}
-
-      {/* Preview modal */}
-      {preview && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setPreview(null)}>
-          <div style={{ background: 'var(--surface)', borderRadius: 16, padding: 24, width: '100%', maxWidth: 460, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 16, margin: 0 }}>Notification Detail</h3>
-              <button onClick={() => setPreview(null)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#888' }}>×</button>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-              <span style={{ fontSize: 26 }}>{TYPES[preview.type]?.icon}</span>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: 15 }}>{preview.title}</div>
-                <TypeBadge t={preview.type} />
-              </div>
-            </div>
-            <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px', fontSize: 13, lineHeight: 1.7, marginBottom: 16, color: 'var(--text-muted)' }}>
-              {preview.body}
-            </div>
-            {[
-              { label: 'Target', value: preview.target },
-              { label: 'Sent by', value: preview.sentBy },
-              { label: 'Sent at', value: preview.sentAt },
-              { label: 'Reach', value: `~${preview.reach.toLocaleString()} recipients` },
-            ].map(r => (
-              <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>{r.label.toUpperCase()}</span>
-                <span style={{ fontSize: 12, fontWeight: 600 }}>{r.value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       <style>{`
-        .notif-row { transition: background .12s; cursor: pointer; }
-        .notif-row:hover { background: var(--surface-2) !important; }
-        .nc-type-btn { transition: all .15s; cursor: pointer; }
-        .nc-type-btn:hover { opacity: .8; }
-        .brgy-chip { transition: all .15s; cursor: pointer; }
-        .brgy-chip:hover { opacity: .85; }
-        @keyframes spin { to { transform: rotate(360deg); } }
+        .nc-main-grid {
+          display: grid;
+          grid-template-columns: minmax(320px, 460px) 1fr;
+          gap: 20px;
+          align-items: start;
+        }
+        @media (max-width: 920px) {
+          .nc-main-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+        @keyframes nc-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .nc-spin {
+          animation: nc-spin 1s linear infinite;
+        }
       `}</style>
 
-      <div className="page">
-
-        {/* Header */}
+      <div className="page" style={{ maxWidth: 1280, margin: '0 auto', paddingBottom: 40 }}>
+        {/* Page Header */}
         <div style={{ marginBottom: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 3 }}>
-            <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 22, fontWeight: 800, margin: 0 }}>Notification Center</h2>
-            <span style={{ background: 'rgba(231,76,60,0.1)', color: '#e74c3c', border: '1px solid rgba(231,76,60,0.3)', fontSize: 9, fontWeight: 800, padding: '3px 10px', borderRadius: 20 }}>ADMIN</span>
-          </div>
-          <p className="text-muted text-sm">Send alerts and announcements city-wide or to specific barangays.</p>
-        </div>
-
-        {/* KPI strip */}
-        <div className="stat-grid" style={{ marginBottom: 20 }}>
-          {[
-            { label: 'Total Sent', value: notifications.length, color: 'var(--text)' },
-            { label: 'Alerts', value: typeCounts.alert || 0, color: '#e74c3c' },
-            { label: 'Announcements', value: typeCounts.announcement || 0, color: '#5dade2' },
-            { label: 'Reminders', value: typeCounts.reminder || 0, color: '#f39c12' },
-          ].map(s => (
-            <div key={s.label} className="stat-card">
-              <div className="label">{s.label}</div>
-              <div className="value" style={{ color: s.color, fontSize: 30 }}>{s.value}</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div
+                style={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: 12,
+                  background: 'rgba(46,204,113,0.1)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--accent)',
+                  border: '1px solid rgba(46,204,113,0.25)',
+                }}
+              >
+                <Bell size={22} strokeWidth={2.2} />
+              </div>
+              <div>
+                <h1 style={{ fontFamily: 'var(--font-head)', fontSize: 22, fontWeight: 800, margin: 0, color: 'var(--text)' }}>
+                  Notification Center
+                </h1>
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
+                  Deliver coordinated broadcasts to Lucena City residents and barangay units.
+                </p>
+              </div>
             </div>
-          ))}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span
+                style={{
+                  background: 'rgba(46,204,113,0.1)',
+                  color: 'var(--accent)',
+                  border: '1px solid rgba(46,204,113,0.3)',
+                  fontSize: 10,
+                  fontWeight: 800,
+                  padding: '4px 10px',
+                  borderRadius: 20,
+                  letterSpacing: '.06em',
+                }}
+              >
+                ATOMIC BROADCAST
+              </span>
+            </div>
+          </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16, alignItems: 'start' }}>
+        {/* Top Summary Cards */}
+        {loading && broadcasts.length === 0 ? (
+          <StatCardSkeleton count={4} style={{ marginBottom: 20 }} />
+        ) : (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: 12,
+            marginBottom: 20,
+          }}
+        >
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 14,
+              padding: '14px 16px',
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.05em', textTransform: 'uppercase' }}>
+              Total Broadcasts
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--text)', marginTop: 4 }}>
+              {broadcasts.length}
+            </div>
+          </div>
 
-          {/* ── Notification List ── */}
-          <div>
-            {/* Filters */}
-            <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
-              <div style={{ display: 'flex', gap: 4, background: 'var(--surface-2)', borderRadius: 10, padding: 4 }}>
-                <button className="nc-type-btn" onClick={() => setFilterType('all')} style={{ padding: '6px 12px', borderRadius: 8, border: 'none', fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-body)', background: filterType === 'all' ? 'var(--surface)' : 'transparent', color: filterType === 'all' ? 'var(--text)' : 'var(--text-muted)', boxShadow: filterType === 'all' ? '0 1px 4px rgba(0,0,0,.08)' : 'none' }}>
-                  All ({notifications.length})
-                </button>
-                {Object.entries(TYPES).map(([k, m]) => (
-                  <button key={k} className="nc-type-btn" onClick={() => setFilterType(k)} style={{ padding: '6px 12px', borderRadius: 8, border: 'none', fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-body)', background: filterType === k ? 'var(--surface)' : 'transparent', color: filterType === k ? m.color : 'var(--text-muted)', boxShadow: filterType === k ? '0 1px 4px rgba(0,0,0,.08)' : 'none' }}>
-                    {m.icon} ({typeCounts[k] || 0})
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 14,
+              padding: '14px 16px',
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.05em', textTransform: 'uppercase' }}>
+              General Announcements
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--accent)', marginTop: 4 }}>
+              {broadcasts.filter(b => b.type === 'ANNOUNCEMENT').length}
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 14,
+              padding: '14px 16px',
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.05em', textTransform: 'uppercase' }}>
+              Schedule Shifts
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: '#f39c12', marginTop: 4 }}>
+              {broadcasts.filter(b => b.type === 'SCHEDULE_CHANGE').length}
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 14,
+              padding: '14px 16px',
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.05em', textTransform: 'uppercase' }}>
+              Available Barangays
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--text)', marginTop: 4 }}>
+              {barangayList.length}
+            </div>
+          </div>
+        </div>
+        )}
+
+        {/* 2-Column Responsive Layout */}
+        <div className="nc-main-grid">
+          
+          {/* ── Left Column: Compose & Resident Preview ── */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            
+            {/* Quick Presets Bar */}
+            <div
+              style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 16,
+                padding: '14px 16px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                <Sparkles size={14} strokeWidth={2} style={{ color: 'var(--accent)' }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
+                  Quick Fill Presets
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {PRESET_TEMPLATES.map(p => (
+                  <button
+                    key={p.name}
+                    type="button"
+                    onClick={() => applyPreset(p)}
+                    style={{
+                      padding: '5px 10px',
+                      borderRadius: 8,
+                      border: '1px solid var(--border)',
+                      background: 'var(--surface-2)',
+                      color: 'var(--text-muted)',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      transition: 'all .15s',
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.borderColor = 'var(--accent)'
+                      e.currentTarget.style.color = 'var(--text)'
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.borderColor = 'var(--border)'
+                      e.currentTarget.style.color = 'var(--text-muted)'
+                    }}
+                  >
+                    {p.name}
                   </button>
                 ))}
               </div>
-              <input className="form-input" placeholder="Search title or target…" value={search} onChange={e => setSearch(e.target.value)} style={{ maxWidth: 220, marginLeft: 'auto' }} />
             </div>
 
-            {filtered.length === 0 && (
-              <div className="card" style={{ textAlign: 'center', padding: '40px 20px' }}>
-                <div style={{ fontSize: 32, marginBottom: 10 }}>📭</div>
-                <div style={{ fontWeight: 700, marginBottom: 4 }}>No notifications found</div>
-                <div className="text-muted text-sm">Try adjusting your filters.</div>
+            {/* Compose Card */}
+            <div
+              style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 16,
+                padding: '20px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Send size={16} strokeWidth={2} style={{ color: 'var(--accent)' }} />
+                  <span style={{ fontWeight: 800, fontSize: 15, color: 'var(--text)' }}>
+                    Compose Broadcast
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setForm(INITIAL_FORM)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--text-muted)',
+                    fontSize: 11,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <RotateCcw size={12} />
+                  Reset
+                </button>
+              </div>
+
+              {/* Type selector */}
+              <div style={{ marginBottom: 14 }}>
+                <label className="form-label">Notification Type</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {Object.entries(BROADCAST_TYPES).map(([typeKey, cfg]) => {
+                    const isSelected = form.type === typeKey
+                    const { Icon } = cfg
+                    return (
+                      <button
+                        key={typeKey}
+                        type="button"
+                        onClick={() => setField('type', typeKey)}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: 10,
+                          border: `1.5px solid ${isSelected ? cfg.color : 'var(--border)'}`,
+                          background: isSelected ? cfg.bg : 'var(--surface-2)',
+                          color: isSelected ? cfg.color : 'var(--text-muted)',
+                          fontWeight: 700,
+                          fontSize: 12,
+                          fontFamily: 'inherit',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          transition: 'all .15s',
+                        }}
+                      >
+                        <Icon size={16} strokeWidth={2.2} />
+                        <span>{cfg.label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Title input */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <label className="form-label" style={{ margin: 0 }}>Title</label>
+                  <span style={{ fontSize: 10, color: form.title.length > 180 ? 'var(--danger)' : 'var(--text-muted)' }}>
+                    {form.title.length}/200
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g., Collection Schedule Update"
+                  value={form.title}
+                  onChange={e => setField('title', e.target.value)}
+                  maxLength={200}
+                />
+              </div>
+
+              {/* Message body input */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <label className="form-label" style={{ margin: 0 }}>Message Body</label>
+                  <span style={{ fontSize: 10, color: form.body.length > 4800 ? 'var(--danger)' : 'var(--text-muted)' }}>
+                    {form.body.length}/5000
+                  </span>
+                </div>
+                <textarea
+                  className="form-input"
+                  placeholder="Provide clear details for residents..."
+                  rows={4}
+                  value={form.body}
+                  onChange={e => setField('body', e.target.value)}
+                  style={{ resize: 'vertical' }}
+                  maxLength={5000}
+                />
+              </div>
+
+              {/* Target Selection */}
+              <div style={{ marginBottom: 14 }}>
+                <label className="form-label">Audience Target</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                  <button
+                    type="button"
+                    onClick={() => setField('target', 'city-wide')}
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: 10,
+                      border: `1.5px solid ${form.target === 'city-wide' ? 'var(--accent)' : 'var(--border)'}`,
+                      background: form.target === 'city-wide' ? 'rgba(46,204,113,0.08)' : 'var(--surface-2)',
+                      color: form.target === 'city-wide' ? 'var(--accent)' : 'var(--text-muted)',
+                      fontWeight: 700,
+                      fontSize: 12,
+                      fontFamily: 'inherit',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <Users size={14} />
+                    <span>City-Wide</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setField('target', 'barangay')}
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: 10,
+                      border: `1.5px solid ${form.target === 'barangay' ? 'var(--accent)' : 'var(--border)'}`,
+                      background: form.target === 'barangay' ? 'rgba(46,204,113,0.08)' : 'var(--surface-2)',
+                      color: form.target === 'barangay' ? 'var(--accent)' : 'var(--text-muted)',
+                      fontWeight: 700,
+                      fontSize: 12,
+                      fontFamily: 'inherit',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <MapPin size={14} />
+                    <span>Specific Barangays</span>
+                  </button>
+                </div>
+
+                {/* Barangay Selection Cloud */}
+                {form.target === 'barangay' && (
+                  <div
+                    style={{
+                      background: 'var(--surface-2)',
+                      borderRadius: 12,
+                      padding: '12px',
+                      border: '1px solid var(--border)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>
+                        Select Target Barangays ({form.barangayIds.length} chosen)
+                      </span>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={selectAllBarangays}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: 'var(--accent)',
+                            cursor: 'pointer',
+                            padding: 0,
+                          }}
+                        >
+                          Select All
+                        </button>
+                        <span style={{ fontSize: 10, color: 'var(--border)' }}>|</span>
+                        <button
+                          type="button"
+                          onClick={clearAllBarangays}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: 'var(--text-muted)',
+                            cursor: 'pointer',
+                            padding: 0,
+                          }}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 180, overflowY: 'auto' }}>
+                      {barangayList.map(b => {
+                        const numId = Number(b.id)
+                        const isSelected = form.barangayIds.includes(numId)
+                        return (
+                          <button
+                            key={b.id}
+                            type="button"
+                            onClick={() => toggleBarangay(numId)}
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: 20,
+                              fontSize: 11,
+                              fontWeight: 600,
+                              fontFamily: 'inherit',
+                              border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}`,
+                              background: isSelected ? 'rgba(46,204,113,0.15)' : 'var(--surface)',
+                              color: isSelected ? 'var(--accent)' : 'var(--text-muted)',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              transition: 'all .12s',
+                            }}
+                          >
+                            {isSelected && <Check size={11} strokeWidth={2.5} />}
+                            {b.name}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Target Scope Status */}
+              <div
+                style={{
+                  background: 'var(--surface-2)',
+                  borderRadius: 10,
+                  padding: '10px 14px',
+                  marginBottom: 16,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.05em' }}>
+                    DELIVERY TARGET
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginTop: 2 }}>
+                    {targetScopeText}
+                  </div>
+                </div>
+                <Users size={18} strokeWidth={1.8} style={{ color: 'var(--accent)' }} />
+              </div>
+
+              {/* Send Button */}
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={sending}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  borderRadius: 12,
+                  border: 'none',
+                  background: sending ? 'rgba(46,204,113,0.4)' : 'var(--accent)',
+                  color: '#0d1117',
+                  fontWeight: 800,
+                  fontSize: 14,
+                  fontFamily: 'inherit',
+                  cursor: sending ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  transition: 'opacity .15s',
+                }}
+              >
+                {sending ? (
+                  <>
+                    <Loader2 size={16} strokeWidth={2.5} className="nc-spin" />
+                    Broadcasting...
+                  </>
+                ) : (
+                  <>
+                    <Send size={15} strokeWidth={2.2} />
+                    Dispatch Broadcast
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* ── Resident Preview Card ── */}
+            <div
+              style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 16,
+                padding: '18px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+                <Eye size={15} strokeWidth={2} style={{ color: 'var(--accent)' }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
+                  Resident preview
+                </span>
+              </div>
+
+              {/* Mirrored card matching resident NotificationsPage */}
+              <div
+                style={{
+                  background: '#fff',
+                  borderRadius: '12px',
+                  padding: '16px',
+                  display: 'flex',
+                  gap: '12px',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
+                  border: '1px solid #e2e8f0',
+                  position: 'relative',
+                }}
+              >
+                {/* Red unread dot */}
+                <div
+                  style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    background: '#ef4444',
+                    flexShrink: 0,
+                    marginTop: '4px',
+                  }}
+                />
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      color: '#1a2e1a',
+                      marginBottom: '4px',
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {form.title.trim() || 'Notification Title Preview'}
+                  </div>
+
+                  <div
+                    style={{
+                      fontSize: '13px',
+                      color: '#64748b',
+                      lineHeight: 1.5,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {form.body.trim() || 'Enter title and message above to preview real-time delivery to residents.'}
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: 8,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      fontSize: 11,
+                      color: 'var(--accent)',
+                      fontWeight: 600,
+                    }}
+                  >
+                    <MapPin size={11} />
+                    <span>
+                      {form.target === 'city-wide'
+                        ? 'City-Wide Alert'
+                        : form.barangayIds.length === 0
+                        ? 'Select Barangays'
+                        : `${form.barangayIds.length} Selected Barangays`}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: '11px', color: '#94a3b8', flexShrink: 0, paddingTop: '2px' }}>
+                  Just now
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* ── Right Column: Broadcast History ── */}
+          <div>
+            {/* Filter and Search Bar */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                flexWrap: 'wrap',
+                marginBottom: 14,
+              }}
+            >
+              <div style={{ display: 'flex', gap: 4, background: 'var(--surface-2)', padding: 3, borderRadius: 10, border: '1px solid var(--border)' }}>
+                <button
+                  type="button"
+                  onClick={() => { setFilterType('all'); setPage(1); }}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: 8,
+                    border: 'none',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    fontFamily: 'inherit',
+                    background: filterType === 'all' ? 'var(--surface)' : 'transparent',
+                    color: filterType === 'all' ? 'var(--text)' : 'var(--text-muted)',
+                    cursor: 'pointer',
+                    boxShadow: filterType === 'all' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                  }}
+                >
+                  All ({broadcasts.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setFilterType('ANNOUNCEMENT'); setPage(1); }}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: 8,
+                    border: 'none',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    fontFamily: 'inherit',
+                    background: filterType === 'ANNOUNCEMENT' ? 'var(--surface)' : 'transparent',
+                    color: filterType === 'ANNOUNCEMENT' ? 'var(--accent)' : 'var(--text-muted)',
+                    cursor: 'pointer',
+                    boxShadow: filterType === 'ANNOUNCEMENT' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                  }}
+                >
+                  Announcements
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setFilterType('SCHEDULE_CHANGE'); setPage(1); }}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: 8,
+                    border: 'none',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    fontFamily: 'inherit',
+                    background: filterType === 'SCHEDULE_CHANGE' ? 'var(--surface)' : 'transparent',
+                    color: filterType === 'SCHEDULE_CHANGE' ? '#f39c12' : 'var(--text-muted)',
+                    cursor: 'pointer',
+                    boxShadow: filterType === 'SCHEDULE_CHANGE' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                  }}
+                >
+                  Schedule Shifts
+                </button>
+              </div>
+
+              {/* Ratio Counter and Search input */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 12,
+                  color: 'var(--text-muted)',
+                  fontWeight: 600,
+                }}>
+                  <span>
+                    Showing <strong>{filteredBroadcasts.length === 0 ? 0 : (page - 1) * 10 + 1}–{Math.min(page * 10, filteredBroadcasts.length)}</strong> of <strong>{filteredBroadcasts.length}</strong>
+                  </span>
+                  <span
+                    className="ww-pagination-ratio"
+                    style={{
+                      background: 'var(--surface-2, #f0f2f5)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--accent, #10b981)',
+                      padding: '2px 8px',
+                      borderRadius: 999,
+                      fontSize: 11,
+                      fontWeight: 800
+                    }}
+                  >
+                    {paginatedBroadcasts.length}/{filteredBroadcasts.length}
+                  </span>
+                </div>
+
+                <div style={{ position: 'relative', minWidth: 180, maxWidth: 260 }}>
+                  <Search
+                    size={14}
+                    strokeWidth={2}
+                    style={{
+                      position: 'absolute',
+                      left: 10,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      color: 'var(--text-muted)',
+                    }}
+                  />
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Search broadcasts..."
+                    value={search}
+                    onChange={e => { setSearch(e.target.value); setPage(1); }}
+                    style={{ paddingLeft: 30, fontSize: 12 }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* List */}
+            {loading && broadcasts.length === 0 ? (
+              <FeedCardSkeleton count={4} compact />
+            ) : filteredBroadcasts.length === 0 ? (
+              <div
+                style={{
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 16,
+                  padding: '60px 20px',
+                  textAlign: 'center',
+                }}
+              >
+                <Bell size={36} strokeWidth={1.5} style={{ color: 'var(--text-muted)', display: 'block', margin: '0 auto 12px' }} />
+                <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)', marginBottom: 4 }}>
+                  No Broadcasts Found
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                  {search ? `No broadcasts match "${search}".` : 'Compose your first broadcast on the left.'}
+                </div>
+              </div>
+            ) : (
+              <div className="ww-stagger" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {paginatedBroadcasts.map(b => {
+                  const cfg = BROADCAST_TYPES[b.type] || BROADCAST_TYPES.ANNOUNCEMENT
+                  const { Icon } = cfg
+                  const formattedDate = (() => {
+                    try {
+                      return new Date(b.created_at).toLocaleString('en-PH', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    } catch {
+                      return b.created_at
+                    }
+                  })()
+
+                  const isDeleting = deletingId === b.broadcast_id
+
+                  return (
+                    <div
+                      key={b.broadcast_id}
+                      style={{
+                        background: 'var(--surface)',
+                        border: '1px solid var(--border)',
+                        borderLeft: `4px solid ${cfg.color}`,
+                        borderRadius: 14,
+                        padding: '16px 18px',
+                        transition: 'box-shadow .15s, border-color .15s',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              fontSize: 9,
+                              fontWeight: 800,
+                              padding: '2px 8px',
+                              borderRadius: 20,
+                              background: cfg.bg,
+                              color: cfg.color,
+                              border: `1px solid ${cfg.border}`,
+                              textTransform: 'uppercase',
+                              letterSpacing: '.06em',
+                            }}
+                          >
+                            <Icon size={10} strokeWidth={2.5} />
+                            {cfg.label}
+                          </span>
+
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              fontSize: 10,
+                              color: 'var(--text-muted)',
+                            }}
+                          >
+                            <Clock size={11} strokeWidth={2} />
+                            {formattedDate}
+                          </span>
+                        </div>
+
+                        {/* Actions */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <button
+                            type="button"
+                            onClick={() => cloneBroadcast(b)}
+                            title="Clone to compose form"
+                            aria-label="Clone broadcast"
+                            style={{
+                              background: 'var(--surface-2)',
+                              border: '1px solid var(--border)',
+                              borderRadius: 8,
+                              padding: '5px 8px',
+                              cursor: 'pointer',
+                              color: 'var(--text-muted)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              fontSize: 11,
+                              fontFamily: 'inherit',
+                              transition: 'all .12s',
+                            }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.borderColor = 'var(--accent)'
+                              e.currentTarget.style.color = 'var(--text)'
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.borderColor = 'var(--border)'
+                              e.currentTarget.style.color = 'var(--text-muted)'
+                            }}
+                          >
+                            <Copy size={12} />
+                            Clone
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteModal(b)}
+                            disabled={isDeleting}
+                            title="Delete this broadcast"
+                            aria-label="Delete broadcast"
+                            style={{
+                              background: 'rgba(231,76,60,0.06)',
+                              border: '1px solid rgba(231,76,60,0.2)',
+                              borderRadius: 8,
+                              padding: '5px 8px',
+                              cursor: isDeleting ? 'not-allowed' : 'pointer',
+                              color: '#e74c3c',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              fontSize: 11,
+                              fontFamily: 'inherit',
+                              transition: 'all .12s',
+                            }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.background = 'rgba(231,76,60,0.15)'
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.background = 'rgba(231,76,60,0.06)'
+                            }}
+                          >
+                            <Trash2 size={12} />
+                            {isDeleting ? 'Deleting...' : 'Delete'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Title */}
+                      <div
+                        style={{
+                          fontWeight: 700,
+                          fontSize: 15,
+                          color: 'var(--text)',
+                          lineHeight: 1.3,
+                          marginBottom: 6,
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => setSelectedBroadcast(b)}
+                      >
+                        {b.title}
+                      </div>
+
+                      {/* Message preview */}
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: 'var(--text-muted)',
+                          lineHeight: 1.6,
+                          marginBottom: 10,
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        {b.message}
+                      </div>
+
+                      {/* Meta Footer */}
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 10,
+                          flexWrap: 'wrap',
+                          fontSize: 11,
+                          color: 'var(--text-muted)',
+                          paddingTop: 8,
+                          borderTop: '1px solid var(--border)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <MapPin size={12} strokeWidth={2} style={{ color: 'var(--accent)' }} />
+                          <span style={{ fontWeight: 600, color: 'var(--text)' }}>
+                            {b.is_citywide
+                              ? 'City-Wide Audience'
+                              : b.barangay_names && b.barangay_names.length > 0
+                              ? b.barangay_names.join(', ')
+                              : `${b.total_count} Barangays`}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setSelectedBroadcast(b)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: 'var(--accent)',
+                            fontSize: 11,
+                            fontWeight: 700,
+                            padding: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 2,
+                          }}
+                        >
+                          Details
+                          <ChevronRight size={13} strokeWidth={2.5} />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             )}
 
-            {filtered.map(n => {
-              const m = TYPES[n.type] || TYPES.info
-              return (
-                <div key={n.id} className="notif-row" onClick={() => setPreview(n)} style={{
-                  background: 'var(--surface)', border: '1px solid var(--border)',
-                  borderLeft: `3px solid ${m.color}`,
-                  borderRadius: 12, padding: '14px 16px', marginBottom: 10,
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                    {/* Icon */}
-                    <div style={{ width: 38, height: 38, borderRadius: 10, flexShrink: 0, background: m.bg, border: `1px solid ${m.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>
-                      {m.icon}
-                    </div>
-
-                    {/* Body */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-                        <span style={{ fontWeight: 700, fontSize: 13 }}>{n.title}</span>
-                        <TypeBadge t={n.type} />
-                      </div>
-                      <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 8px', lineHeight: 1.5, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                        {n.body}
-                      </p>
-                      <div style={{ display: 'flex', gap: 14, fontSize: 11, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-                        <span>📍 {n.target}</span>
-                        <span>👤 {n.sentBy}</span>
-                        <span>🕐 {n.sentAt}</span>
-                        <span style={{ color: m.color, fontWeight: 700 }}>~{n.reach.toLocaleString()} reached</span>
-                      </div>
-                    </div>
-
-                    <div style={{ fontSize: 16, color: 'var(--text-muted)', flexShrink: 0 }}>›</div>
-                  </div>
-                </div>
-              )
-            })}
+            <Pagination
+              currentPage={page}
+              totalPages={totalPages}
+              totalCount={filteredBroadcasts.length}
+              pageSize={10}
+              onPageChange={setPage}
+            />
           </div>
 
-          {/* ── Compose Form ── */}
-          <div className="card" style={{ padding: 20, position: 'sticky', top: 80 }}>
-            <h3 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 15, margin: '0 0 18px' }}>
-              ✉️ Compose Notification
-            </h3>
+        </div>
 
-            {/* Type picker */}
-            <label className="form-label">Type</label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 14 }}>
-              {Object.entries(TYPES).map(([k, m]) => (
-                <button key={k} className="nc-type-btn" onClick={() => set('type', k)} style={{
-                  padding: '8px 10px', borderRadius: 10, border: `1px solid ${form.type === k ? m.color : 'var(--border)'}`,
-                  background: form.type === k ? m.bg : 'transparent',
-                  color: form.type === k ? m.color : 'var(--text-muted)',
-                  fontWeight: 700, fontSize: 12, fontFamily: 'var(--font-body)',
-                  display: 'flex', alignItems: 'center', gap: 6,
-                }}>
-                  <span>{m.icon}</span> {m.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Title */}
-            <div style={{ marginBottom: 12 }}>
-              <label className="form-label">Title</label>
-              <input className="form-input" value={form.title} onChange={e => set('title', e.target.value)} placeholder="e.g. Special Collection Schedule" maxLength={80} />
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', textAlign: 'right', marginTop: 2 }}>{form.title.length}/80</div>
-            </div>
-
-            {/* Body */}
-            <div style={{ marginBottom: 12 }}>
-              <label className="form-label">Message</label>
-              <textarea className="form-input" rows={3} value={form.body} onChange={e => set('body', e.target.value)} placeholder="Enter the notification message…" style={{ resize: 'vertical' }} maxLength={500} />
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', textAlign: 'right', marginTop: 2 }}>{form.body.length}/500</div>
-            </div>
-
-            {/* Target */}
-            <div style={{ marginBottom: 14 }}>
-              <label className="form-label">Target Audience</label>
-              <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-                {[['city-wide', '🌆 City-wide'], ['barangay', '📍 Per Barangay']].map(([v, l]) => (
-                  <button key={v} className="nc-type-btn" onClick={() => set('target', v)} style={{
-                    flex: 1, padding: '8px', borderRadius: 10, border: '1px solid',
-                    fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-body)',
-                    borderColor: form.target === v ? 'var(--accent)' : 'var(--border)',
-                    color: form.target === v ? 'var(--accent)' : 'var(--text-muted)',
-                    background: form.target === v ? 'rgba(46,204,113,0.08)' : 'transparent',
-                  }}>{l}</button>
-                ))}
-              </div>
-
-              {form.target === 'barangay' && (
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 7 }}>
-                    SELECT BARANGAYS ({form.barangays.length} selected)
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                    {BARANGAYS.map(b => {
-                      const on = form.barangays.includes(b)
-                      return (
-                        <button key={b} className="brgy-chip" onClick={() => toggleBrgy(b)} style={{
-                          padding: '3px 10px', borderRadius: 20, fontSize: 10, fontWeight: 600,
-                          border: '1px solid', fontFamily: 'var(--font-body)',
-                          borderColor: on ? 'var(--accent)' : 'var(--border)',
-                          color: on ? 'var(--accent)' : 'var(--text-muted)',
-                          background: on ? 'rgba(46,204,113,0.08)' : 'transparent',
-                        }}>{b}</button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Estimated reach */}
-            <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '10px 14px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.06em', marginBottom: 2 }}>TARGET</div>
-                <div style={{ fontSize: 13, fontWeight: 700 }}>{targetLabel(form)}</div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.06em', marginBottom: 2 }}>EST. REACH</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)' }}>{estimatedReach(form)}</div>
-              </div>
-            </div>
-
-            <button
-              onClick={handleSend}
-              disabled={sending}
+        {/* ── Broadcast Detail Modal ── */}
+        {selectedBroadcast && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="broadcast-detail-title"
+            onMouseDown={e => { mouseDownTargetRef.current = e.target }}
+            onClick={e => {
+              if (mouseDownTargetRef.current === e.currentTarget && e.target === e.currentTarget) {
+                setSelectedBroadcast(null)
+              }
+            }}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.6)',
+              backdropFilter: 'blur(4px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 9999,
+              padding: 16,
+            }}
+          >
+            <div
               style={{
-                width: '100%', padding: '12px', borderRadius: 12, border: 'none',
-                background: sending ? 'rgba(46,204,113,0.4)' : 'var(--accent)',
-                color: '#0d1117', fontWeight: 800, fontSize: 14,
-                fontFamily: 'var(--font-body)', cursor: sending ? 'not-allowed' : 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                transition: 'all .2s',
+                background: 'var(--surface)',
+                borderRadius: 16,
+                padding: '24px',
+                width: '100%',
+                maxWidth: 500,
+                boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
+                border: '1px solid var(--border)',
               }}
             >
-              {sending ? (
-                <>
-                  <div style={{ width: 14, height: 14, border: '2px solid #0d1117', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
-                  Sending…
-                </>
-              ) : '📤 Send Notification'}
-            </button>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <span id="broadcast-detail-title" style={{ fontWeight: 800, fontSize: 16, color: 'var(--text)' }}>
+                  Broadcast Details
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedBroadcast(null)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                  aria-label="Close details"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div style={{ fontWeight: 800, fontSize: 16, color: 'var(--text)', marginBottom: 6 }}>
+                {selectedBroadcast.title}
+              </div>
+
+              <div
+                style={{
+                  background: 'var(--surface-2)',
+                  borderRadius: 10,
+                  padding: '12px 14px',
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  color: 'var(--text)',
+                  marginBottom: 16,
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {selectedBroadcast.message}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12, marginBottom: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Target Audience</span>
+                  <span style={{ fontWeight: 700, color: 'var(--text)' }}>
+                    {selectedBroadcast.is_citywide
+                      ? 'City-Wide (All Lucena Residents)'
+                      : selectedBroadcast.barangay_names?.join(', ') || 'Selected Barangays'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Broadcast ID</span>
+                  <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--text-muted)' }}>
+                    {selectedBroadcast.broadcast_id}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Notification Rows</span>
+                  <span style={{ fontWeight: 700, color: 'var(--text)' }}>
+                    {selectedBroadcast.total_count} recipient row{selectedBroadcast.total_count === 1 ? '' : 's'}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => {
+                    cloneBroadcast(selectedBroadcast)
+                    setSelectedBroadcast(null)
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+                >
+                  <Copy size={13} />
+                  Clone to Compose
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => setSelectedBroadcast(null)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* ── Confirmation Delete Modal ── */}
+        {confirmDeleteModal && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-delete-title"
+            onMouseDown={e => { mouseDownTargetRef.current = e.target }}
+            onClick={e => {
+              if (mouseDownTargetRef.current === e.currentTarget && e.target === e.currentTarget) {
+                setConfirmDeleteModal(null)
+              }
+            }}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.65)',
+              backdropFilter: 'blur(4px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 9999,
+              padding: 16,
+            }}
+          >
+            <div
+              style={{
+                background: 'var(--surface)',
+                borderRadius: 16,
+                padding: '24px',
+                width: '100%',
+                maxWidth: 420,
+                border: '1px solid var(--border)',
+                boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 10,
+                    background: 'rgba(231,76,60,0.1)',
+                    color: '#e74c3c',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <AlertTriangle size={18} strokeWidth={2.2} />
+                </div>
+                <h3 id="confirm-delete-title" style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--text)' }}>
+                  Delete Broadcast?
+                </h3>
+              </div>
+
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 18 }}>
+                Are you sure you want to delete &ldquo;{confirmDeleteModal.title}&rdquo;? This will atomically remove this notification from all recipient feeds and cannot be undone.
+              </p>
+
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => setConfirmDeleteModal(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => executeDelete(confirmDeleteModal)}
+                  style={{
+                    background: '#e74c3c',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Trash2 size={14} />
+                  Delete Now
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
     </DashboardLayout>
   )
-}
-
-function _notifTypeToLocal(type) {
-  switch (type) {
-    case 'ANNOUNCEMENT': return 'announcement'
-    case 'SCHEDULE_CHANGE': return 'reminder'
-    case 'TRUCK_NEAR': return 'alert'
-    case 'COLLECTION_DONE': return 'info'
-    default: return 'info'
-  }
 }

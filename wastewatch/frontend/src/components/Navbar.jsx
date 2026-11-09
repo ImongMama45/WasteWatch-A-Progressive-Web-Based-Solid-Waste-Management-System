@@ -15,6 +15,8 @@ import { useAuth } from '../context/AuthContext'
 import { useOnline } from '../hooks/useOnline'
 import { ICONS, NAV_ICONS, getRoleNavItems, flattenNavItems } from '../api/navConfig'
 import { useNotifications } from '../hooks/useNotifications'
+import { AlertTriangle } from 'lucide-react'
+import { SidebarWidgetSkeleton } from './ui/Skeleton'
 
 // ─── tiny CSS injected once ───────────────────────────────────────────────────
 const NAVBAR_CSS = `
@@ -477,7 +479,7 @@ export default function Navbar() {
   const navigate = useNavigate()
   const location = useLocation()
   const isOnline = useOnline()
-  const { notifications, unreadCount, markRead } = useNotifications()
+  const { notifications, unreadCount, loading: notifLoading, markRead } = useNotifications()
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
@@ -531,10 +533,12 @@ export default function Navbar() {
 
   const desktopLinks = [
     { path: '/', label: 'Home' },
-    { path: '/map', label: 'Map' },
+    // Show map only to authorized staff roles
+    ...(['admin', 'brgy_official', 'watcher'].includes(role) ? [{ path: '/map', label: 'Map' }] : []),
     { path: '/schedule', label: 'Schedule' },
-    { path: '/about', label: 'About' },
+    { path: '/community', label: 'Community' },
     { path: '/announcements', label: 'Announcements' },
+    { path: '/about', label: 'About' },
     ...(user ? [{ path: '/dashboard', label: 'Dashboard' }] : []),
   ]
 
@@ -661,7 +665,9 @@ export default function Navbar() {
             >×</button>
           </div>
 
-          {notifications.length === 0 ? (
+          {notifLoading && notifications.length === 0 ? (
+            <SidebarWidgetSkeleton rows={3} style={{ padding: '14px 16px' }} />
+          ) : notifications.length === 0 ? (
             <div style={{ padding: '24px 16px', textAlign: 'center', color: 'rgba(0,0,0,0.4)', fontSize: 13 }}>
               No new notifications
             </div>
@@ -799,7 +805,7 @@ export default function Navbar() {
             width: '100%', maxWidth: 360, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
             textAlign: 'center',
           }} onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+            <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(231,76,60,0.1)', color: '#e74c3c', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}><AlertTriangle size={26} /></div>
             <h3 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 8px 0', color: '#1a2e1a' }}>
               Sign Out?
             </h3>

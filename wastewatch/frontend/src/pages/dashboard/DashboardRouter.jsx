@@ -4,7 +4,7 @@ import WatcherDashboard from "./WatcherDashboard";
 import DriverDashboard from "./DriverDashboard";
 import AdminDashboard from "./AdminDashboard";
 import CitizenDashboard from "./CitizenDashboard";
-import BrgyDashboard from "./BrgyDashboard";
+import BrgyDashboard from "../brgy_official/BrgyDashboard";
 import DumpsiteDashboard from "./DumpsiteDashboard";
 
 export default function DashboardRouter() {

@@ -12,11 +12,13 @@
 
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Clock } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import Navbar from '../../components/Navbar'
 import BottomNav from '../../components/BottomNav'
 import api from '../../api/client'
 import { ICONS } from '../../api/navConfig'
+import { SkeletonPill, FeedCardSkeleton } from '../../components/ui/Skeleton'
 
 // ─── STATUS COLOURS (mirrors pickupStatusSync palette) ───────────────────────
 const STATUS_META = {
@@ -131,7 +133,7 @@ function WorkflowCard({
                 background: `${accent}10`, border: `1px solid ${accent}33`,
                 borderRadius: 20, padding: '4px 12px', marginBottom: 18,
             }}>
-                <span style={{ fontSize: 12 }}>🕐</span>
+                <Clock size={12} color={accent} />
                 <span style={{ fontSize: 11, fontWeight: 700, color: accent }}>{timing}</span>
             </div>
 
@@ -256,13 +258,9 @@ export default function WatcherTasksHub() {
                             Watcher Tasks
                         </h2>
                         {loading ? (
-                            <div style={{
-                                width: 18, height: 18, borderRadius: '50%',
-                                border: '2.5px solid var(--border)', borderTopColor: '#14b8a6',
-                                animation: 'spin 1s linear infinite',
-                            }} />
+                            <SkeletonPill width={96} height={22} />
                         ) : (
-                            <span style={{
+                            <span className="ww-fade-in" style={{
                                 background: 'rgba(20,184,166,0.12)', color: '#14b8a6',
                                 border: '1px solid rgba(20,184,166,0.3)',
                                 fontSize: 10, fontWeight: 800, padding: '3px 10px', borderRadius: 20,
@@ -279,8 +277,14 @@ export default function WatcherTasksHub() {
                 </div>
 
                 {/* ── Live status strip ── */}
-                {!loading && totalToday > 0 && (
-                    <div style={{
+                {loading ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
+                        <SkeletonPill width={110} height={26} />
+                        <SkeletonPill width={124} height={26} />
+                        <SkeletonPill width={96} height={26} />
+                    </div>
+                ) : totalToday > 0 ? (
+                    <div className="ww-fade-in" style={{
                         display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 18,
                     }}>
                         <StatusPill status="PENDING_INSPECTION" count={pendingInspection} />
@@ -289,52 +293,56 @@ export default function WatcherTasksHub() {
                         <StatusPill status="COLLECTION_REPORTED" count={collectionReported} />
                         <StatusPill status="VERIFIED_COLLECTED" count={verifiedCollected} />
                     </div>
-                )}
+                ) : null}
 
                 {/* ── Process flow diagram ── */}
                 <ProcessFlow />
 
                 {/* ── Workflow cards ── */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {loading ? (
+                    <FeedCardSkeleton count={2} compact />
+                ) : (
+                    <div className="ww-stagger" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-                    {/* Card 1 — Pre-Collection Inspection */}
-                    <div className="hub-card">
-                        <WorkflowCard
-                            icon={ICONS.search}
-                            title="Pre-Collection Inspection"
-                            subtitle="Done before the truck arrives"
-                            description="Walk to each assigned stop and report whether garbage is present. Marks stops as Ready for Collection or Empty."
-                            timing="Before truck arrival"
-                            actionLabel="Start Inspection"
-                            accent="#14b8a6"
-                            badgeCount={pendingInspection}
-                            badgeLabel="pending"
-                            disabled={loading || allInspected}
-                            onClick={() => navigate('/verification-tasks')}
-                        />
-                    </div>
+                        {/* Card 1 — Pre-Collection Inspection */}
+                        <div className="hub-card">
+                            <WorkflowCard
+                                icon={ICONS.search}
+                                title="Pre-Collection Inspection"
+                                subtitle="Done before the truck arrives"
+                                description="Walk to each assigned stop and report whether garbage is present. Marks stops as Ready for Collection or Empty."
+                                timing="Before truck arrival"
+                                actionLabel="Start Inspection"
+                                accent="#14b8a6"
+                                badgeCount={pendingInspection}
+                                badgeLabel="pending"
+                                disabled={allInspected}
+                                onClick={() => navigate('/verification-tasks')}
+                            />
+                        </div>
 
-                    {/* Card 2 — Post-Collection Confirmation */}
-                    <div className="hub-card">
-                        <WorkflowCard
-                            icon={ICONS.check}
-                            title="Post-Collection Verification"
-                            subtitle="Done after the truck has collected"
-                            description="Verify that the driver's collection report is accurate. Confirm the stop is clean and capture a final proof photo."
-                            timing="After truck has collected"
-                            actionLabel="Verify Collections"
-                            accent="#16a34a"
-                            badgeCount={collectionReported}
-                            badgeLabel="to verify"
-                            disabled={loading || allVerified}
-                            onClick={() => navigate('/watcher/confirm')}
-                        />
+                        {/* Card 2 — Post-Collection Confirmation */}
+                        <div className="hub-card">
+                            <WorkflowCard
+                                icon={ICONS.check}
+                                title="Post-Collection Verification"
+                                subtitle="Done after the truck has collected"
+                                description="Verify that the driver's collection report is accurate. Confirm the stop is clean and capture a final proof photo."
+                                timing="After truck has collected"
+                                actionLabel="Verify Collections"
+                                accent="#16a34a"
+                                badgeCount={collectionReported}
+                                badgeLabel="to verify"
+                                disabled={allVerified}
+                                onClick={() => navigate('/watcher/confirm')}
+                            />
+                        </div>
                     </div>
-                </div>
+                )}
 
                 {/* ── All done state ── */}
                 {!loading && allInspected && allVerified && totalToday > 0 && (
-                    <div style={{
+                    <div className="ww-fade-in" style={{
                         marginTop: 20, padding: '20px', borderRadius: 14, textAlign: 'center',
                         background: 'rgba(22,163,74,0.06)', border: '1px solid rgba(22,163,74,0.2)',
                     }}>
@@ -352,7 +360,7 @@ export default function WatcherTasksHub() {
 
                 {/* ── Empty state ── */}
                 {!loading && totalToday === 0 && (
-                    <div style={{
+                    <div className="ww-fade-in" style={{
                         marginTop: 20, padding: '32px 20px', borderRadius: 14, textAlign: 'center',
                         background: 'var(--surface)', border: '1px solid var(--border)',
                     }}>

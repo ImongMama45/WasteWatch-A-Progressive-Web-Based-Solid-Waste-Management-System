@@ -9,17 +9,17 @@ import api from '../api/client'
 
 const DriverGpsContext = createContext(null)
 
-export function DriverGpsProvider({ children }) {
+export function DriverGpsProvider({ children, hasActiveShift }) {
   const { shiftActive } = useShiftTimer()
   const [backendShiftActive, setBackendShiftActive] = useState(false)
 
   useEffect(() => {
     let alive = true
     const refresh = () => {
-      api.get('/api/driver/shift/status/')
+      api.get('/api/driver/shift/active/')
         .then((res) => {
           if (!alive) return
-          setBackendShiftActive(Boolean(res.data?.shift_active))
+          setBackendShiftActive(Boolean(res.data?.active))
         })
         .catch(() => {
           if (alive) setBackendShiftActive(false)
@@ -33,7 +33,7 @@ export function DriverGpsProvider({ children }) {
     }
   }, [])
 
-  const trackingActive = shiftActive || backendShiftActive
+  const trackingActive = hasActiveShift === false ? false : (Boolean(hasActiveShift) || shiftActive || backendShiftActive)
   const gps = useGpsTracking({
     // GPS watch is ALWAYS active for drivers — it is a non-negotiable baseline
     // requirement for all driver workflow modules.  Backend sync is still

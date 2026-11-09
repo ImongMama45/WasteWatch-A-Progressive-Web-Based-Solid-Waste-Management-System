@@ -40,6 +40,7 @@ const ENDPOINTS = {
       }
       if (r.latitude != null && !isNaN(r.latitude)) payload.latitude = Math.round(r.latitude * 1e6) / 1e6
       if (r.longitude != null && !isNaN(r.longitude)) payload.longitude = Math.round(r.longitude * 1e6) / 1e6
+      if (r.is_watcher_spot) payload.is_watcher_spot = true
       return payload
     },
   },

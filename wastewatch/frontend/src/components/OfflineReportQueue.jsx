@@ -1,5 +1,5 @@
 import { useAuth } from '../context/AuthContext'
-import { Clock, CheckCircle, XCircle, Trash2, Truck, AlertTriangle, Leaf, Recycle, Plus, RefreshCw } from 'lucide-react'
+import { Clock, CheckCircle, XCircle, Trash2, Truck, AlertTriangle, Leaf, Recycle, Plus, RefreshCw, Sparkles } from 'lucide-react'
 
 /**
  * components/OfflineReportQueue.jsx
@@ -20,6 +20,7 @@ import { Clock, CheckCircle, XCircle, Trash2, Truck, AlertTriangle, Leaf, Recycl
  *   onSyncNow    : () => void
  *   onRetry      : (id) => void
  *   onNewReport  : () => void  — opens OfflineReportBuilder
+ *   onDemoReport : () => void  — adds sample report for testing
  */
 
 const STATUS_META = {
@@ -150,6 +151,7 @@ export default function OfflineReportQueue({
   onRetry,
   onNewReport,
   onReportClick,
+  onDemoReport,
 }) {
   const { user } = useAuth()
   const pending = reports.filter(r => r.status === 'pending')
@@ -205,6 +207,26 @@ export default function OfflineReportQueue({
               <span className="orb-spinner orb-spinner--sm" /> Syncing…
             </span>
           )}
+          {onDemoReport && (
+            <button
+              onClick={onDemoReport}
+              style={{
+                marginLeft: 'auto',
+                background: 'none',
+                border: 'none',
+                color: 'var(--ld-green, #2e7d32)',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4
+              }}
+              title="Add another demo report for testing"
+            >
+              <Sparkles size={12} /> + Demo
+            </button>
+          )}
         </div>
       )}
 
@@ -222,6 +244,27 @@ export default function OfflineReportQueue({
             </div>
             <p className="orq-empty__text">No reports yet.</p>
             <p className="orq-empty__sub">Submit your first garbage report below.</p>
+            {onDemoReport && (
+              <button
+                onClick={onDemoReport}
+                style={{
+                  marginTop: 10,
+                  background: 'rgba(46,125,50,0.08)',
+                  border: '1.5px dashed var(--ld-green-bdr2, #a5d6a7)',
+                  borderRadius: 10,
+                  color: 'var(--ld-green, #2e7d32)',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  padding: '8px 16px',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                <Sparkles size={14} /> Try Sample Report (Test Queue)
+              </button>
+            )}
           </div>
         ) : (
           <>

@@ -9,9 +9,11 @@
  */
 
 import { useState, useEffect } from 'react'
+import { Home, Truck, Tag, MapPin, Calendar, Clock, Map as MapIcon, Info } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import api from '../../../api/client'
-import Navbar from '../../../components/Navbar'
+import { resolveDriverSchedule, formatTime12h } from '../../../utils/driverSchedule'
+import { MobileFlowSkeleton } from '../../../components/ui/Skeleton'
 
 export default function ConfirmStartModule({ onAdvance, shift }) {
   const { user } = useAuth()
@@ -25,23 +27,27 @@ export default function ConfirmStartModule({ onAdvance, shift }) {
     if (!user?.id) return
     setLoading(true)
     Promise.all([
-      api.get('/api/driver/collection-schedules/').catch(() => ({ data: [] })),
+      api.get('/api/driver/collection-schedules/?paginate=false').catch(() => ({ data: [] })),
       api.get('/api/driver/shift/profile/').catch(() => ({ data: null })),
     ]).then(([schedRes, profRes]) => {
-      const match = schedRes.data.find(s => String(s.driver) === String(user.id))
+      const match = resolveDriverSchedule(
+        schedRes.data,
+        user.id,
+        shift?.schedule_id ?? shift?.schedule ?? null
+      )
       setSchedule(match || null)
       setProfile(profRes.data || null)
     }).finally(() => setLoading(false))
-  }, [user?.id])
+  }, [user?.id, shift?.schedule_id, shift?.schedule])
 
-  const stopCount = schedule ? (schedule.waypoints?.length || 1) - 1 : 0
-  const routeName = shift?.barangay_names || schedule?.barangay_names || 'Your Route'
-  const truckLabel = shift?.truck_model || '—'
-  const plateLabel = shift?.truck_plate || '—'
-  const barangayLabel = shift?.barangay_names || schedule?.barangay_names || '—'
-  const daysLabel = schedule?.days || '—'
+  const stopCount = schedule ? Math.max((schedule.waypoints?.length || 1) - 1, 0) : 0
+  const routeName = shift?.barangay_names || schedule?.barangay_names || profile?.route || 'Your Route'
+  const truckLabel = shift?.truck_model || profile?.truck || '—'
+  const plateLabel = shift?.truck_plate || profile?.plateNumber || '—'
+  const barangayLabel = shift?.barangay_names || schedule?.barangay_names || profile?.barangay || '—'
+  const daysLabel = Array.isArray(schedule?.days) ? schedule.days.join(', ') : (schedule?.days || '—')
   const timeLabel = schedule?.start_time
-    ? `${schedule.start_time.slice(0, 5)} – ${schedule.end_time?.slice(0, 5) || ''}`
+    ? `${formatTime12h(schedule.start_time)}${schedule.end_time ? ` – ${formatTime12h(schedule.end_time)}` : ''}`
     : '—'
 
   const now = new Date()
@@ -51,19 +57,13 @@ export default function ConfirmStartModule({ onAdvance, shift }) {
   if (loading) {
     return (
       <>
-        <Navbar />
-        <div style={{ height: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, background: '#f8fafc' }}>
-          <div style={{ width: 32, height: 32, borderRadius: '50%', border: '3px solid #e2e8f0', borderTopColor: '#0f172a', animation: 'csfSpin 1s linear infinite' }} />
-          <style>{`@keyframes csfSpin { to{transform:rotate(360deg)} }`}</style>
-          <span style={{ color: '#64748b', fontSize: 13 }}>Loading shift info…</span>
-        </div>
+        <MobileFlowSkeleton label="Loading shift checklist..." />
       </>
     )
   }
 
   return (
     <>
-      <Navbar />
       <style>{`
         @keyframes csfFadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
         @keyframes csfPulse  { 0%,100%{transform:scale(1)} 50%{transform:scale(1.04)} }
@@ -78,8 +78,8 @@ export default function ConfirmStartModule({ onAdvance, shift }) {
           <div style={{ position: 'absolute', inset: 0, opacity: 0.04, backgroundImage: 'radial-gradient(circle at 50% 50%, #fff 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
 
           <div style={{ position: 'relative', zIndex: 1 }}>
-            <div style={{ width: 72, height: 72, borderRadius: '50%', background: 'rgba(22,163,74,0.18)', border: '2px solid rgba(22,163,74,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px', fontSize: 32 }}>
-              🏠
+            <div style={{ width: 72, height: 72, borderRadius: '50%', background: 'rgba(22,163,74,0.18)', border: '2px solid rgba(22,163,74,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px', color: '#22c55e' }}>
+              <Home size={32} />
             </div>
             <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(22,163,74,0.9)', letterSpacing: '.1em', marginBottom: 6 }}>AT HOME BASE</div>
             <h1 style={{ fontFamily: 'var(--font-head)', fontSize: 26, fontWeight: 900, margin: '0 0 6px', letterSpacing: '.02em' }}>
@@ -104,21 +104,21 @@ export default function ConfirmStartModule({ onAdvance, shift }) {
             <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, color: '#0f172a', marginBottom: 2 }}>{routeName}</div>
           </div>
           {[
-            { icon: '🚛', label: 'Truck', value: truckLabel },
-            { icon: '🔖', label: 'Plate No.', value: plateLabel },
-            { icon: '📍', label: 'Barangay', value: barangayLabel },
-            { icon: '📅', label: 'Schedule', value: daysLabel },
-            { icon: '⏰', label: 'Time', value: timeLabel },
+            { Icon: Truck, label: 'Truck', value: truckLabel },
+            { Icon: Tag, label: 'Plate No.', value: plateLabel },
+            { Icon: MapPin, label: 'Barangay', value: barangayLabel },
+            { Icon: Calendar, label: 'Schedule', value: daysLabel },
+            { Icon: Clock, label: 'Time', value: timeLabel },
           ].map(row => (
             <div key={row.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 18px', borderBottom: '1px solid #f1f5f9' }}>
-              <span style={{ fontSize: 16, flexShrink: 0 }}>{row.icon}</span>
+              <row.Icon size={16} color="#64748b" style={{ flexShrink: 0 }} />
               <span style={{ fontSize: 13, color: '#64748b', fontWeight: 600, flex: 1 }}>{row.label}</span>
               <span style={{ fontSize: 13, fontWeight: 800, color: '#0f172a' }}>{row.value}</span>
             </div>
           ))}
           {/* Stop count badge */}
           <div style={{ padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 16 }}>🗺️</span>
+            <MapIcon size={16} color="#64748b" style={{ flexShrink: 0 }} />
             <span style={{ fontSize: 13, color: '#64748b', fontWeight: 600, flex: 1 }}>Total Stops</span>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(15,23,42,0.08)', borderRadius: 20, padding: '3px 12px' }}>
               <span style={{ fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900, color: '#0f172a' }}>{stopCount}</span>
@@ -129,7 +129,7 @@ export default function ConfirmStartModule({ onAdvance, shift }) {
 
         {/* ── INFO NOTICE ── */}
         <div className="csf-card" style={{ margin: '0 16px 20px', padding: '12px 16px', background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 12, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-          <span style={{ fontSize: 16, flexShrink: 0 }}>ℹ️</span>
+          <Info size={16} color="#3b82f6" style={{ flexShrink: 0, marginTop: 2 }} />
           <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.6 }}>
             Tapping <strong>"Start My Shift"</strong> will initialize GPS tracking, log your shift start time, and begin route monitoring. Make sure you're ready before proceeding.
           </div>
@@ -149,13 +149,14 @@ export default function ConfirmStartModule({ onAdvance, shift }) {
               color: '#fff', fontFamily: 'var(--font-head)',
               fontSize: 17, fontWeight: 900, letterSpacing: '.06em',
               cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               boxShadow: '0 8px 24px rgba(16,185,129,0.4)',
               transition: 'transform .15s, box-shadow .15s',
             }}
             onMouseDown={e => { e.currentTarget.style.transform = 'scale(0.98)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(16,185,129,0.3)' }}
             onMouseUp={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 8px 24px rgba(16,185,129,0.4)' }}
           >
-            🚛 Start My Shift
+            <Truck size={18} /> Start My Shift
           </button>
           <p style={{ textAlign: 'center', fontSize: 11, color: '#94a3b8', marginTop: 10 }}>
             Your shift will be logged and tracked in real time

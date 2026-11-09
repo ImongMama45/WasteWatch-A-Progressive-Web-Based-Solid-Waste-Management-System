@@ -16,19 +16,31 @@ function timeToMinutes(t) {
   return h * 60 + (m || 0)
 }
 
-export function detectConflicts(newSched, existingSchedules) {
+function normalizeDays(daysInput) {
+  if (!daysInput) return new Set()
+  const arr = Array.isArray(daysInput) ? daysInput : daysInput.split(',')
+  const normalized = arr.map(d => d.trim().slice(0, 3).toLowerCase()).filter(Boolean)
+  return new Set(normalized)
+}
+
+export function detectConflicts(newSched, existingSchedules = []) {
+  const schedList = Array.isArray(existingSchedules) ? existingSchedules : (existingSchedules?.results || [])
   const newStart = timeToMinutes(newSched.start_time)
   const newEnd   = timeToMinutes(newSched.end_time)
-  const newDays  = new Set(newSched.days || [])
+  const newDays  = normalizeDays(newSched.days)
 
-  if (newStart >= newEnd || newDays.size === 0) return []
+  if (newDays.size === 0) return []
+  
+  // If end_time is not after start_time, it's invalid (or overnight, which is rejected),
+  // but it's not a "conflict" to be resolved by this logic. The form validation will catch it.
+  if (newStart >= newEnd) return []
 
   const conflicts = []
 
-  for (const ex of existingSchedules) {
+  for (const ex of schedList) {
     if (newSched.editId && String(ex.id) === String(newSched.editId)) continue
 
-    const exDays = new Set((ex.days || '').split(', ').filter(Boolean))
+    const exDays = normalizeDays(ex.days)
     const shared = [...newDays].filter(d => exDays.has(d))
     if (shared.length === 0) continue
 

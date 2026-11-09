@@ -16,13 +16,15 @@ import { useNotification } from '../../context/NotificationContext'
 import { getApiErrorMessage } from '../../utils/notificationHelpers'
 import api from '../../api/client'
 import { ICONS } from '../../api/navConfig'
+import { StatCardSkeleton, FeedCardSkeleton, MapSkeleton } from '../../components/ui/Skeleton'
+import Pagination from '../../components/ui/Pagination'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const STATUS_META = {
-  active: { label: 'Active', color: '#2ecc71', bg: 'rgba(46,204,113,0.1)', border: 'rgba(46,204,113,0.3)' },
-  maintenance: { label: 'Maintenance', color: '#f39c12', bg: 'rgba(243,156,18,0.1)', border: 'rgba(243,156,18,0.3)' },
-  inactive: { label: 'Inactive', color: '#e74c3c', bg: 'rgba(231,76,60,0.1)', border: 'rgba(231,76,60,0.3)' },
+  active: { label: 'Active', color: '#15803d', bg: '#e7f5eb', border: '#bbf7d0' },
+  maintenance: { label: 'Maintenance', color: '#b45309', bg: '#fef3c7', border: '#fde68a' },
+  inactive: { label: 'Inactive', color: '#b91c1c', bg: '#fee2e2', border: '#fecaca' },
 }
 
 function StatusBadge({ status }) {
@@ -30,10 +32,10 @@ function StatusBadge({ status }) {
   return (
     <span style={{
       background: m.bg, border: `1px solid ${m.border}`, color: m.color,
-      borderRadius: 20, padding: '2px 10px', fontSize: 9, fontWeight: 800,
-      letterSpacing: '.06em', whiteSpace: 'nowrap',
+      borderRadius: 4, padding: '2px 7px', fontSize: 10, fontWeight: 700,
+      letterSpacing: '.04em', textTransform: 'uppercase', whiteSpace: 'nowrap',
     }}>
-      {m.label.toUpperCase()}
+      {m.label}
     </span>
   )
 }
@@ -99,70 +101,71 @@ function TruckEntityModal({ truck, onSave, onClose }) {
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
       zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+      backdropFilter: 'blur(3px)',
     }} onClick={onClose}>
       <div style={{
-        background: 'var(--surface)', borderRadius: 16, padding: 24,
+        background: '#ffffff', borderRadius: 8, padding: '20px 24px',
         width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto',
-        boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+        boxShadow: '0 8px 30px rgba(0,0,0,0.12)', border: '1px solid #e4e6eb',
       }} onClick={e => e.stopPropagation()}>
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-          <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, borderBottom: '1px solid #e4e6eb', paddingBottom: 14 }}>
+          <h3 style={{ fontFamily: 'var(--font-head, inherit)', fontSize: 17, fontWeight: 700, margin: 0, color: '#1c1e21' }}>
             {truck ? 'Edit Truck' : 'Add Truck'}
           </h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#888' }}>×</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#65676b', padding: '0 4px', lineHeight: 1 }}>×</button>
         </div>
 
         {/* Photo */}
         <div style={{ marginBottom: 16, textAlign: 'center' }}>
           <div style={{
-            width: 120, height: 120, borderRadius: 12, margin: '0 auto 10px',
-            background: 'var(--surface-2)', border: '1px dashed var(--border)',
+            width: 120, height: 120, borderRadius: 6, margin: '0 auto 10px',
+            background: '#f0f2f5', border: '1px dashed #ced0d4',
             display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
           }}>
             {photoPreview
               ? <img src={photoPreview} alt="Truck" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              : <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>No photo</span>}
+              : <span style={{ fontSize: 12, color: '#65676b' }}>No photo</span>}
           </div>
-          <input type="file" accept="image/*" onChange={handlePhotoChange} style={{ fontSize: 12 }} />
+          <input type="file" accept="image/*" onChange={handlePhotoChange} style={{ fontSize: 12, color: '#65676b' }} />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
           <div>
-            <label className="form-label">Plate Number</label>
-            <input className="form-input" value={plateNumber} onChange={e => setPlateNumber(e.target.value)} placeholder="LCN-001" />
+            <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Plate Number</label>
+            <input className="form-input meta-input" value={plateNumber} onChange={e => setPlateNumber(e.target.value)} placeholder="LCN-001" style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }} />
           </div>
           <div>
-            <label className="form-label">Model</label>
-            <input className="form-input" value={modelName} onChange={e => setModelName(e.target.value)} placeholder="Isuzu Elf" />
+            <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Model</label>
+            <input className="form-input meta-input" value={modelName} onChange={e => setModelName(e.target.value)} placeholder="Isuzu Elf" style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }} />
           </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
           <div>
-            <label className="form-label">Status</label>
-            <select className="form-input" value={status} onChange={e => setStatus(e.target.value)}>
+            <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Status</label>
+            <select className="form-input meta-input" value={status} onChange={e => setStatus(e.target.value)} style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }}>
               <option value="active">Active</option>
               <option value="maintenance">Maintenance</option>
               <option value="inactive">Inactive</option>
             </select>
           </div>
           <div>
-            <label className="form-label">Max Capacity (kg)</label>
-            <input className="form-input" type="number" min="0" step="100" value={maxCapacityKg} onChange={e => setMaxCapacityKg(e.target.value)} />
+            <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Max Capacity (kg)</label>
+            <input className="form-input meta-input" type="number" min="0" step="100" value={maxCapacityKg} onChange={e => setMaxCapacityKg(e.target.value)} style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }} />
           </div>
         </div>
 
         <div style={{ marginBottom: 20 }}>
-          <label className="form-label">Date Bought</label>
-          <input className="form-input" type="date" value={dateBought} onChange={e => setDateBought(e.target.value)} />
+          <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Date Bought</label>
+          <input className="form-input meta-input" type="date" value={dateBought} onChange={e => setDateBought(e.target.value)} style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }} />
         </div>
 
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSubmit}>
+        <div style={{ display: 'flex', gap: 10, paddingTop: 12, borderTop: '1px solid #e4e6eb' }}>
+          <button className="btn btn-outline" style={{ flex: 1, height: 36, borderRadius: 6, border: '1px solid #ccd0d5', background: '#ffffff', color: '#1c1e21', fontWeight: 600, fontSize: 13, cursor: 'pointer' }} onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" style={{ flex: 1, height: 36, borderRadius: 6, border: 'none', background: '#16a34a', color: '#ffffff', fontWeight: 600, fontSize: 13, cursor: 'pointer' }} onClick={handleSubmit}>
             {truck ? 'Save Changes' : 'Add Truck'}
           </button>
         </div>
@@ -186,7 +189,8 @@ function AssignTruckModal({ truck, trucks, onSave, onClose, drivers, crewPool })
       setAssignedDrivers(t.drivers || [])
       setAssignedCrew(t.crew || [])
     }
-  }, [selectedTruckId, trucks])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTruckId])
 
   const getMemberName = (id) => {
     const u = crewPool.find(x => x.id === id) || drivers.find(x => x.id === id)
@@ -210,29 +214,31 @@ function AssignTruckModal({ truck, trucks, onSave, onClose, drivers, crewPool })
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
       zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+      backdropFilter: 'blur(3px)',
     }} onClick={onClose}>
       <div style={{
-        background: 'var(--surface)', borderRadius: 16, padding: 24,
+        background: '#ffffff', borderRadius: 8, padding: '20px 24px',
         width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto',
-        boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+        boxShadow: '0 8px 30px rgba(0,0,0,0.12)', border: '1px solid #e4e6eb',
       }} onClick={e => e.stopPropagation()}>
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-          <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, borderBottom: '1px solid #e4e6eb', paddingBottom: 14 }}>
+          <h3 style={{ fontFamily: 'var(--font-head, inherit)', fontSize: 17, fontWeight: 700, margin: 0, color: '#1c1e21' }}>
             Assign Truck to a Driver
           </h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#888' }}>×</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#65676b', padding: '0 4px', lineHeight: 1 }}>×</button>
         </div>
 
         <div style={{ marginBottom: 14 }}>
-          <label className="form-label">Truck</label>
+          <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Truck</label>
           <select
-            className="form-input"
+            className="form-input meta-input"
             value={selectedTruckId}
             onChange={e => setSelectedTruckId(e.target.value)}
             disabled={!!truck}   // locked if opened from a specific row
+            style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }}
           >
             <option value="">— Select truck —</option>
             {trucks.map(t => (
@@ -243,17 +249,17 @@ function AssignTruckModal({ truck, trucks, onSave, onClose, drivers, crewPool })
 
         {/* Drivers */}
         <div style={{ marginBottom: 14 }}>
-          <label className="form-label">Assigned Drivers (Max 2)</label>
+          <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Assigned Drivers (Max 2)</label>
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
             <select
-              className="form-input"
+              className="form-input meta-input"
               value={driverInput}
               onChange={e => setDriverInput(e.target.value)}
-              style={{ flex: 1 }}
+              style={{ flex: 1, height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }}
               disabled={assignedDrivers.length >= 2}
             >
               <option value="">— Select driver —</option>
-              {drivers.filter(d => !assignedDrivers.includes(d.id)).map(d => <option key={d.id} value={d.id}>{d.full_name}</option>)}
+              {drivers.filter(d => !assignedDrivers.includes(d.id)).map(d => <option key={d.id} value={d.id}>{d.full_name || d.username || d.email}</option>)}
             </select>
             <button
               type="button"
@@ -264,16 +270,16 @@ function AssignTruckModal({ truck, trucks, onSave, onClose, drivers, crewPool })
                 setAssignedDrivers(prev => [...prev, drv.id])
                 setDriverInput('')
               }}
-              style={{ background: 'var(--accent)', color: '#0d1117', border: 'none', borderRadius: 8, padding: '0 14px', fontWeight: 700, cursor: 'pointer' }}
+              style={{ background: '#16a34a', color: '#ffffff', border: 'none', borderRadius: 6, padding: '0 14px', fontWeight: 600, fontSize: 13, cursor: 'pointer', height: 36 }}
               disabled={assignedDrivers.length >= 2}
             >Add</button>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {assignedDrivers.length === 0 && <span style={{ fontSize: 12, color: '#aaa' }}>No driver assigned.</span>}
+            {assignedDrivers.length === 0 && <span style={{ fontSize: 12, color: '#8a8d91' }}>No driver assigned.</span>}
             {assignedDrivers.map(id => (
-              <span key={id} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 20, padding: '4px 10px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span key={id} style={{ background: '#f0f2f5', border: '1px solid #e4e6eb', borderRadius: 4, padding: '3px 8px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, color: '#1c1e21', fontWeight: 500 }}>
                 {getMemberName(id)}
-                <button type="button" onClick={() => setAssignedDrivers(prev => prev.filter(d => d !== id))} style={{ background: 'none', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
+                <button type="button" onClick={() => setAssignedDrivers(prev => prev.filter(d => d !== id))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
               </span>
             ))}
           </div>
@@ -281,30 +287,30 @@ function AssignTruckModal({ truck, trucks, onSave, onClose, drivers, crewPool })
 
         {/* Crew */}
         <div style={{ marginBottom: 20 }}>
-          <label className="form-label">Crew Members</label>
+          <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Crew Members</label>
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <select className="form-input" value={crewInput} onChange={e => setCrewInput(e.target.value)} style={{ flex: 1 }}>
+            <select className="form-input meta-input" value={crewInput} onChange={e => setCrewInput(e.target.value)} style={{ flex: 1, height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }}>
               <option value="">— Select crew member —</option>
-              {availableCrew.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
+              {availableCrew.map(c => <option key={c.id} value={c.id}>{c.full_name || c.username || c.email}</option>)}
             </select>
             <button type="button" onClick={() => addCrew(crewInput)}
-              style={{ background: 'var(--accent)', color: '#0d1117', border: 'none', borderRadius: 8, padding: '0 14px', fontWeight: 700, cursor: 'pointer' }}
+              style={{ background: '#16a34a', color: '#ffffff', border: 'none', borderRadius: 6, padding: '0 14px', fontWeight: 600, fontSize: 13, cursor: 'pointer', height: 36 }}
             >Add</button>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {assignedCrew.length === 0 && <span style={{ fontSize: 12, color: '#aaa' }}>No crew assigned yet.</span>}
+            {assignedCrew.length === 0 && <span style={{ fontSize: 12, color: '#8a8d91' }}>No crew assigned yet.</span>}
             {assignedCrew.map(id => (
-              <span key={id} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 20, padding: '4px 10px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span key={id} style={{ background: '#f0f2f5', border: '1px solid #e4e6eb', borderRadius: 4, padding: '3px 8px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, color: '#1c1e21', fontWeight: 500 }}>
                 {getMemberName(id)}
-                <button type="button" onClick={() => setAssignedCrew(prev => prev.filter(c => c !== id))} style={{ background: 'none', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
+                <button type="button" onClick={() => setAssignedCrew(prev => prev.filter(c => c !== id))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
               </span>
             ))}
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSubmit}>Save Assignment</button>
+        <div style={{ display: 'flex', gap: 10, paddingTop: 12, borderTop: '1px solid #e4e6eb' }}>
+          <button className="btn btn-outline" style={{ flex: 1, height: 36, borderRadius: 6, border: '1px solid #ccd0d5', background: '#ffffff', color: '#1c1e21', fontWeight: 600, fontSize: 13, cursor: 'pointer' }} onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" style={{ flex: 1, height: 36, borderRadius: 6, border: 'none', background: '#16a34a', color: '#ffffff', fontWeight: 600, fontSize: 13, cursor: 'pointer' }} onClick={handleSubmit}>Save Assignment</button>
         </div>
       </div>
     </div>
@@ -371,9 +377,10 @@ function RouteModal({ truckId, driverId, driverName, onClose }) {
   // Fetch driver schedule
   useEffect(() => {
     setLoading(true)
-    api.get('/api/driver/collection-schedules/')
+    api.get('/api/driver/collection-schedules/?paginate=false')
       .then(res => {
-        const matching = res.data.filter(s => String(s.truck) === String(truckId) && String(s.driver) === String(driverId))
+        const list = Array.isArray(res.data) ? res.data : (res.data?.results || [])
+        const matching = list.filter(s => String(s.truck) === String(truckId) && String(s.driver) === String(driverId))
         setSchedules(matching)
         setActiveIdx(0)
       })
@@ -463,27 +470,27 @@ function RouteModal({ truckId, driverId, driverName, onClose }) {
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)',
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
       zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: 16,
+      padding: 16, backdropFilter: 'blur(3px)',
     }} onClick={onClose}>
       <div style={{
-        background: 'var(--surface)', borderRadius: 16, padding: 24,
-        width: '100%', maxWidth: 600, maxHeight: '95vh', overflowY: 'auto',
-        boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+        background: '#ffffff', borderRadius: 8, padding: '20px 24px',
+        width: '100%', maxWidth: 640, maxHeight: '95vh', overflowY: 'auto',
+        boxShadow: '0 8px 30px rgba(0,0,0,0.12)', border: '1px solid #e4e6eb',
       }} onClick={e => e.stopPropagation()}>
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, borderBottom: '1px solid #e4e6eb', paddingBottom: 12 }}>
           <div>
-            <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: 0 }}>
+            <h3 style={{ fontFamily: 'var(--font-head, inherit)', fontSize: 17, fontWeight: 700, margin: 0, color: '#1c1e21' }}>
               Route Map
             </h3>
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Assigned to: {driverName}</span>
+            <span style={{ fontSize: 12, color: '#65676b' }}>Assigned to: <strong style={{ color: '#1c1e21' }}>{driverName}</strong></span>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#888', padding: 0 }}>×</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#65676b', padding: '0 4px', lineHeight: 1 }}>×</button>
         </div>
 
-        <div style={{ position: 'relative', width: '100%', height: 350, background: '#1e293b', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+        <div style={{ position: 'relative', width: '100%', height: 350, background: '#f0f2f5', borderRadius: 6, overflow: 'hidden', marginBottom: 14, border: '1px solid #e4e6eb' }}>
           {schedules.length > 1 && (
             <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 1000, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {schedules.map((s, idx) => (
@@ -491,11 +498,11 @@ function RouteModal({ truckId, driverId, driverName, onClose }) {
                   key={s.id}
                   onClick={() => setActiveIdx(idx)}
                   style={{
-                    background: activeIdx === idx ? '#14b8a6' : 'rgba(15,23,42,0.8)',
-                    color: '#fff', borderRadius: 20, padding: '6px 12px',
-                    fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-                    border: `1px solid ${activeIdx === idx ? '#14b8a6' : 'rgba(255,255,255,0.2)'}`
+                    background: activeIdx === idx ? '#16a34a' : 'rgba(255,255,255,0.92)',
+                    color: activeIdx === idx ? '#ffffff' : '#1c1e21', borderRadius: 4, padding: '4px 10px',
+                    fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+                    border: `1px solid ${activeIdx === idx ? '#16a34a' : '#ced0d4'}`
                   }}
                 >
                   {formatDaysInitials(s.days) || `Route ${idx + 1}`}
@@ -506,49 +513,51 @@ function RouteModal({ truckId, driverId, driverName, onClose }) {
           <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
 
           {(loading || !leafletReady) && (
-            <div style={{
-              position: 'absolute', inset: 0, background: 'rgba(30, 41, 59, 0.85)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 14, fontWeight: 600
-            }}>
-              {loading ? 'Fetching route schedule...' : 'Loading map...'}
+            <div style={{ position: 'absolute', inset: 0, zIndex: 500 }}>
+              <MapSkeleton
+                height="100%"
+                dark={false}
+                label={loading ? 'Fetching route schedule...' : 'Loading route map...'}
+                showControls={false}
+              />
             </div>
           )}
 
           {!loading && leafletReady && !schedule && (
             <div style={{
-              position: 'absolute', inset: 0, background: 'rgba(30, 41, 59, 0.9)',
-              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#fff', padding: 20, textAlign: 'center'
+              position: 'absolute', inset: 0, background: 'rgba(255, 255, 255, 0.9)',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#1c1e21', padding: 20, textAlign: 'center'
             }}>
-              <span style={{ width: 36, height: 36, marginBottom: 10, color: '#e74c3c' }}>{ICONS.map}</span>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#e74c3c' }}>No Route Configured</span>
-              <span style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>This driver does not have a route schedule assigned.</span>
+              <span style={{ width: 32, height: 32, marginBottom: 8, color: '#dc2626' }}>{ICONS.map}</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: '#dc2626' }}>No Route Configured</span>
+              <span style={{ fontSize: 12, color: '#65676b', marginTop: 4 }}>This driver does not have a route schedule assigned.</span>
             </div>
           )}
         </div>
 
         {schedule && (
-          <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: 12, fontSize: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '10px 14px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-muted)' }}>Barangays:</span>
-              <span style={{ fontWeight: 600 }}>{schedule.barangay_names || '—'}</span>
+              <span style={{ color: '#65676b' }}>Barangays:</span>
+              <span style={{ fontWeight: 600, color: '#1c1e21' }}>{schedule.barangay_names || '—'}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-muted)' }}>Days:</span>
-              <span style={{ fontWeight: 600 }}>{formatDaysInitials(schedule.days) || '—'}</span>
+              <span style={{ color: '#65676b' }}>Days:</span>
+              <span style={{ fontWeight: 600, color: '#1c1e21' }}>{formatDaysInitials(schedule.days) || '—'}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-muted)' }}>Time Schedule:</span>
-              <span style={{ fontWeight: 600 }}>{schedule.start_time?.slice(0, 5)} - {schedule.end_time?.slice(0, 5)}</span>
+              <span style={{ color: '#65676b' }}>Time Schedule:</span>
+              <span style={{ fontWeight: 600, color: '#1c1e21' }}>{schedule.start_time?.slice(0, 5)} - {schedule.end_time?.slice(0, 5)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-muted)' }}>Total Waypoints:</span>
-              <span style={{ fontWeight: 600 }}>{schedule.waypoints?.length || 0} stops</span>
+              <span style={{ color: '#65676b' }}>Total Waypoints:</span>
+              <span style={{ fontWeight: 600, color: '#1c1e21' }}>{schedule.waypoints?.length || 0} stops</span>
             </div>
           </div>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
-          <button className="btn btn-outline" style={{ minWidth: 100 }} onClick={onClose}>Close</button>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14, paddingTop: 10, borderTop: '1px solid #e4e6eb' }}>
+          <button className="btn btn-outline" style={{ minWidth: 90, height: 36, borderRadius: 6, border: '1px solid #ccd0d5', background: '#ffffff', color: '#1c1e21', fontWeight: 600, fontSize: 13, cursor: 'pointer' }} onClick={onClose}>Close</button>
         </div>
       </div>
     </div>
@@ -559,17 +568,27 @@ function RouteModal({ truckId, driverId, driverName, onClose }) {
 
 export default function TruckManagement() {
   const navigate = useNavigate()
-  const { trucks, loading, saveTruck, deleteTruck: apiDeleteTruck } = useTrucks()
+  const { trucks, pagination, loading, refresh: refreshTrucks, saveTruck, deleteTruck: apiDeleteTruck } = useTrucks()
   const { drivers, crew: crewPool } = useUsers()
   const { notify } = useNotification()
 
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
   const [modal, setModal] = useState(null)   // null | { type: 'add_truck'|'edit_truck'|'assign_truck', truck: obj|null }
   const [expanded, setExpanded] = useState(null)
   const [toast, setToast] = useState(null)
   const [viewRouteTruck, setViewRouteTruck] = useState(null)
   const [warningModal, setWarningModal] = useState(null)
+
+  useEffect(() => {
+    refreshTrucks({
+      page,
+      page_size: 10,
+      status: filter === 'all' ? '' : filter,
+      search: search.trim(),
+    })
+  }, [page, filter, search, refreshTrucks])
 
   function showToast(msg) {
     setToast(msg)
@@ -577,7 +596,7 @@ export default function TruckManagement() {
   }
 
   async function handleSave(form, truckId = null) {
-    const id = truckId;
+    const id = (truckId !== null && truckId !== undefined && truckId !== '') ? Number(truckId) : null;
 
     if (id) {
       const originalTruck = trucks.find(t => t.id === id)
@@ -594,12 +613,18 @@ export default function TruckManagement() {
 
   async function executeSave(id, form) {
     const payload = form instanceof FormData ? form : { ...form }
-    if (!(payload instanceof FormData) && !payload.last_service) payload.last_service = null
+    if (!(payload instanceof FormData) && 'last_service' in payload && !payload.last_service) payload.last_service = null
 
     const res = await saveTruck(id, payload)
     if (res.ok) {
-      showToast(id ? '✅ Truck updated successfully.' : '✅ Truck added successfully.')
+      showToast(id ? 'Truck updated successfully.' : 'Truck added successfully.')
       setModal(null)
+      refreshTrucks({
+        page,
+        page_size: 10,
+        status: filter === 'all' ? '' : filter,
+        search: search.trim(),
+      })
     } else {
       notify({ variant: 'error-outline', message: getApiErrorMessage({ response: { data: res.error } }, 'Failed to save truck.') })
     }
@@ -615,6 +640,12 @@ export default function TruckManagement() {
       setExpanded(null)
       setWarningModal(null)
       notify({ message: 'Truck deleted permanently.', variant: 'error-dark', position: 'bottom-left' })
+      refreshTrucks({
+        page,
+        page_size: 10,
+        status: filter === 'all' ? '' : filter,
+        search: search.trim(),
+      })
     }
   }
 
@@ -631,23 +662,19 @@ export default function TruckManagement() {
     executeSave(id, finalForm)
   }
 
-  const filtered = useMemo(() => trucks.filter(t => {
-    const matchStatus = filter === 'all' || t.status === filter
-    const driverNames = t.driver_details?.map(d => d.full_name).join(' ') || ''
-    const assignedBarangays = t.driver_details?.map(d => d.assigned_barangays).join(' ') || ''
-    const matchSearch = !search ||
-      t.plate_number.toLowerCase().includes(search.toLowerCase()) ||
-      driverNames.toLowerCase().includes(search.toLowerCase()) ||
-      assignedBarangays.toLowerCase().includes(search.toLowerCase())
-    return matchStatus && matchSearch
-  }), [trucks, filter, search])
+  const filtered = trucks
 
-  const counts = useMemo(() => ({
-    all: trucks.length,
-    active: trucks.filter(t => t.status === 'active').length,
-    maintenance: trucks.filter(t => t.status === 'maintenance').length,
-    inactive: trucks.filter(t => t.status === 'inactive').length,
-  }), [trucks])
+  const counts = useMemo(() => {
+    if (pagination?.summary) {
+      return pagination.summary
+    }
+    return {
+      all: pagination?.count || trucks.length,
+      active: trucks.filter(t => t.status === 'active').length,
+      maintenance: trucks.filter(t => t.status === 'maintenance').length,
+      inactive: trucks.filter(t => t.status === 'inactive').length,
+    }
+  }, [pagination, trucks])
 
   return (
     <DashboardLayout>
@@ -694,38 +721,58 @@ export default function TruckManagement() {
       <style>{`
         @keyframes fadeSlideIn { from{opacity:0;transform:translateX(-50%) translateY(-8px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }
         @keyframes slideDown { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
-        .truck-row { transition: box-shadow .18s, border-color .18s; cursor: pointer; }
-        .truck-row:hover { box-shadow: 0 4px 18px rgba(0,0,0,.08); }
-        .tm-filter-btn { transition: all .15s; cursor: pointer; }
-        .tm-filter-btn:hover { opacity: .8; }
+        
+        .meta-page-canvas { background: #f0f2f5; min-height: 100vh; padding: 20px 24px; font-family: var(--font-body, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif); }
+        .meta-card { background: #ffffff; border: 1px solid #e4e6eb; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+        .meta-stat-card { background: #ffffff; border: 1px solid #e4e6eb; border-radius: 8px; padding: 14px 18px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+        .meta-stat-label { font-size: 11px; font-weight: 700; color: #65676b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+        .meta-stat-value { font-size: 24px; font-weight: 700; color: #1c1e21; line-height: 1.2; }
+        
+        .meta-tabs-wrapper { display: inline-flex; background: #e4e6eb; padding: 3px; border-radius: 8px; gap: 2px; }
+        .meta-tab-btn { padding: 6px 14px; border-radius: 6px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; color: #65676b; background: transparent; }
+        .meta-tab-btn.active { background: #ffffff; color: #1c1e21; box-shadow: 0 1px 2px rgba(0,0,0,0.08); font-weight: 700; }
+        .meta-tab-btn:hover:not(.active) { color: #1c1e21; }
+        
+        .meta-input { height: 36px; border: 1px solid #ced0d4; border-radius: 6px; padding: 0 12px; font-size: 13px; background: #ffffff; color: #1c1e21; outline: none; transition: border-color 0.15s, box-shadow 0.15s; }
+        .meta-input:focus { border-color: #16a34a; box-shadow: 0 0 0 2px rgba(22,163,74,0.15); }
+        .meta-input::placeholder { color: #8a8d91; }
+        
+        .meta-btn-primary { height: 36px; background: #16a34a; color: #ffffff; border: none; border-radius: 6px; padding: 0 16px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; alignItems: center; gap: 6px; transition: background 0.15s; }
+        .meta-btn-primary:hover { background: #15803d; }
+        .meta-btn-secondary { height: 36px; background: #ffffff; color: #1c1e21; border: 1px solid #ccd0d5; border-radius: 6px; padding: 0 14px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; alignItems: center; gap: 6px; transition: background 0.15s, border-color 0.15s; }
+        .meta-btn-secondary:hover { background: #f2f3f5; border-color: #bec3c9; }
+        
+        .truck-meta-row { transition: border-color 0.15s, box-shadow 0.15s; cursor: pointer; }
+        .truck-meta-row:hover { border-color: #ced0d4; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
       `}</style>
 
-      <div className="page">
+      <div className="meta-page-canvas">
 
         {/* ── Page Header ── */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 3 }}>
-              <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 22, fontWeight: 800, margin: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <h2 style={{ fontFamily: 'var(--font-head, inherit)', fontSize: 22, fontWeight: 700, margin: 0, color: '#1c1e21', letterSpacing: '-0.02em' }}>
                 Truck & Driver Management
               </h2>
               <span style={{
-                background: 'rgba(93,173,226,0.1)', color: '#5dade2',
-                border: '1px solid rgba(93,173,226,0.3)',
-                fontSize: 9, fontWeight: 800, padding: '3px 10px', borderRadius: 20,
+                background: '#e7f5eb', color: '#15803d',
+                border: '1px solid #bbf7d0',
+                fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
+                textTransform: 'uppercase', letterSpacing: '0.04em'
               }}>ADMIN</span>
             </div>
-            <p className="text-muted text-sm">Manage fleet, assign drivers and crew members.</p>
+            <p style={{ margin: 0, fontSize: 13, color: '#65676b' }}>Manage fleet status, driver assignments, crew personnel, and collection routes.</p>
           </div>
-          <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
             <button
-              className="btn btn-outline"
+              className="meta-btn-secondary"
               onClick={() => setModal({ type: 'assign_truck', truck: null })}
             >
               Assign Truck
             </button>
             <button
-              className="btn btn-primary"
+              className="meta-btn-primary"
               onClick={() => setModal({ type: 'add_truck', truck: null })}
             >
               + Add Truck
@@ -733,61 +780,92 @@ export default function TruckManagement() {
           </div>
         </div>
 
-        {/* ── KPI Strip ── */}
-        <div className="stat-grid" style={{ marginBottom: 20 }}>
+        {/* ── Flat Stat Cards ── */}
+        {loading && trucks.length === 0 ? (
+          <StatCardSkeleton count={4} style={{ marginBottom: 20 }} />
+        ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 20 }}>
           {[
-            { label: 'Total Trucks', value: counts.all, color: '#ffffffff', icon: '' },
-            { label: 'Active', value: counts.active, color: '#2ecc71', icon: '' },
-            { label: 'Maintenance', value: counts.maintenance, color: '#f39c12', icon: '' },
-            { label: 'Inactive', value: counts.inactive, color: '#e74c3c', icon: '' },
+            { label: 'Total Trucks', value: counts.all, color: '#1c1e21' },
+            { label: 'Active', value: counts.active, color: '#15803d' },
+            { label: 'Maintenance', value: counts.maintenance, color: '#b45309' },
+            { label: 'Inactive', value: counts.inactive, color: '#b91c1c' },
           ].map(s => (
-            <div key={s.label} className="stat-card">
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                <div className="label">{s.label}</div>
-                <span style={{ fontSize: 16 }}>{s.icon}</span>
-              </div>
-              <div className="value" style={{ color: s.color, fontSize: 30 }}>{s.value}</div>
+            <div key={s.label} className="meta-stat-card">
+              <div className="meta-stat-label">{s.label}</div>
+              <div className="meta-stat-value" style={{ color: s.color }}>{s.value}</div>
             </div>
           ))}
         </div>
+        )}
 
         {/* ── Filters + Search ── */}
-        <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{
-            display: 'flex', gap: 4,
-            background: 'var(--surface-2)', borderRadius: 10, padding: 4,
-          }}>
+        <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="meta-tabs-wrapper">
             {['all', 'active', 'maintenance', 'inactive'].map(f => (
-              <button key={f} className="tm-filter-btn" onClick={() => setFilter(f)} style={{
-                padding: '6px 14px', borderRadius: 8, border: 'none',
-                fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-body)',
-                background: filter === f ? 'var(--surface)' : 'transparent',
-                color: filter === f ? 'var(--text)' : 'var(--text-muted)',
-                boxShadow: filter === f ? '0 1px 4px rgba(0,0,0,.08)' : 'none',
-              }}>
+              <button
+                key={f}
+                className={`meta-tab-btn ${filter === f ? 'active' : ''}`}
+                onClick={() => {
+                  setFilter(f)
+                  setPage(1)
+                }}
+              >
                 {f.charAt(0).toUpperCase() + f.slice(1)} ({counts[f]})
               </button>
             ))}
           </div>
 
-          <input
-            className="form-input"
-            placeholder="   Search plate, driver, barangay…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{ maxWidth: 260, marginLeft: 'auto' }}
-          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 12,
+              color: 'var(--text-muted, #65676b)',
+              fontWeight: 600,
+            }}>
+              <span>
+                Showing <strong>{(pagination?.count || trucks.length) === 0 ? 0 : (page - 1) * 10 + 1}–{Math.min(page * 10, pagination?.count || trucks.length)}</strong> of <strong>{pagination?.count || trucks.length}</strong>
+              </span>
+              <span
+                className="ww-pagination-ratio"
+                style={{
+                  background: 'var(--surface-2, #f0f2f5)',
+                  border: '1px solid #ced0d4',
+                  color: '#15803d',
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  fontSize: 11,
+                  fontWeight: 800
+                }}
+              >
+                {trucks.length}/{pagination?.count || trucks.length}
+              </span>
+            </div>
+
+            <input
+              className="meta-input"
+              placeholder="Search plate, driver, barangay…"
+              value={search}
+              onChange={e => {
+                setSearch(e.target.value)
+                setPage(1)
+              }}
+              style={{ width: '100%', maxWidth: 260 }}
+            />
+          </div>
         </div>
 
         {/* ── Truck List ── */}
         <div>
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: 40 }}>Loading trucks...</div>
+          {loading && trucks.length === 0 ? (
+            <FeedCardSkeleton count={4} compact />
           ) : filtered.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', padding: '36px 20px' }}>
-              <div style={{ width: 48, height: 48, margin: '0 auto 12px', color: '#94a3b8' }}>{ICONS.truck}</div>
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>No trucks found</div>
-              <div className="text-muted text-sm">Try adjusting your filter or search.</div>
+            <div className="meta-card" style={{ textAlign: 'center', padding: '48px 24px' }}>
+              <div style={{ width: 40, height: 40, margin: '0 auto 12px', color: '#8a8d91' }}>{ICONS.truck}</div>
+              <div style={{ fontWeight: 700, fontSize: 15, color: '#1c1e21', marginBottom: 4 }}>No trucks found</div>
+              <div style={{ color: '#65676b', fontSize: 13 }}>Try adjusting your status filter or search query.</div>
             </div>
           ) : (
             filtered.map(truck => {
@@ -796,89 +874,91 @@ export default function TruckManagement() {
               return (
                 <div
                   key={truck.id}
-                  className="truck-row"
+                  className="meta-card truck-meta-row"
                   style={{
-                    background: 'var(--surface)',
-                    border: `1px solid ${isOpen ? sm.border : 'var(--border)'}`,
-                    borderRadius: 14, marginBottom: 10, overflow: 'hidden',
+                    marginBottom: 10,
+                    overflow: 'hidden',
+                    borderColor: isOpen ? '#ced0d4' : '#e4e6eb',
                   }}
                 >
                   {/* ── Row header ── */}
                   <div
-                    style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 14 }}
+                    style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 14 }}
                     onClick={() => setExpanded(p => p === truck.id ? null : truck.id)}
                   >
                     {/* Icon */}
                     <div style={{
-                      width: 44, height: 44, borderRadius: 12, flexShrink: 0,
-                      background: `${sm.bg}`,
+                      width: 40, height: 40, borderRadius: 6, flexShrink: 0,
+                      background: sm.bg,
                       border: `1px solid ${sm.border}`, color: sm.color,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}>
-                      <div style={{ width: 24, height: 24 }}>{ICONS.truck}</div>
+                      <div style={{ width: 22, height: 22 }}>{ICONS.truck}</div>
                     </div>
 
                     {/* Main info */}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 3 }}>
-                        <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 15 }}>{truck.plate_number}</span>
-                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{truck.model}</span>
+                        <span style={{ fontWeight: 700, fontSize: 15, color: '#1c1e21' }}>{truck.plate_number}</span>
+                        <span style={{ fontSize: 13, color: '#65676b' }}>{truck.model}</span>
                         <StatusBadge status={truck.status} />
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <div style={{ width: 14, height: 14, flexShrink: 0 }}>{ICONS.profile}</div>
-                        {truck.driver_details?.length ? truck.driver_details.map(d => d.full_name).join(' & ') : 'No drivers assigned'} &nbsp;·&nbsp; {truck.driver_details?.length ? Array.from(new Set(truck.driver_details.map(d => d.assigned_barangays).filter(b => b && b !== 'No routes assigned'))).join(' | ') || 'No routes' : 'No routes'}
+                      <div style={{ fontSize: 12, color: '#65676b', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ width: 13, height: 13, flexShrink: 0, color: '#8a8d91' }}>{ICONS.profile}</div>
+                        <span>
+                          {truck.driver_details?.length ? truck.driver_details.map(d => d.full_name).join(' & ') : 'No drivers assigned'} &nbsp;·&nbsp; {truck.driver_details?.length ? Array.from(new Set(truck.driver_details.map(d => d.assigned_barangays).filter(b => b && b !== 'No routes assigned'))).join(' | ') || 'No routes' : 'No routes'}
+                        </span>
                       </div>
                       {truck.status === 'active' && <CapacityBar pct={truck.current_capacity} />}
                     </div>
 
                     {/* Crew count */}
-                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>Crew</div>
+                    <div style={{ textAlign: 'right', flexShrink: 0, paddingRight: 6 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#65676b', marginBottom: 2 }}>Crew</div>
                       <div style={{
-                        fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 20,
-                        color: truck.crew.length === 0 ? '#e74c3c' : 'var(--text)',
+                        fontWeight: 700, fontSize: 18,
+                        color: truck.crew.length === 0 ? '#b91c1c' : '#1c1e21',
                       }}>{truck.crew.length}</div>
                     </div>
 
                     {/* Chevron */}
                     <div style={{
-                      fontSize: 16, color: 'var(--text-muted)',
+                      fontSize: 16, color: '#8a8d91',
                       transform: isOpen ? 'rotate(90deg)' : 'rotate(0)',
-                      transition: 'transform .2s', flexShrink: 0,
+                      transition: 'transform 0.15s ease', flexShrink: 0,
                     }}>›</div>
                   </div>
 
                   {/* ── Expanded detail ── */}
                   {isOpen && (
                     <div
-                      style={{ borderTop: '1px solid var(--border)', padding: '16px', animation: 'slideDown .18s' }}
+                      style={{ borderTop: '1px solid #e4e6eb', padding: '16px 18px', background: '#fafbfc', animation: 'slideDown .15s' }}
                       onClick={e => e.stopPropagation()}
                     >
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12, marginBottom: 16 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12, marginBottom: 14 }}>
                         {truck.driver_details && truck.driver_details.length > 0 ? (
                           truck.driver_details.map(d => (
-                            <div key={d.id} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                            <div key={d.id} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                               {/* Driver & Schedule card */}
-                              <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px', flex: 1 }}>
-                                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 8 }}>ASSIGNMENT & SCHEDULE</div>
-                                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                              <div style={{ background: '#ffffff', border: '1px solid #e4e6eb', borderRadius: 6, padding: '12px 14px', flex: 1 }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: '#65676b', letterSpacing: '.05em', textTransform: 'uppercase', marginBottom: 8 }}>ASSIGNMENT & SCHEDULE</div>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                       <div style={{
-                                        width: 32, height: 32, borderRadius: '50%', background: 'var(--accent)', color: '#0d1117',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 13,
+                                        width: 28, height: 28, borderRadius: 4, background: '#e7f5eb', color: '#15803d',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 12,
                                       }}>{d.full_name[0]}</div>
-                                      <span style={{ fontSize: 13, fontWeight: 600 }}>{d.full_name}</span>
+                                      <span style={{ fontSize: 13, fontWeight: 600, color: '#1c1e21' }}>{d.full_name}</span>
                                     </div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: '1.4' }}>
+                                    <div style={{ fontSize: 12, color: '#65676b', lineHeight: '1.4' }}>
                                       <div style={{ marginBottom: 2 }}>
-                                        <strong style={{ color: 'var(--text)' }}>Added:</strong> {truck.created_at ? new Date(truck.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown'}
+                                        <strong style={{ color: '#1c1e21' }}>Added:</strong> {truck.created_at ? new Date(truck.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown'}
                                       </div>
                                       <div>
-                                        <strong style={{ color: 'var(--text)' }}>Schedule:</strong>
+                                        <strong style={{ color: '#1c1e21' }}>Schedule:</strong>
                                         {Array.isArray(d.schedule_description) && d.schedule_description.length > 0 ? (
-                                          <ul style={{ listStyleType: 'disc', paddingLeft: 20, margin: '4px 0 0 0', color: 'var(--text)' }}>
+                                          <ul style={{ listStyleType: 'disc', paddingLeft: 18, margin: '4px 0 0 0', color: '#1c1e21' }}>
                                             {d.schedule_description.map((desc, i) => {
                                               let displayDesc = desc;
                                               const parts = desc.split(' | ');
@@ -890,35 +970,35 @@ export default function TruckManagement() {
                                             })}
                                           </ul>
                                         ) : (
-                                          <span style={{ marginLeft: 4 }}>No active schedule</span>
+                                          <span style={{ marginLeft: 4, color: '#8a8d91' }}>No active schedule</span>
                                         )}
                                       </div>
                                     </div>
                                   </div>
-                                  <button className="btn btn-outline btn-sm" style={{ fontSize: 11, padding: '6px 12px', height: 'fit-content', whiteSpace: 'nowrap' }} onClick={() => setViewRouteTruck({ id: truck.id, driverId: d.id, name: d.full_name })}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 14, height: 14 }}>{ICONS.map}</div> Show Route</div>
+                                  <button className="meta-btn-secondary" style={{ height: 32, fontSize: 12, padding: '0 10px' }} onClick={() => setViewRouteTruck({ id: truck.id, driverId: d.id, name: d.full_name })}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}><div style={{ width: 14, height: 14 }}>{ICONS.map}</div> Show Route</div>
                                   </button>
                                 </div>
                               </div>
                               {/* Last service */}
-                              <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px' }}>
-                                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 6 }}>LAST SERVICE</div>
-                                <div style={{ fontSize: 13, fontWeight: 600 }}>{d.last_service || '—'}</div>
+                              <div style={{ background: '#ffffff', border: '1px solid #e4e6eb', borderRadius: 6, padding: '10px 14px' }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: '#65676b', letterSpacing: '.05em', textTransform: 'uppercase', marginBottom: 4 }}>LAST SERVICE</div>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: '#1c1e21' }}>{d.last_service || '—'}</div>
                               </div>
                             </div>
                           ))
                         ) : (
-                          <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px', gridColumn: '1 / -1' }}>
-                            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 8 }}>ASSIGNMENT & SCHEDULE</div>
-                            <span style={{ fontSize: 12, color: '#e74c3c' }}>No drivers assigned</span>
+                          <div style={{ background: '#ffffff', border: '1px solid #e4e6eb', borderRadius: 6, padding: '12px 14px', gridColumn: '1 / -1' }}>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: '#65676b', letterSpacing: '.05em', textTransform: 'uppercase', marginBottom: 6 }}>ASSIGNMENT & SCHEDULE</div>
+                            <span style={{ fontSize: 12, color: '#b91c1c' }}>No drivers assigned</span>
                           </div>
                         )}
                       </div>
 
                       {truck.status === 'maintenance' && (
-                        <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px', marginBottom: 16 }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: '#d97706', letterSpacing: '.07em', marginBottom: 6 }}>UNDER MAINTENANCE</div>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '10px 14px', marginBottom: 14 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#b45309', letterSpacing: '.05em', textTransform: 'uppercase', marginBottom: 4 }}>UNDER MAINTENANCE</div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: '#92400e', display: 'flex', alignItems: 'center', gap: 6 }}>
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                             {truck.maintenance_start ? formatMaintenanceDuration(truck.maintenance_start) : 'Start time unknown'}
                           </div>
@@ -927,29 +1007,29 @@ export default function TruckManagement() {
 
                       {/* Crew list */}
                       <div style={{ marginBottom: 16 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.07em', marginBottom: 8 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: '#65676b', letterSpacing: '.05em', textTransform: 'uppercase', marginBottom: 6 }}>
                           {truck.status === 'inactive'
                             ? 'PAST CREW MEMBERS'
                             : `CREW MEMBERS (${truck.crew?.length || 0})`}
                         </div>
 
                         {truck.status === 'inactive' ? (
-                          <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic', background: 'var(--surface)', border: '1px solid var(--border)', padding: '6px 12px', borderRadius: 8 }}>
+                          <div style={{ fontSize: 12, color: '#65676b', fontStyle: 'italic', background: '#ffffff', border: '1px solid #e4e6eb', padding: '6px 12px', borderRadius: 6 }}>
                             {truck.past_crew_names ? truck.past_crew_names : 'No past crew recorded.'}
                           </div>
                         ) : truck.crew?.length === 0 ? (
-                          <div style={{ fontSize: 12, color: '#e74c3c' }}>No crew assigned to this truck.</div>
+                          <div style={{ fontSize: 12, color: '#b91c1c' }}>No crew assigned to this truck.</div>
                         ) : (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                             {truck.crew_names?.map(c => (
                               <span key={c} style={{
-                                background: 'var(--surface)', border: '1px solid var(--border)',
-                                borderRadius: 20, padding: '4px 12px', fontSize: 12, fontWeight: 500,
-                                display: 'flex', alignItems: 'center', gap: 6,
+                                background: '#ffffff', border: '1px solid #ced0d4',
+                                borderRadius: 4, padding: '3px 8px', fontSize: 12, fontWeight: 500,
+                                display: 'flex', alignItems: 'center', gap: 6, color: '#1c1e21'
                               }}>
                                 <span style={{
-                                  width: 18, height: 18, borderRadius: '50%', background: '#5dade2',
-                                  color: '#fff', fontSize: 9, fontWeight: 800,
+                                  width: 16, height: 16, borderRadius: '50%', background: '#e7f5eb',
+                                  color: '#15803d', fontSize: 9, fontWeight: 700,
                                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                                 }}>{c[0]}</span>
                                 {c}
@@ -962,30 +1042,30 @@ export default function TruckManagement() {
                       {/* Action buttons */}
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button
-                          className="btn btn-outline btn-sm"
-                          style={{ flex: 1 }}
+                          className="meta-btn-secondary"
+                          style={{ flex: 1, height: 32, fontSize: 12, justifyContent: 'center' }}
                           onClick={() => setModal({ type: 'edit_truck', truck })}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                            <div style={{ width: 14, height: 14 }}>{ICONS.edit}</div> Edit
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                            <div style={{ width: 13, height: 13 }}>{ICONS.edit}</div> Edit
                           </div>
                         </button>
                         <button
-                          className="btn btn-outline btn-sm"
-                          style={{ flex: 1 }}
+                          className="meta-btn-secondary"
+                          style={{ flex: 1, height: 32, fontSize: 12, justifyContent: 'center' }}
                           onClick={() => setModal({ type: 'assign_truck', truck })}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                            <div style={{ width: 14, height: 14 }}>{ICONS.profile}</div> Assign
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                            <div style={{ width: 13, height: 13 }}>{ICONS.profile}</div> Assign
                           </div>
                         </button>
                         <button
-                          className="btn btn-sm"
-                          style={{ background: 'rgba(231,76,60,0.08)', color: '#e74c3c', border: '1px solid rgba(231,76,60,0.3)' }}
+                          className="meta-btn-secondary"
+                          style={{ flex: 1, height: 32, fontSize: 12, justifyContent: 'center', color: '#b91c1c', borderColor: '#fca5a5', background: '#fff' }}
                           onClick={() => handleDeleteTruck(truck)}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                            <div style={{ width: 14, height: 14 }}>{ICONS.trash}</div> Delete
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                            <div style={{ width: 13, height: 13 }}>{ICONS.trash}</div> Delete
                           </div>
                         </button>
                       </div>
@@ -996,59 +1076,76 @@ export default function TruckManagement() {
             })
           )}
         </div>
+
+        <Pagination
+          currentPage={page}
+          totalPages={pagination?.total_pages || 1}
+          totalCount={pagination?.count || trucks.length}
+          pageSize={10}
+          onPageChange={setPage}
+          loading={loading}
+        />
       </div>
 
       {/* Warning Modal */}
       {warningModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, backdropFilter: 'blur(4px)' }}>
-          <div style={{ background: 'var(--surface)', width: '90%', maxWidth: 400, borderRadius: 16, padding: 24, boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, backdropFilter: 'blur(3px)' }}>
+          <div style={{ background: '#ffffff', width: '90%', maxWidth: 400, borderRadius: 8, padding: '20px 24px', boxShadow: '0 8px 30px rgba(0,0,0,0.15)', border: '1px solid #e4e6eb' }}>
 
             {warningModal.action === 'delete' ? (
               <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, color: '#e74c3c' }}>
-                  <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(231,76,60,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <div style={{ width: 20, height: 20 }}>{ICONS.trash}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, color: '#b91c1c' }}>
+                  <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <div style={{ width: 18, height: 18, color: '#b91c1c' }}>{ICONS.trash}</div>
                   </div>
-                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Delete Truck</h3>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1c1e21' }}>Delete Truck</h3>
                 </div>
-                <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 24, lineHeight: 1.5 }}>
-                  Are you sure you want to delete <strong>{warningModal.truck.plate_number}</strong>? <br /><br />
+                <p style={{ fontSize: 13, color: '#65676b', marginBottom: 20, lineHeight: 1.5 }}>
+                  Are you sure you want to delete <strong style={{ color: '#1c1e21' }}>{warningModal.truck.plate_number}</strong>? <br /><br />
                   Deleting this truck will orphan any assigned routes (leaving them blank for reassignment). This action cannot be undone.
                 </p>
-                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-                  <button className="btn btn-outline" onClick={() => setWarningModal(null)}>Cancel</button>
-                  <button className="btn btn-primary" style={{ background: '#e74c3c', borderColor: '#e74c3c', color: '#fff' }} onClick={() => confirmDelete(warningModal.truck)}>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 12, borderTop: '1px solid #e4e6eb' }}>
+                  <button className="meta-btn-secondary" onClick={() => setWarningModal(null)}>Cancel</button>
+                  <button className="meta-btn-primary" style={{ background: '#b91c1c' }} onClick={() => confirmDelete(warningModal.truck)}>
                     Yes, Delete
                   </button>
                 </div>
               </>
             ) : (
-              <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, color: '#d97706' }}>
-                  <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(217,119,6,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <div style={{ fontSize: 20 }}>⚠️</div>
-                  </div>
-                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Change Status</h3>
-                </div>
-                <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.5 }}>
-                  You are changing this truck's status to <strong>{warningModal.form.status}</strong>.
-                  {warningModal.form.status === 'inactive' && ' This will unassign the truck, driver, and crew from all active routes.'}
-                </p>
-                <div style={{ marginBottom: 24 }}>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 8 }}>Reason for {warningModal.form.status}</label>
-                  <textarea
-                    id="statusReasonInput"
-                    style={{ width: '100%', minHeight: 80, padding: 12, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontSize: 13, resize: 'vertical' }}
-                    placeholder={`Why is this truck ${warningModal.form.status}?`}
-                  />
-                </div>
-                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-                  <button className="btn btn-outline" onClick={() => setWarningModal(null)}>Cancel</button>
-                  <button className="btn btn-primary" onClick={() => confirmStatusChange(document.getElementById('statusReasonInput').value)}>
-                    Confirm Change
-                  </button>
-                </div>
-              </>
+              (() => {
+                const pendingStatus = warningModal?.form instanceof FormData
+                  ? warningModal.form.get('status')
+                  : warningModal?.form?.status;
+                return (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                      <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#b45309', flexShrink: 0 }}>
+                        <div style={{ width: 20, height: 20 }}>{ICONS.warning}</div>
+                      </div>
+                      <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1c1e21' }}>Change Status</h3>
+                    </div>
+                    <p style={{ fontSize: 13, color: '#65676b', marginBottom: 14, lineHeight: 1.5 }}>
+                      You are changing this truck's status to <strong style={{ color: '#1c1e21' }}>{pendingStatus}</strong>.
+                      {pendingStatus === 'inactive' && ' This will unassign the truck, driver, and crew from all active routes.'}
+                    </p>
+                    <div style={{ marginBottom: 20 }}>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: '#65676b', marginBottom: 6 }}>Reason for {pendingStatus}</label>
+                      <textarea
+                        id="statusReasonInput"
+                        className="meta-input"
+                        style={{ width: '100%', minHeight: 72, padding: '8px 10px', height: 'auto', resize: 'vertical' }}
+                        placeholder={`Why is this truck ${pendingStatus}?`}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 12, borderTop: '1px solid #e4e6eb' }}>
+                      <button className="meta-btn-secondary" onClick={() => setWarningModal(null)}>Cancel</button>
+                      <button className="meta-btn-primary" onClick={() => confirmStatusChange(document.getElementById('statusReasonInput').value)}>
+                        Confirm Change
+                      </button>
+                    </div>
+                  </>
+                );
+              })()
             )}
 
           </div>

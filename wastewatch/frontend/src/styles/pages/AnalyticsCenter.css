@@ -20,21 +20,29 @@
 ───────────────────────────────────────────────────────────── */
 .ac-header {
   background: linear-gradient(150deg, #071612 0%, #0d2318 42%, #122b1a 100%);
-  /* Bleed to page edges by reversing the parent's padding */
-  margin-left:  -16px;
-  margin-right: -16px;
-  margin-top:   -20px;
-  margin-bottom: 0;
+  /* Full width inside dashboard-main, no bleed needed */
   padding: 24px 16px 0;
   position: relative;
-  overflow: hidden;
   border-bottom: 1px solid rgba(46, 204, 113, 0.18);
+}
+
+/* ── Sticky variant: sticks just below the fixed navbar when scrolling ── */
+.ac-header--sticky {
+  position: sticky;
+  /* Uses the CSS var set by DashboardLayout; falls back to the 60px navbar height */
+  top: var(--navbar-h, 60px);
+  z-index: 90;
+}
+
+/* On mobile the sticky header can consume a third of the viewport — disable it */
+@media (max-width: 640px) {
+  .ac-header--sticky {
+    position: static;
+  }
 }
 
 @media (min-width: 640px) {
   .ac-header {
-    margin-left:  -24px;
-    margin-right: -24px;
     padding-left:  24px;
     padding-right: 24px;
   }
@@ -42,8 +50,6 @@
 
 @media (min-width: 1024px) {
   .ac-header {
-    margin-left:  -32px;
-    margin-right: -32px;
     padding-left:  32px;
     padding-right: 32px;
     padding-top:   28px;
@@ -78,6 +84,15 @@
 .ac-header__inner {
   position: relative;
   z-index: 1;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+@media (min-width: 640px) {
+  .ac-header__inner { max-width: 680px; }
+}
+@media (min-width: 1024px) {
+  .ac-header__inner { max-width: 1400px; }
 }
 
 /* ── Breadcrumb ────────────────────────────────────────────── */
@@ -186,6 +201,13 @@
 .ac-filter-select:hover  { border-color: rgba(46,204,113,.35); }
 .ac-filter-select:focus  { border-color: rgba(46,204,113,.6); background-color: rgba(46,204,113,.06); }
 .ac-filter-select option { background: #1a2e1a; color: #fff; }
+
+/* Date inputs: remove the select chevron overlay, make native picker icon visible on dark bg */
+.ac-filter-select[type="date"] {
+  color-scheme: dark;
+  background-image: none;
+  padding-right: 10px;
+}
 
 /* Export button */
 .ac-export-btn {
@@ -1382,4 +1404,13 @@
   .ac-kpi-value { font-size: 18px; }
   .ac-hotspot-stats { grid-template-columns: repeat(3, 1fr); gap: 4px; }
   .ac-mini-stat { padding: 8px; }
+}
+
+/* ── Utilities ─────────────────────────────────────────────── */
+.ac-hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.ac-hide-scrollbar::-webkit-scrollbar {
+  display: none;
 }

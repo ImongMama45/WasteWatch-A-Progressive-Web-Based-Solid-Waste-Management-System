@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.conf import settings
 from cloudinary.models import CloudinaryField
 
 User = get_user_model()
@@ -311,6 +312,7 @@ class DriverShift(models.Model):
     ended_at = models.DateTimeField(null=True, blank=True)
     duration_ms = models.BigIntegerField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    end_reason = models.CharField(max_length=20, blank=True, default='')
     op_status = models.CharField(
         max_length=20,
         default='on_duty',
@@ -409,3 +411,26 @@ class DriverPerformance(models.Model):
 
     def __str__(self):
         return f"Performance for {self.driver.username} - {self.total_points} pts"
+
+class SystemSetting(models.Model):
+    """Singleton row (pk=1) holding system-wide settings."""
+    home_base_lat = models.FloatField(default=13.9373)
+    home_base_lng = models.FloatField(default=121.617)
+    home_base_label = models.CharField(max_length=120, default='City Hall — Home Base')
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='+',
+    )
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        pass  # singleton, never deleted
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj

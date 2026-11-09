@@ -13,17 +13,27 @@ function normalizeUsersPayload(data) {
   return []
 }
 
-export function useUsers() {
+export function useUsers(defaultParams = null) {
   const [users, setUsers] = useState([])
+  const [pagination, setPagination] = useState({ count: 0, total_pages: 1, current_page: 1, page_size: 10, summary: null })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (customParams) => {
     setLoading(true)
     try {
-      const res = await api.get('/api/accounts/users/', { params: { t: Date.now() } })
-      console.log('users raw:', res.data)
+      const p = { t: Date.now(), ...(customParams || defaultParams || { paginate: 'false' }) }
+      const res = await api.get('/api/accounts/users/', { params: p })
       setUsers(normalizeUsersPayload(res.data))
+      if (res.data && typeof res.data === 'object' && 'count' in res.data) {
+        setPagination({
+          count: res.data.count || 0,
+          total_pages: res.data.total_pages || 1,
+          current_page: res.data.current_page || 1,
+          page_size: res.data.page_size || 10,
+          summary: res.data.summary || null
+        })
+      }
       setError(null)
     } catch (err) {
       setError('Failed to fetch users')
@@ -31,7 +41,7 @@ export function useUsers() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [defaultParams])
 
   useEffect(() => {
     refresh()
@@ -42,5 +52,5 @@ export function useUsers() {
   const crew = users.filter(u => u.employee_type === 'crew_member')
   const crewPool = crew   // alias used by TruckManagement
 
-  return { users, drivers, crew, crewPool, loading, error, refresh }
+  return { users, pagination, drivers, crew, crewPool, loading, error, refresh }
 }

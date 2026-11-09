@@ -51,13 +51,40 @@ import { useNavigate } from 'react-router-dom'
 import useShiftTimer from '../../../hooks/useShiftTimer'
 import { useDriverGps } from '../../../context/DriverGpsContext'
 import { useNotification } from '../../../context/NotificationContext'
-import Navbar from '../../../components/Navbar'
 import api from '../../../api/client'
+import { resolveDriverSchedule } from '../../../utils/driverSchedule'
 import { useAuth } from '../../../context/AuthContext'
 import EndShiftModule from './EndShiftModule'
 import MultiPhotoPicker from '../../../components/MultiPhotoPicker'
 import { useOnline } from '../../../hooks/useOnline'
 import { getQueue } from '../../../hooks/useOfflineQueue'
+import {
+  MapPin,
+  Navigation,
+  LocateFixed,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle2,
+  Clock,
+  Radio,
+  AlertTriangle,
+  Package,
+  X,
+  Flag,
+  SkipForward,
+  Ban,
+  Target,
+  Check,
+  Camera,
+  Compass,
+  Plus,
+  Minus,
+  Layers,
+} from 'lucide-react'
+import MapLayerToggle, { applyMapTileLayer } from '../../../components/MapLayerToggle'
+import { calculateBearing, getShortestAngle, create3DVehicleIcon, createTruckSpriteIcon } from './map3DUtils'
+import { NavCamera } from './navCamera'
+import TruckOverlay from './TruckOverlay'
 import {
   broadcastPickupStatusSync,
   buildStopValidationSnapshot,
@@ -71,6 +98,9 @@ import {
   isScheduleFullyResolved,
 } from '../../../utils/pickupStatusSync'
 import useReassignedStops from '../../../hooks/useReassignedStops'
+import { MapSkeleton } from '../../../components/ui/Skeleton'
+import { resolveActiveNavTarget, pickNearestRoutableIndex, getResolvedStopStatus } from './navTarget'
+import { RouteRequestManager } from './routeRequestManager'
 
 const STOP_COLORS = STOP_STATUS_COLORS
 
@@ -109,7 +139,7 @@ function injectStopMarkerStyles() {
   document.head.appendChild(style)
 }
 
-function stopMarkerHTML(stopNumber, status, details, isActive = false) {
+function stopMarkerHTML(stopNumber, status, details, isActive = false, isSatellite = false) {
   const safeStatus = normalizeStopStatus(status)
   const c = STOP_COLORS[safeStatus] || STOP_COLORS.PENDING_INSPECTION
   const size = isActive ? 28 : 24
@@ -125,17 +155,42 @@ function stopMarkerHTML(stopNumber, status, details, isActive = false) {
   const pulse = isActive ? `
     <span style="
       position:absolute;inset:-5px;border-radius:50%;
-      border:2.5px solid ${c.bg === 'transparent' ? '#f59e0b' : c.bg};
+      border:2.5px solid ${isSatellite ? '#f59e0b' : (c.bg === 'transparent' ? '#f59e0b' : c.bg)};
       animation:wwMarkerPulse 1.8s ease infinite;
       pointer-events:none;
     "></span>
   ` : ''
 
-  const glowShadow = ['VERIFIED_COLLECTED', 'COLLECTION_DISPUTED', 'COLLECTION_REPORTED'].includes(safeStatus)
-    ? `0 2px 10px ${c.shadow}, 0 0 0 3px ${c.bg === 'transparent' ? 'rgba(148,163,184,0.3)' : `${c.bg}44`}`
-    : `0 2px 10px ${c.shadow}`
-  const fillColor = safeStatus === 'PENDING_INSPECTION' ? 'transparent' : c.bg
-  const borderStyle = safeStatus === 'PENDING_INSPECTION' ? `2px dashed ${c.border}` : `2.5px solid ${c.border}`
+  let fillColor
+  let borderStyle
+  let textColor
+  let glowShadow
+
+  if (isSatellite) {
+    // Satellite view: White Version (solid white circle with dark text, like PostCollectionOverlay.jsx)
+    fillColor = '#ffffff'
+    textColor = '#0f172a'
+    const statusBorderColor = safeStatus === 'PENDING_INSPECTION'
+      ? (isActive ? '#f59e0b' : '#94a3b8')
+      : (c.bg !== 'transparent' ? c.bg : (c.border || '#16a34a'))
+    borderStyle = isActive ? '2.5px solid #f59e0b' : `2.5px solid ${statusBorderColor}`
+    glowShadow = '0 2px 10px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.2)'
+  } else {
+    // Default view: Transparent inside and dotted lines on the side for pending stops
+    if (safeStatus === 'PENDING_INSPECTION') {
+      fillColor = 'transparent'
+      borderStyle = isActive ? '2.5px dotted #f59e0b' : `2px dotted ${c.border || '#94a3b8'}`
+      textColor = isActive ? '#d97706' : '#64748b'
+      glowShadow = isActive ? '0 0 10px rgba(245,158,11,0.5)' : 'none'
+    } else {
+      fillColor = c.bg
+      borderStyle = `2.5px solid ${c.border}`
+      textColor = c.label
+      glowShadow = ['VERIFIED_COLLECTED', 'COLLECTION_DISPUTED', 'COLLECTION_REPORTED'].includes(safeStatus)
+        ? `0 2px 10px ${c.shadow}, 0 0 0 3px ${c.bg === 'transparent' ? 'rgba(148,163,184,0.3)' : `${c.bg}44`}`
+        : `0 2px 10px ${c.shadow}`
+    }
+  }
 
   return `
     ${keyframe}
@@ -147,10 +202,10 @@ function stopMarkerHTML(stopNumber, status, details, isActive = false) {
         border:${borderStyle};
         border-radius:50%;
         display:flex;align-items:center;justify-content:center;
-        color:${c.label};
+        color:${textColor};
         font-size:${isActive ? 12 : 10}px;
         font-weight:900;
-        font-family:monospace;
+        font-family:system-ui,-apple-system,sans-serif;
         box-shadow:${glowShadow};
         transition:background .35s, box-shadow .35s;
       ">${markerLabel}</div>
@@ -234,7 +289,7 @@ import TurnArrow, { TURN_COLOR } from './TurnArrow'
 
 function MapLegend() {
   const items = [
-    { color: 'transparent', border: '1px dashed rgba(148,163,184,0.9)', label: STOP_STATUS_LABELS.PENDING_INSPECTION },
+    { color: 'transparent', border: '1.5px dotted rgba(148,163,184,0.9)', label: STOP_STATUS_LABELS.PENDING_INSPECTION },
     { color: '#f59e0b', label: STOP_STATUS_LABELS.READY_FOR_COLLECTION },
     { color: '#94a3b8', label: STOP_STATUS_LABELS.EMPTY_STOP },
     { color: '#eab308', label: STOP_STATUS_LABELS.COLLECTION_REPORTED },
@@ -279,7 +334,6 @@ function RouteOverlay({ children, visible, onClose }) {
         alignItems: 'center', justifyContent: 'flex-end',
       }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
-        <Navbar />
       </div>
       <div
         onClick={e => e.stopPropagation()}
@@ -308,6 +362,7 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
   const { user } = useAuth()
   const isOnline = useOnline()
   const proofQueue = getQueue('proof_submissions')
+  const { notify } = useNotification()
 
   useEffect(() => {
     if (!visible) {
@@ -378,12 +433,18 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
           sessionStorage.setItem('ww_pending_collection_photo_url', res.data?.photo_url || '')
           sessionStorage.setItem('ww_pending_collection_note', note_)
           sessionStorage.setItem('ww_pending_collection_at', collected_at)
+          let missedStopResolved = true
           // If collecting a missed stop, also call the resolve endpoint
           if (missedStopId) {
-            try { await api.post(`/api/driver/shift/missed-stops/${missedStopId}/collect/`) } catch { /* non-fatal */ }
+            try {
+              await api.post(`/api/driver/shift/missed-stops/${missedStopId}/collect/`)
+            } catch {
+              missedStopResolved = false
+              notify({ variant: 'warning', message: 'Photo saved, but failed to mark missed stop as resolved. Please retry later.' })
+            }
           }
           setSubmitting(false)
-          onConfirm()
+          onConfirm(missedStopResolved)
           return
         } catch (netErr) {
           const isNetworkErr = !netErr?.response
@@ -408,7 +469,7 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
       sessionStorage.setItem('ww_pending_collection_note', note_)
       sessionStorage.setItem('ww_pending_collection_at', collected_at)
       setSubmitting(false)
-      onConfirm()
+      onConfirm(missedStopId ? false : true)
     } catch (err) {
       setCameraError(err?.response?.data?.error || err?.message || 'Proof photo upload failed.')
       setSubmitting(false)
@@ -512,8 +573,24 @@ function ArrivedOverlay({ visible, currentStop, stopIndex, gpsPos, scheduleId, o
                 letterSpacing: '.06em', cursor: submitting || photos.length === 0 ? 'not-allowed' : 'pointer',
                 boxShadow: submitting || photos.length === 0 ? 'none' : '0 6px 20px rgba(15,23,42,0.3)',
                 transition: 'all .2s',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
               }}>
-                {submitting ? 'Saving…' : photos.length === 0 ? '📷 Take a photo first' : '✓ Confirm Collection'}
+                {submitting ? (
+                  'Saving…'
+                ) : photos.length === 0 ? (
+                  <>
+                    <Camera size={18} />
+                    <span>Take a photo first</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={18} />
+                    <span>Confirm Collection</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -781,9 +858,11 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
   const gpsPos = mockGps || realGpsPos
   const isMock = mockGps !== null
 
+  const viewportRef = useRef(null)
   const mapRef = useRef(null)
   const mapInstance = useRef(null)
   const driverMarker = useRef(null)
+  const navCameraRef = useRef(null)
   const routeLayer = useRef(null)
   const [mapReady, setMapReady] = useState(false)
 
@@ -797,6 +876,19 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
   const [leafletReady, setLeafletReady] = useState(false)
   const [schedule, setSchedule] = useState(null)
   const [mapLoading, setMapLoading] = useState(true)
+
+  // Stage 2B: Vehicle avatar mode ('sprite-topdown' | 'svg')
+  const [markerAvatarMode, setMarkerAvatarMode] = useState('sprite-topdown')
+  const resolvedHeadingRef = useRef(null)
+
+  const getVehicleMarkerIcon = (L, heading, is3DMode, mapHdg) => {
+    if (markerAvatarMode === 'svg') {
+      return create3DVehicleIcon(L, heading, is3DMode, mapHdg)
+    }
+    return createTruckSpriteIcon(L, heading, is3DMode, mapHdg, {
+      useChaseIn3D: false, // Standardize on top-down sprite for Stage 2B to prevent cornering roll
+    })
+  }
 
   // Guard: if the driver has an active shift on a DIFFERENT route than the
   // one this module just loaded, don't let them silently work the wrong route.
@@ -820,6 +912,27 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
   const prevStopIndexRef = useRef(currentStopIndex)
 
   const [stopStatuses, setStopStatuses] = useState(restoreStopStatuses)
+  const [is3D, setIs3D] = useState(false)
+  const [mapHeading, setMapHeading] = useState(0)
+  const prevGpsPosRef = useRef(null)
+  const isFollowCamRef = useRef(true)
+  const [isUserPanned, setIsUserPanned] = useState(false)
+  const [isRetracted, setIsRetracted] = useState(false)
+  const [isTurnCardCollapsed, setIsTurnCardCollapsed] = useState(false)
+  const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false)
+  const [show3DPreview, setShow3DPreview] = useState(false)
+
+  const toggleRetract = () => {
+    setIsRetracted(prev => {
+      const next = !prev
+      setIsHeaderCollapsed(next)
+      return next
+    })
+  }
+
+  const toggleHeader = () => {
+    setIsHeaderCollapsed(prev => !prev)
+  }
 
   // ── Reactive route-completion catcher ────────────────────────────────────
   // Fires after BOTH of these are true:
@@ -870,7 +983,7 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     }
     hasAutoEndedRef.current = true
     sessionStorage.setItem('ww_route_complete', 'true')
-    try { sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...stopStatuses])) } catch {}
+    try { sessionStorage.setItem('ww_stop_statuses_snapshot', JSON.stringify([...stopStatuses])) } catch { }
     // Use setTimeout to let current React render cycle finish before transitioning
     setTimeout(() => handleEndShift(), 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -897,6 +1010,18 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
   const cachedLegLayersRef = useRef([])
   // Camera-authority flag: true while next stop is >800m away (Fix 5)
   const isFarModeRef = useRef(false)
+  // Base tile layer ref for switching between Default and Satellite
+  const baseTileLayerRef = useRef(null)
+  const [mapType, setMapType] = useState(() => localStorage.getItem('ww_map_type') || 'default')
+
+  const toggleMapType = () => {
+    setMapType(prev => {
+      const next = prev === 'default' ? 'satellite' : 'default'
+      localStorage.setItem('ww_map_type', next)
+      return next
+    })
+  }
+
   // Track online status for auto-retry
   const [isOnline, setIsOnline] = useState(() => navigator.onLine)
 
@@ -929,7 +1054,7 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
       })
     }
     setActiveMissedStop(best)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floatingMissedStops, isExtendedMode])
 
   useEffect(() => {
@@ -972,8 +1097,13 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
 
   const waypoints = localWaypoints
 
-  const targetWp = waypoints[currentStopIndex] || null
-  const currentTarget = activeMissedStop || targetWp
+  const resolvedNavTarget = resolveActiveNavTarget({
+    waypoints,
+    currentStopIndex,
+    stopStatuses,
+    activeMissedStop,
+  })
+  const currentTarget = resolvedNavTarget.targetWp
   const nextTarget = waypoints[currentStopIndex + 1] || null
 
   const distanceToStop = gpsPos && currentTarget
@@ -981,6 +1111,60 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     : null
 
   const isNearDestination = distanceToStop != null && distanceToStop <= ARRIVAL_RADIUS_M
+
+  // Track heading & course angle for Google Maps style Course-Up navigation
+  useEffect(() => {
+    if (!gpsPos) return
+    let newHeading = null
+
+    // 1. Valid hardware GPS heading: [0, 360) where 0 is True North
+    const hasValidGpsHeading =
+      typeof gpsPos.heading === 'number' &&
+      !Number.isNaN(gpsPos.heading) &&
+      gpsPos.heading >= 0 &&
+      gpsPos.heading < 360
+
+    if (hasValidGpsHeading) {
+      newHeading = gpsPos.heading
+    } else if (prevGpsPosRef.current) {
+      const dist = haversineDistance(prevGpsPosRef.current.lat, prevGpsPosRef.current.lng, gpsPos.lat, gpsPos.lng)
+      if (dist >= 1.5) {
+        newHeading = calculateBearing(prevGpsPosRef.current.lat, prevGpsPosRef.current.lng, gpsPos.lat, gpsPos.lng)
+      }
+    }
+
+    // 2. Initial startup fallback: only query route geometry or currentTarget if we have NEVER established a heading yet.
+    // If vehicle is stationary and already had an established heading, keep the existing heading to avoid sudden flips.
+    if (newHeading == null && resolvedHeadingRef.current == null) {
+      if (orsData?.geometry) {
+        try {
+          const pts = decodePolyline(orsData.geometry)
+          if (pts.length >= 2) {
+            newHeading = calculateBearing(pts[0][0], pts[0][1], pts[1][0], pts[1][1])
+          }
+        } catch { }
+      }
+
+      const orsStepBearing = orsData?.segments?.[0]?.steps?.[0]?.bearing_after
+      if (newHeading == null && orsStepBearing != null && !Number.isNaN(orsStepBearing)) {
+        newHeading = orsStepBearing
+      } else if (newHeading == null && currentTarget) {
+        const distToCurrent = haversineDistance(gpsPos.lat, gpsPos.lng, currentTarget.lat, currentTarget.lng)
+        if (distToCurrent < 15 && nextTarget) {
+          newHeading = calculateBearing(gpsPos.lat, gpsPos.lng, nextTarget.lat, nextTarget.lng)
+        } else {
+          newHeading = calculateBearing(gpsPos.lat, gpsPos.lng, currentTarget.lat, currentTarget.lng)
+        }
+      }
+    }
+
+    if (newHeading != null) {
+      const unwrapped = getShortestAngle(resolvedHeadingRef.current ?? newHeading, newHeading)
+      resolvedHeadingRef.current = unwrapped
+      setMapHeading(unwrapped)
+    }
+    prevGpsPosRef.current = gpsPos
+  }, [gpsPos, currentTarget, nextTarget, orsData])
 
   useEffect(() => { persistStopStatuses(stopStatuses) }, [stopStatuses])
 
@@ -1005,11 +1189,7 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
       api.get('/api/driver/stops/current/').catch(() => ({ data: null })),
       api.get(`/api/watcher/stop-validations/?schedule_id=${encodeURIComponent(scheduleId)}`).catch(() => ({ data: null })),
     ])
-    const nextStopIndex = Number(currentRes.data?.order)
-    if (Number.isInteger(nextStopIndex) && nextStopIndex > 0) {
-      setCurrentStopIndex(nextStopIndex)
-      sessionStorage.setItem('ww_current_stop_index', String(nextStopIndex))
-    }
+    const serverStopIndex = Number(currentRes.data?.order)
     const rows = validationRes.data?.results ?? validationRes.data ?? []
     const snapshot = buildStopValidationSnapshot(rows)
 
@@ -1022,6 +1202,28 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
       }
     })
 
+    // Dynamic routing: keep the active target while it is still routable; once it
+    // is resolved, pick the nearest remaining routable stop from the live GPS fix
+    // (server order is only a fallback when there is no GPS).
+    {
+      const stored = parseInt(sessionStorage.getItem('ww_current_stop_index') || '1', 10)
+      const statusByIdx = new Map()
+      snapshot.statusMap.forEach((st, key) => {
+        const o = Number(String(key).split(':')[1])
+        if (!Number.isNaN(o)) statusByIdx.set(o, st)
+      })
+      if (!isRoutableStopStatus(getResolvedStopStatus(statusByIdx, stored))) {
+        const gps = gpsPosRef.current
+        let pick = pickNearestRoutableIndex({
+          waypoints: schedule?.waypoints, stopStatuses: statusByIdx, gps, excludeIndex: stored,
+        })
+        if (pick == null && !gps && Number.isInteger(serverStopIndex) && serverStopIndex > 0) pick = serverStopIndex
+        if (pick != null && pick !== stored) {
+          setCurrentStopIndex(pick)
+          sessionStorage.setItem('ww_current_stop_index', String(pick))
+        }
+      }
+    }
     setStopDetailsMap(snapshot.detailsMap)
     stopDetailsMapRef.current = snapshot.detailsMap
     setStopStatuses(prev => {
@@ -1043,8 +1245,9 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     const details = detailsOverride ?? stopDetailsMapRef.current.get(`${schedule?.id}:${wpIndex}`)
     const isActive = wpIndex === currentStopIndex && isRoutableStopStatus(safeStatus)
     const colorEntry = STOP_COLORS[safeStatus] || STOP_COLORS.PENDING_INSPECTION
+    const isSatellite = mapType === 'satellite'
     marker.setIcon(window.L.divIcon({
-      html: stopMarkerHTML(wpIndex, safeStatus, details, isActive),
+      html: stopMarkerHTML(wpIndex, safeStatus, details, isActive, isSatellite),
       className: 'ww-stop-div-icon',
       iconSize: isActive ? [28, 28] : [24, 24],
       iconAnchor: isActive ? [14, 14] : [12, 12],
@@ -1058,7 +1261,7 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
       <div style="font-size:11px;color:#64748b;margin-top:2px;">Truck: ${details?.truck || schedule?.truck_plate || 'Unknown'}</div>
     `
     marker.getPopup()?.setContent(popupHtml)
-  }, [waypoints, schedule, currentStopIndex])
+  }, [waypoints, schedule, currentStopIndex, mapType])
 
   useEffect(() => {
     if (!window.L || stopMarkersRef.current.size === 0) return
@@ -1086,9 +1289,13 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
   useEffect(() => {
     if (!user?.id) return
     setMapLoading(true)
-    api.get('/api/driver/collection-schedules/')
+    api.get('/api/driver/collection-schedules/?paginate=false')
       .then(async res => {
-        const match = res.data.find(s => String(s.driver) === String(user.id))
+        const match = resolveDriverSchedule(
+          res.data,
+          user.id,
+          activeScheduleId ?? shift?.schedule_id ?? shift?.schedule ?? null
+        )
         setSchedule(match || null)
         const currentStopRes = await api.get('/api/driver/stops/current/').catch(() => ({ data: null }))
         const backendIndex = Number(currentStopRes.data?.order)
@@ -1145,17 +1352,35 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     const pos = gpsPosRef.current
     const map = L.map(mapRef.current, {
       center: pos ? [pos.lat, pos.lng] : [13.9373, 121.617],
-      zoom: 15,
+      zoom: 17.5,
       zoomControl: false,
     })
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap', maxZoom: 19,
-    }).addTo(map)
+    applyMapTileLayer(map, mapType, baseTileLayerRef)
+
+    // User drag / zoom listener: pause auto follow-cam so user can freely explore
+    const pauseFollow = () => {
+      isFollowCamRef.current = false
+      setIsUserPanned(true)
+    }
+    map.on('dragstart zoomstart movestart', (e) => {
+      if (e.originalEvent || e.type === 'dragstart' || e.type === 'zoomstart') {
+        pauseFollow()
+      }
+    })
+
     mapInstance.current = map
     setMapReady(true)
     setTimeout(() => map.invalidateSize(), 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leafletReady, schedule])
+
+  useEffect(() => {
+    if (!leafletReady || !mapInstance.current) return
+    applyMapTileLayer(mapInstance.current, mapType, baseTileLayerRef)
+    stopMarkersRef.current.forEach((_, wpIndex) => {
+      repaintMarker(wpIndex, getStopStatus(wpIndex))
+    })
+  }, [mapType, leafletReady, repaintMarker, getStopStatus])
 
 
   // ── Online / offline listener — triggers ORS retry on reconnect ─────────
@@ -1170,25 +1395,15 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     }
   }, [])
 
-  // GPS-movement-triggered ORS re-fetch
-  // Fires whenever gpsPos changes; if the driver has moved >10m from the
-  // last position used for an ORS fetch, bump orsFetchKey to re-fetch.
-  // This guarantees the first real GPS fix always triggers a route draw.
+  // GPS fix forwarding to RouteRequestManager for local progress tracking and off-route detection
   useEffect(() => {
     if (!gpsPos) return
-    const last = lastOrsGpsPosRef.current
-    if (!last) {
-      // First fix — always trigger
-      lastOrsGpsPosRef.current = gpsPos
-      setOrsFetchKey(k => k + 1)
-      return
-    }
-    const moved = haversineDistance(last.lat, last.lng, gpsPos.lat, gpsPos.lng)
-    if (moved > 10) {
-      lastOrsGpsPosRef.current = gpsPos
-      setOrsFetchKey(k => k + 1)
-    }
-  }, [gpsPos])
+    routeManagerRef.current?.handleGpsUpdate(
+      gpsPos,
+      isMock ? null : gpsAccuracy,
+      { isMock }
+    )
+  }, [gpsPos, gpsAccuracy, isMock])
   // ── FIX 4: Driver marker creation is now DECOUPLED from map init. ─────────
   // This effect waits until BOTH mapInstance.current and gpsPos are non-null
   // before creating the marker. If gpsPos arrives after the map, the marker
@@ -1204,48 +1419,40 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
       ? [pos.lat, pos.lng]
       : mapInstance.current.getCenter()
 
-    const heading = pos?.heading ?? 0
-
-    const truckIconHtml = (deg) => `
-      <div style="
-        width:32px;height:32px;
-        transform:rotate(${deg}deg);
-        transition:transform 0.6s ease;
-        filter:drop-shadow(0 3px 8px rgba(37,99,235,0.7));
-      ">
-        <svg viewBox="0 0 32 32" width="32" height="32" xmlns="http://www.w3.org/2000/svg">
-          <!-- Truck body -->
-          <rect x="6" y="10" width="20" height="14" rx="3" fill="#1d4ed8" stroke="white" stroke-width="1.5"/>
-          <!-- Cab -->
-          <rect x="14" y="6" width="12" height="10" rx="2" fill="#2563eb" stroke="white" stroke-width="1.2"/>
-          <!-- Windshield -->
-          <rect x="15" y="7.5" width="9" height="5" rx="1" fill="rgba(186,230,253,0.85)"/>
-          <!-- Wheels -->
-          <circle cx="10" cy="24" r="3" fill="#1e293b" stroke="white" stroke-width="1"/>
-          <circle cx="22" cy="24" r="3" fill="#1e293b" stroke="white" stroke-width="1"/>
-          <!-- Direction arrow on top -->
-          <polygon points="16,2 13.5,6.5 18.5,6.5" fill="#60a5fa"/>
-        </svg>
-      </div>`
-
-    const driverIcon = L.divIcon({
-      html: truckIconHtml(heading),
-      className: '',
-      iconSize: [32, 32],
-      iconAnchor: [16, 16],
-    })
+    const heading = resolvedHeadingRef.current ?? pos?.heading ?? mapHeading ?? 0
+    const driverIcon = getVehicleMarkerIcon(L, heading, is3D, mapHeading)
 
     driverMarker.current = L.marker(startPos, {
       icon: driverIcon,
       zIndexOffset: 1000,
     }).addTo(mapInstance.current)
 
-    // Store truck icon factory on ref so move effect can update rotation
-    driverMarker.current._truckIconHtml = truckIconHtml
-
-    // Pan to the real GPS position immediately on first fix.
+    // Pan to the real GPS position immediately on first fix at close-up street level
     if (pos && routeState === 'navigating') {
-      mapInstance.current.panTo([pos.lat, pos.lng])
+      mapInstance.current.setView([pos.lat, pos.lng], is3D ? 18 : 17.5)
+    }
+
+    // Initialize unified NavCamera controller
+    if (!navCameraRef.current && viewportRef.current && mapRef.current) {
+      navCameraRef.current = new NavCamera({
+        viewportEl: viewportRef.current,
+        mapEl: mapRef.current,
+        getMap: () => mapInstance.current,
+        getMarker: () => driverMarker.current,
+        onModeChange: (mode) => {
+          if (mode === '2D') {
+            setIs3D(false)
+          }
+        },
+      })
+      if (pos) {
+        navCameraRef.current.setTargetPosition(pos.lat, pos.lng)
+      }
+      navCameraRef.current.setTargetHeading(heading)
+      const initialMode = navCameraRef.current.setMode(is3D ? '3D' : '2D')
+      if (is3D && initialMode !== '3D') {
+        setIs3D(false)
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leafletReady, gpsPos, mapReady])
@@ -1266,7 +1473,7 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
       const colorEntry = STOP_COLORS[safeStatus] || STOP_COLORS.PENDING_INSPECTION
       const displayColor = safeStatus === 'PENDING_INSPECTION' ? '#94a3b8' : colorEntry.bg
       const icon = L.divIcon({
-        html: stopMarkerHTML(wpIndex, status, details, isActive),
+        html: stopMarkerHTML(wpIndex, status, details, isActive, mapType === 'satellite'),
         className: 'ww-stop-div-icon',
         iconSize: isActive ? [28, 28] : [24, 24],
         iconAnchor: isActive ? [14, 14] : [12, 12],
@@ -1286,7 +1493,7 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
       stopMarkersRef.current.set(wpIndex, marker)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schedule, mapReady])
+  }, [schedule, mapReady, mapType])
 
   // 3c. Floating missed-stop markers (reassigned from other routes)
   useEffect(() => {
@@ -1335,25 +1542,19 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
 
   // ── Helper: build the ordered coordinate list for ORS / fallback ─────────
   const buildRouteCoords = useCallback(() => {
-    const startLng = Number(gpsPos?.lng ?? waypoints[0]?.lng ?? 121.617)
-    const startLat = Number(gpsPos?.lat ?? waypoints[0]?.lat ?? 13.9373)
+    const startLng = Number(gpsPosRef.current?.lng ?? waypoints[0]?.lng ?? 121.617)
+    const startLat = Number(gpsPosRef.current?.lat ?? waypoints[0]?.lat ?? 13.9373)
     if (activeMissedStop) {
       const target = [Number(activeMissedStop.lng), Number(activeMissedStop.lat)]
       return { startLat, startLng, remaining: [target], orsCoords: [[startLng, startLat], target] }
     }
-    const routableFromCurrent = getRoutableIndices().filter(idx => idx >= currentStopIndex)
-    const remaining = routableFromCurrent
-      .slice(0, 40)
-      .filter(idx => waypoints[idx] && waypoints[idx].lat != null && waypoints[idx].lng != null)
-      .map(idx => {
-        const wp = waypoints[idx]
-        return [Number(wp.lng), Number(wp.lat)]
-      })
-
-    const target = remaining[0]
-    const orsCoords = target ? [[startLng, startLat], target] : [[startLng, startLat]]
-    return { startLat, startLng, remaining, orsCoords }
-  }, [gpsPos, waypoints, getRoutableIndices, currentStopIndex, activeMissedStop])
+    if (!resolvedNavTarget.hasValidCoords || !resolvedNavTarget.coords) {
+      return { startLat, startLng, remaining: [], orsCoords: [[startLng, startLat]] }
+    }
+    const target = resolvedNavTarget.coords
+    const orsCoords = [[startLng, startLat], target]
+    return { startLat, startLng, remaining: [target], orsCoords }
+  }, [waypoints, activeMissedStop, resolvedNavTarget])
 
   // ── Shared traversal: the physical stop sequence from currentTarget onward,
   // regardless of watcher/validation status. Used by BOTH the leg pre-cache
@@ -1395,8 +1596,8 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
       fallbackRouteLayer.current = null
     }
 
-    const driverLat = gpsPos?.lat ?? waypoints[0]?.lat ?? 13.9373
-    const driverLng = gpsPos?.lng ?? waypoints[0]?.lng ?? 121.617
+    const driverLat = gpsPosRef.current?.lat ?? waypoints[0]?.lat ?? 13.9373
+    const driverLng = gpsPosRef.current?.lng ?? waypoints[0]?.lng ?? 121.617
 
     // ── Leg 0: GPS → currentTarget ────────────────────────────────────────────
     if (currentTarget) {
@@ -1434,136 +1635,72 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
         cachedLegLayersRef.current.push(layer)
       }
     }
-  }, [mapReady, currentStopIndex, currentTarget, gpsPos, waypoints, getAheadSequence])
+  }, [mapReady, currentStopIndex, currentTarget, waypoints, getAheadSequence])
 
 
-  // 4a. ORS directions — reactive current-leg (GPS → currentTarget)
+  // ── 4a. RouteRequestManager Integration ────────────────────────────────────
   //
-  // Draws all legs from current cache state first (via drawAllLegs), so the
-  // driver always sees something. Fetches real ORS for the current leg and
-  // upgrades the dashed fallback to a solid line once it lands.
+  // Manages single-flight ORS route requests, target caching, auto-reroute cooldown,
+  // exponential backoff with jitter, and 10s-paced background pre-caching.
   //
-  // lastOrsGeometryRef is TARGET-KEYED: { key: "lat,lng", geometry }.
-  // drawAllLegs only draws the cached geometry if its key matches the current
-  // target — preventing stale routes from a previous leg being redrawn (Fix 1).
+  // Binding Owner Decision A1: If resolvedNavTarget.isRoutable is false, route
+  // requests are suppressed; fallback geometry remains visible.
+  const routeManagerRef = useRef(null)
+  const drawAllLegsRef = useRef(drawAllLegs)
+  useLayoutEffect(() => {
+    drawAllLegsRef.current = drawAllLegs
+  })
+
   useEffect(() => {
-    if (!currentTarget || !mapReady) return
-
-    drawAllLegs() // draw all legs from cache; current leg: dashed until ORS lands
-
-    const orsApiKey = import.meta.env.VITE_ORS_API_KEY
-    if (!orsApiKey) return          // no key — dashed fallback is the only route
-    if (!isOnline) return           // offline — 4c hydration handles restore
-
-    const { orsCoords } = buildRouteCoords()
-    if (orsCoords.length < 2) return
-
-    if (orsRetryTimerRef.current) { clearTimeout(orsRetryTimerRef.current); orsRetryTimerRef.current = null }
-
-    const targetKey = `${currentTarget.lat},${currentTarget.lng}`
-    let cancelled = false
-    let attempt = 0
-    const MAX_ATTEMPTS = 3
-    const BASE_DELAY_MS = 2000
-
-    async function attemptFetch() {
-      if (cancelled) return
-      try {
-        const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
-          method: 'POST',
-          headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: orsApiKey },
-          body: JSON.stringify({ coordinates: orsCoords, instructions: true }),
-        })
-        if (cancelled) return
-        if (!res.ok) throw new Error(`ORS HTTP ${res.status}`)
-        const data = await res.json()
-        if (cancelled) return
-        if (!data.routes?.length) {
-          console.warn('[ORS] No routes returned — dashed fallback remains')
-          return // drawAllLegs already drew the dashed fallback at effect start
-        }
-        const route = data.routes[0]
-        setOrsData(route)
-        // Store with target key — prevents stale re-draw on the next effect run (Fix 1)
-        lastOrsGeometryRef.current = { key: targetKey, geometry: route.geometry }
-        // Persist for offline restore — target-keyed to prevent wrong-leg hydration on reload (Fix 3)
-        try { sessionStorage.setItem('ww_ors_route', JSON.stringify({ key: targetKey, geometry: route.geometry })) } catch { }
-        drawAllLegs() // upgrade current-leg dashed → solid
-      } catch (err) {
-        if (cancelled) return
-        attempt += 1
-        console.warn(`[ORS] Fetch failed (attempt ${attempt}/${MAX_ATTEMPTS}):`, err.message)
-        if (attempt < MAX_ATTEMPTS && navigator.onLine) {
-          const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          orsRetryTimerRef.current = setTimeout(() => { if (!cancelled) attemptFetch() }, delay)
-        } else {
-          console.warn('[ORS] Max retries reached — dashed fallback remains')
-        }
-      }
-    }
-
-    attemptFetch()
-
-    return () => {
-      cancelled = true
-      if (orsRetryTimerRef.current) { clearTimeout(orsRetryTimerRef.current); orsRetryTimerRef.current = null }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orsFetchKey, currentTarget?.lat, currentTarget?.lng, currentStopIndex, mapReady, isOnline, drawAllLegs])
-
-  // 4b. Background pre-cache: fetch all remaining stop→stop legs while online.
-  //
-  // Only covers fixed stop→stop pairs (both endpoints stable coordinates).
-  // The GPS→currentTarget leg (leg 0) stays reactive in 4a — it’s GPS-anchored
-  // and changes too frequently to be a stable cache key.
-  // Sequential fetch with 300ms gap avoids ORS rate-limiting.
-  // Each successful leg is persisted immediately so a page refresh restores it.
-  useEffect(() => {
-    if (!isOnline || !schedule?.id || !mapReady) return
     const orsApiKey = import.meta.env.VITE_ORS_API_KEY
     if (!orsApiKey) return
 
-    const ahead = getAheadSequence()
-    if (ahead.length < 2) return
+    const manager = new RouteRequestManager({
+      apiKey: orsApiKey,
+      initialGps: gpsPosRef.current || gpsPos,
+      initialAccuracy: isMock ? null : gpsAccuracy,
+      initialIsMock: isMock,
+      initialIsOnline: isOnline,
+      initialTarget: mapReady ? resolvedNavTarget : null,
+      onRouteSuccess: ({ route, target }) => {
+        setOrsData(route)
+        if (target?.targetKey) {
+          lastOrsGeometryRef.current = { key: target.targetKey, geometry: route.geometry }
+        }
+        drawAllLegsRef.current?.()
+      },
+      onPrecacheSuccess: ({ legKey, route }) => {
+        routeLegCacheRef.current.set(legKey, { geometry: route.geometry })
+        drawAllLegsRef.current?.()
+      },
+      onRouteError: (err) => {
+        console.warn('[RouteManager] Request failed:', err.error?.message)
+      },
+    })
+    routeManagerRef.current = manager
 
-    let cancelled = false
-
-    async function cacheLeg(fromIdx, toIdx) {
-      const legKey = `${fromIdx}-${toIdx}`
-      if (routeLegCacheRef.current.has(legKey)) return // already cached
-      const fromWp = waypoints[fromIdx]
-      const toWp = waypoints[toIdx]
-      if (!fromWp || !toWp) return
-      try {
-        const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
-          method: 'POST',
-          headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: orsApiKey },
-          body: JSON.stringify({
-            coordinates: [[Number(fromWp.lng), Number(fromWp.lat)], [Number(toWp.lng), Number(toWp.lat)]],
-            instructions: false,
-          }),
-        })
-        if (cancelled || !res.ok) return
-        const data = await res.json()
-        if (cancelled || !data.routes?.length) return
-        routeLegCacheRef.current.set(legKey, { geometry: data.routes[0].geometry })
-        try { sessionStorage.setItem('ww_ors_route_cache', JSON.stringify([...routeLegCacheRef.current])) } catch {}
-        drawAllLegs() // upgrade dashed → solid as each leg becomes available
-      } catch { /* skip failed legs — they stay dashed */ }
+    return () => {
+      manager.destroy()
+      routeManagerRef.current = null
     }
+  }, []) // Stable manager lifecycle: mounted component lifecycle
 
-    async function cacheAllLegs() {
-      for (let i = 0; i < ahead.length - 1; i++) {
-        if (cancelled) return
-        await cacheLeg(ahead[i].idx, ahead[i + 1].idx)
-        if (!cancelled) await new Promise(r => setTimeout(r, 300))
-      }
-    }
+  // Sync online status to RouteRequestManager
+  useEffect(() => {
+    routeManagerRef.current?.setOnline(isOnline)
+  }, [isOnline])
 
-    cacheAllLegs()
-    return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOnline, schedule?.id, mapReady, currentStopIndex, currentTarget])
+  // Sync active navigation target to RouteRequestManager
+  useEffect(() => {
+    if (!mapReady) return
+    routeManagerRef.current?.setTarget(resolvedNavTarget)
+  }, [resolvedNavTarget.targetId, resolvedNavTarget.targetKey, resolvedNavTarget.isRoutable, mapReady])
+
+  // Sync upcoming legs to pre-cache queue
+  useEffect(() => {
+    if (!schedule?.id || !mapReady || !isOnline) return
+    routeManagerRef.current?.updatePrecacheSequence(waypoints, currentStopIndex)
+  }, [schedule?.id, mapReady, isOnline, currentStopIndex, waypoints])
 
   // 4c. Hydrate current-leg geometry from sessionStorage after currentTarget resolves.
   //
@@ -1584,55 +1721,66 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTarget?.lat, currentTarget?.lng, mapReady, drawAllLegs])
 
-  // 5. Move driver marker — runs every time gpsPos updates.
-  //
-  // Camera authority (only while 'navigating'):
-  //   dist > 800m, not already in far-mode  → fitBounds(driver + target) ONCE
-  //   dist ≤ 800m (or no target)            → panTo follow-cam on every tick
-  //   dist > 800m, already in far-mode      → do nothing (respect driver’s manual pan)
+  // 5a. Move driver marker coordinate — runs on gpsPos updates (zero icon recreation, zero layout thrashing)
   useEffect(() => {
-    if (!gpsPos) return
-    if (!mapInstance.current || !window.L) return
+    if (!gpsPos || !driverMarker.current) return
+    driverMarker.current.setLatLng([gpsPos.lat, gpsPos.lng])
 
-    if (driverMarker.current) {
-      driverMarker.current.setLatLng([gpsPos.lat, gpsPos.lng])
-      if (driverMarker.current._truckIconHtml && window.L) {
-        const heading = gpsPos.heading ?? 0
-        driverMarker.current.setIcon(window.L.divIcon({
-          html: driverMarker.current._truckIconHtml(heading),
-          className: '',
-          iconSize: [32, 32],
-          iconAnchor: [16, 16],
-        }))
+    // Only auto-pan camera if user hasn't panned away
+    if (routeState === 'navigating' && isFollowCamRef.current && mapInstance.current) {
+      if (!navCameraRef.current || navCameraRef.current.mode === '2D') {
+        mapInstance.current.panTo([gpsPos.lat, gpsPos.lng], { animate: true, duration: 0.4 })
       }
     }
-
-    if (routeState === 'navigating') {
-      const dist = currentTarget
-        ? haversineDistance(gpsPos.lat, gpsPos.lng, currentTarget.lat, currentTarget.lng)
-        : 0
-
-      const wasFar = isFarModeRef.current
-      const isFar = dist > 800
-
-      if (isFar && !wasFar) {
-        // Just crossed the far threshold — fit both driver and target into view once
-        isFarModeRef.current = true
-        mapInstance.current.fitBounds(
-          [[gpsPos.lat, gpsPos.lng], [currentTarget.lat, currentTarget.lng]],
-          { padding: [60, 60], maxZoom: 16 }
-        )
-      } else if (!isFar) {
-        // Normal range — follow-cam on every GPS tick
-        isFarModeRef.current = false
-        mapInstance.current.panTo([gpsPos.lat, gpsPos.lng])
-      }
-      // else: isFar && wasFar — already zoomed out, leave camera alone
+    if (navCameraRef.current) {
+      navCameraRef.current.follow = isFollowCamRef.current
+      navCameraRef.current.setTargetPosition(gpsPos.lat, gpsPos.lng)
     }
-  }, [gpsPos, routeState, currentTarget])
+  }, [gpsPos, routeState])
+
+  // 5b. Update driver marker icon ONLY when visual representation actually changes
+  // Mode/avatar toggles reconstruct icon; continuous heading is driven by NavCamera's rAF loop
+  const lastIconStateRef = useRef({ heading: null, is3D: null, avatarMode: null })
+  useEffect(() => {
+    if (!driverMarker.current || !window.L) return
+
+    const currentHeading = resolvedHeadingRef.current ?? mapHeading ?? 0
+    const prev = lastIconStateRef.current
+
+    const modeChanged = prev.is3D !== is3D
+    const avatarChanged = prev.avatarMode !== markerAvatarMode
+    const headingChanged = prev.heading == null || Math.abs(currentHeading - prev.heading) >= 0.5
+
+    if (modeChanged || avatarChanged) {
+      lastIconStateRef.current = {
+        heading: currentHeading,
+        is3D,
+        avatarMode: markerAvatarMode,
+      }
+      driverMarker.current.setIcon(getVehicleMarkerIcon(window.L, currentHeading, is3D, mapHeading))
+    }
+
+    if (navCameraRef.current) {
+      navCameraRef.current.setTargetHeading(currentHeading)
+      navCameraRef.current.apply()
+    } else if (headingChanged) {
+      const el = driverMarker.current.getElement()
+      const wrapper = el?.querySelector('.ww-truck-sprite-wrapper') || el?.querySelector('.ww-3d-truck-wrapper')
+      if (wrapper) {
+        wrapper.style.transform = `rotate(${currentHeading}deg)`
+      }
+    }
+  }, [mapHeading, is3D, markerAvatarMode])
+
+  // 5c. Mode synchronization: removed duplicate setMode() call;
+  // the explicit toggle handler (handleToggle3D) is the single authority for NavCamera.setMode().
 
   // 6. Cleanup
   useEffect(() => () => {
+    if (navCameraRef.current) {
+      navCameraRef.current.destroy()
+      navCameraRef.current = null
+    }
     if (orsRetryTimerRef.current) clearTimeout(orsRetryTimerRef.current)
     cachedLegLayersRef.current.forEach(layer => {
       try { mapInstance.current?.removeLayer(layer) } catch { }
@@ -1658,6 +1806,25 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     setMockGps(null)
     setOrsFetchKey(k => k + 1)
   }, [])
+
+  // Stage 2D-B2: Explicit 2D/3D camera mode toggle (single authority for NavCamera.setMode)
+  const handleToggle3D = useCallback(() => {
+    isFollowCamRef.current = true
+    setIsUserPanned(false)
+
+    if (navCameraRef.current) {
+      navCameraRef.current.follow = true
+      const targetMode = (navCameraRef.current.mode === '3D' || is3D) ? '2D' : '3D'
+      const actualMode = navCameraRef.current.setMode(targetMode)
+      setIs3D(actualMode === '3D')
+    } else {
+      if (mapInstance.current && gpsPos) {
+        mapInstance.current.setView([gpsPos.lat, gpsPos.lng], 17.5, { animate: true })
+        setTimeout(() => mapInstance.current?.invalidateSize(), 300)
+      }
+      setIs3D(false)
+    }
+  }, [is3D, gpsPos])
 
   const markRemainingMissed = useCallback((fromIndex) => {
     setStopStatuses(prev => {
@@ -1715,16 +1882,19 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
     }
   }
 
-  function handleCollectionConfirmed() {
+  function handleCollectionConfirmed(missedStopResolved = true) {
     if (activeMissedStop) {
-      // Missed stop: show a toast, remove from floating list, clear active target
-      notify({ variant: 'success', message: `🎯 Missed stop collected! +50 pts` })
-      
-      // Update local storage so the dashboard immediately shows the new count
-      const localCount = parseInt(sessionStorage.getItem('ww_missed_stops_collected') || '0', 10)
-      sessionStorage.setItem('ww_missed_stops_collected', String(localCount + 1))
-      
-      setFloatingMissedStops(prev => prev.filter(s => s.id !== activeMissedStop.id))
+      if (missedStopResolved) {
+        // Missed stop: show a toast, remove from floating list, clear active target
+        notify({ variant: 'success', message: `🎯 Missed stop collected! +50 pts` })
+
+        // Update local storage so the dashboard immediately shows the new count
+        const localCount = parseInt(sessionStorage.getItem('ww_missed_stops_collected') || '0', 10)
+        sessionStorage.setItem('ww_missed_stops_collected', String(localCount + 1))
+
+        setFloatingMissedStops(prev => prev.filter(s => s.id !== activeMissedStop.id))
+      }
+      // Either way, stop targeting it — the poller will re-surface it if still PENDING
       setActiveMissedStop(null)
       setRouteState('navigating')
       return
@@ -1775,9 +1945,14 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
   }
 
   function handleNextStop() {
-    const routable = getRoutableIndices()
-    const pos = routable.indexOf(currentStopIndex)
-    const nextIndex = pos >= 0 && pos < routable.length - 1 ? routable[pos + 1] : currentStopIndex + 1
+    // Dynamic routing: next target is the nearest remaining routable stop by distance
+    const nearest = pickNearestRoutableIndex({
+      waypoints: schedule?.waypoints,
+      stopStatuses,
+      gps: gpsPosRef.current || gpsPos,
+      excludeIndex: currentStopIndex,
+    })
+    const nextIndex = nearest != null ? nearest : (schedule?.waypoints || []).length
     setCurrentStopIndex(nextIndex)
     sessionStorage.setItem('ww_current_stop_index', String(nextIndex))
     sessionStorage.removeItem('ww_pending_collection_note')
@@ -1861,249 +2036,735 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
 
   return (
     <>
-      <Navbar />
-          <style>{`
-            @keyframes navPulse    { 0%,100%{opacity:1} 50%{opacity:.3} }
-            @keyframes markerPulse { 0%,100%{transform:scale(1);opacity:.5} 50%{transform:scale(1.6);opacity:0} }
-            @keyframes navFadeUp   { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
-            @keyframes arrowPop    { 0%{transform:scale(.8);opacity:0} 60%{transform:scale(1.1)} 100%{transform:scale(1);opacity:1} }
-          `}</style>
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        bottom: 0,
+        left: 0,
+        right: 0,
+        zIndex: 900,
+        display: 'flex',
+        flexDirection: 'column',
+        fontFamily: 'var(--font-body)',
+        overflow: 'hidden',
+        background: '#1c2430',
+      }}>
+        {/* MAP CONTAINER WITH 3D PERSPECTIVE SUPPORT (NavCamera Unified Controller) */}
+        <div
+          ref={viewportRef}
+          style={{ position: 'absolute', inset: 0, zIndex: 0, background: '#1c2430', overflow: 'hidden' }}
+        >
+          <div
+            ref={mapRef}
+            onTouchStart={() => {
+              if (!is3D) {
+                isFollowCamRef.current = false
+                setIsUserPanned(true)
+                if (navCameraRef.current) navCameraRef.current.follow = false
+              }
+            }}
+            onMouseDown={() => {
+              if (!is3D) {
+                isFollowCamRef.current = false
+                setIsUserPanned(true)
+                if (navCameraRef.current) navCameraRef.current.follow = false
+              }
+            }}
+            onWheel={() => {
+              if (!is3D) {
+                isFollowCamRef.current = false
+                setIsUserPanned(true)
+                if (navCameraRef.current) navCameraRef.current.follow = false
+              }
+            }}
+            style={{
+              width: '100%',
+              height: '100%',
+              position: 'absolute',
+              inset: 0,
+            }}
+          />
+          <MapLegend />
+          {leafletReady && (
+            <MapLayerToggle
+              mapType={mapType}
+              onToggle={toggleMapType}
+              style={{
+                position: 'absolute',
+                bottom: isRetracted ? 95 : 230,
+                left: 14,
+                zIndex: 500,
+              }}
+            />
+          )}
+          {(!leafletReady || (mapLoading && waypoints.length === 0)) && (
+            <div style={{ position: 'absolute', inset: 0, zIndex: 500 }}>
+              <MapSkeleton height="100%" dark label="Initializing live route HUD..." showControls={false} />
+            </div>
+          )}
 
-          <div style={{ position: 'fixed', top: 60, bottom: 0, left: 0, right: 0, zIndex: 900, display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-body)', overflow: 'hidden', background: '#1e293b' }}>
-            {/* MAP */}
-            <div style={{ position: 'absolute', inset: 0, zIndex: 0, background: '#2a3441' }}>
-              <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
-              <MapLegend />
-              {import.meta.env.DEV && (
-                <div style={{ position: 'absolute', top: '50%', right: 14, marginTop: 54, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <button onClick={() => teleportTo(currentTarget)} disabled={!currentTarget} title="Teleport to Current Stop"
-                    style={{ width: 44, height: 44, borderRadius: '50%', background: currentTarget ? '#f59e0b' : '#cbd5e1', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentTarget ? 'pointer' : 'not-allowed', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 20 }}>📍</button>
-                  <button onClick={handleDevSkipStop} disabled={!nextTarget} title="Teleport to Next Stop & Skip Current"
-                    style={{ width: 44, height: 44, borderRadius: '50%', background: nextTarget ? '#8b5cf6' : '#cbd5e1', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: nextTarget ? 'pointer' : 'not-allowed', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 20 }}>⏭</button>
-                  {isMock && (
-                    <button onClick={clearMock} title="Clear Mock GPS"
-                      style={{ width: 44, height: 44, borderRadius: '50%', background: '#ef4444', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 16, fontWeight: 800, color: '#fff' }}>✕</button>
-                  )}
-                  <button onClick={() => markRemainingMissed(currentStopIndex + 1)} title="Simulate shift end"
-                    style={{ width: 44, height: 44, borderRadius: '50%', background: '#0f172a', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', fontSize: 14, color: '#fff', fontWeight: 800 }}>🚫</button>
+          {/* FLOATING MAP CONTROLS (Right side, Google Maps / Grab style HUD) */}
+          <div style={{
+            position: 'absolute',
+            right: 14,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }}>
+            {/* Satellite / Default Layer Toggle */}
+            <button
+              type="button"
+              onClick={toggleMapType}
+              title={`Switch to ${mapType === 'default' ? 'Satellite' : 'Default'} Map`}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: '50%',
+                background: mapType === 'satellite' ? '#16a34a' : 'rgba(15, 23, 42, 0.85)',
+                backdropFilter: 'blur(10px)',
+                border: mapType === 'satellite' ? '2px solid #22c55e' : '1px solid rgba(255,255,255,0.2)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <Layers size={18} />
+            </button>
+
+            {/* 3D / 2D Camera Toggle */}
+            <button
+              type="button"
+              onClick={handleToggle3D}
+              title={is3D ? "Switch to 2D Top-Down View" : "Switch to 3D Cockpit View"}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: '50%',
+                background: is3D ? '#16a34a' : 'rgba(15, 23, 42, 0.85)',
+                backdropFilter: 'blur(10px)',
+                border: is3D ? '2px solid #22c55e' : '1px solid rgba(255,255,255,0.2)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+                transition: 'all 0.2s ease',
+                fontFamily: 'var(--font-head)',
+                fontSize: 13,
+                fontWeight: 900,
+                letterSpacing: '0.04em',
+              }}
+            >
+              {is3D ? '2D' : '3D'}
+            </button>
+
+            {/* Stage 2B: Vehicle Avatar Toggle (Top-down Sprite <-> SVG Fallback) */}
+            <button
+              type="button"
+              onClick={() => {
+                setMarkerAvatarMode(prev => (prev === 'sprite-topdown' ? 'svg' : 'sprite-topdown'))
+              }}
+              title={`Truck Avatar: ${markerAvatarMode === 'sprite-topdown' ? '3D Model Sprite' : 'Vector SVG'}`}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: '50%',
+                background: markerAvatarMode === 'svg' ? 'rgba(15, 23, 42, 0.85)' : '#0284c7',
+                backdropFilter: 'blur(10px)',
+                border: markerAvatarMode === 'svg' ? '1px solid rgba(255,255,255,0.2)' : '2px solid #38bdf8',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+                transition: 'all 0.2s ease',
+                fontFamily: 'var(--font-head)',
+                fontSize: 10,
+                fontWeight: 900,
+                letterSpacing: '0.02em',
+              }}
+            >
+              {markerAvatarMode === 'sprite-topdown' ? '3D' : 'SVG'}
+            </button>
+
+            {/* Compass / Heading Reset in 3D Mode */}
+            {is3D && (
+              <button
+                type="button"
+                onClick={() => setMapHeading(0)}
+                title="Reset to North"
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: '50%',
+                  background: 'rgba(15, 23, 42, 0.85)',
+                  backdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <div style={{ transform: `rotate(${-mapHeading}deg)`, transition: 'transform 0.4s ease' }}>
+                  <Compass size={20} color="#f87171" />
                 </div>
-              )}
+              </button>
+            )}
+
+            {/* Re-center GPS */}
+            <button
+              type="button"
+              onClick={() => {
+                if (gpsPos && mapInstance.current) {
+                  isFollowCamRef.current = true
+                  setIsUserPanned(false)
+                  mapInstance.current.setView([gpsPos.lat, gpsPos.lng], is3D ? 18 : 17.5, { animate: true })
+                }
+              }}
+              title="Re-center on My Location"
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: '50%',
+                background: isUserPanned ? '#2563eb' : 'rgba(15, 23, 42, 0.85)',
+                backdropFilter: 'blur(10px)',
+                border: isUserPanned ? '2px solid #60a5fa' : '1px solid rgba(255,255,255,0.2)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                boxShadow: isUserPanned ? '0 0 16px rgba(37,99,235,0.7)' : '0 4px 16px rgba(0,0,0,0.3)',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <LocateFixed size={20} />
+            </button>
+
+            {/* Zoom In / Out Buttons */}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              background: 'rgba(15, 23, 42, 0.85)',
+              backdropFilter: 'blur(10px)',
+              borderRadius: 22,
+              border: '1px solid rgba(255,255,255,0.2)',
+              overflow: 'hidden',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+            }}>
+              <button
+                type="button"
+                onClick={() => {
+                  isFollowCamRef.current = false
+                  setIsUserPanned(true)
+                  mapInstance.current?.zoomIn()
+                }}
+                title="Zoom In"
+                style={{
+                  width: 44,
+                  height: 38,
+                  background: 'transparent',
+                  border: 'none',
+                  borderBottom: '1px solid rgba(255,255,255,0.12)',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  transition: 'background 0.15s ease',
+                }}
+              >
+                <Plus size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  isFollowCamRef.current = false
+                  setIsUserPanned(true)
+                  mapInstance.current?.zoomOut()
+                }}
+                title="Zoom Out"
+                style={{
+                  width: 44,
+                  height: 38,
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  transition: 'background 0.15s ease',
+                }}
+              >
+                <Minus size={18} />
+              </button>
             </div>
 
-            {/* STOP HEADER */}
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(30,42,58,0.92)', backdropFilter: 'blur(8px)', padding: '16px 18px 18px', color: '#fff', boxShadow: '0 4px 20px rgba(0,0,0,.15)' }}>
-              <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-                <GpsStatusPill isTracking={isTracking} error={gpsError} accuracy={gpsAccuracy} />
-                <ConnPill />
-                {isExtendedMode && (
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.5)', borderRadius: 20, padding: '3px 10px' }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', animation: 'navPulse 1.5s ease infinite', display: 'inline-block' }} />
-                    <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: '.04em' }}>COLLECTING UNCLAIMED</span>
-                  </div>
+            {/* DEV CONTROLS */}
+            {import.meta.env.DEV && (
+              <>
+                <button onClick={() => teleportTo(currentTarget)} disabled={!currentTarget} title="DEV: Teleport to Current Stop"
+                  style={{ width: 44, height: 44, borderRadius: '50%', background: currentTarget ? '#f59e0b' : '#cbd5e1', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: currentTarget ? 'pointer' : 'not-allowed', boxShadow: '0 4px 12px rgba(0,0,0,.2)', color: '#fff' }}>
+                  <MapPin size={18} />
+                </button>
+                <button onClick={handleDevSkipStop} disabled={!nextTarget} title="DEV: Teleport to Next Stop & Skip Current"
+                  style={{ width: 44, height: 44, borderRadius: '50%', background: nextTarget ? '#8b5cf6' : '#cbd5e1', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: nextTarget ? 'pointer' : 'not-allowed', boxShadow: '0 4px 12px rgba(0,0,0,.2)', color: '#fff' }}>
+                  <SkipForward size={18} />
+                </button>
+                {isMock && (
+                  <button onClick={clearMock} title="Clear Mock GPS"
+                    style={{ width: 44, height: 44, borderRadius: '50%', background: '#ef4444', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', color: '#fff' }}>
+                    <X size={18} />
+                  </button>
                 )}
-                <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: '3px 10px' }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.65)', letterSpacing: '.04em' }}>⏱ {formattedTime}</span>
+                <button onClick={() => markRemainingMissed(currentStopIndex + 1)} title="Simulate shift end"
+                  style={{ width: 44, height: 44, borderRadius: '50%', background: '#0f172a', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.2)', color: '#fff' }}>
+                  <Ban size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShow3DPreview(prev => !prev)}
+                  title="DEV: Inspect 3D Truck Model (Gate 1)"
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: '50%',
+                    background: show3DPreview ? '#2563eb' : '#0f172a',
+                    border: '2px solid #38bdf8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(0,0,0,.3)',
+                    color: '#38bdf8',
+                    fontWeight: 900,
+                    fontSize: 11,
+                    letterSpacing: '0.04em'
+                  }}
+                >
+                  3D
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* RETRACTABLE STOP HEADER */}
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 10,
+          background: 'rgba(30,42,58,0.95)',
+          backdropFilter: 'blur(10px)',
+          color: '#fff',
+          boxShadow: '0 4px 20px rgba(0,0,0,.22)',
+          transition: 'transform 0.35s cubic-bezier(0.3, 0.8, 0.3, 1)',
+          transform: isHeaderCollapsed ? 'translateY(calc(-100% + 32px))' : 'translateY(0)',
+          display: 'flex',
+          flexDirection: 'column',
+        }}>
+          {/* Main Header Content */}
+          <div style={{
+            padding: '12px 18px 8px',
+            opacity: isHeaderCollapsed ? 0 : 1,
+            pointerEvents: isHeaderCollapsed ? 'none' : 'auto',
+            transition: 'opacity 0.25s ease',
+          }}>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center', paddingRight: 110 }}>
+              <GpsStatusPill isTracking={isTracking} error={gpsError} accuracy={gpsAccuracy} />
+              <ConnPill />
+              {isExtendedMode && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.5)', borderRadius: 20, padding: '3px 10px' }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', animation: 'navPulse 1.5s ease infinite', display: 'inline-block' }} />
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: '.04em' }}>COLLECTING UNCLAIMED</span>
                 </div>
+              )}
+              <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: '3px 10px' }}>
+                <Clock size={11} color="rgba(255,255,255,0.7)" />
+                <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.75)', letterSpacing: '.04em' }}>{formattedTime}</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                  <span style={{ fontSize: 20, marginTop: 2 }}>{activeMissedStop ? '🎯' : '📍'}</span>
-                  <div>
-                    <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, marginBottom: 2 }}>
-                      {currentTarget?.label || (activeMissedStop ? 'Missed Stop' : `Stop ${currentStopIndex}`)}
-                      {!activeMissedStop && getStopStatus(currentStopIndex) === 'PENDING_INSPECTION' && (
-                        <span style={{ 
-                          marginLeft: 8, fontSize: 10, padding: '2px 6px', borderRadius: 4, fontWeight: 800, verticalAlign: 'middle',
-                          background: currentTarget?.watcher_names === 'No assigned watcher' ? '#ef4444' : '#f59e0b',
-                          color: currentTarget?.watcher_names === 'No assigned watcher' ? '#fff' : '#0f172a' 
-                        }}>
-                          {currentTarget?.watcher_names === 'No assigned watcher' ? 'NO WATCHER' : 'UNINSPECTED'}
-                        </span>
-                      )}
-                    </div>
-                    {activeMissedStop ? (
-                       <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>Unclaimed Stop</div>
-                    ) : (
-                       <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>{currentStopIndex} of {waypoints.length - 1} · {schedule?.days || ''}</div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <div style={{ marginTop: 2 }}>
+                  {activeMissedStop ? <Target size={18} color="#f59e0b" /> : <MapPin size={18} color="#22c55e" />}
+                </div>
+                <div>
+                  <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, marginBottom: 2 }}>
+                    {currentTarget?.label || (activeMissedStop ? 'Missed Stop' : `Stop ${currentStopIndex}`)}
+                    {!activeMissedStop && getStopStatus(currentStopIndex) === 'PENDING_INSPECTION' && (
+                      <span style={{
+                        marginLeft: 8, fontSize: 10, padding: '2px 6px', borderRadius: 4, fontWeight: 800, verticalAlign: 'middle',
+                        background: currentTarget?.watcher_names === 'No assigned watcher' ? '#ef4444' : '#f59e0b',
+                        color: currentTarget?.watcher_names === 'No assigned watcher' ? '#fff' : '#0f172a'
+                      }}>
+                        {currentTarget?.watcher_names === 'No assigned watcher' ? 'NO WATCHER' : 'UNINSPECTED'}
+                      </span>
                     )}
                   </div>
-                </div>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-                  {[
-                    { status: 'PENDING_INSPECTION', color: '#94a3b8' },
-                    { status: 'READY_FOR_COLLECTION', color: '#f59e0b' },
-                    { status: 'EMPTY_STOP', color: '#94a3b8' },
-                    { status: 'COLLECTION_REPORTED', color: '#eab308' },
-                    { status: 'VERIFIED_COLLECTED', color: '#16a34a' },
-                    { status: 'COLLECTION_DISPUTED', color: '#ef4444' },
-                  ].map(({ status, color }) => {
-                    const count = [...stopStatuses.values()].filter(s => normalizeStopStatus(s) === status).length
-                    return count > 0 && (
-                      <div key={status} style={{ display: 'flex', alignItems: 'center', gap: 3, background: `${color}22`, border: `1px solid ${color}44`, borderRadius: 20, padding: '2px 8px' }}>
-                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
-                        <span style={{ fontSize: 9, fontWeight: 800, color, letterSpacing: '.04em' }}>{count}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {hasNewStops && (
-              <div style={{
-                position: 'absolute', top: 105, left: 14, right: 14, zIndex: 20,
-                background: '#0f172a', borderRadius: 12, padding: '12px 16px',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
-              }}>
-                <span style={{ color: '#fff', fontSize: 13, fontWeight: 700 }}>
-                  📦 New stops assigned to your route
-                </span>
-                <button onClick={() => setHasNewStops(false)} style={{
-                  background: 'none', border: 'none', color: 'rgba(255,255,255,0.6)',
-                  fontSize: 18, cursor: 'pointer', padding: 0
-                }}>✕</button>
-              </div>
-            )}
-
-            {/* TURN INSTRUCTION CARD */}
-            {isTargetRoutable && (!distanceToStop || distanceToStop > 30) && (
-              <div key={stepType} style={{ position: 'absolute', top: hasNewStops ? 160 : 105, left: 14, right: 14, zIndex: 10, background: 'rgba(255,255,255,0.97)', borderRadius: 16, overflow: 'hidden', display: 'flex', alignItems: 'stretch', boxShadow: '0 6px 28px rgba(0,0,0,.18)', backdropFilter: 'blur(6px)', transition: 'top .3s ease', animation: 'navFadeUp .25s ease' }}>
-                <div style={{ width: 76, flexShrink: 0, background: `${accentColor}12`, borderRight: `3px solid ${accentColor}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
-                  <div style={{ animation: 'arrowPop .3s ease' }}>
-                    <TurnArrow type={stepType} bearing={stepBearing} size={48} color={accentColor} />
-                  </div>
-                </div>
-                <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                  <div style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 900, color: '#0f172a', lineHeight: 1.2, marginBottom: instructionDist ? 5 : 0 }}>{instructionText}</div>
-                  {instructionDist && (
-                    <div style={{ fontSize: 13, color: accentColor, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke={accentColor} strokeWidth="2" strokeLinecap="round">
-                        <line x1="8" y1="2" x2="8" y2="14" />
-                        <line x1="3" y1="9" x2="8" y2="14" />
-                        <line x1="13" y1="9" x2="8" y2="14" />
-                      </svg>
-                      in {instructionDist}
-                    </div>
+                  {activeMissedStop ? (
+                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>Unclaimed Stop</div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>{currentStopIndex} of {waypoints.length - 1} · {schedule?.days || ''}</div>
                   )}
                 </div>
               </div>
-            )}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                {[
+                  { status: 'PENDING_INSPECTION', color: '#94a3b8' },
+                  { status: 'READY_FOR_COLLECTION', color: '#f59e0b' },
+                  { status: 'EMPTY_STOP', color: '#94a3b8' },
+                  { status: 'COLLECTION_REPORTED', color: '#eab308' },
+                  { status: 'VERIFIED_COLLECTED', color: '#16a34a' },
+                  { status: 'COLLECTION_DISPUTED', color: '#ef4444' },
+                ].map(({ status, color }) => {
+                  const count = [...stopStatuses.values()].filter(s => normalizeStopStatus(s) === status).length
+                  return count > 0 && (
+                    <div key={status} style={{ display: 'flex', alignItems: 'center', gap: 3, background: `${color}22`, border: `1px solid ${color}44`, borderRadius: 20, padding: '2px 8px' }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
+                      <span style={{ fontSize: 9, fontWeight: 800, color, letterSpacing: '.04em' }}>{count}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
 
-            {/* BOTTOM PANEL */}
-            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(12px)', borderTopLeftRadius: 24, borderTopRightRadius: 24, boxShadow: '0 -4px 24px rgba(0,0,0,.1)', display: 'flex', flexDirection: 'column', paddingBottom: 24 }}>
-              <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2, margin: '12px auto' }} />
+          {/* Collapsible Handle Lip */}
+          <div
+            onClick={toggleHeader}
+            title={isHeaderCollapsed ? "Tap to expand header" : "Tap to collapse header"}
+            style={{
+              height: 32,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '0 16px',
+              cursor: 'pointer',
+              userSelect: 'none',
+              borderTop: isHeaderCollapsed ? 'none' : '1px solid rgba(255,255,255,0.08)',
+              background: isHeaderCollapsed ? 'rgba(20,29,42,0.96)' : 'rgba(0,0,0,0.12)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <MapPin size={13} color="#22c55e" />
+              <span style={{
+                fontSize: 12,
+                fontWeight: 800,
+                color: '#ffffff',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}>
+                {currentTarget?.label || (activeMissedStop ? 'Missed Stop' : `Stop ${currentStopIndex}`)}
+              </span>
+              {isHeaderCollapsed && (
+                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', fontWeight: 600 }}>
+                  ({currentStopIndex} of {waypoints.length - 1})
+                </span>
+              )}
+            </div>
 
-              {/* ── Extended mode: no missed stops available ── */}
-              {isExtendedMode && floatingMissedStops.length === 0 ? (
-                <div style={{ padding: '16px 24px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-                  <div style={{ fontSize: 42 }}>✅</div>
-                  <div style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 900, color: '#0f172a', textAlign: 'center' }}>
-                    All Clear — No Missed Stops
-                  </div>
-                  <p style={{ fontSize: 13, color: '#64748b', textAlign: 'center', margin: 0 }}>
-                    There are currently no unclaimed stops nearby.
-                    Checking again every 8 seconds…
-                  </p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#94a3b8' }}>
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', animation: 'navPulse 1.5s ease infinite' }} />
-                    Scanning for unclaimed stops
-                  </div>
-                  <button
-                    id="end-extended-shift-btn"
-                    onClick={() => onAdvance('end_shift')}
-                    style={{
-                      marginTop: 4, width: '100%', maxWidth: 320, padding: '16px',
-                      borderRadius: 30, border: 'none',
-                      background: '#0f172a', color: '#fff',
-                      fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900,
-                      letterSpacing: '.04em', cursor: 'pointer',
-                      boxShadow: '0 6px 20px rgba(15,23,42,0.25)',
-                    }}>
-                    🏁 Return to Base &amp; End Shift
-                  </button>
-                </div>
-              ) : (
-                <>
-              {isTargetRoutable && (
-                <div style={{ padding: '4px 12px 16px', display: 'flex', alignItems: 'center', borderBottom: '1px solid rgba(0,0,0,.06)' }}>
-                  <StatCell value={arrivalTimeStr} label="arrival" />
-                  <div style={{ width: 1, height: 32, background: '#e2e8f0' }} />
-                  <StatCell value={etaMinutes} label="min" />
-                  <div style={{ width: 1, height: 32, background: '#e2e8f0' }} />
-                  <StatCell value={distanceKmStr} label="km" />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0 }}>
+              <span>{isHeaderCollapsed ? 'Expand Header' : 'Collapse'}</span>
+              {isHeaderCollapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+            </div>
+          </div>
+        </div>
+
+        {hasNewStops && (
+          <div style={{
+            position: 'absolute', top: isHeaderCollapsed ? 42 : 100, left: 14, right: 14, zIndex: 20,
+            background: '#0f172a', borderRadius: 12, padding: '12px 16px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+            transition: 'top 0.35s cubic-bezier(0.3, 0.8, 0.3, 1)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#fff', fontSize: 13, fontWeight: 700 }}>
+              <Package size={16} color="#22c55e" />
+              <span>New stops assigned to your route</span>
+            </div>
+            <button onClick={() => setHasNewStops(false)} style={{
+              background: 'none', border: 'none', color: 'rgba(255,255,255,0.6)',
+              cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center'
+            }}>
+              <X size={18} />
+            </button>
+          </div>
+        )}
+
+        {/* TURN INSTRUCTION CARD (Google Maps / Ride-Hailing Emerald style) */}
+        {isTargetRoutable && (!distanceToStop || distanceToStop > 30) && (
+          <div
+            key={stepType}
+            onClick={() => setIsTurnCardCollapsed(p => !p)}
+            title="Tap to toggle turn card size"
+            style={{
+              position: 'absolute',
+              top: isHeaderCollapsed ? (hasNewStops ? 88 : 42) : (hasNewStops ? 155 : 100),
+              left: 14,
+              right: 14,
+              zIndex: 10,
+              background: 'linear-gradient(135deg, #005944 0%, #064e3b 100%)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: isTurnCardCollapsed ? 12 : 18,
+              overflow: 'hidden',
+              display: 'flex',
+              alignItems: 'center',
+              padding: isTurnCardCollapsed ? '8px 14px' : '12px 14px',
+              boxShadow: '0 8px 30px rgba(0,0,0,.32)',
+              transition: 'all .35s cubic-bezier(0.3, 0.8, 0.3, 1)',
+              animation: 'navFadeUp .25s ease',
+              gap: 12,
+              cursor: 'pointer',
+            }}
+          >
+            <div style={{
+              width: isTurnCardCollapsed ? 32 : 46,
+              height: isTurnCardCollapsed ? 32 : 46,
+              flexShrink: 0,
+              background: 'rgba(255,255,255,0.12)',
+              borderRadius: isTurnCardCollapsed ? 8 : 12,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#ffffff',
+              transition: 'all .25s ease',
+            }}>
+              <TurnArrow type={stepType} bearing={stepBearing} size={isTurnCardCollapsed ? 20 : 36} color="#ffffff" />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontFamily: 'var(--font-head)',
+                fontSize: isTurnCardCollapsed ? 15 : 20,
+                fontWeight: 900,
+                color: '#ffffff',
+                lineHeight: 1.1,
+                letterSpacing: '-0.02em',
+                marginBottom: isTurnCardCollapsed ? 0 : 2,
+              }}>
+                {instructionDist ? `in ${instructionDist}` : 'Next Maneuver'}
+              </div>
+              {!isTurnCardCollapsed && (
+                <div style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: 'rgba(255,255,255,0.92)',
+                  lineHeight: 1.25,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}>
+                  {instructionText}
                 </div>
               )}
-              <div style={{ padding: '20px 20px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <p style={{ fontFamily: 'var(--font-head)', fontSize: isTargetRoutable ? 18 : 15, fontWeight: 800, textAlign: 'center', color: isTargetRoutable ? (isNearDestination ? '#0f172a' : '#64748b') : '#f59e0b', marginBottom: 6, transition: 'color .3s' }}>
-                  {isTargetRoutable
-                    ? (isNearDestination ? 'You have arrived!' : 'On the way to next stop')
-                    : `No verified Stops yet, contact your assigned watcher (${currentTarget?.watcher_names || 'Unknown'})`}
-                </p>
-                {isTargetRoutable && !isNearDestination && distanceToStop != null && (
-                  <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12 }}>
-                    {distanceToStop > 1000
-                      ? `${(distanceToStop / 1000).toFixed(1)} km to destination`
-                      : `${Math.round(distanceToStop)} m to destination`}
-                  </p>
-                )}
-                {isTargetRoutable && !isNearDestination && distanceToStop == null && (
-                  <p style={{ fontSize: 12, color: '#f59e0b', marginBottom: 12 }}>📡 Waiting for GPS signal…</p>
-                )}
-                {(() => {
-                  const currentStatus = activeMissedStop ? 'READY_FOR_COLLECTION' : (stopStatuses.has(currentStopIndex) ? normalizeStopStatus(stopStatuses.get(currentStopIndex)) : 'PENDING_INSPECTION');
-                  const isRoutable = activeMissedStop ? true : isRoutableStopStatus(currentStatus);
-                  const canArrive = isNearDestination && isRoutable;
+            </div>
+            <div style={{ color: 'rgba(255,255,255,0.6)', flexShrink: 0 }}>
+              {isTurnCardCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+            </div>
+          </div>
+        )}
 
-                  let buttonText = 'Confirm on Arrival';
-                  if (isNearDestination) {
-                    if (isRoutable) {
-                      if (currentStatus === 'PENDING_INSPECTION') {
-                        buttonText = currentTarget?.watcher_names === 'No assigned watcher' 
-                          ? 'Collect (No Watcher)' 
-                          : 'Collect (Uninspected)';
-                      } else {
-                        buttonText = 'Confirm Arrival';
-                      }
-                    }
-                    else buttonText = 'Waiting for Inspection...';
-                  }
-
-                  return (
-                    <div style={{ width: '100%', maxWidth: 360, display: 'flex', gap: 10 }}>
-                      <button
-                        id="arrived-btn"
-                        disabled={!canArrive}
-                        onClick={handleCollectClick}
-                        style={{
-                          flex: 1, padding: '18px 12px', borderRadius: 30, border: 'none',
-                          fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900, letterSpacing: '.06em',
-                          transition: 'all .35s ease',
-                          cursor: canArrive ? 'pointer' : 'not-allowed',
-                          background: canArrive ? '#0f172a' : '#e2e8f0',
-                          color: canArrive ? '#fff' : '#94a3b8',
-                          boxShadow: canArrive ? '0 6px 20px rgba(15,23,42,0.3)' : 'none',
-                        }}>
-                        {buttonText}
-                      </button>
-                      <button
-                        onClick={() => setShowFullConfirm(true)}
-                        style={{
-                          padding: '18px 16px', borderRadius: 30, border: '2px solid #ef4444',
-                          background: '#fff', color: '#ef4444', fontFamily: 'var(--font-head)',
-                          fontSize: 15, fontWeight: 900, letterSpacing: '.02em', flexShrink: 0,
-                          cursor: 'pointer', transition: 'all .2s'
-                        }}>
-                        Full
-                      </button>
-                    </div>
-                  );
-                })()}
-              </div>
-              </>
+        {/* RETRACTABLE BOTTOM SHEET (Ride-Hailing / Foodpanda style) */}
+        <div style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          zIndex: 10,
+          background: 'rgba(255,255,255,0.97)',
+          backdropFilter: 'blur(16px)',
+          borderTopLeftRadius: 24,
+          borderTopRightRadius: 24,
+          boxShadow: '0 -6px 28px rgba(0,0,0,.15)',
+          display: 'flex',
+          flexDirection: 'column',
+          paddingBottom: 'env(safe-area-inset-bottom, 14px)',
+          transition: 'all 0.3s cubic-bezier(0.3, 0.8, 0.3, 1)',
+        }}>
+          {/* Retractable Handle Bar (Click to toggle) */}
+          <div
+            onClick={toggleRetract}
+            style={{
+              height: 32,
+              cursor: 'pointer',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              userSelect: 'none',
+              padding: '6px 16px 2px',
+            }}
+          >
+            <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2, marginBottom: 2 }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {isRetracted ? (
+                <>
+                  <ChevronUp size={13} />
+                  <span>{isNearDestination ? "Arrived · Tap to view stats" : "Tap to view stats"}</span>
+                </>
+              ) : (
+                <>
+                  <ChevronDown size={13} />
+                  <span>Tap to collapse stats</span>
+                </>
               )}
             </div>
           </div>
+
+          {/* Stats & Details — Collapsible to save space */}
+          {!isRetracted && (
+            isExtendedMode && floatingMissedStops.length === 0 ? (
+              <div style={{ padding: '12px 24px 4px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                <CheckCircle2 size={36} color="#16a34a" />
+                <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, color: '#0f172a', textAlign: 'center' }}>
+                  All Clear — No Missed Stops
+                </div>
+                <p style={{ fontSize: 12, color: '#64748b', textAlign: 'center', margin: 0 }}>
+                  There are currently no unclaimed stops nearby.
+                  Checking again every 8 seconds…
+                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#94a3b8' }}>
+                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', animation: 'navPulse 1.5s ease infinite' }} />
+                  Scanning for unclaimed stops
+                </div>
+              </div>
+            ) : (
+              <>
+                {isTargetRoutable && (
+                  <div style={{ padding: '4px 12px 14px', display: 'flex', alignItems: 'center', borderBottom: '1px solid rgba(0,0,0,.06)' }}>
+                    <StatCell value={arrivalTimeStr} label="arrival" />
+                    <div style={{ width: 1, height: 32, background: '#e2e8f0' }} />
+                    <StatCell value={etaMinutes} label="min" />
+                    <div style={{ width: 1, height: 32, background: '#e2e8f0' }} />
+                    <StatCell value={distanceKmStr} label="km" />
+                  </div>
+                )}
+                <div style={{ padding: '12px 20px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <p style={{ fontFamily: 'var(--font-head)', fontSize: isTargetRoutable ? 16 : 13, fontWeight: 800, textAlign: 'center', color: isTargetRoutable ? (isNearDestination ? '#0f172a' : '#64748b') : '#f59e0b', marginBottom: 4, transition: 'color .3s' }}>
+                    {isTargetRoutable
+                      ? (isNearDestination ? 'You have arrived!' : 'On the way to next stop')
+                      : `No verified Stops yet, contact your assigned watcher (${currentTarget?.watcher_names || 'Unknown'})`}
+                  </p>
+                  {isTargetRoutable && !isNearDestination && distanceToStop != null && (
+                    <p style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', marginBottom: 8 }}>
+                      {distanceToStop > 1000
+                        ? `${(distanceToStop / 1000).toFixed(1)} km to destination`
+                        : `${Math.round(distanceToStop)} m to destination`}
+                    </p>
+                  )}
+                  {isTargetRoutable && !isNearDestination && distanceToStop == null && (
+                    <p style={{ fontSize: 12, color: '#f59e0b', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <Radio size={14} /> Waiting for GPS signal…
+                    </p>
+                  )}
+                </div>
+              </>
+            )
+          )}
+
+          {/* Action Area — ALWAYS accessible even when collapsed */}
+          <div style={{
+            padding: isRetracted ? '4px 20px 10px' : '10px 20px 12px',
+            display: 'flex',
+            justifyContent: 'center',
+            width: '100%',
+          }}>
+            {isExtendedMode && floatingMissedStops.length === 0 ? (
+              <button
+                id="end-extended-shift-btn"
+                onClick={() => onAdvance('end_shift')}
+                style={{
+                  width: '100%', maxWidth: 360, padding: isRetracted ? '12px' : '15px',
+                  borderRadius: 30, border: 'none',
+                  background: '#0f172a', color: '#fff',
+                  fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900,
+                  letterSpacing: '.04em', cursor: 'pointer',
+                  boxShadow: '0 6px 20px rgba(15,23,42,0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                }}>
+                <Flag size={16} />
+                <span>Return to Base &amp; End Shift</span>
+              </button>
+            ) : (
+              (() => {
+                const currentStatus = activeMissedStop ? 'READY_FOR_COLLECTION' : (stopStatuses.has(currentStopIndex) ? normalizeStopStatus(stopStatuses.get(currentStopIndex)) : 'PENDING_INSPECTION');
+                const isRoutable = activeMissedStop ? true : isRoutableStopStatus(currentStatus);
+                const canArrive = isNearDestination && isRoutable;
+
+                let buttonText = 'Confirm on Arrival';
+                if (isNearDestination) {
+                  if (isRoutable) {
+                    if (currentStatus === 'PENDING_INSPECTION') {
+                      buttonText = currentTarget?.watcher_names === 'No assigned watcher'
+                        ? 'Collect (No Watcher)'
+                        : 'Collect (Uninspected)';
+                    } else {
+                      buttonText = 'Confirm Arrival';
+                    }
+                  }
+                  else buttonText = 'Waiting for Inspection...';
+                }
+
+                return (
+                  <div style={{ width: '100%', maxWidth: 360, display: 'flex', gap: 10 }}>
+                    <button
+                      id="arrived-btn"
+                      disabled={!canArrive}
+                      onClick={handleCollectClick}
+                      style={{
+                        flex: 1, padding: isRetracted ? '13px 12px' : '16px 12px', borderRadius: 30, border: 'none',
+                        fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900, letterSpacing: '.04em',
+                        transition: 'all .35s ease',
+                        cursor: canArrive ? 'pointer' : 'not-allowed',
+                        background: canArrive ? '#16a34a' : '#e2e8f0',
+                        color: canArrive ? '#fff' : '#94a3b8',
+                        boxShadow: canArrive ? '0 6px 20px rgba(22,163,74,0.35)' : 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                      }}>
+                      {canArrive && <CheckCircle2 size={16} />}
+                      <span>{buttonText}</span>
+                    </button>
+                    <button
+                      onClick={() => setShowFullConfirm(true)}
+                      style={{
+                        padding: isRetracted ? '13px 16px' : '16px 16px', borderRadius: 30, border: '2px solid #ef4444',
+                        background: '#fff', color: '#ef4444', fontFamily: 'var(--font-head)',
+                        fontSize: 14, fontWeight: 900, letterSpacing: '.02em', flexShrink: 0,
+                        cursor: 'pointer', transition: 'all .2s'
+                      }}>
+                      Full
+                    </button>
+                  </div>
+                );
+              })()
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* ── Overlays — always mounted for state continuity ── */}
       <ArrivedOverlay
@@ -2140,7 +2801,9 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
             width: '100%', maxWidth: 340, textAlign: 'center',
             boxShadow: '0 10px 40px rgba(0,0,0,0.2)'
           }}>
-            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+            <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'center' }}>
+              <AlertTriangle size={40} color="#f59e0b" />
+            </div>
             <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 20, fontWeight: 900, color: '#0f172a', marginBottom: 8 }}>Watcher Delayed</h3>
             <p style={{ fontSize: 14, color: '#64748b', marginBottom: 24, lineHeight: 1.5 }}>
               Watcher <strong>{currentTarget?.watcher_names}</strong> hasn't inspected this stop — proceed anyway?
@@ -2187,7 +2850,9 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
             width: '100%', maxWidth: 340, textAlign: 'center',
             boxShadow: '0 10px 40px rgba(0,0,0,0.2)'
           }}>
-            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+            <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'center' }}>
+              <AlertTriangle size={40} color="#ef4444" />
+            </div>
             <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 20, fontWeight: 900, color: '#0f172a', marginBottom: 8 }}>Truck Full?</h3>
             <p style={{ fontSize: 14, color: '#64748b', marginBottom: 24, lineHeight: 1.5 }}>
               Are you sure your truck is full? This will end your route and navigate you directly to the dump site.
@@ -2220,6 +2885,74 @@ export default function ShiftRouteModule({ onAdvance, shift }) {
                 }}>
                 Yes
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── GATE 1 ISOLATED 3D TRUCK MODEL INSPECTOR ── */}
+      {show3DPreview && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 9999,
+          background: 'rgba(15, 23, 42, 0.85)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 16,
+        }}>
+          <div style={{
+            position: 'relative',
+            width: '100%',
+            maxWidth: 620,
+            height: 520,
+            background: '#0f172a',
+            borderRadius: 16,
+            border: '1px solid rgba(255, 255, 255, 0.15)',
+            boxShadow: '0 20px 50px rgba(0, 0, 0, 0.6)',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }}>
+            <div style={{
+              padding: '12px 16px',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'rgba(30, 41, 59, 0.7)',
+            }}>
+              <div>
+                <div style={{ color: '#fff', fontWeight: 800, fontSize: 14 }}>
+                  Gate 1: Isolated 3D Truck Inspector
+                </div>
+                <div style={{ color: '#94a3b8', fontSize: 11 }}>
+                  Three.js + OBJLoader + MTLLoader · camion jugete.obj
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShow3DPreview(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  padding: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ flex: 1, position: 'relative' }}>
+              <TruckOverlay isolated={true} testView="oblique" />
             </div>
           </div>
         </div>

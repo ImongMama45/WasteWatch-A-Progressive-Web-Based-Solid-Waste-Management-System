@@ -96,6 +96,11 @@ class WasteDelivery(models.Model):
 
     remarks      = models.TextField(blank=True)
     is_validated = models.BooleanField(default=False, help_text='Dumpsite operator confirmed this record')
+    is_synthetic = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text='True if generated as synthetic development fixture; False for genuine CENRO weighbridge records'
+    )
     created_at   = models.DateTimeField(auto_now_add=True)
 
     class Meta:

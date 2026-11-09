@@ -20,8 +20,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import api from '../api/client'
-import useShiftTimer from '../hooks/useShiftTimer'
+import api, { handleStaleShift } from '../api/client'
 
 const DEFAULT_INTERVAL_MS = 10_000   // send to backend every 10 s
 const SYNC_FAIL_THRESHOLD = 3       // warn after this many consecutive failures
@@ -60,9 +59,14 @@ export default function useGpsTracking({
   const lastSentAt = useRef(0)   // timestamp of last API POST attempt
   const failCountRef = useRef(0)   // consecutive backend failure count
   const watchId = useRef(null)
+  const syncEnabledRef = useRef(syncEnabled)
+  useEffect(() => {
+    syncEnabledRef.current = syncEnabled
+  }, [syncEnabled])
 
   // ── Send position to backend (throttled) ───────────────────────────────────
   const syncToBackend = useCallback((lat, lng, acc) => {
+    if (!syncEnabledRef.current) return
     const now = Date.now()
     if (now - lastSentAt.current < intervalMs) return   // throttle
 
@@ -80,6 +84,8 @@ export default function useGpsTracking({
       .catch(err => {
         console.error('Truck location sync failed:', err.response?.data || err)
 
+        if (handleStaleShift(err)) return
+
         failCountRef.current += 1
 
         if (failCountRef.current >= SYNC_FAIL_THRESHOLD) {
@@ -94,7 +100,7 @@ export default function useGpsTracking({
   // All driver process components must have GPS available as a baseline.
   useEffect(() => {
     primeGpsPermission()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── Start / stop watchPosition ─────────────────────────────────────────────
@@ -116,16 +122,23 @@ export default function useGpsTracking({
 
     watchId.current = navigator.geolocation.watchPosition(
       (pos) => {
-        const { latitude: lat, longitude: lng, accuracy: acc } = pos.coords
-        setPosition({ lat, lng })
-        setAccuracy(Math.round(acc))
+        const { latitude: lat, longitude: lng, accuracy: acc, heading: rawHeading, speed } = pos.coords
+        const heading = (rawHeading != null && !isNaN(rawHeading) && rawHeading >= 0) ? rawHeading : null
+        const fixAccuracy = (acc != null && !isNaN(acc) && acc > 0) ? Math.round(acc) : null
+        const timestamp = pos.timestamp || Date.now()
+        setPosition({ lat, lng, heading, speed, accuracy: fixAccuracy, timestamp })
+        setAccuracy(fixAccuracy)
         setError(null)
         setIsTracking(true)
-        
-        sessionStorage.setItem('ww_gps_lat', String(lat))
-        sessionStorage.setItem('ww_gps_lng', String(lng))
-        
-        if (syncEnabled) syncToBackend(lat, lng, acc)
+
+        try {
+          sessionStorage.setItem('ww_gps_lat', String(lat))
+          sessionStorage.setItem('ww_gps_lng', String(lng))
+        } catch (e) {
+          // Ignore storage errors in private browsing modes
+        }
+
+        if (syncEnabledRef.current) syncToBackend(lat, lng, acc)
       },
       (err) => {
         const messages = {

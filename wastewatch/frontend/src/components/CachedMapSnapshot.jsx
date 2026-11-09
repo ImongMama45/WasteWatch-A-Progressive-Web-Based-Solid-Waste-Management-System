@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useOnline } from '../hooks/useOnline'
+import { useAuth } from '../context/AuthContext'
 import MiniMap from './MiniMap'
 
 const LUCENA = { lat: 13.9373, lng: 121.617 }
@@ -44,12 +45,13 @@ function buildGrid(lat, lng, zoom = 14) {
 
 function OfflineSnapshot({ center }) {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const tiles    = buildGrid(center.lat, center.lng)
 
   return (
     <div className="cms-snapshot">
       <div className="cms-offline-badge">📡 Offline — Cached Map</div>
-      <button className="cms-expand-btn" onClick={() => navigate('/map')}>⛶ Full Map</button>
+      <button className="cms-expand-btn" onClick={() => navigate(user?.role?.toLowerCase() === 'citizen' ? '/public-map' : '/map')}>⛶ Full Map</button>
 
       <div className="cms-tile-grid">
         {tiles.map(t => (

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react'
+import { AlertTriangle, CheckCircle2 } from 'lucide-react'
 import api from '../../../api/client'
+import { SidebarWidgetSkeleton } from '../../../components/ui/Skeleton'
 
 export default function BarangayPersonnelTab({ detail, fetchDetail }) {
   return (
@@ -50,10 +52,11 @@ function PersonnelSection({ title, people, role, barangayId, onAssigned }) {
         <div style={{
           padding: '16px', borderRadius: 10, border: '1.5px dashed #FCA5A5',
           background: '#FEF2F2', display: 'flex', alignItems: 'center',
-          justifyContent: 'space-between'
+          justifyContent: 'space-between', gap: 12
         }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#DC2626' }}>
-            ⚠️ No {title.toLowerCase()} assigned to this barangay
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#DC2626', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+            No {title.toLowerCase()} assigned to this barangay
           </span>
           <button onClick={() => setModalOpen(true)} style={{
             background: '#DC2626', color: '#fff', border: 'none',
@@ -108,15 +111,27 @@ function PersonnelSection({ title, people, role, barangayId, onAssigned }) {
 
 function AssignPersonnelModal({ role, barangayId, onClose, onSuccess }) {
   const [users, setUsers] = useState([])
+  const [loadingUsers, setLoadingUsers] = useState(true)
   const [selectedId, setSelectedId] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
+    let active = true
+    setLoadingUsers(true)
+    setError('')
     // Fetch eligible users for this role — backend should filter by role type
     api.get(`/api/accounts/barangay-management/unassigned-users/?role=${role}`)
-      .then(res => setUsers(res.data))
-      .catch(() => setError('Failed to load users'))
+      .then(res => {
+        if (active) setUsers(Array.isArray(res.data) ? res.data : [])
+      })
+      .catch(() => {
+        if (active) setError('Failed to load users')
+      })
+      .finally(() => {
+        if (active) setLoadingUsers(false)
+      })
+    return () => { active = false }
   }, [role])
 
   async function handleConfirm() {
@@ -136,34 +151,42 @@ function AssignPersonnelModal({ role, barangayId, onClose, onSuccess }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(15,23,42,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-      <div style={{ background: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 }}>
+      <div className="ww-scale-in" style={{ background: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 }}>
         <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 800 }}>Assign {role.replace('_', ' ')}</h3>
         <p style={{ fontSize: 13, color: '#64748B', margin: '4px 0 16px' }}>
           Users currently assigned elsewhere will be moved to this barangay.
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 240, overflowY: 'auto', marginBottom: 16 }}>
-          {users.map(u => (
-            <button key={u.id} onClick={() => setSelectedId(u.id)} style={{
-              padding: '10px 14px', borderRadius: 8, textAlign: 'left',
-              border: `1.5px solid ${selectedId === u.id ? '#2563EB' : '#E2E8F0'}`,
-              background: selectedId === u.id ? '#EFF6FF' : '#fff',
-              cursor: 'pointer', width: '100%',
-            }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>{u.full_name}</div>
-              {u.current_barangay ? (
-                <div style={{ fontSize: 11, color: '#F59E0B', marginTop: 2, fontWeight: 600 }}>
-                  ⚠️ Currently assigned to: {u.current_barangay}
-                </div>
-              ) : (
-                <div style={{ fontSize: 11, color: '#10B981', marginTop: 2, fontWeight: 600 }}>
-                  ✓ Unassigned — available
-                </div>
+          {loadingUsers ? (
+            <SidebarWidgetSkeleton rows={3} />
+          ) : (
+            <>
+              {users.map(u => (
+                <button key={u.id} onClick={() => setSelectedId(u.id)} style={{
+                  padding: '10px 14px', borderRadius: 8, textAlign: 'left',
+                  border: `1.5px solid ${selectedId === u.id ? '#2563EB' : '#E2E8F0'}`,
+                  background: selectedId === u.id ? '#EFF6FF' : '#fff',
+                  cursor: 'pointer', width: '100%',
+                }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>{u.full_name}</div>
+                  {u.current_barangay ? (
+                    <div style={{ fontSize: 11, color: '#F59E0B', marginTop: 2, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <AlertTriangle size={12} />
+                      Currently assigned to: {u.current_barangay}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 11, color: '#10B981', marginTop: 2, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <CheckCircle2 size={12} />
+                      Unassigned — available
+                    </div>
+                  )}
+                </button>
+              ))}
+              {users.length === 0 && !error && (
+                <p style={{ color: '#94A3B8', fontSize: 13 }}>No unassigned {role.replace('_', ' ')}s available.</p>
               )}
-            </button>
-          ))}
-          {users.length === 0 && !error && (
-            <p style={{ color: '#94A3B8', fontSize: 13 }}>No unassigned {role.replace('_', ' ')}s available.</p>
+            </>
           )}
         </div>
 
@@ -178,11 +201,12 @@ function AssignPersonnelModal({ role, barangayId, onClose, onSuccess }) {
             flex: 2, padding: 12, borderRadius: 10, border: 'none',
             background: selectedId && !submitting ? '#2563EB' : '#E2E8F0',
             color: selectedId && !submitting ? '#fff' : '#94A3B8',
-            fontWeight: 700, cursor: selectedId && !submitting ? 'pointer' : 'not-allowed'
+            fontWeight: 700, cursor: selectedId && !submitting ? 'pointer' : 'not-allowed',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6
           }}>
             {submitting ? 'Assigning…'
               : users.find(u => u.id === selectedId)?.current_barangay
-                ? '⚠️ Reassign to This Barangay'
+                ? <><AlertTriangle size={14} /> Reassign to This Barangay</>
                 : 'Confirm Assignment'}
           </button>
         </div>

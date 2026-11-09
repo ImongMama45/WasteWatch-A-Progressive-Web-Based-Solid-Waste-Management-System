@@ -12,7 +12,12 @@ export function getApiErrorMessage(error, fallback = 'Oops! Something went wrong
       const extracted = Array.isArray(value) ? value[0] : value
       if (extracted == null || extracted === '') continue
       if (key === 'detail' && typeof extracted === 'string') return extracted
-      parts.push(typeof extracted === 'object' ? JSON.stringify(extracted) : `${key}: ${extracted}`)
+      if (key === 'non_field_errors') {
+        parts.push(typeof extracted === 'object' ? JSON.stringify(extracted) : extracted)
+      } else {
+        const formattedKey = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ')
+        parts.push(typeof extracted === 'object' ? JSON.stringify(extracted) : `${formattedKey}: ${extracted}`)
+      }
     }
     if (parts.length) return parts.join('\n')
   }

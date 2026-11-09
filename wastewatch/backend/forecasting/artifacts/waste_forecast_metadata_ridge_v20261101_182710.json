@@ -1,0 +1,114 @@
+{
+  "model_version": "ridge_v20261101_182710",
+  "model_type": "ridge_regression",
+  "trained_at": "2026-11-01T18:27:10.988525+00:00",
+  "training_window": {
+    "start_date": "2026-09-03",
+    "end_date": "2026-11-01",
+    "days": 60
+  },
+  "genuine_records": 2,
+  "synthetic_records": 159,
+  "training_samples": 312,
+  "unique_origin_dates": 26,
+  "feature_count": 28,
+  "feature_schema": [
+    "population",
+    "target_day_of_week",
+    "target_is_weekend",
+    "target_is_sunday",
+    "target_is_monday",
+    "target_day_of_month",
+    "target_is_month_start",
+    "target_is_month_end",
+    "target_is_holiday",
+    "target_sin_dow",
+    "target_cos_dow",
+    "lag_1",
+    "lag_2",
+    "lag_3",
+    "lag_7",
+    "lag_14",
+    "lag_21",
+    "rolling_mean_7",
+    "rolling_mean_14",
+    "rolling_mean_28",
+    "rolling_std_7",
+    "rolling_std_14",
+    "rolling_max_14",
+    "rolling_min_14",
+    "rolling_median_14",
+    "trend_7_vs_28",
+    "recent_growth_rate",
+    "barangay_id"
+  ],
+  "library_versions": {
+    "python": "3.13.1",
+    "sklearn": "1.9.1",
+    "numpy": "2.5.4",
+    "pandas": "3.1.0",
+    "joblib": "1.6.0"
+  },
+  "model_sha256": "c625e392988c091a015dc1837b79248106b27ccff1a06eeca99d821763b46ef5",
+  "baseline_metrics": {
+    "overall_mae": 1827.03,
+    "city_mae": 5455.64,
+    "barangay_mae": 1497.16
+  },
+  "validation_metrics": {
+    "overall_mae": 1843.93,
+    "overall_rmse": 2937.84,
+    "overall_wape": 0.8655,
+    "mean_bias": -660.67,
+    "horizon_q80": {
+      "1": 1843.56,
+      "2": 2277.53,
+      "3": 3356.03,
+      "4": 2317.02,
+      "5": 2321.79,
+      "6": 2103.33,
+      "7": 3231.24
+    },
+    "test_coverage": {
+      "1": 0.806,
+      "2": 0.778,
+      "3": 0.778,
+      "4": 0.778,
+      "5": 0.639,
+      "6": 0.667,
+      "7": 0.778
+    },
+    "calibration_sample_counts": {
+      "1": 60,
+      "2": 60,
+      "3": 60,
+      "4": 60,
+      "5": 60,
+      "6": 60,
+      "7": 60
+    },
+    "average_interval_width": {
+      "1": 3687.13,
+      "2": 4555.05,
+      "3": 6712.07,
+      "4": 4634.05,
+      "5": 4643.58,
+      "6": 4206.66,
+      "7": 6462.48
+    },
+    "best_alphas": {
+      "1": 100.0,
+      "2": 10.0,
+      "3": 10.0,
+      "4": 100.0,
+      "5": 10.0,
+      "6": 100.0,
+      "7": 50.0
+    },
+    "cv_samples": 312
+  },
+  "relative_improvement_pct": -0.92,
+  "promoted_to_production": false,
+  "gate_threshold_pct": 5.0,
+  "quarantine_reason": "Model trained on synthetic data or insufficient genuine records."
+}

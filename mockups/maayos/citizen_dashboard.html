@@ -1,0 +1,1817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WasteWatch · Citizen Dashboard Wireframes</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;600;700&display=swap');
+
+        .ww {
+            font-family: 'Caveat', cursive;
+            background: #f0ede8;
+            padding: 24px 16px 48px;
+            min-width: 960px;
+        }
+
+        .ww-title {
+            font-size: 22px;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin-bottom: 2px;
+        }
+
+        .ww-sub {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 28px;
+        }
+
+        .pair-label {
+            font-size: 16px;
+            font-weight: 700;
+            color: #1a1a1a;
+            border-bottom: 2px solid #c2bdb5;
+            padding-bottom: 5px;
+            margin-bottom: 12px;
+        }
+
+        .pair {
+            display: flex;
+            gap: 28px;
+            margin-bottom: 52px;
+            align-items: flex-start;
+        }
+
+        .desktop {
+            border: 3px solid #2a2a2a;
+            border-radius: 10px;
+            background: #fff;
+            box-shadow: 5px 6px 0 #c2bdb5;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            width: 560px;
+            flex-shrink: 0;
+        }
+
+        .bbar {
+            background: #e8e4df;
+            border-bottom: 2px solid #2a2a2a;
+            padding: 5px 10px;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+        }
+
+        .bdots {
+            display: flex;
+            gap: 4px;
+        }
+
+        .bdot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            border: 2px solid #2a2a2a;
+            background: #fff;
+        }
+
+        .burl {
+            flex: 1;
+            height: 16px;
+            border: 2px solid #2a2a2a;
+            border-radius: 3px;
+            background: #fff;
+            font-size: 9px;
+            color: #888;
+            display: flex;
+            align-items: center;
+            padding: 0 5px;
+        }
+
+        .d-body {
+            display: flex;
+            flex: 1;
+        }
+
+        .d-sidebar {
+            width: 90px;
+            background: #faf8f5;
+            border-right: 2px solid #2a2a2a;
+            display: flex;
+            flex-direction: column;
+            padding: 10px 0;
+            flex-shrink: 0;
+        }
+
+        .d-sidebar.wide {
+            width: 140px;
+        }
+
+        .d-logo {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 0 10px 10px;
+            border-bottom: 1px solid #e8e4df;
+            margin-bottom: 8px;
+        }
+
+        .d-logo-box {
+            width: 18px;
+            height: 18px;
+            border: 2px solid #2a2a2a;
+            border-radius: 5px;
+            background: #e8e4df;
+            font-size: 9px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #1a1a1a;
+        }
+
+        .d-logo-text {
+            font-size: 10px;
+            color: #1a1a1a;
+            font-weight: 700;
+            line-height: 1.1;
+        }
+
+        .d-logo-sub {
+            font-size: 7px;
+            color: #1a1a1a;
+            letter-spacing: 1px;
+        }
+
+        .d-nav-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            font-size: 9px;
+            color: #888;
+            cursor: pointer;
+        }
+
+        .d-nav-item.active {
+            background: #e8e4df;
+            color: #1a1a1a;
+            border-left: 2px solid #1a1a1a;
+        }
+
+        .d-nav-icon {
+            width: 12px;
+            height: 12px;
+            border: 1.5px solid currentColor;
+            border-radius: 2px;
+            flex-shrink: 0;
+        }
+
+        .d-sidebar-bottom {
+            margin-top: auto;
+            border-top: 1px solid #e8e4df;
+            padding-top: 8px;
+        }
+
+        .d-topbar {
+            border-bottom: 2px solid #2a2a2a;
+            padding: 6px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 8px;
+            background: #fff;
+        }
+
+        .d-topbar-bell {
+            width: 14px;
+            height: 14px;
+            border: 1.5px solid #2a2a2a;
+            border-radius: 3px;
+            background: #e8e4df;
+        }
+
+        .d-topbar-avatar {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 2px solid #2a2a2a;
+            background: #2a2a2a;
+        }
+
+        .d-topbar-name {
+            font-size: 9px;
+            color: #1a1a1a;
+            font-weight: 700;
+        }
+
+        .d-topbar-role {
+            font-size: 7px;
+            color: #888;
+        }
+
+        .d-green-bar {
+            height: 2px;
+            background: #faf8f5;
+        }
+
+        .d-main {
+            flex: 1;
+            background: #faf8f5;
+            padding: 12px;
+            overflow: hidden;
+        }
+
+        .d-greeting {
+            font-size: 14px;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin-bottom: 2px;
+        }
+
+        .d-sub-info {
+            font-size: 8px;
+            color: #888;
+            margin-bottom: 10px;
+        }
+
+        .d-badge-active {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            border: 1.5px solid #1a1a1a;
+            border-radius: 10px;
+            padding: 1px 7px;
+            font-size: 8px;
+            color: #2a2a2a;
+            margin-left: 6px;
+        }
+
+        .d-badge-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: #faf8f5;
+        }
+
+        .d-route-card {
+            background: #faf8f5;
+            border: 2px solid #2a2a2a;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            box-shadow: 2px 2px 0 #c2bdb5;
+        }
+
+        .d-route-eyebrow {
+            font-size: 8px;
+            color: #555;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .d-route-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin-bottom: 3px;
+        }
+
+        .d-route-stops {
+            font-size: 8px;
+            color: #aaa;
+            margin-bottom: 8px;
+        }
+
+        .d-progress-bar {
+            height: 6px;
+            background: #d4cfc9;
+            border-radius: 3px;
+            margin-bottom: 3px;
+            overflow: hidden;
+        }
+
+        .d-progress-fill {
+            height: 100%;
+            background: #faf8f5;
+            border-radius: 3px;
+        }
+
+        .d-in-progress {
+            font-size: 8px;
+            color: #1a1a1a;
+            font-weight: 700;
+            float: right;
+            margin-top: -14px;
+        }
+
+        .d-pct {
+            font-size: 8px;
+            color: #1a1a1a;
+            text-align: right;
+        }
+
+        .d-perf-card {
+            background: #faf8f5;
+            border: 2px solid #2a2a2a;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            box-shadow: 2px 2px 0 #c2bdb5;
+        }
+
+        .d-perf-eyebrow {
+            font-size: 8px;
+            color: #2a2a2a;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .d-perf-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin-bottom: 3px;
+        }
+
+        .d-perf-sub {
+            font-size: 8px;
+            color: #aaa;
+            margin-bottom: 8px;
+        }
+
+        .d-perf-stats {
+            display: flex;
+            gap: 8px;
+        }
+
+        .d-perf-stat {
+            flex: 1;
+            background: #e8e4df;
+            border-radius: 5px;
+            padding: 6px;
+            text-align: center;
+        }
+
+        .d-perf-num {
+            font-size: 14px;
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+
+        .d-perf-num.green {
+            color: #1a1a1a;
+        }
+
+        .d-perf-num.orange {
+            color: #555;
+        }
+
+        .d-perf-label {
+            font-size: 7px;
+            color: #888;
+            letter-spacing: 0.5px;
+        }
+
+        .d-carousel-dots {
+            display: flex;
+            justify-content: center;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
+        .d-cdot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            border: 1.5px solid #2a2a2a;
+            background: #fff;
+        }
+
+        .d-cdot.active {
+            background: #faf8f5;
+            border-color: #1a1a1a;
+        }
+
+        .d-shift {
+            border: 2px solid #2a2a2a;
+            border-radius: 7px;
+            background: #fff;
+            padding: 7px 10px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 2px 2px 0 #c2bdb5;
+        }
+
+        .d-shift-label {
+            font-size: 7px;
+            color: #888;
+            letter-spacing: 0.5px;
+            font-weight: 700;
+            margin-bottom: 2px;
+        }
+
+        .d-shift-time {
+            font-size: 16px;
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+
+        .d-shift-started {
+            text-align: right;
+        }
+
+        .d-shift-started-label {
+            font-size: 7px;
+            color: #888;
+            letter-spacing: 0.5px;
+        }
+
+        .d-shift-started-val {
+            font-size: 11px;
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+
+        .d-stat-row {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+
+        .d-stat-card {
+            flex: 1;
+            background: #faf8f5;
+            border: 2px solid #2a2a2a;
+            border-radius: 7px;
+            padding: 7px 9px;
+            box-shadow: 2px 2px 0 #c2bdb5;
+        }
+
+        .d-stat-label {
+            font-size: 6px;
+            color: #888;
+            letter-spacing: 0.5px;
+            font-weight: 700;
+            margin-bottom: 3px;
+        }
+
+        .d-stat-val {
+            font-size: 16px;
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+
+        .d-right {
+            width: 140px;
+            flex-shrink: 0;
+            background: #fff;
+            border-left: 2px solid #e8e4df;
+            padding: 10px;
+        }
+
+        .d-right-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+        }
+
+        .d-quick-btn {
+            border: 2px solid #2a2a2a;
+            border-radius: 6px;
+            padding: 5px 8px;
+            font-family: 'Caveat', cursive;
+            font-size: 9px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 6px;
+            color: #1a1a1a;
+            background: #faf8f5;
+        }
+
+        .d-quick-btn.outline {
+            background: #fff;
+        }
+
+        .d-today-route {
+            border: 2px solid #2a2a2a;
+            border-radius: 7px;
+            background: #fff;
+            padding: 8px 10px;
+            box-shadow: 2px 2px 0 #c2bdb5;
+        }
+
+        .d-today-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .d-status-pill {
+            font-size: 7px;
+            border: 1.5px solid #1a1a1a;
+            border-radius: 10px;
+            padding: 1px 6px;
+            color: #2a2a2a;
+        }
+
+        .d-line {
+            height: 5px;
+            background: #d4cfc9;
+            border-radius: 3px;
+            margin-bottom: 3px;
+        }
+
+        .d-map {
+            border: 2px solid #2a2a2a;
+            border-radius: 7px;
+            background: #c8c4be;
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+        .d-map::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to bottom right, transparent calc(50% - 1px), #bbb8b3 calc(50% - 1px), #bbb8b3 calc(50% + 1px), transparent calc(50% + 1px));
+        }
+
+        .d-map::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to bottom left, transparent calc(50% - 1px), #bbb8b3 calc(50% - 1px), #bbb8b3 calc(50% + 1px), transparent calc(50% + 1px));
+        }
+
+        .d-map-label {
+            position: absolute;
+            bottom: 5px;
+            left: 7px;
+            font-size: 8px;
+            color: #555;
+            z-index: 2;
+            background: rgba(255, 255, 255, 0.7);
+            padding: 1px 5px;
+            border-radius: 3px;
+        }
+
+        .d-map-zoom {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            z-index: 2;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .d-zoom-btn {
+            width: 14px;
+            height: 14px;
+            border: 1.5px solid #2a2a2a;
+            border-radius: 3px;
+            background: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: 700;
+        }
+
+        .d-sched-list {
+            border: 2px solid #2a2a2a;
+            border-radius: 7px;
+            background: #fff;
+            overflow: hidden;
+            box-shadow: 2px 2px 0 #c2bdb5;
+        }
+
+        .d-sched-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 9px;
+            border-bottom: 1px solid #e8e4df;
+        }
+
+        .d-sched-row:last-child {
+            border-bottom: none;
+        }
+
+        .d-sched-icon {
+            width: 18px;
+            height: 18px;
+            border: 1.5px solid #2a2a2a;
+            border-radius: 4px;
+            background: #e8e4df;
+            margin-right: 7px;
+            flex-shrink: 0;
+        }
+
+        .d-sched-day {
+            font-size: 10px;
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+
+        .d-sched-sub {
+            font-size: 7px;
+            color: #aaa;
+        }
+
+        .d-sched-time {
+            font-size: 8px;
+            color: #555;
+        }
+
+        .d-tag {
+            font-size: 7px;
+            border: 1.5px solid;
+            border-radius: 8px;
+            padding: 1px 6px;
+            font-weight: 700;
+        }
+
+        .d-tag.active {
+            color: #2a2a2a;
+            border-color: #2a2a2a;
+        }
+
+        .d-tag.upcoming {
+            color: #555;
+            border-color: #555;
+        }
+
+        .d-profile-card {
+            border: 2px solid #2a2a2a;
+            border-radius: 7px;
+            background: #fff;
+            padding: 8px 10px;
+            margin-top: 8px;
+            box-shadow: 2px 2px 0 #c2bdb5;
+        }
+
+        .d-profile-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin-bottom: 7px;
+        }
+
+        .d-profile-row {
+            margin-bottom: 5px;
+        }
+
+        .d-profile-label {
+            font-size: 7px;
+            color: #888;
+            letter-spacing: 0.5px;
+            font-weight: 700;
+        }
+
+        .d-profile-val {
+            font-size: 10px;
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+
+        .d-tag-pill {
+            display: inline-block;
+            border: 1.5px solid #2a2a2a;
+            border-radius: 8px;
+            padding: 1px 7px;
+            font-size: 8px;
+        }
+
+        .d-tag-pill.blue {
+            color: #2a2a2a;
+            border-color: #2a2a2a;
+        }
+
+        .d-tag-pill.gray {
+            color: #555;
+            border-color: #555;
+        }
+
+        .d-status-row {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
+        .d-status-btn {
+            flex: 1;
+            border: 2px solid #2a2a2a;
+            border-radius: 5px;
+            padding: 4px 0;
+            text-align: center;
+            font-family: 'Caveat', cursive;
+            font-size: 8px;
+            font-weight: 700;
+            color: #1a1a1a;
+            background: #fff;
+        }
+
+        .d-status-btn.selected {
+            border-color: #2a2a2a;
+            color: #2a2a2a;
+            background: #e8e4df;
+        }
+
+        .d-action-row {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 8px;
+        }
+
+        .d-action-btn {
+            flex: 1;
+            border: 2px solid #2a2a2a;
+            border-radius: 5px;
+            padding: 5px 0;
+            text-align: center;
+            font-family: 'Caveat', cursive;
+            font-size: 9px;
+            font-weight: 700;
+        }
+
+        .d-action-btn.green {
+            background: #faf8f5;
+            border-color: #2a2a2a;
+            color: #1a1a1a;
+        }
+
+        .d-action-btn.red {
+            background: #faf8f5;
+            border-color: #555;
+            color: #555;
+        }
+
+        /* ── MOBILE ── */
+        .mobile {
+            width: 200px;
+            flex-shrink: 0;
+            border: 3px solid #2a2a2a;
+            border-radius: 22px;
+            background: #fff;
+            box-shadow: 4px 5px 0 #c2bdb5;
+            overflow: hidden;
+        }
+
+        .m-notch {
+            height: 12px;
+            background: #e8e4df;
+            border-bottom: 2px solid #2a2a2a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .m-notch-pill {
+            width: 36px;
+            height: 4px;
+            background: #2a2a2a;
+            border-radius: 3px;
+        }
+
+        .m-topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 10px;
+            border-bottom: 2px solid #2a2a2a;
+            background: #fff;
+        }
+
+        .m-hamburger {
+            font-size: 14px;
+            color: #1a1a1a;
+        }
+
+        .m-brand {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+
+        .m-brand-icon {
+            width: 18px;
+            height: 18px;
+            border: 2px solid #2a2a2a;
+            border-radius: 5px;
+            background: #e8e4df;
+            font-size: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #1a1a1a;
+        }
+
+        .m-bell {
+            width: 13px;
+            height: 13px;
+            border: 1.5px solid #2a2a2a;
+            border-radius: 3px;
+            background: #e8e4df;
+            position: relative;
+        }
+
+        .m-bell::after {
+            content: '';
+            position: absolute;
+            top: -3px;
+            right: -2px;
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: #555;
+            border: 1px solid #fff;
+        }
+
+        .m-green-bar {
+            height: 2px;
+            background: #faf8f5;
+        }
+
+        .m-content {
+            padding: 8px 9px;
+            background: #faf8f5;
+        }
+
+        .m-greeting {
+            font-size: 13px;
+            font-weight: 700;
+            color: #1a1a1a;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+
+        .m-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            border: 1.5px solid #1a1a1a;
+            border-radius: 8px;
+            padding: 1px 5px;
+            font-size: 7px;
+            color: #2a2a2a;
+        }
+
+        .m-badge-dot {
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: #faf8f5;
+        }
+
+        .m-sub {
+            font-size: 7px;
+            color: #888;
+            margin-bottom: 7px;
+            line-height: 1.3;
+        }
+
+        .m-route-card {
+            background: #faf8f5;
+            border: 2px solid #2a2a2a;
+            border-radius: 7px;
+            padding: 8px 9px;
+            margin-bottom: 6px;
+            box-shadow: 2px 2px 0 #c2bdb5;
+        }
+
+        .m-route-eyebrow {
+            font-size: 7px;
+            color: #555;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            margin-bottom: 3px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .m-route-status {
+            font-size: 7px;
+            color: #1a1a1a;
+            font-weight: 700;
+        }
+
+        .m-route-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin-bottom: 2px;
+        }
+
+        .m-route-stops {
+            font-size: 7px;
+            color: #aaa;
+            margin-bottom: 6px;
+        }
+
+        .m-progress-bar {
+            height: 5px;
+            background: #d4cfc9;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 2px;
+        }
+
+        .m-progress-fill {
+            height: 100%;
+            background: #faf8f5;
+            border-radius: 3px;
+        }
+
+        .m-pct {
+            font-size: 7px;
+            color: #1a1a1a;
+            text-align: right;
+        }
+
+        .m-perf-card {
+            background: #faf8f5;
+            border: 2px solid #2a2a2a;
+            border-radius: 7px;
+            padding: 8px 9px;
+            margin-bottom: 6px;
+            box-shadow: 2px 2px 0 #c2bdb5;
+        }
+
+        .m-perf-eyebrow {
+            font-size: 7px;
+            color: #2a2a2a;
+            font-weight: 700;
+            margin-bottom: 3px;
+        }
+
+        .m-perf-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin-bottom: 2px;
+        }
+
+        .m-perf-sub {
+            font-size: 7px;
+            color: #aaa;
+            margin-bottom: 6px;
+        }
+
+        .m-perf-stats {
+            display: flex;
+            gap: 5px;
+        }
+
+        .m-perf-stat {
+            flex: 1;
+            background: #e8e4df;
+            border-radius: 4px;
+            padding: 4px 3px;
+            text-align: center;
+        }
+
+        .m-perf-num {
+            font-size: 11px;
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+
+        .m-perf-num.green {
+            color: #1a1a1a;
+        }
+
+        .m-perf-num.orange {
+            color: #555;
+        }
+
+        .m-perf-label {
+            font-size: 6px;
+            color: #888;
+        }
+
+        .m-carousel-dots {
+            display: flex;
+            justify-content: center;
+            gap: 3px;
+            margin-bottom: 6px;
+        }
+
+        .m-cdot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            border: 1.5px solid #2a2a2a;
+            background: #fff;
+        }
+
+        .m-cdot.active {
+            background: #faf8f5;
+            border-color: #1a1a1a;
+        }
+
+        .m-shift {
+            border: 2px solid #2a2a2a;
+            border-radius: 6px;
+            background: #fff;
+            padding: 6px 8px;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 2px 2px 0 #c2bdb5;
+        }
+
+        .m-shift-label {
+            font-size: 6px;
+            color: #888;
+            letter-spacing: 0.4px;
+            font-weight: 700;
+            margin-bottom: 2px;
+        }
+
+        .m-shift-time {
+            font-size: 13px;
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+
+        .m-shift-started-label {
+            font-size: 6px;
+            color: #888;
+        }
+
+        .m-shift-started-val {
+            font-size: 9px;
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+
+        .m-stat-row {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 6px;
+        }
+
+        .m-stat-card {
+            flex: 1;
+            background: #faf8f5;
+            border: 2px solid #2a2a2a;
+            border-radius: 6px;
+            padding: 5px 6px;
+            box-shadow: 1px 2px 0 #c2bdb5;
+        }
+
+        .m-stat-label {
+            font-size: 5px;
+            color: #888;
+            letter-spacing: 0.4px;
+            font-weight: 700;
+            margin-bottom: 2px;
+        }
+
+        .m-stat-val {
+            font-size: 14px;
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+
+        .m-today-route {
+            border: 2px solid #2a2a2a;
+            border-radius: 6px;
+            background: #fff;
+            padding: 7px 8px;
+            margin-bottom: 6px;
+            box-shadow: 2px 2px 0 #c2bdb5;
+        }
+
+        .m-today-title {
+            font-size: 10px;
+            font-weight: 700;
+            color: #1a1a1a;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+
+        .m-status-pill {
+            font-size: 6px;
+            border: 1.5px solid #1a1a1a;
+            border-radius: 8px;
+            padding: 1px 5px;
+            color: #2a2a2a;
+        }
+
+        .m-line {
+            height: 4px;
+            background: #d4cfc9;
+            border-radius: 2px;
+            margin-bottom: 3px;
+        }
+
+        .m-map {
+            border: 2px solid #2a2a2a;
+            border-radius: 6px;
+            background: #c8c4be;
+            position: relative;
+            overflow: hidden;
+            height: 80px;
+            margin-bottom: 6px;
+        }
+
+        .m-map::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to bottom right, transparent calc(50% - 1px), #bbb8b3 calc(50% - 1px), #bbb8b3 calc(50% + 1px), transparent calc(50% + 1px));
+        }
+
+        .m-map::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to bottom left, transparent calc(50% - 1px), #bbb8b3 calc(50% - 1px), #bbb8b3 calc(50% + 1px), transparent calc(50% + 1px));
+        }
+
+        .m-map-label {
+            position: absolute;
+            bottom: 4px;
+            left: 5px;
+            font-size: 6px;
+            color: #555;
+            z-index: 2;
+            background: rgba(255, 255, 255, 0.7);
+            padding: 1px 4px;
+            border-radius: 2px;
+        }
+
+        .m-full-map {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            font-size: 6px;
+            border: 1.5px solid #2a2a2a;
+            border-radius: 4px;
+            padding: 1px 5px;
+            color: #2a2a2a;
+            background: rgba(255, 255, 255, 0.9);
+            z-index: 2;
+            font-weight: 700;
+        }
+
+        .m-status-row {
+            display: flex;
+            gap: 3px;
+            margin-bottom: 5px;
+        }
+
+        .m-status-btn {
+            flex: 1;
+            border: 1.5px solid #2a2a2a;
+            border-radius: 4px;
+            padding: 3px 0;
+            text-align: center;
+            font-family: 'Caveat', cursive;
+            font-size: 7px;
+            font-weight: 700;
+            color: #1a1a1a;
+            background: #fff;
+        }
+
+        .m-status-btn.selected {
+            border-color: #2a2a2a;
+            color: #2a2a2a;
+            background: #e8e4df;
+        }
+
+        .m-action-row {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 5px;
+        }
+
+        .m-action-btn {
+            flex: 1;
+            border: 2px solid #2a2a2a;
+            border-radius: 5px;
+            padding: 4px 0;
+            text-align: center;
+            font-family: 'Caveat', cursive;
+            font-size: 8px;
+            font-weight: 700;
+        }
+
+        .m-action-btn.green {
+            background: #faf8f5;
+            border-color: #2a2a2a;
+            color: #1a1a1a;
+        }
+
+        .m-action-btn.red {
+            background: #faf8f5;
+            border-color: #555;
+            color: #555;
+        }
+
+        .m-sched-list {
+            border: 2px solid #2a2a2a;
+            border-radius: 6px;
+            background: #fff;
+            overflow: hidden;
+            box-shadow: 2px 2px 0 #c2bdb5;
+        }
+
+        .m-sched-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 5px 7px;
+            border-bottom: 1px solid #e8e4df;
+        }
+
+        .m-sched-row:last-child {
+            border-bottom: none;
+        }
+
+        .m-sched-icon {
+            width: 14px;
+            height: 14px;
+            border: 1.5px solid #2a2a2a;
+            border-radius: 3px;
+            background: #e8e4df;
+            margin-right: 5px;
+            flex-shrink: 0;
+        }
+
+        .m-sched-day {
+            font-size: 8px;
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+
+        .m-sched-sub {
+            font-size: 6px;
+            color: #aaa;
+        }
+
+        .m-sched-time {
+            font-size: 7px;
+            color: #555;
+        }
+
+        .m-tag {
+            font-size: 6px;
+            border: 1.5px solid;
+            border-radius: 6px;
+            padding: 1px 4px;
+            font-weight: 700;
+        }
+
+        .m-tag.active {
+            color: #2a2a2a;
+            border-color: #2a2a2a;
+        }
+
+        .m-tag.upcoming {
+            color: #555;
+            border-color: #555;
+        }
+
+        .m-bottom-nav {
+            border-top: 2px solid #2a2a2a;
+            background: #fff;
+            display: flex;
+            padding: 5px 0 3px;
+        }
+
+        .m-nav-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            font-size: 6px;
+            color: #555;
+        }
+
+        .m-nav-item.active {
+            color: #2a2a2a;
+        }
+
+        .m-nav-icon {
+            width: 13px;
+            height: 13px;
+            border: 1.5px solid currentColor;
+            border-radius: 3px;
+            background: transparent;
+        }
+
+        .m-nav-cam {
+            width: 22px;
+            height: 22px;
+            border: 2px solid #2a2a2a;
+            border-radius: 50%;
+            background: #e8e4df;
+            margin-top: -8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+        }
+
+        .section-foot {
+            border-top: 2px solid #c2bdb5;
+            padding-top: 10px;
+            font-size: 11px;
+            color: #888;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="ww">
+        <div class="ww-title">WasteWatch · Citizen Dashboard</div>
+        <p class="ww-sub">Low-Fidelity Wireframes · Desktop (left) &amp; Mobile (right) · Side by Side</p>
+
+        <!-- ===== SCREEN 1 ===== -->
+        <div class="pair-label">Screen 1 · Dashboard Overview</div>
+        <div class="pair">
+            <div class="desktop">
+                <div class="bbar"><div class="bdots"><div class="bdot"></div><div class="bdot"></div><div class="bdot"></div></div><div class="burl">localhost:5173 / resident / dashboard</div></div>
+                <div class="d-green-bar"></div>
+                <div class="d-body">
+                    <div class="d-sidebar wide">
+                        <div class="d-logo">
+                            <div class="d-logo-box">🗑</div>
+                            <div>
+                                <div class="d-logo-text">WasteWatch</div>
+                                <div class="d-logo-sub">RESIDENT</div>
+                            </div>
+                        </div>
+                        <div class="d-nav-item active"><div class="d-nav-icon"></div>Dashboard</div>
+                        <div class="d-nav-item"><div class="d-nav-icon"></div>My Schedule</div>
+                        <div class="d-nav-item"><div class="d-nav-icon"></div>Report Issue</div>
+                        <div class="d-nav-item"><div class="d-nav-icon"></div>My Reports</div>
+                        <div class="d-sidebar-bottom">
+                            <div class="d-nav-item"><div class="d-nav-icon"></div>Profile</div>
+                            <div class="d-nav-item"><div class="d-nav-icon"></div>Logout</div>
+                        </div>
+                    </div>
+                    <div style="flex:1;display:flex;flex-direction:column">
+                        <div class="d-topbar">
+                            <div class="d-topbar-bell"></div>
+                            <div class="d-topbar-avatar"></div>
+                            <div><div class="d-topbar-name">Juan</div><div class="d-topbar-role">Resident</div></div>
+                        </div>
+                        <div style="display:flex;flex:1">
+                            <div class="d-main" style="background:#faf8f5">
+                                <div class="d-greeting">Hello, Juan 👋</div>
+                                <div class="d-sub-info">Resident · Ilayang Dupay, Lucena City</div>
+                                
+                                <div style="display:flex;gap:10px;margin-bottom:12px">
+                                    <div class="d-route-card" style="flex:1">
+                                        <div class="d-route-eyebrow">📅 NEXT COLLECTION</div>
+                                        <div class="d-route-title">Tomorrow, 06:00 AM</div>
+                                        <div class="d-route-stops">Mixed Waste · Ilayang Dupay</div>
+                                    </div>
+                                    <div class="d-route-card" style="flex:1;background:#fff">
+                                        <div class="d-route-eyebrow">📢 LATEST ADVISORY</div>
+                                        <div class="d-route-title" style="font-size:12px">Heavy Rain Delays</div>
+                                        <div class="d-route-stops">Expect +2hrs delay today.</div>
+                                    </div>
+                                </div>
+                                
+                                <div style="font-size:12px;font-weight:700;color:#1a1a1a;margin-bottom:8px">My Recent Reports</div>
+                                <div class="d-route-card" style="background:#fff">
+                                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                                        <div style="font-size:11px;font-weight:700">Overflowing Bin</div>
+                                        <div class="d-tag-pill blue" style="font-size:7px">IN PROGRESS</div>
+                                    </div>
+                                    <div style="font-size:9px;color:#888;margin-bottom:6px">Reported 2 days ago · Purok 3</div>
+                                    <div class="d-progress-bar"><div class="d-progress-fill" style="width:60%;background:#2a2a2a"></div></div>
+                                </div>
+                                <div class="d-route-card" style="background:#fff">
+                                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                                        <div style="font-size:11px;font-weight:700">Missed Collection</div>
+                                        <div class="d-tag-pill gray" style="font-size:7px">RESOLVED</div>
+                                    </div>
+                                    <div style="font-size:9px;color:#888">Reported 1 week ago · Ilayang Dupay</div>
+                                </div>
+                            </div>
+                            <div class="d-right">
+                                <div class="d-right-title">Quick Actions</div>
+                                <div class="d-quick-btn">🚨 Report an Issue</div>
+                                <div class="d-quick-btn outline">📅 View Full Schedule</div>
+                                <div style="height:12px"></div>
+                                <div class="d-right-title">My Stats</div>
+                                <div style="font-size:16px;font-weight:700;color:#1a1a1a;margin-bottom:2px">3</div>
+                                <div style="font-size:8px;color:#888;margin-bottom:12px">Total Reports Submitted</div>
+                                <div style="font-size:16px;font-weight:700;color:#1a1a1a;margin-bottom:2px">100%</div>
+                                <div style="font-size:8px;color:#888">Resolution Rate</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <div class="mobile">
+                    <div class="m-notch"><div class="m-notch-pill"></div></div>
+                    <div class="m-topbar"><span class="m-hamburger">☰</span><div class="m-brand"><div class="m-brand-icon">🗑</div>WasteWatch</div><div class="m-bell"></div></div>
+                    <div class="m-green-bar"></div>
+                    <div class="m-content">
+                        <div class="m-greeting" style="margin-bottom:2px">Hello, Juan 👋</div>
+                        <div class="m-sub" style="margin-bottom:12px">Resident · Ilayang Dupay</div>
+                        
+                        <div class="m-route-card" style="background:#fff">
+                            <div class="m-route-eyebrow">📅 NEXT COLLECTION</div>
+                            <div class="m-route-title">Tomorrow, 06:00 AM</div>
+                            <div class="m-route-stops">Mixed Waste</div>
+                        </div>
+                        
+                        <div style="display:flex;gap:6px;margin-bottom:12px">
+                            <div style="flex:1;background:#2a2a2a;color:#fff;border-radius:6px;padding:8px;text-align:center;font-size:9px;font-weight:700">
+                                🚨 Report Issue
+                            </div>
+                            <div style="flex:1;background:#fff;border:1.5px solid #2a2a2a;color:#1a1a1a;border-radius:6px;padding:8px;text-align:center;font-size:9px;font-weight:700">
+                                📅 Schedule
+                            </div>
+                        </div>
+                        
+                        <div style="font-size:10px;font-weight:700;color:#1a1a1a;margin-bottom:6px">Recent Reports</div>
+                        <div class="m-route-card" style="background:#fff">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                                <div style="font-size:10px;font-weight:700">Overflowing Bin</div>
+                                <div class="m-badge" style="font-size:6px">IN PROGRESS</div>
+                            </div>
+                            <div style="font-size:7px;color:#888;margin-bottom:6px">Reported 2 days ago</div>
+                            <div class="m-progress-bar"><div class="m-progress-fill" style="width:60%;background:#2a2a2a"></div></div>
+                        </div>
+                    </div>
+                    <div class="m-bottom-nav">
+                        <div class="m-nav-item active"><div class="m-nav-icon"></div>Home</div>
+                        <div class="m-nav-item"><div class="m-nav-icon"></div>Schedule</div>
+                        <div class="m-nav-item"><div class="m-nav-cam" style="border:2px solid #2a2a2a;background:#fff;color:#1a1a1a">+</div></div>
+                        <div class="m-nav-item"><div class="m-nav-icon"></div>Reports</div>
+                        <div class="m-nav-item"><div class="m-nav-icon"></div>Profile</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== SCREEN 2 ===== -->
+        <div class="pair-label">Screen 2 · Report an Issue (Form & Map)</div>
+        <div class="pair">
+            <div class="desktop">
+                <div class="bbar"><div class="bdots"><div class="bdot"></div><div class="bdot"></div><div class="bdot"></div></div><div class="burl">localhost:5173 / resident / report</div></div>
+                <div class="d-green-bar"></div>
+                <div class="d-body">
+                    <div class="d-sidebar wide">
+                        <div class="d-logo"><div class="d-logo-box">🗑</div><div><div class="d-logo-text">WasteWatch</div><div class="d-logo-sub">RESIDENT</div></div></div>
+                        <div class="d-nav-item"><div class="d-nav-icon"></div>Dashboard</div>
+                        <div class="d-nav-item"><div class="d-nav-icon"></div>My Schedule</div>
+                        <div class="d-nav-item active"><div class="d-nav-icon"></div>Report Issue</div>
+                        <div class="d-nav-item"><div class="d-nav-icon"></div>My Reports</div>
+                    </div>
+                    <div style="flex:1;display:flex;flex-direction:column">
+                        <div class="d-topbar">
+                            <div class="d-topbar-bell"></div>
+                            <div class="d-topbar-avatar"></div>
+                            <div><div class="d-topbar-name">Juan</div><div class="d-topbar-role">Resident</div></div>
+                        </div>
+                        <div style="display:flex;flex:1;background:#faf8f5;padding:16px">
+                            <div style="flex:1;background:#fff;border:2px solid #2a2a2a;border-radius:10px;padding:16px;box-shadow:2px 2px 0 #c2bdb5;margin-right:16px;display:flex;flex-direction:column">
+                                <div style="font-size:16px;font-weight:700;margin-bottom:16px">Submit a Report</div>
+                                
+                                <div style="font-size:10px;font-weight:700;color:#555;margin-bottom:4px">ISSUE TYPE</div>
+                                <select style="width:100%;padding:8px;border:1.5px solid #d4cfc9;border-radius:6px;font-size:11px;margin-bottom:12px;background:#faf8f5">
+                                    <option>Illegal Dumping</option>
+                                    <option>Overflowing Bin</option>
+                                    <option>Missed Collection</option>
+                                </select>
+
+                                <div style="font-size:10px;font-weight:700;color:#555;margin-bottom:4px">DESCRIPTION</div>
+                                <textarea style="width:100%;height:60px;padding:8px;border:1.5px solid #d4cfc9;border-radius:6px;font-size:11px;margin-bottom:12px;background:#faf8f5;box-sizing:border-box" placeholder="Describe the issue..."></textarea>
+
+                                <div style="font-size:10px;font-weight:700;color:#555;margin-bottom:4px">PHOTO EVIDENCE</div>
+                                <div style="border:2px dashed #d4cfc9;border-radius:6px;padding:16px;text-align:center;background:#faf8f5;margin-bottom:12px">
+                                    <div style="font-size:20px;margin-bottom:4px">📷</div>
+                                    <div style="font-size:10px;font-weight:700">Click to capture or upload</div>
+                                </div>
+                            </div>
+                            <div style="flex:1;background:#fff;border:2px solid #2a2a2a;border-radius:10px;padding:16px;box-shadow:2px 2px 0 #c2bdb5;display:flex;flex-direction:column">
+                                <div style="font-size:10px;font-weight:700;color:#555;margin-bottom:4px">PIN LOCATION</div>
+                                <div class="d-map" style="flex:1;min-height:150px;margin-bottom:12px;background:#e8e4df">
+                                    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-100%);font-size:24px;text-shadow:0 2px 4px rgba(0,0,0,0.2)">📍</div>
+                                </div>
+                                <input type="text" value="Purok 3, Ilayang Dupay, Lucena City" style="width:100%;padding:8px;border:1.5px solid #d4cfc9;border-radius:6px;font-size:11px;margin-bottom:16px;box-sizing:border-box">
+                                
+                                <div style="background:#2a2a2a;color:#fff;border-radius:6px;padding:10px;text-align:center;font-size:12px;font-weight:700;margin-top:auto">
+                                    Submit Report
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <div class="mobile" style="height:700px">
+                    <div class="m-notch"><div class="m-notch-pill"></div></div>
+                    <div class="m-topbar"><span class="m-hamburger">☰</span><div class="m-brand">WasteWatch</div><div class="m-bell"></div></div>
+                    <div class="m-green-bar"></div>
+                    <div class="m-content" style="background:#fff;height:100%;padding:12px">
+                        <div style="font-size:14px;font-weight:700;margin-bottom:12px">Report an Issue</div>
+                        
+                        <div style="font-size:8px;font-weight:700;color:#555;margin-bottom:4px">ISSUE TYPE</div>
+                        <div style="border:1.5px solid #d4cfc9;border-radius:6px;padding:6px 8px;font-size:10px;margin-bottom:12px;background:#faf8f5">
+                            Illegal Dumping ▾
+                        </div>
+
+                        <div style="font-size:8px;font-weight:700;color:#555;margin-bottom:4px">PHOTO EVIDENCE</div>
+                        <div style="border:1.5px dashed #d4cfc9;border-radius:6px;padding:16px;text-align:center;background:#faf8f5;margin-bottom:12px">
+                            <div style="font-size:16px;margin-bottom:2px">📷</div>
+                            <div style="font-size:8px;font-weight:700">Tap to Camera Modal</div>
+                        </div>
+
+                        <div style="font-size:8px;font-weight:700;color:#555;margin-bottom:4px">PIN LOCATION</div>
+                        <div class="m-map" style="height:120px;border-radius:6px;margin-bottom:6px">
+                            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-100%);font-size:20px">📍</div>
+                        </div>
+                        <div style="font-size:8px;color:#888;margin-bottom:12px;border:1px solid #d4cfc9;padding:4px;border-radius:4px">Purok 3, Ilayang Dupay</div>
+
+                        <div style="font-size:8px;font-weight:700;color:#555;margin-bottom:4px">DESCRIPTION</div>
+                        <div style="border:1.5px solid #d4cfc9;border-radius:6px;padding:6px 8px;font-size:10px;margin-bottom:24px;background:#faf8f5;height:40px;color:#888">
+                            Add details...
+                        </div>
+
+                        <div style="background:#2a2a2a;color:#fff;border-radius:6px;padding:10px;text-align:center;font-size:12px;font-weight:700">
+                            Submit Report
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== SCREEN 3 ===== -->
+        <div class="pair-label">Screen 3 · Camera Modal (Proof Capture)</div>
+        <div class="pair">
+            <div class="desktop" style="background:#888">
+                <div class="bbar"><div class="bdots"><div class="bdot"></div><div class="bdot"></div><div class="bdot"></div></div><div class="burl">localhost:5173 / resident / report (Modal)</div></div>
+                <div class="d-body" style="justify-content:center;align-items:center;padding:40px">
+                    <div style="width:400px;background:#fff;border:3px solid #2a2a2a;border-radius:12px;box-shadow:6px 6px 0 rgba(0,0,0,0.5);overflow:hidden;display:flex;flex-direction:column">
+                        <div style="padding:12px 16px;border-bottom:2px solid #2a2a2a;display:flex;justify-content:space-between;align-items:center">
+                            <div style="font-size:14px;font-weight:700">Capture Evidence</div>
+                            <div style="font-size:14px;font-weight:700">✕</div>
+                        </div>
+                        <div style="height:250px;background:#2a2a2a;position:relative;display:flex;align-items:center;justify-content:center">
+                            <div style="color:#fff;font-size:12px">[ Camera Viewfinder ]</div>
+                            <div style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.5);color:#fff;padding:4px 8px;border-radius:12px;font-size:9px">⏱ 12:45 PM</div>
+                        </div>
+                        <div style="padding:16px;display:flex;justify-content:center;gap:16px;background:#faf8f5;border-top:2px solid #2a2a2a">
+                            <div style="width:40px;height:40px;border-radius:50%;background:#e8e4df;border:2px solid #2a2a2a;display:flex;align-items:center;justify-content:center;font-size:16px">📁</div>
+                            <div style="width:48px;height:48px;border-radius:50%;background:#fff;border:4px solid #2a2a2a;display:flex;align-items:center;justify-content:center"><div style="width:36px;height:36px;border-radius:50%;background:#2a2a2a"></div></div>
+                            <div style="width:40px;height:40px;border-radius:50%;background:#e8e4df;border:2px solid #2a2a2a;display:flex;align-items:center;justify-content:center;font-size:16px">🔄</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <div class="mobile" style="height:700px;background:#888;display:flex;align-items:center;justify-content:center;position:relative">
+                    <div class="m-notch" style="position:absolute;top:0;width:100%;z-index:10"><div class="m-notch-pill"></div></div>
+                    <div style="width:180px;background:#fff;border:2px solid #2a2a2a;border-radius:12px;box-shadow:4px 4px 0 rgba(0,0,0,0.5);overflow:hidden;display:flex;flex-direction:column">
+                        <div style="padding:8px 12px;border-bottom:2px solid #2a2a2a;display:flex;justify-content:space-between;align-items:center">
+                            <div style="font-size:11px;font-weight:700">Photo Proof</div>
+                            <div style="font-size:11px;font-weight:700">✕</div>
+                        </div>
+                        <div style="height:280px;background:#2a2a2a;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px">
+                            [ Camera Active ]
+                        </div>
+                        <div style="padding:12px;display:flex;justify-content:center;gap:12px;background:#faf8f5;border-top:2px solid #2a2a2a">
+                            <div style="width:28px;height:28px;border-radius:50%;background:#e8e4df;border:2px solid #2a2a2a;display:flex;align-items:center;justify-content:center;font-size:12px">📁</div>
+                            <div style="width:36px;height:36px;border-radius:50%;background:#fff;border:3px solid #2a2a2a;display:flex;align-items:center;justify-content:center"><div style="width:26px;height:26px;border-radius:50%;background:#2a2a2a"></div></div>
+                            <div style="width:28px;height:28px;border-radius:50%;background:#e8e4df;border:2px solid #2a2a2a;display:flex;align-items:center;justify-content:center;font-size:12px">🔄</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== SCREEN 4 ===== -->
+        <div class="pair-label">Screen 4 · My Reports (List View)</div>
+        <div class="pair">
+            <div class="desktop">
+                <div class="bbar"><div class="bdots"><div class="bdot"></div><div class="bdot"></div><div class="bdot"></div></div><div class="burl">localhost:5173 / resident / my-reports</div></div>
+                <div class="d-green-bar"></div>
+                <div class="d-body">
+                    <div class="d-sidebar wide">
+                        <div class="d-logo"><div class="d-logo-box">🗑</div><div><div class="d-logo-text">WasteWatch</div><div class="d-logo-sub">RESIDENT</div></div></div>
+                        <div class="d-nav-item"><div class="d-nav-icon"></div>Dashboard</div>
+                        <div class="d-nav-item"><div class="d-nav-icon"></div>My Schedule</div>
+                        <div class="d-nav-item"><div class="d-nav-icon"></div>Report Issue</div>
+                        <div class="d-nav-item active"><div class="d-nav-icon"></div>My Reports</div>
+                    </div>
+                    <div style="flex:1;display:flex;flex-direction:column;background:#faf8f5">
+                        <div class="d-topbar">
+                            <div class="d-topbar-bell"></div>
+                            <div class="d-topbar-avatar"></div>
+                            <div><div class="d-topbar-name">Juan</div><div class="d-topbar-role">Resident</div></div>
+                        </div>
+                        <div style="padding:16px">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                                <div style="font-size:18px;font-weight:700">My Submitted Reports</div>
+                                <div style="display:flex;gap:8px">
+                                    <div class="d-quick-btn outline" style="margin:0">Filter: All</div>
+                                    <div class="d-quick-btn" style="margin:0;background:#1a1a1a;color:#fff">+ New Report</div>
+                                </div>
+                            </div>
+
+                            <div style="background:#fff;border:2px solid #e8e4df;border-radius:8px;padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:16px">
+                                <div style="width:48px;height:48px;background:#e8e4df;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:16px">📷</div>
+                                <div style="flex:1">
+                                    <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                                        <div style="font-size:14px;font-weight:700">Overflowing Bin</div>
+                                        <div class="d-tag-pill blue" style="font-size:8px">IN PROGRESS</div>
+                                    </div>
+                                    <div style="font-size:10px;color:#888;margin-bottom:4px">Purok 3, Ilayang Dupay · Reported 2 days ago</div>
+                                    <div style="font-size:10px;color:#1a1a1a">Barangay officials have acknowledged the report. Scheduled for pickup today.</div>
+                                </div>
+                                <div style="font-size:14px;font-weight:700;color:#2a2a2a">›</div>
+                            </div>
+
+                            <div style="background:#fff;border:2px solid #e8e4df;border-radius:8px;padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:16px;opacity:0.7">
+                                <div style="width:48px;height:48px;background:#e8e4df;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:16px">📷</div>
+                                <div style="flex:1">
+                                    <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                                        <div style="font-size:14px;font-weight:700">Missed Collection</div>
+                                        <div class="d-tag-pill gray" style="font-size:8px">RESOLVED</div>
+                                    </div>
+                                    <div style="font-size:10px;color:#888;margin-bottom:4px">Ilayang Dupay · Reported 1 week ago</div>
+                                    <div style="font-size:10px;color:#1a1a1a">Waste has been collected. Issue closed.</div>
+                                </div>
+                                <div style="font-size:14px;font-weight:700;color:#2a2a2a">›</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <div class="mobile" style="height:700px">
+                    <div class="m-notch"><div class="m-notch-pill"></div></div>
+                    <div class="m-topbar"><span class="m-hamburger">☰</span><div class="m-brand">WasteWatch</div><div class="m-bell"></div></div>
+                    <div class="m-green-bar"></div>
+                    <div class="m-content" style="background:#faf8f5;height:100%">
+                        <div style="font-size:14px;font-weight:700;margin-bottom:12px;display:flex;justify-content:space-between">
+                            My Reports
+                            <span style="font-size:10px;color:#888;font-weight:400">Filter ▾</span>
+                        </div>
+                        
+                        <div style="background:#fff;border:1.5px solid #d4cfc9;border-radius:6px;padding:10px;margin-bottom:8px">
+                            <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+                                <div style="font-size:11px;font-weight:700">Overflowing Bin</div>
+                                <div class="m-badge" style="font-size:6px">IN PROGRESS</div>
+                            </div>
+                            <div style="display:flex;gap:8px">
+                                <div style="width:36px;height:36px;background:#e8e4df;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px">📷</div>
+                                <div style="flex:1">
+                                    <div style="font-size:8px;color:#888;margin-bottom:2px">Purok 3 · 2 days ago</div>
+                                    <div style="font-size:8px;color:#1a1a1a">Scheduled for pickup today.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="background:#fff;border:1.5px solid #d4cfc9;border-radius:6px;padding:10px;margin-bottom:8px;opacity:0.7">
+                            <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+                                <div style="font-size:11px;font-weight:700">Missed Collection</div>
+                                <div class="m-badge" style="font-size:6px;border-color:#888;color:#888">RESOLVED</div>
+                            </div>
+                            <div style="display:flex;gap:8px">
+                                <div style="width:36px;height:36px;background:#e8e4df;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px">📷</div>
+                                <div style="flex:1">
+                                    <div style="font-size:8px;color:#888;margin-bottom:2px">Ilayang Dupay · 1 wk ago</div>
+                                    <div style="font-size:8px;color:#1a1a1a">Issue closed.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="m-bottom-nav">
+                        <div class="m-nav-item"><div class="m-nav-icon"></div>Home</div>
+                        <div class="m-nav-item"><div class="m-nav-icon"></div>Schedule</div>
+                        <div class="m-nav-item"><div class="m-nav-cam" style="border:2px solid #2a2a2a;background:#fff;color:#1a1a1a">+</div></div>
+                        <div class="m-nav-item active"><div class="m-nav-icon"></div>Reports</div>
+                        <div class="m-nav-item"><div class="m-nav-icon"></div>Profile</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- ===== SCREEN 5 ===== -->
+        <div class="pair-label">Screen 5 · Live Truck Tracking & Advisories (Future Feature)</div>
+        <div class="pair">
+            <div class="desktop">
+                <div class="bbar"><div class="bdots"><div class="bdot"></div><div class="bdot"></div><div class="bdot"></div></div><div class="burl">localhost:5173 / resident / map</div></div>
+                <div class="d-green-bar"></div>
+                <div class="d-body">
+                    <div class="d-sidebar wide">
+                        <div class="d-logo"><div class="d-logo-box">🗑</div><div><div class="d-logo-text">WasteWatch</div><div class="d-logo-sub">RESIDENT</div></div></div>
+                        <div class="d-nav-item"><div class="d-nav-icon"></div>Dashboard</div>
+                        <div class="d-nav-item"><div class="d-nav-icon"></div>My Schedule</div>
+                        <div class="d-nav-item"><div class="d-nav-icon"></div>Report Issue</div>
+                        <div class="d-nav-item"><div class="d-nav-icon"></div>My Reports</div>
+                        <div class="d-nav-item active"><div class="d-nav-icon"></div>Live Map</div>
+                    </div>
+                    <div style="flex:1;display:flex;flex-direction:column;background:#faf8f5">
+                        <div class="d-topbar">
+                            <div class="d-topbar-bell"></div>
+                            <div class="d-topbar-avatar"></div>
+                            <div><div class="d-topbar-name">Juan</div><div class="d-topbar-role">Resident</div></div>
+                        </div>
+                        <div style="display:flex;flex:1;padding:16px;gap:16px">
+                            <div style="flex:2;background:#e8e4df;border:2px solid #2a2a2a;border-radius:10px;box-shadow:2px 2px 0 #c2bdb5;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden">
+                                <div style="font-size:24px;color:#888">[ Live Map ]</div>
+                                
+                                <div style="position:absolute;top:50%;left:40%;background:#1a1a1a;color:#fff;border-radius:20px;padding:4px 10px;font-size:10px;font-weight:700;display:flex;align-items:center;gap:6px">
+                                    <span style="font-size:12px">🚛</span> Truck 1 (On Duty)
+                                </div>
+                                <div style="position:absolute;top:60%;left:60%;background:#ff4d4f;color:#fff;border-radius:20px;padding:4px 10px;font-size:10px;font-weight:700;display:flex;align-items:center;gap:6px">
+                                    <span style="font-size:12px">🚨</span> Reported Hotspot
+                                </div>
+                            </div>
+                            <div style="flex:1;display:flex;flex-direction:column;gap:12px">
+                                <div style="background:#fff;border:2px solid #e8e4df;border-radius:8px;padding:16px">
+                                    <div style="font-size:14px;font-weight:700;margin-bottom:12px">Live Status</div>
+                                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+                                        <div style="width:32px;height:32px;background:#e8e4df;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px">🚛</div>
+                                        <div>
+                                            <div style="font-size:12px;font-weight:700">Truck is in your area</div>
+                                            <div style="font-size:10px;color:#888">ETA: 15 mins (Ilayang Dupay)</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div style="background:#fff;border:2px solid #e8e4df;border-radius:8px;padding:16px;flex:1">
+                                    <div style="font-size:14px;font-weight:700;margin-bottom:12px">Barangay Advisories</div>
+                                    <div style="padding:12px;background:#faf8f5;border-left:4px solid #1a1a1a;margin-bottom:8px">
+                                        <div style="font-size:12px;font-weight:700;margin-bottom:4px">Road Block at Purok 2</div>
+                                        <div style="font-size:10px;color:#555">Collection truck will use alternate route. Please bring bins to the main road.</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <div class="mobile" style="height:700px">
+                    <div class="m-notch"><div class="m-notch-pill"></div></div>
+                    <div class="m-topbar"><span class="m-hamburger">☰</span><div class="m-brand">WasteWatch</div><div class="m-bell"></div></div>
+                    <div class="m-green-bar"></div>
+                    <div class="m-content" style="background:#e8e4df;height:100%;padding:0;position:relative">
+                        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:20px;color:#888">[ Live Map ]</div>
+                        
+                        <div style="position:absolute;top:40%;left:30%;background:#1a1a1a;color:#fff;border-radius:12px;padding:4px 8px;font-size:9px;font-weight:700">
+                            🚛 Truck 1
+                        </div>
+                        
+                        <div style="position:absolute;bottom:0;width:100%;background:#fff;border-radius:16px 16px 0 0;padding:16px;box-shadow:0 -4px 10px rgba(0,0,0,0.1);box-sizing:border-box">
+                            <div style="width:30px;height:4px;background:#e8e4df;border-radius:2px;margin:0 auto 12px"></div>
+                            <div style="font-size:12px;font-weight:700;margin-bottom:8px">Live Status</div>
+                            <div style="display:flex;align-items:center;gap:12px">
+                                <div style="width:32px;height:32px;background:#faf8f5;border:1px solid #e8e4df;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px">🚛</div>
+                                <div>
+                                    <div style="font-size:11px;font-weight:700">Approaching Area</div>
+                                    <div style="font-size:9px;color:#888">ETA: 15 mins to Purok 3</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="m-bottom-nav">
+                        <div class="m-nav-item"><div class="m-nav-icon"></div>Home</div>
+                        <div class="m-nav-item active"><div class="m-nav-icon"></div>Map</div>
+                        <div class="m-nav-item"><div class="m-nav-cam" style="border:2px solid #2a2a2a;background:#fff;color:#1a1a1a">+</div></div>
+                        <div class="m-nav-item"><div class="m-nav-icon"></div>Reports</div>
+                        <div class="m-nav-item"><div class="m-nav-icon"></div>Profile</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</body>
+</html>

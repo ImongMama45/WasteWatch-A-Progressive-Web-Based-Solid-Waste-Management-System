@@ -1,59 +1,129 @@
 /**
  * NewsSearchBar.jsx
  * ------------------
- * Search input + filter trigger.
- * Icons: Search, SlidersHorizontal (Lucide React).
+ * Accessible search input with clear action, keyboard support,
+ * and live result counts. Zero emojis.
  */
 
-import { Search, SlidersHorizontal } from 'lucide-react'
+import { Search, X } from 'lucide-react'
 
-export default function NewsSearchBar({ value, onChange, onFilterClick, resultCount }) {
+export default function NewsSearchBar({
+  value,
+  onChange,
+  resultCount,
+  activeCategory = 'All',
+  containerStyle,
+}) {
   return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ position: 'relative', display: 'flex', gap: 8 }}>
-        {/* Search input */}
-        <div style={{ position: 'relative', flex: 1 }}>
-          <span style={{
-            position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)',
-            color: 'var(--text-muted)', display: 'flex', alignItems: 'center',
+    <div style={{ marginBottom: 18, ...containerStyle }}>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+        {/* Search icon */}
+        <span
+          style={{
+            position: 'absolute',
+            left: 14,
+            color: '#64748b',
+            display: 'flex',
+            alignItems: 'center',
             pointerEvents: 'none',
-          }}>
-            <Search size={15} strokeWidth={2} />
-          </span>
-          <input
-            type="text"
-            className="form-input"
-            placeholder="Search news, announcements..."
-            value={value}
-            onChange={e => onChange(e.target.value)}
-            style={{ paddingLeft: 34, paddingRight: 12 }}
-          />
-        </div>
+          }}
+        >
+          <Search size={16} strokeWidth={2.2} />
+        </span>
 
-        {/* Filter button */}
-        {onFilterClick && (
+        {/* Input */}
+        <input
+          type="search"
+          aria-label="Search city announcements and news"
+          placeholder={`Search ${activeCategory === 'All' ? 'announcements, cleanup drives, advisories...' : `${activeCategory.toLowerCase()}...`}`}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          style={{
+            width: '100%',
+            height: 44,
+            paddingLeft: 40,
+            paddingRight: value ? 38 : 14,
+            borderRadius: 12,
+            border: '1px solid #cbd5e1',
+            background: '#ffffff',
+            fontSize: 13,
+            color: '#0f172a',
+            fontFamily: 'inherit',
+            outline: 'none',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+            transition: 'border-color .15s ease, box-shadow .15s ease',
+          }}
+          onFocus={e => {
+            e.currentTarget.style.borderColor = '#16a34a'
+            e.currentTarget.style.boxShadow = '0 0 0 3px rgba(22,163,74,0.15)'
+          }}
+          onBlur={e => {
+            e.currentTarget.style.borderColor = '#cbd5e1'
+            e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.03)'
+          }}
+        />
+
+        {/* Clear query button */}
+        {value && (
           <button
-            onClick={onFilterClick}
+            type="button"
+            aria-label="Clear search query"
+            onClick={() => onChange('')}
             style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              width: 40, height: 40, borderRadius: 'var(--radius)',
-              background: 'var(--surface)', border: '1px solid var(--border)',
-              color: 'var(--text-muted)', cursor: 'pointer', flexShrink: 0,
-              transition: 'border-color .15s, color .15s',
+              position: 'absolute',
+              right: 12,
+              background: '#f1f5f9',
+              border: 'none',
+              borderRadius: '50%',
+              width: 22,
+              height: 22,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: '#64748b',
+              padding: 0,
             }}
-            title="Filter"
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)' }}
           >
-            <SlidersHorizontal size={16} strokeWidth={2} />
+            <X size={13} strokeWidth={2.5} />
           </button>
         )}
       </div>
 
-      {/* Result count hint */}
+      {/* Result Count and Active Search Feedback */}
       {value && resultCount !== undefined && (
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, paddingLeft: 2 }}>
-          {resultCount} result{resultCount !== 1 ? 's' : ''} for &ldquo;{value}&rdquo;
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: '#475569',
+            marginTop: 8,
+            paddingLeft: 4,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <span>
+            Found {resultCount} {resultCount === 1 ? 'result' : 'results'} for &ldquo;{value}&rdquo;
+          </span>
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#16a34a',
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          >
+            Reset Search
+          </button>
         </div>
       )}
     </div>
