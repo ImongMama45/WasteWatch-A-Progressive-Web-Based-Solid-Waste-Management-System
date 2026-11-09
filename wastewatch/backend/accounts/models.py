@@ -156,6 +156,29 @@ class User(AbstractUser):
         help_text="User's profile picture."
     )
 
+    phone_number = models.CharField(
+        max_length=20,
+        blank=True,
+        default='',
+        help_text="Contact number for citizen notifications and collection coordination.",
+    )
+
+    address_line = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text="Street, Purok, or house number within the selected barangay.",
+    )
+
+    email_verified = models.BooleanField(
+        default=False,
+        help_text="True if the user's email address has been verified.",
+    )
+
+    email_verified_at = models.DateTimeField(null=True, blank=True)
+
+    terms_accepted_at = models.DateTimeField(null=True, blank=True)
+
     last_activity = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -232,6 +255,12 @@ class User(AbstractUser):
         if not self.username:
             # Use the part before @ as username, e.g. "juan.dela.cruz"
             self.username = self.email.split('@')[0]
+        # Superusers are automatically granted the admin role and cannot be crew
+        if self.is_superuser and self.role != UserRole.ADMIN:
+            self.role = UserRole.ADMIN
+        # Only citizens can be designated as crew members
+        if self.role != UserRole.CITIZEN:
+            self.employee_type = ''
         super().save(*args, **kwargs)
 
 # ---------------------------------------------------------------------------

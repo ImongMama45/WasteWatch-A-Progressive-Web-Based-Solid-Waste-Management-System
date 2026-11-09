@@ -26,16 +26,24 @@ from django.contrib.auth            import authenticate, login, logout
 
 from rest_framework import viewsets, permissions, serializers, status
 from .models import User, Barangay, UserRole
+from rest_framework.response import Response
+from wastewatch.pagination import StandardResultsSetPagination
 from .serializers import UserSerializer, BarangaySerializer, RegisterSerializer, AdminUserSerializer
 from .permissions import IsAdminRole, IsAdminRoleOrReadOnly, is_admin_user
+from .emails import send_verification_email
 
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.select_related('barangay', 'dumpsite', 'driverprofile').prefetch_related('suspension_overrides').order_by('-id')
+    pagination_class = StandardResultsSetPagination
     # Admin only for EVERY method. Writes use AdminUserSerializer (role + password
     # writable), and list/retrieve expose every user's email, so a plain
     # IsAuthenticated check let any citizen PATCH themselves to role='admin'.
     permission_classes = [permissions.IsAuthenticated, IsAdminRole]
+    # Admin-only endpoint: allow ?paginate=false so assignment dropdowns
+    # (drivers / crew in Truck & Route management) receive the full user list
+    # instead of only the first page.
+    allow_unpaginated = True
 
     def get_serializer_class(self):
         # Admin writes use the full serializer (password + role writable)
@@ -46,9 +54,106 @@ class UserViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = self.queryset.all()
         role = self.request.query_params.get('role')
-        if role:
-            return queryset.filter(role=role)
+        if role and role.lower() != 'all':
+            if role.lower() == 'crew':
+                queryset = queryset.filter(employee_type='crew_member')
+            else:
+                queryset = queryset.filter(role=role)
+
+        status_param = self.request.query_params.get('status')
+        if status_param and status_param.lower() != 'all':
+            if status_param.lower() == 'active':
+                queryset = queryset.filter(is_active=True)
+            elif status_param.lower() == 'inactive':
+                queryset = queryset.filter(is_active=False)
+
+        search_query = self.request.query_params.get('search', '').strip()
+        if search_query:
+            search_filter = (
+                Q(full_name__icontains=search_query) |
+                Q(username__icontains=search_query) |
+                Q(email__icontains=search_query) |
+                Q(barangay__name__icontains=search_query) |
+                Q(dumpsite__name__icontains=search_query)
+            )
+            if search_query.isdigit():
+                search_filter |= Q(id=int(search_query))
+            queryset = queryset.filter(search_filter)
+
         return queryset
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+
+        if getattr(self, 'paginator', None) is not None:
+            base_qs = self.queryset.all()
+            summary_agg = base_qs.aggregate(
+                all=Count('id'),
+                active=Count('id', filter=Q(is_active=True)),
+                inactive=Count('id', filter=Q(is_active=False)),
+                driver=Count('id', filter=Q(role='driver')),
+                watcher=Count('id', filter=Q(role='watcher')),
+                brgy_official=Count('id', filter=Q(role='brgy_official')),
+                citizen=Count('id', filter=Q(role='citizen')),
+                dumpsite=Count('id', filter=Q(role='dumpsite')),
+                crew=Count('id', filter=Q(employee_type='crew_member')),
+            )
+            self.paginator.extra_data = {'summary': summary_agg}
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.role == 'admin':
+            return Response(
+                {'error': 'Administrator accounts cannot be edited through User Management.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.id == request.user.id and 'is_active' in request.data and not request.data['is_active']:
+            return Response(
+                {'error': 'You cannot deactivate your own administrator account.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if instance.role == 'admin':
+            if 'is_active' in request.data and not request.data['is_active']:
+                return Response(
+                    {'error': 'Administrator accounts cannot be deactivated.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if 'role' in request.data and request.data['role'] != 'admin':
+                return Response(
+                    {'error': 'Administrator role cannot be changed through User Management.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if instance.id == request.user.id and any(k in request.data for k in ('email', 'username', 'role')):
+                return Response(
+                    {'error': 'Your administrator credentials should be updated in Profile settings.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.id == request.user.id:
+            return Response(
+                {'error': 'You cannot delete your own account.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if instance.role == 'admin':
+            return Response(
+                {'error': 'Administrator accounts cannot be deleted through User Management.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=['patch'], url_path='lift_suspension')
     def lift_suspension(self, request, pk=None):
@@ -105,7 +210,12 @@ def user_to_dict(user):
         'dumpsite':      user.dumpsite_id,
         'dumpsite_id':   user.dumpsite_id,
         'dumpsite_name': user.dumpsite.name if user.dumpsite else None,
+        'phone_number':  user.phone_number or '',
+        'address_line':  user.address_line or '',
+        'email_verified': user.email_verified,
+        'email_verified_at': user.email_verified_at.isoformat() if user.email_verified_at else None,
         'is_active':     user.is_active,
+        'is_staff':      bool(user.is_staff),
         'profile_pic':   user.profile_pic.url if user.profile_pic else None,
         'created_at':    user.created_at.isoformat() if user.created_at else None,
     }
@@ -158,7 +268,7 @@ def get_csrf_token_view(request):
 def me_view(request):
     if request.method == 'PATCH':
         allowed = {}
-        for field in ('full_name', 'first_name', 'last_name', 'username', 'barangay', 'profile_pic'):
+        for field in ('full_name', 'first_name', 'last_name', 'username', 'barangay', 'profile_pic', 'phone_number', 'address_line'):
             if field in request.data:
                 allowed[field] = request.data[field]
                 
@@ -177,6 +287,13 @@ from django.views.decorators.csrf import csrf_exempt
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_login_view(request):
+    if request.user.is_authenticated:
+        return JsonResponse({
+            'error': 'You are already signed in. Please log out first before signing into another account.',
+            'code': 'already_authenticated',
+            'user': user_to_dict(request.user)
+        }, status=400)
+
     data = _json_body(request)
     if data is None:
         return JsonResponse({'error': 'Invalid JSON payload.'}, status=400)
@@ -187,6 +304,14 @@ def api_login_view(request):
     user = authenticate(request, username=email, password=password)
     if user is None:
         return JsonResponse({'error': 'Invalid email or password.'}, status=400)
+
+    # Email verification check (applies only to citizen accounts)
+    if user.role == UserRole.CITIZEN and not user.email_verified and not user.is_staff and not user.is_superuser:
+        return JsonResponse({
+            'error': 'Please verify your email address before signing in. Check your inbox for the activation link.',
+            'code': 'email_not_verified',
+            'email': user.email
+        }, status=403)
 
     login(request, user)
     return JsonResponse({'user': user_to_dict(user)})
@@ -205,16 +330,27 @@ def api_logout_view(request):
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def api_register_view(request):
+    if request.user.is_authenticated:
+        return JsonResponse({
+            'error': 'You are already signed in. Please log out before creating a new account.',
+            'code': 'already_authenticated'
+        }, status=400)
+
     data = request.data
     if not data:
         return JsonResponse({'error': 'Invalid payload.'}, status=400)
 
-    print(f"DEBUG: api_register_view - Received barangay: {data.get('barangay')}")
-
     serializer = RegisterSerializer(data=data)
     if serializer.is_valid():
         user = serializer.save()
-        return JsonResponse({'user': user_to_dict(user)}, status=201)
+        # Dispatch verification email asynchronously / via email backend
+        send_verification_email(user)
+        return JsonResponse({
+            'message': 'Account created! Please check your email to verify your account.',
+            'verification_required': True,
+            'email': user.email,
+            'user': user_to_dict(user)
+        }, status=201)
 
     return JsonResponse(serializer.errors, status=400)
 
@@ -246,15 +382,14 @@ from django.utils import timezone
 from datetime import timedelta
 from django.http import HttpResponse
 from django.views.decorators.http import require_POST
-from django.contrib.auth.decorators import login_required
-
 PERSONNEL_ROLES = ('watcher', 'brgy_official', 'driver')
 
 @csrf_exempt
-@login_required
 @require_POST
 def heartbeat_view(request):
     user = request.user
+    if not user or not user.is_authenticated:
+        return HttpResponse(status=401)
     if getattr(user, 'role', None) not in PERSONNEL_ROLES:
         return HttpResponse(status=204)
     from django.contrib.auth import get_user_model
@@ -264,8 +399,10 @@ def heartbeat_view(request):
     )
     return HttpResponse(status=204)
 
-@login_required
 def online_users_view(request):
+    user = request.user
+    if not user or not user.is_authenticated:
+        return JsonResponse({'error': 'Authentication required'}, status=401)
     cutoff = timezone.now() - timedelta(minutes=5)
     from django.contrib.auth import get_user_model
     User = get_user_model()
@@ -301,10 +438,11 @@ def online_users_view(request):
 
 class BarangayManagementViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsAdminRole]
+    pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
         if self.action == 'list':
-            return Barangay.objects.annotate(
+            qs = Barangay.objects.annotate(
                 official_count=Count('residents', filter=Q(residents__role='brgy_official'), distinct=True),
                 watcher_count=Count('residents', filter=Q(residents__role='watcher'), distinct=True),
                 driver_count=Count('residents', filter=Q(residents__role='driver'), distinct=True),
@@ -312,7 +450,7 @@ class BarangayManagementViewSet(viewsets.ReadOnlyModelViewSet):
                     'reports', filter=Q(reports__status='PENDING'), distinct=True
                 ),
                 active_hotspots=Count(
-                    'hotspots', distinct=True # Or filter by something if hotspot has is_active
+                    'hotspots', filter=Q(hotspots__is_active=True), distinct=True
                 ),
                 open_escalations=Count(
                     'escalations', filter=Q(escalations__status='pending'), distinct=True
@@ -324,6 +462,10 @@ class BarangayManagementViewSet(viewsets.ReadOnlyModelViewSet):
                     output_field=BooleanField(),
                 ),
             )
+            search_query = self.request.query_params.get('search', '').strip()
+            if search_query:
+                qs = qs.filter(name__icontains=search_query)
+            return qs.order_by('name')
         return Barangay.objects.prefetch_related(
             'residents', 'hotspots', 'escalations', 'reports',
         )

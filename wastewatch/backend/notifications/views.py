@@ -14,9 +14,13 @@ def _notifications_for_user(user):
       - barangay-wide notifications for their barangay, OR
       - system-wide notifications (both FKs null)
     """
+    if not user or not getattr(user, 'is_authenticated', False):
+        return Notification.objects.none()
+
     q = Q(user=user)
-    if user.barangay_id:
-        q |= Q(barangay_id=user.barangay_id, user__isnull=True)
+    barangay_id = getattr(user, 'barangay_id', None)
+    if barangay_id:
+        q |= Q(barangay_id=barangay_id, user__isnull=True)
     q |= Q(user__isnull=True, barangay__isnull=True)
     return Notification.objects.filter(q)
 

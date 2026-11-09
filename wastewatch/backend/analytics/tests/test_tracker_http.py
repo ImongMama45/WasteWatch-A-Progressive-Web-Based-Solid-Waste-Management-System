@@ -15,8 +15,8 @@ class TrackerApiTests(APITestCase):
         self.citizen = User.objects.create_user('citizen1', email='c@x.com', password='x', role='citizen', barangay=self.b1)
         self.admin = User.objects.create_user('admin1', email='a@x.com', password='x', role='admin')
         self.driver = User.objects.create_user('driver1', email='d@x.com', password='x', role='driver', full_name='John Driver')
-        self.site = Dumpsite.objects.create(name='Test Dumpsite', latitude=14.0, longitude=121.0)
-        self.site_B = Dumpsite.objects.create(name='Other Site', latitude=14.1, longitude=121.1)
+        self.site = Dumpsite.objects.create(name='Test Dumpsite', barangay=self.b1, latitude=14.0, longitude=121.0)
+        self.site_B = Dumpsite.objects.create(name='Other Site', barangay=self.b2, latitude=14.1, longitude=121.1)
         self.operator_A = User.objects.create_user('opA', email='opa@x.com', password='x', role='dumpsite', dumpsite=self.site)
         
         self.truck = Truck.objects.create(plate_number='TRK-123')
@@ -108,10 +108,11 @@ class TrackerApiTests(APITestCase):
         for method, path in [('get', 'inbound_queue'), ('post', 'reset_capacity'), ('post', 'create-account')]:
             self.assertEqual(getattr(self.client, method)(f'/api/dumpsite/dumpsites/{self.site.id}/{path}/').status_code, 403)
 
-        # 2. Operator A can access their own queue but not site B's queue
+        # 2. Operator A can access their own queue but gets 404 on site B
+        #    (get_queryset filters to dumpsite_id, so site B is not found)
         self.client.force_authenticate(self.operator_A)
         self.assertEqual(self.client.get(f'/api/dumpsite/dumpsites/{self.site.id}/inbound_queue/').status_code, 200)
-        self.assertEqual(self.client.get(f'/api/dumpsite/dumpsites/{self.site_B.id}/inbound_queue/').status_code, 403)
+        self.assertEqual(self.client.get(f'/api/dumpsite/dumpsites/{self.site_B.id}/inbound_queue/').status_code, 404)
         
         # 3. Operator A cannot reset capacity or create accounts
         self.assertEqual(self.client.post(f'/api/dumpsite/dumpsites/{self.site.id}/reset_capacity/').status_code, 403)

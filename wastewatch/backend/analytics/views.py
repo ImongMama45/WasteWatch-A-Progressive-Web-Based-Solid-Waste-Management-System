@@ -8,6 +8,7 @@ from django.db.models.functions import TruncDate
 from django.utils.dateparse import parse_date
 from django.utils import timezone
 from datetime import timedelta, date as date_type
+from wastewatch.pagination import StandardResultsSetPagination
 
 from .models import ActivityLog
 from .serializers import ActivityLogSerializer
@@ -307,6 +308,48 @@ class AnalyticsViewSet(viewsets.ViewSet):
         return response.Response(ret)
 
 class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = ActivityLog.objects.all().order_by('-timestamp')
+    queryset = ActivityLog.objects.all().select_related('admin').order_by('-timestamp')
     serializer_class = ActivityLogSerializer
+    pagination_class = StandardResultsSetPagination
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = ActivityLog.objects.all().select_related('admin').order_by('-timestamp')
+        action_param = self.request.query_params.get('action')
+        if action_param and action_param.lower() != 'all':
+            qs = qs.filter(action=action_param.lower())
+
+        module_param = self.request.query_params.get('module')
+        if module_param and module_param.lower() != 'all':
+            qs = qs.filter(module__iexact=module_param)
+
+        search_query = self.request.query_params.get('search', '').strip()
+        if search_query:
+            qs = qs.filter(
+                Q(details__icontains=search_query) |
+                Q(module__icontains=search_query) |
+                Q(admin__full_name__icontains=search_query) |
+                Q(admin__username__icontains=search_query)
+            )
+
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+
+        if getattr(self, 'paginator', None) is not None:
+            summary_agg = ActivityLog.objects.aggregate(
+                all=Count('id'),
+                create=Count('id', filter=Q(action='create')),
+                update=Count('id', filter=Q(action='update')),
+                delete=Count('id', filter=Q(action='delete')),
+                system=Count('id', filter=Q(action='system')),
+            )
+            self.paginator.extra_data = {'summary': summary_agg}
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return response.Response(serializer.data)

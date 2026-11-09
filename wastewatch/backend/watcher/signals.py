@@ -19,7 +19,7 @@ def trigger_hotspot_automation(sender, instance, **kwargs):
     When a GarbageReport is approved, check if the threshold is met for that barangay.
     If yes, create a CollectionSchedule if one doesn't exist for today.
     """
-    if instance.status == ReportStatus.APPROVED and instance.barangay:
+    if instance.status == ReportStatus.APPROVED and instance.barangay and not instance.is_watcher_spot:
         # Get threshold from settings or default to 10
         try:
             setting = SystemSetting.objects.get(key='hotspot_threshold')
@@ -27,10 +27,12 @@ def trigger_hotspot_automation(sender, instance, **kwargs):
         except (SystemSetting.DoesNotExist, ValueError):
             threshold = 10
         
-        # Count approved reports for this barangay
+        # Count approved reports for this barangay (watcher spots are internal route
+        # suggestions and must never trigger automated schedules)
         approved_count = GarbageReport.objects.filter(
             barangay=instance.barangay,
-            status=ReportStatus.APPROVED
+            status=ReportStatus.APPROVED,
+            is_watcher_spot=False,
         ).count()
         
         if approved_count >= threshold:

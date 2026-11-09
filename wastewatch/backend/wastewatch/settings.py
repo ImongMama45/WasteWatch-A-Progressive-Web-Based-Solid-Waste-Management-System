@@ -12,13 +12,18 @@ import os
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(BASE_DIR / '.env')
 
 SECRET_KEY = os.environ.get('SECRET_KEY')
 if not SECRET_KEY:
     raise ValueError("The SECRET_KEY environment variable is not set. Add it to your Render Environment settings.")
 
-DEBUG = os.environ.get('DEBUG', 'False') == 'True'
+def _parse_debug_env(val):
+    if val is None:
+        return False
+    return str(val).strip().lower() in ('true', '1', 't', 'yes')
+
+DEBUG = _parse_debug_env(os.environ.get('DEBUG'))
 
 ALLOWED_HOSTS = [
     'localhost',
@@ -59,6 +64,10 @@ INSTALLED_APPS = [
     'analytics',            # Performance metrics and trends
     'cloudinary',           # Cloudinary integration
     'notifications',
+    'community',
+    'forecasting',
+    'events',
+    'calendar_service.apps.CalendarServiceConfig',
 ]
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',   # Must be first
@@ -274,4 +283,46 @@ REST_FRAMEWORK = {
 # ---------------------------------------------------------------------------
 #                           App-Specific Settings
 # ---------------------------------------------------------------------------
-SHIFT_STALE_HOURS = 6
+SHIFT_STALE_HOURS = 6
+
+# ---------------------------------------------------------------------------
+#                           Forecasting Engine Settings
+# ---------------------------------------------------------------------------
+# When False (default), production analytics serves the verified weekday-adjusted
+# seasonal baseline heuristic. Ridge Regression runs in shadow/offline evaluation mode.
+FORECAST_ML_ENABLED = False
+
+# ---------------------------------------------------------------------------
+#                           Email & Auth Verification Settings
+# ---------------------------------------------------------------------------
+FRONTEND_URL = os.environ.get('FRONTEND_URL') or os.environ.get('VERCEL_FRONTEND_URL') or 'http://localhost:3000'
+
+# Defaults to console backend in development if no SMTP host is configured
+if os.environ.get('EMAIL_HOST'):
+    EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
+else:
+    EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+
+EMAIL_HOST          = os.environ.get('EMAIL_HOST', '')
+EMAIL_PORT          = int(os.environ.get('EMAIL_PORT', 587))
+EMAIL_HOST_USER     = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+# Automatic TLS/SSL detection based on standard ports
+if EMAIL_PORT == 465:
+    EMAIL_USE_SSL = True
+    EMAIL_USE_TLS = False
+else:
+    EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True').lower() in ('true', '1', 'yes')
+    EMAIL_USE_SSL = False
+# Fallback from-address: Gmail SMTP requires From address to match the authenticated user
+configured_from = os.environ.get('DEFAULT_FROM_EMAIL')
+if configured_from and 'noreply@wastewatch.lucena.gov.ph' not in configured_from:
+    DEFAULT_FROM_EMAIL = configured_from
+elif EMAIL_HOST_USER:
+    DEFAULT_FROM_EMAIL = f"WasteWatch Lucena <{EMAIL_HOST_USER}>"
+else:
+    DEFAULT_FROM_EMAIL = 'WasteWatch Lucena <noreply@wastewatch.lucena.gov.ph>'
+
+EMAIL_TIMEOUT = 10  # Seconds before SMTP timeout
+
+PASSWORD_RESET_TIMEOUT = 3600  # 1 hour

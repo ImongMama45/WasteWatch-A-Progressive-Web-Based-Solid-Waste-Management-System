@@ -114,11 +114,11 @@ class Command(BaseCommand):
             # Setup: Nothing handled, shift in shiftroute
             s = make_sched()
             sh = make_shift(s, status='shiftroute', lat=14.05, lng=121.05)
-            check('1. Nothing handled, shift in shiftroute (expect en_route, away=2)', s, b.id)
+            check('1. Nothing handled, shift in shiftroute (expect en_route, away=1)', s, b.id)
 
             # Stop 1 collected
             sv(s, 1, SVS.COLLECTION_REPORTED)
-            check('2. Stop 1 (b2) collected (expect away=1)', s, b.id)
+            check('2. Stop 1 (b2) collected (expect away=0)', s, b.id)
 
             # Barangay owns stop 2 (order=2). Stop 3 (order=3) collected, stop 2 still pending
             sv(s, 3, SVS.COLLECTION_REPORTED)

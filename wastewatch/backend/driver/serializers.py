@@ -293,6 +293,10 @@ class CollectionScheduleSerializer(serializers.ModelSerializer):
         return count if count > 0 else max(0, len(obj.waypoints or []) - 1)
 
     def get_truck_status(self, obj):
+        from .views import compute_schedule_truck_status
+        return compute_schedule_truck_status(obj)
+
+    def _legacy_get_truck_status(self, obj):
         from driver.models import DriverShift
         from django.utils import timezone
         today = timezone.localdate()
@@ -431,6 +435,7 @@ class DriverShiftSerializer(serializers.ModelSerializer):
     truck_id        = serializers.SerializerMethodField()
     truck_plate     = serializers.CharField(source='truck.plate_number', read_only=True)
     truck_model     = serializers.CharField(source='truck.model', read_only=True)
+    driver_name     = serializers.CharField(source='driver.full_name', read_only=True)
     schedule_id     = serializers.SerializerMethodField()
     route_id        = serializers.SerializerMethodField()  # kept as alias for backward compat
     barangay_names  = serializers.SerializerMethodField()
@@ -442,7 +447,14 @@ class DriverShiftSerializer(serializers.ModelSerializer):
             'id', 'status', 'started_at', 'ended_at',
             'truck', 'truck_id', 'truck_plate', 'truck_model',
             'schedule', 'schedule_id', 'route_id', 'barangay_names',
-            'driver', 'is_active', 'op_status', 'end_shift_phase', 'elapsed_ms',
+            'driver', 'driver_name', 'is_active', 'op_status', 'end_shift_phase', 'elapsed_ms', 'duration_ms', 'end_reason',
+        ]
+        read_only_fields = [
+            'id', 'status', 'started_at', 'ended_at',
+            'truck', 'truck_id', 'truck_plate', 'truck_model',
+            'schedule', 'schedule_id', 'route_id', 'barangay_names',
+            'driver', 'driver_name', 'is_active', 'op_status', 'end_shift_phase',
+            'elapsed_ms', 'duration_ms', 'end_reason',
         ]
 
     def get_truck_id(self, obj):

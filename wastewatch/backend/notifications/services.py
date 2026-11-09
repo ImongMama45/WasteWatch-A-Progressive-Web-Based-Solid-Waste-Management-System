@@ -41,6 +41,25 @@ def notify_announcement(news_item):
         logger.exception('notify_announcement failed for NewsItem pk=%s', news_item.pk)
 
 
+# ── 1b. EMERGENCY ALERT ──────────────────────────────────────────────────────
+
+def notify_emergency_alert(alert):
+    """
+    Called when an EmergencyAlert is activated.
+    Creates one system-wide notification row.
+    """
+    try:
+        Notification.objects.create(
+            user=None,
+            barangay=None,   # system-wide
+            title=f"EMERGENCY ADVISORY: {alert.title}",
+            message=_truncate(alert.body, 250),
+            type=NotificationType.ANNOUNCEMENT,
+        )
+    except Exception:
+        logger.exception('notify_emergency_alert failed for EmergencyAlert pk=%s', alert.pk)
+
+
 # ── 2. SCHEDULE_CHANGE ───────────────────────────────────────────────────────
 
 def notify_schedule_change(schedule, is_new=False):

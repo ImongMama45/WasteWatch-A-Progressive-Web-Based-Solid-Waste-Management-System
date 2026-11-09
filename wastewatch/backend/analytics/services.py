@@ -237,54 +237,15 @@ def build_live_payload(date_from, date_to, brgy_obj=None, include_peers=True):
     }
 
 
-# ── Forecast: weekday-adjusted baseline + 80% residual band ──────────────
-Z80 = 1.2816  # two-sided 80%
+from forecasting.service import get_waste_forecast, forecast_weight_heuristic
 
+# ── Forecast: Ridge Regression with Conformal 80% Intervals & Heuristic Fallback ──────────────
 def forecast_weight(brgy_obj=None, lookback=30, horizon=7, min_span=14, min_active=7):
-    today = timezone.localdate()  # local PH date, not UTC
-    end = today - timedelta(days=1)
-    start = end - timedelta(days=lookback - 1)
-    qs = WasteDelivery.objects.filter(date__range=[start, end])
-    if brgy_obj:
-        qs = qs.filter(barangays=brgy_obj)
-    by_day = {row['date']: row['kg'] or 0 for row in qs.values('date').annotate(kg=Sum(WEIGHT))}
-
-    if not by_day:
-        return {'sufficient': False, 'reason': 'no_data'}
-    span = (end - min(by_day)).days + 1
-    if span < min_span or len(by_day) < min_active:
-        return {'sufficient': False, 'reason': 'not_enough_data', 'days_available': span}
-
-    # Zero-fill: a day with no delivery is a real zero (e.g. no Sunday collection)
-    first = min(by_day)
-    days = [first + timedelta(days=i) for i in range((end - first).days + 1)]
-    y = [by_day.get(d, 0.0) for d in days]
-
-    overall = mean(y)
-    if overall <= 0:
-        return {'sufficient': False, 'reason': 'no_data'}
-
-    buckets = {wd: [] for wd in range(7)}
-    for d, v in zip(days, y):
-        buckets[d.weekday()].append(v)
-    index = {wd: (mean(v) / overall if v else 1.0) for wd, v in buckets.items()}
-
-    fitted = [overall * index[d.weekday()] for d in days]
-    resid = [a - f for a, f in zip(y, fitted)]
-    band = Z80 * (stdev(resid) if len(resid) > 1 else 0.0)
-
-    points = []
-    for i in range(horizon):
-        d = today + timedelta(days=i)
-        e = overall * index[d.weekday()]
-        points.append({'date': str(d), 'expected_kg': round(e),
-                       'low_kg': round(max(0, e - band)), 'high_kg': round(e + band)})
-
-    return {
-        'sufficient': True, 'band_pct': 80,
-        'history': [{'date': str(d), 'kg': round(v)} for d, v in zip(days[-14:], y[-14:])],
-        'points': points,
-    }
+    """
+    Forecasting entry point: delegates to WasteWatch forecasting service (Ridge Regression
+    with time-based conformal 80% intervals, tiered fallback to weekday-adjusted heuristic).
+    """
+    return get_waste_forecast(brgy_obj=brgy_obj, lookback=max(45, lookback), horizon=horizon)
 
 
 from watcher.stop_validation_utils import is_schedule_today, haversine_m, COLLECTION_RADIUS_M
@@ -440,12 +401,16 @@ def _compute_tracker_payload(bid, today, now):
             getattr(shift.driver, 'full_name', '') or getattr(shift.driver, 'username', '')
             if shift and shift.driver else None
         )
+        driver_id = shift.driver_id if (shift and shift.driver_id) else getattr(s, 'driver_id', None)
+        truck_id = s.truck_id if s.truck else None
+        shift_id = shift.id if shift else None
         fix_age_s = None
         if shift and shift.last_location_update:
             fix_age_s = int((now - shift.last_location_update).total_seconds())
 
         # partial: the truck reached some stops but not all
         partial = bool(my_done) and bool(my_pending or my_missed)
+        is_incomplete = bool(partial) or (len(my) > 0 and len(my_done) < len(my) and state in ('passed', 'missed', 'no_show', 'none', 'unloading'))
 
         preparing = bool(shift and not shift.is_extended_mode
                      and shift.status in ('navigate_to_base', 'confirm_start', 'checkin'))
@@ -455,6 +420,9 @@ def _compute_tracker_payload(bid, today, now):
 
         out.append({
             'schedule_id': s.id,
+            'shift_id': shift_id,
+            'truck_id': truck_id,
+            'driver_id': driver_id,
             'state': state,
             'truck': {
                 'plate': s.truck.plate_number if s.truck else 'Unknown',
@@ -476,11 +444,14 @@ def _compute_tracker_payload(bid, today, now):
             'eta_max': eta_max,
             'stops_done': len(my_done),
             'stops_total': len(my),
+            'stops_missed': len(my_missed),
+            'stops_pending': len(my_pending),
             'start_time': s.start_time.strftime('%H:%M') if s.start_time else '00:00',
             'end_time': s.end_time.strftime('%H:%M') if s.end_time else '23:59',
             'is_stale': is_stale,
             'fix_age_s': fix_age_s,
             'partial': partial,
+            'is_incomplete': is_incomplete,
             'preparing': preparing,
         })
 

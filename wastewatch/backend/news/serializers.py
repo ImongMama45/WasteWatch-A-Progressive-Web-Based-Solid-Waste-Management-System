@@ -13,6 +13,8 @@ class NewsItemSerializer(serializers.ModelSerializer):
     )
     # Full URL of the cover image (read-only convenience field)
     image_url = serializers.SerializerMethodField()
+    # Resolved author name
+    author_name = serializers.SerializerMethodField()
 
     # Explicit boolean fields so multipart "true"/"false" strings are coerced
     is_pinned   = serializers.BooleanField(required=False, default=False)
@@ -23,12 +25,13 @@ class NewsItemSerializer(serializers.ModelSerializer):
         model  = NewsItem
         fields = [
             'id', 'title', 'description', 'type', 'category', 'priority',
-            'date', 'barangay', 'barangay_name',
+            'status', 'date', 'updated_at', 'author', 'author_name',
+            'barangay', 'barangay_name',
             'is_featured', 'is_pinned', 'is_active',
             'image', 'image_url',
             'accent_color', 'bg_color',
         ]
-        read_only_fields = ['date']
+        read_only_fields = ['date', 'updated_at', 'author_name']
 
     def to_internal_value(self, data):
         # FormData sends empty string for null barangay — convert to None
@@ -36,10 +39,36 @@ class NewsItemSerializer(serializers.ModelSerializer):
         mutable = data.copy() if hasattr(data, 'copy') else dict(data)
         if mutable.get('barangay') in ('', 'null', 'None', None):
             mutable['barangay'] = None
+
+        # Synchronize status and is_active for incoming payload
+        if 'status' in mutable and mutable['status']:
+            if mutable['status'] == 'published':
+                mutable['is_active'] = True
+            elif mutable['status'] in ('draft', 'archived'):
+                mutable['is_active'] = False
+        elif 'is_active' in mutable:
+            raw_active = mutable['is_active']
+            if isinstance(raw_active, str):
+                is_active = raw_active.lower() == 'true'
+            else:
+                is_active = bool(raw_active)
+            if not is_active:
+                mutable['status'] = 'draft'
+            else:
+                mutable['status'] = 'published'
+
         return super().to_internal_value(mutable)
 
     def get_barangay_name(self, obj):
         return obj.barangay.name if obj.barangay else 'City-Wide'
+
+    def get_author_name(self, obj):
+        if obj.author:
+            name = (obj.author.get_full_name() or '').strip()
+            if not name and hasattr(obj.author, 'username'):
+                name = obj.author.username
+            return name or 'Staff'
+        return 'City Official'
 
     def get_image_url(self, obj):
         if not obj.image:

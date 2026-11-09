@@ -1,0 +1,7 @@
+from django.apps import AppConfig
+
+
+class CalendarServiceConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'calendar_service'
+    verbose_name = 'Calendar Service'

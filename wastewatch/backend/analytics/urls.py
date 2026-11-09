@@ -9,6 +9,7 @@ router = DefaultRouter()
 # AnalyticsViewSet uses @action, but because of custom paths below, we can omit it from router or keep it.
 # We keep it for the `dashboard` endpoint which has no custom path definition in urlpatterns here.
 router.register(r'logs', ActivityLogViewSet, basename='activity-logs')
+router.register(r'activity-logs', ActivityLogViewSet, basename='activity-logs-alias')
 router.register(r'', AnalyticsViewSet, basename='analytics')
 
 

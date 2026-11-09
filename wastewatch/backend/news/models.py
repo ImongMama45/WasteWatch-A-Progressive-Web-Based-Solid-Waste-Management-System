@@ -1,5 +1,12 @@
 from django.db import models
+from django.conf import settings
 from cloudinary.models import CloudinaryField
+
+
+class ContentStatus(models.TextChoices):
+    DRAFT     = 'draft',     'Draft'
+    PUBLISHED = 'published', 'Published'
+    ARCHIVED  = 'archived',  'Archived'
 
 
 class NewsType(models.TextChoices):
@@ -50,6 +57,20 @@ class NewsItem(models.Model):
     is_featured = models.BooleanField(default=False)
     is_pinned   = models.BooleanField(default=False)
     is_active   = models.BooleanField(default=True)
+    status      = models.CharField(
+        max_length=20,
+        choices=ContentStatus.choices,
+        default=ContentStatus.PUBLISHED,
+        db_index=True,
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='news_items',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
 
     # Optional cover image uploaded with the announcement
     image = CloudinaryField(
@@ -65,16 +86,66 @@ class NewsItem(models.Model):
     class Meta:
         ordering = ['-is_pinned', '-date']
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._initial_status = getattr(self, 'status', ContentStatus.PUBLISHED)
+        self._initial_is_active = getattr(self, 'is_active', True)
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get('update_fields')
+        has_update_fields = update_fields is not None
+        if has_update_fields:
+            update_fields = set(update_fields)
+
+        initial_status = getattr(self, '_initial_status', None)
+        initial_is_active = getattr(self, '_initial_is_active', None)
+
+        if has_update_fields:
+            if 'status' in update_fields and 'is_active' not in update_fields:
+                self.is_active = (self.status == ContentStatus.PUBLISHED)
+                update_fields.add('is_active')
+            elif 'is_active' in update_fields and 'status' not in update_fields:
+                if not self.is_active and self.status == ContentStatus.PUBLISHED:
+                    self.status = ContentStatus.ARCHIVED
+                elif self.is_active and self.status != ContentStatus.PUBLISHED:
+                    self.status = ContentStatus.PUBLISHED
+                update_fields.add('status')
+            kwargs['update_fields'] = list(update_fields)
+        else:
+            status_changed = (self.status != initial_status)
+            active_changed = (self.is_active != initial_is_active)
+
+            if active_changed and not status_changed:
+                if not self.is_active:
+                    self.status = ContentStatus.ARCHIVED
+                else:
+                    self.status = ContentStatus.PUBLISHED
+            elif status_changed:
+                self.is_active = (self.status == ContentStatus.PUBLISHED)
+            else:
+                if self.status == ContentStatus.PUBLISHED:
+                    if not self.is_active:
+                        self.status = ContentStatus.ARCHIVED
+                    else:
+                        self.is_active = True
+                else:
+                    self.is_active = False
+
+        super().save(*args, **kwargs)
+        self._initial_status = self.status
+        self._initial_is_active = self.is_active
+
     def __str__(self):
         target = self.barangay.name if self.barangay else 'City-Wide'
         return f'[{self.type}] {self.title} → {target}'
 
 
 class EmergencyAlert(models.Model):
-    title     = models.CharField(max_length=255)
-    body      = models.TextField()
-    date      = models.DateField(auto_now_add=True)
-    is_active = models.BooleanField(default=True)
+    title      = models.CharField(max_length=255)
+    body       = models.TextField()
+    date       = models.DateField(auto_now_add=True)
+    is_active  = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['-date']

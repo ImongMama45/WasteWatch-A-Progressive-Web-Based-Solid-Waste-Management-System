@@ -6,6 +6,7 @@ from django.db import transaction, models
 from .models import Dumpsite, WasteDelivery, DumpsiteIncident
 from .serializers import DumpsiteSerializer, WasteDeliverySerializer, DumpsiteIncidentSerializer
 from driver.models import DriverShift, CollectionSchedule
+from wastewatch.pagination import StandardResultsSetPagination
 
 class IsAdminRole(permissions.BasePermission):
     def has_permission(self, request, view):
@@ -171,6 +172,10 @@ class DumpsiteViewSet(viewsets.ModelViewSet):
                 'truck_plate': shift.truck.plate_number if shift.truck else 'Unknown',
                 'truck_id':    shift.truck.id if shift.truck else None,
                 'truck_max_capacity_kg': float(shift.truck.max_capacity_kg) if shift.truck else 1000.0,
+                'truck_lat':   float(shift.current_latitude)  if shift.current_latitude  else None,
+                'truck_lng':   float(shift.current_longitude) if shift.current_longitude else None,
+                'site_lat':    float(site.latitude)  if site.latitude  else None,
+                'site_lng':    float(site.longitude) if site.longitude else None,
                 'barangays':   [b.name for b in schedule.barangays.all()] if schedule else [],
                 'barangay_ids': [b.id for b in schedule.barangays.all()] if schedule else [],
                 'schedule_id': schedule.id if schedule else None,
@@ -200,7 +205,12 @@ class DumpsiteViewSet(viewsets.ModelViewSet):
         if p.get('barangay'):   qs = qs.filter(barangays__name__icontains=p['barangay'])
         if p.get('fill_level'): qs = qs.filter(fill_level=p['fill_level'])
 
-        serializer = WasteDeliverySerializer(qs[:100], many=True)
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(qs, request)
+        if page is not None:
+            serializer = WasteDeliverySerializer(page, many=True)
+            return paginator.get_paginated_response(serializer.data)
+        serializer = WasteDeliverySerializer(qs, many=True)
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='log_arrival')
@@ -311,23 +321,30 @@ class WasteDeliveryViewSet(viewsets.ModelViewSet):
         'truck', 'driver', 'dumpsite', 'dumpsite_operator', 'schedule'
     ).prefetch_related('barangays').all()
     serializer_class = WasteDeliverySerializer
+
     def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+        if self.action in ('create', 'update', 'partial_update', 'destroy', 'analytics'):
             return [IsAdminOrDumpsiteRole()]
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
-        qs = super().get_queryset()
-        # Dumpsite operators only see deliveries at their linked dumpsite
-        user = self.request.user
-        if user.role == 'dumpsite' and user.dumpsite_id:
-            qs = qs.filter(dumpsite_id=user.dumpsite_id)
-        elif user.role == 'driver':
-            qs = qs.filter(driver=user)
-        return qs.order_by('-created_at')
+        qs, u = super().get_queryset(), self.request.user
+        role = getattr(u, 'role', None)
+        if role == 'admin' or getattr(u, 'is_staff', False) or getattr(u, 'is_superuser', False):
+            return qs.order_by('-created_at')
+        if role == 'dumpsite':
+            return qs.filter(dumpsite_id=u.dumpsite_id).order_by('-created_at') if u.dumpsite_id else qs.none()
+        if role == 'driver':
+            return qs.filter(driver=u).order_by('-created_at')
+        return qs.none()
 
     def perform_create(self, serializer):
-        delivery = serializer.save()
+        u = self.request.user
+        extra = {}
+        # Operators can only log arrivals at their own site
+        if getattr(u, 'role', None) == 'dumpsite' and u.dumpsite_id:
+            extra['dumpsite_id'] = u.dumpsite_id
+        delivery = serializer.save(**extra)
         from driver.models import DriverShift
         shift = DriverShift.objects.filter(driver=delivery.driver, is_active=True).first()
         if shift and shift.op_status in ['heading_to_dumpsite', 'at_dumpsite']:
@@ -345,9 +362,14 @@ class WasteDeliveryViewSet(viewsets.ModelViewSet):
         start_week  = today - datetime.timedelta(days=today.weekday())
         start_month = today.replace(day=1)
 
+        u = request.user
         base = WasteDelivery.objects.filter(is_validated=True)
-        if request.user.role == 'dumpsite':
-            base = base.filter(dumpsite_id=request.user.dumpsite_id)
+        if u.role == 'dumpsite':
+            if not u.dumpsite_id:
+                base = base.none()
+            else:
+                base = base.filter(dumpsite_id=u.dumpsite_id)
+        # admin sees all; other roles are already blocked by get_permissions
 
         return Response({
             'today':  base.filter(date=today).aggregate(
@@ -373,13 +395,25 @@ class WasteDeliveryViewSet(viewsets.ModelViewSet):
 class DumpsiteIncidentViewSet(viewsets.ModelViewSet):
     queryset = DumpsiteIncident.objects.select_related('delivery', 'reported_by').all()
     serializer_class = DumpsiteIncidentSerializer
+
     def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+        if self.action in ('create', 'update', 'partial_update', 'destroy'):
             return [IsAdminOrDumpsiteRole()]
-        return [permissions.IsAuthenticated()]
+        return [IsAdminOrDumpsiteRole()]  # reads also gated
 
     def get_queryset(self):
         qs = super().get_queryset()
+        u = self.request.user
+        role = getattr(u, 'role', None)
+        if role == 'admin':
+            pass  # sees all
+        elif role == 'dumpsite':
+            if u.dumpsite_id:
+                qs = qs.filter(delivery__dumpsite_id=u.dumpsite_id)
+            else:
+                qs = qs.none()
+        else:
+            qs = qs.none()
         delivery_id = self.request.query_params.get('delivery')
         if delivery_id:
             qs = qs.filter(delivery_id=delivery_id)

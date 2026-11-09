@@ -60,13 +60,13 @@ def public_stats_view(request):
     today = timezone.localdate()
 
     try:
-        verified_reports = GarbageReport.objects.filter(status__in=[ReportStatus.APPROVED, ReportStatus.RESOLVED])
+        verified_reports = GarbageReport.objects.filter(status__in=[ReportStatus.APPROVED, ReportStatus.RESOLVED], is_watcher_spot=False)
         total_reports    = verified_reports.count()
         resolved_reports = verified_reports.filter(status=ReportStatus.RESOLVED).count()
         pending_reports  = GarbageReport.objects.filter(status=ReportStatus.PENDING).count()
         total_trucks     = Truck.objects.count()
         active_trucks    = Truck.objects.filter(status=TruckStatus.ACTIVE).count()
-        hotspots         = GarbageHotspot.objects.count()
+        hotspots         = GarbageHotspot.objects.exclude(source_report__is_watcher_spot=True).count()
 
         now = timezone.now()
         staleness_cutoff = now - timedelta(hours=getattr(settings, 'SHIFT_STALE_HOURS', 6))
@@ -135,28 +135,89 @@ def public_stats_view(request):
 @require_http_methods(['GET'])
 def public_schedule_view(request):
     """
-    Returns general collection schedule (not personalized).
-    Personalized schedule requires auth — handled in watcher API.
+    Returns sanitized public collection schedules (not personalized).
+    Safe for unauthenticated public consumption:
+    - Excludes cancelled schedules.
+    - Excludes driver identities and user IDs.
+    - Excludes truck plates, IDs, and live telemetry.
+    - Excludes dumpsite coordinates and internal IDs.
+    - Excludes watcher names and raw GPS waypoint coordinates.
+    - Bounded to 100 schedules.
     """
     from driver.models import CollectionSchedule
+    from django.db.models import Q
     import datetime
-    
-    # CollectionSchedule has a ManyToMany relationship to Barangay via 'barangays' field
-    schedules = CollectionSchedule.objects.prefetch_related('barangays').all().order_by('id')
-    
+
+    # Exclude CANCELLED schedules completely from public schedule view
+    schedules = CollectionSchedule.objects.exclude(status='CANCELLED').prefetch_related('barangays')
+
+    # Optional barangay filtering
+    barangay_id = request.GET.get('barangay_id')
+    if barangay_id:
+        try:
+            bid = int(barangay_id)
+            schedules = schedules.filter(
+                Q(barangays__id=bid) |
+                (Q(barangays__isnull=True) & (Q(area__iexact='citywide') | Q(area__iexact='city-wide')))
+            ).distinct()
+        except (ValueError, TypeError):
+            pass
+
+    # Bounded processing
+    schedules = schedules.order_by('id')[:100]
+
     today_name = datetime.datetime.now().strftime("%a")
-    
+
     data = []
     for s in schedules:
         is_today = today_name in s.days if s.days else False
+
+        time_str = ""
+        if s.start_time and s.end_time:
+            time_str = f"{s.start_time.strftime('%I:%M %p').lstrip('0')} – {s.end_time.strftime('%I:%M %p').lstrip('0')}"
+        elif s.start_time:
+            time_str = s.start_time.strftime('%I:%M %p').lstrip('0')
+
+        brgy_list = list(s.barangays.all())
+        brgy_names = ", ".join([b.name for b in brgy_list]) if brgy_list else (s.area or "City-Wide")
+        brgy_ids = [b.id for b in brgy_list]
+
+        # Extract sanitized stop labels only (no GPS coords, no watcher names)
+        safe_stops = []
+        for idx, wp in enumerate(s.waypoints or []):
+            if isinstance(wp, dict):
+                lbl = wp.get('label') or wp.get('address') or f"Stop {idx + 1}"
+            elif isinstance(wp, str):
+                lbl = wp
+            else:
+                lbl = f"Stop {idx + 1}"
+            safe_stops.append({
+                'order': idx + 1,
+                'label': str(lbl).strip(),
+            })
+
         data.append({
-            'day': s.days,
-            'zone': ", ".join([b.name for b in s.barangays.all()]) if s.barangays.exists() else s.area,
-            'time': f"{s.start_time.strftime('%I:%M %p')} – {s.end_time.strftime('%I:%M %p')}",
+            # Backward-compatible fields for OfflineCommandCenter & existing clients
+            'day': s.days or '',
+            'zone': brgy_names,
+            'time': time_str,
             'isNext': is_today,
-            'status': 'upcoming' if is_today else 'pending'
+            'status': 'upcoming' if is_today else 'pending',
+
+            # Sanitized public collection route fields
+            'id': s.id,
+            'area': s.area or brgy_names,
+            'days': s.days or '',
+            'start_time': s.start_time.strftime('%H:%M:%S') if s.start_time else None,
+            'end_time': s.end_time.strftime('%H:%M:%S') if s.end_time else None,
+            'barangays': brgy_ids,
+            'barangay_names': brgy_names,
+            'total_stops': len(safe_stops),
+            'stops': safe_stops,
+            'color': getattr(s, 'color', None) or '#16a34a',
+            'lifecycle_status': s.status,
         })
-    
+
     return JsonResponse(data, safe=False)
 
 
