@@ -1,194 +1,257 @@
 /**
  * NewsCard.jsx
  * -------------
- * Three card variants: news | announcement | emergency
- * Uses Lucide React icons. Matches .card design system.
- * Zero emojis.
+ * Community editorial card with rich typography, standardized 160px media slot,
+ * graceful fallback banner, decoupled category/type/priority badges, accessible controls,
+ * and zero emojis.
  */
 
-import { MapPin, Calendar, ChevronRight, Pin } from 'lucide-react'
-import { TYPE_CONFIG, PRIORITY_CONFIG } from '../utils/newsConfig'
+import { useState } from 'react'
+import { MapPin, Calendar, ChevronRight, Pin, Clock, ShieldAlert } from 'lucide-react'
+import {
+  PRIORITY_CONFIG,
+  CATEGORY_CONFIG,
+  getCategoryLabel,
+  calculateReadingTime,
+} from '../utils/newsConfig'
+import { resolveCardAccentPrecedence } from '../utils/newsUtils'
+import './NewsCard.css'
 
-// ─── Animated card CSS injected once ─────────────────────────────────────────
-const CSS = `
-@keyframes nc-in { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
-.nc-card { 
-  transition: all .3s cubic-bezier(0.25, 0.8, 0.25, 1); 
-  animation: nc-in .4s cubic-bezier(0.16, 1, 0.3, 1) both; 
-  cursor: pointer;
-  box-shadow: 0 4px 16px rgba(46,125,50,0.03);
-}
-.nc-card:hover { 
-  box-shadow: 0 12px 30px rgba(46,125,50,0.08); 
-  transform: translateY(-3px); 
-  border-color: rgba(46,204,113,.4) !important;
-}
-.nc-read-btn { transition: all .2s; }
-.nc-card:hover .nc-read-btn { color: var(--accent) !important; gap: 6px !important; }
-`
-let _injected = false
-function inject() {
-  if (_injected) return; _injected = true
-  const el = document.createElement('style'); el.textContent = CSS; document.head.appendChild(el)
-}
-
-// ─── Component ────────────────────────────────────────────────────────────────
 export default function NewsCard({ item, onReadMore, style = {}, animDelay = 0 }) {
-  inject()
-  const type     = item.type || 'news'
-  const cfg      = TYPE_CONFIG[type] || TYPE_CONFIG.news
-  const pCfg     = PRIORITY_CONFIG[item.priority] || PRIORITY_CONFIG.low
-  const { Icon } = cfg
+  const [imgError, setImgError] = useState(false)
 
+  if (!item) return null
+
+  // 1. Decoupled Category, Content Type, Priority, and Pinning
+  const type = item.type || 'news'
+  const rawCategory = item.category || 'General'
+  const categoryLabel = getCategoryLabel(rawCategory)
+  const catCfg = CATEGORY_CONFIG[rawCategory] || CATEGORY_CONFIG[categoryLabel] || CATEGORY_CONFIG.General
+  const CategoryIcon = catCfg?.Icon || catCfg?.icon
+
+  const pCfg = PRIORITY_CONFIG[item.priority] || PRIORITY_CONFIG.low
+  const isHighPriority = item.priority === 'high'
+  const isMedPriority = item.priority === 'medium'
+  const isPinned = Boolean(item.is_pinned ?? item.isPinned)
+  const isEmergencyType = type === 'emergency'
+
+  // 2. Primary Visual Accent Precedence (Emergency > High Priority > Pinned > Standard)
+  const accent = resolveCardAccentPrecedence(item)
+
+  // 3. Estimated Reading Time (null if < 15 words)
+  const readingTime = calculateReadingTime(item.description)
+
+  // 4. Formatted Philippine Date
   const formattedDate = (() => {
     try {
-      return new Date(item.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
-    } catch { return item.date }
+      if (!item.date) return ''
+      return new Date(item.date).toLocaleDateString('en-PH', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      })
+    } catch {
+      return item.date || ''
+    }
   })()
 
-  const brgyName = item.barangay_name || (typeof item.barangay === 'string' ? item.barangay : null)
-  const isPinned = Boolean(item.is_pinned ?? item.isPinned)
+  // 5. Barangay Location Name
+  const brgyName =
+    item.barangay_name ||
+    (typeof item.barangay === 'string' ? item.barangay : null) ||
+    (item.barangay && typeof item.barangay === 'object' ? item.barangay.name : null) ||
+    'City-Wide'
+
   const imageUrl = item.image_url || (typeof item.image === 'string' ? item.image : null)
 
-  function handleClick() {
+  function handleReadMore() {
     onReadMore?.(item)
   }
 
-  function handleKeyDown(e) {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault()
-      onReadMore?.(item)
+  function handleCardClick(e) {
+    // If the click originated from an interactive element like a button, let the button handle it
+    if (e.target && e.target.closest('button')) {
+      return
     }
+    handleReadMore()
   }
 
   return (
-    <div
-      role="article"
-      tabIndex={0}
-      onClick={handleClick}
-      onKeyDown={handleKeyDown}
-      className="nc-card"
+    <article
+      aria-labelledby={`nc-title-${item.id}`}
+      onClick={handleCardClick}
+      className={`nc-editorial-card nc-accent-${accent.accent}`}
       style={{
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderLeft: type === 'emergency' ? `4px solid #e74c3c` : type === 'announcement' ? `4px solid var(--accent)` : `1px solid var(--border)`,
-        borderRadius: '16px',
-        padding: '18px 22px',
         animationDelay: `${animDelay}ms`,
-        outline: 'none',
-        display: 'flex',
-        flexDirection: 'column',
         ...style,
       }}
     >
-      {/* Top row — icon + badges */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          {/* Type badge */}
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            fontSize: 9, fontWeight: 800, letterSpacing: '.08em',
-            textTransform: 'uppercase', padding: '2px 8px', borderRadius: 20,
-            background: cfg.badgeBg, color: cfg.badgeColor,
-            border: `1px solid ${cfg.badgeBorder}`,
-          }}>
-            <Icon size={10} strokeWidth={2.5} />
-            {item.category || cfg.label}
-          </span>
-          {/* Pinned badge */}
-          {isPinned && (
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: 3,
-              fontSize: 9, fontWeight: 700, letterSpacing: '.06em',
-              padding: '2px 7px', borderRadius: 20,
-              background: 'rgba(46,204,113,.08)', color: 'var(--accent)',
-              border: '1px solid rgba(46,204,113,.25)',
-            }}>
-              <Pin size={9} strokeWidth={2.5} />
-              Pinned
+      {/* Cover Image or Standardized 160px Fallback Eco-Banner */}
+      {imageUrl && !imgError ? (
+        <div className="nc-media-wrap">
+          <img
+            src={imageUrl}
+            alt=""
+            loading="lazy"
+            className="nc-media-img"
+            onError={() => setImgError(true)}
+          />
+        </div>
+      ) : (
+        <div className="nc-fallback-banner">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, zIndex: 1 }}>
+            <div
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 10,
+                background: '#ffffff',
+                border: `1px solid ${catCfg?.border || '#bbf7d0'}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: catCfg?.color || '#16a34a',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.03)',
+              }}
+            >
+              {CategoryIcon && <CategoryIcon size={18} strokeWidth={2} />}
+            </div>
+            <div>
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 800,
+                  letterSpacing: '.08em',
+                  textTransform: 'uppercase',
+                  color: catCfg?.color || '#16a34a',
+                }}
+              >
+                {categoryLabel}
+              </div>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 500 }}>
+                Lucena City Public Information
+              </div>
+            </div>
+          </div>
+          <div className="nc-fallback-watermark">
+            {CategoryIcon && <CategoryIcon size={96} strokeWidth={1} />}
+          </div>
+        </div>
+      )}
+
+      {/* Body Content */}
+      <div className="nc-body-content">
+        {/* Badges strip: Category (subject) + Type + Pinned on Left; Urgency on Right */}
+        <div className="nc-badges-strip">
+          <div className="nc-badges-left">
+            {/* Subject Category tag */}
+            <span
+              className="nc-badge-pill"
+              style={{
+                background: catCfg?.bg || 'rgba(22,163,74,.08)',
+                color: catCfg?.color || '#16a34a',
+                border: `1px solid ${catCfg?.border || 'rgba(22,163,74,.2)'}`,
+              }}
+            >
+              {CategoryIcon && <CategoryIcon size={11} strokeWidth={2.5} />}
+              {categoryLabel}
+            </span>
+
+            {/* Emergency Type Indicator (when type === 'emergency' distinct from subject category) */}
+            {isEmergencyType && (
+              <span
+                className="nc-badge-pill"
+                style={{
+                  background: '#fee2e2',
+                  color: '#dc2626',
+                  border: '1px solid #fca5a5',
+                }}
+              >
+                <ShieldAlert size={11} strokeWidth={2.5} />
+                Emergency
+              </span>
+            )}
+
+            {/* Editorial Pinned badge */}
+            {isPinned && (
+              <span
+                className="nc-badge-pill"
+                style={{
+                  background: 'rgba(22,163,74,.1)',
+                  color: '#16a34a',
+                  border: '1px solid rgba(22,163,74,.25)',
+                }}
+              >
+                <Pin size={10} strokeWidth={2.5} />
+                Pinned
+              </span>
+            )}
+          </div>
+
+          {/* Urgency Priority Chip */}
+          {(isHighPriority || isMedPriority) && (
+            <span
+              className="nc-priority-chip"
+              style={{
+                background: pCfg.bg,
+                color: pCfg.color,
+                border: `1px solid ${pCfg.border}`,
+              }}
+            >
+              {pCfg.label}
             </span>
           )}
         </div>
-        {/* Priority */}
-        <span style={{
-          fontSize: 8, fontWeight: 800, letterSpacing: '.07em',
-          padding: '2px 7px', borderRadius: 20, flexShrink: 0,
-          background: pCfg.bg, color: pCfg.color,
-          border: `1px solid ${pCfg.border}`,
-        }}>
-          {pCfg.label}
-        </span>
-      </div>
 
-      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flex: 1 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {/* Title */}
-          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)', lineHeight: 1.3, marginBottom: 6 }}>
-            {item.title}
-          </div>
+        {/* Title — Clamped at 2 lines visually, full title preserved via title attribute and DOM text */}
+        <h3
+          id={`nc-title-${item.id}`}
+          title={item.title}
+          className="nc-card-title"
+        >
+          {item.title}
+        </h3>
 
-          {/* Body */}
-          <div style={{
-            fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 12,
-            display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-          }}>
-            {item.description || item.body}
-          </div>
-        </div>
+        {/* Description — Clamped at 3 lines */}
+        <p className="nc-card-desc">
+          {item.description || item.body || ''}
+        </p>
 
-        {/* Thumbnail preview if available */}
-        {imageUrl && (
-          <div style={{
-            width: 80, height: 70, borderRadius: 10, overflow: 'hidden',
-            flexShrink: 0, border: '1px solid var(--border)',
-          }}>
-            <img
-              src={imageUrl}
-              alt=""
-              onError={e => { e.currentTarget.parentElement.style.display = 'none' }}
-              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-            />
-          </div>
-        )}
-      </div>
+        {/* Footer Meta Row */}
+        <div className="nc-card-footer">
+          <div className="nc-meta-group">
+            {formattedDate && (
+              <span className="nc-meta-item">
+                <Calendar size={12} strokeWidth={2} />
+                {formattedDate}
+              </span>
+            )}
 
-      {/* Meta row */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginTop: 'auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {/* Date */}
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)' }}>
-            <Calendar size={11} strokeWidth={2} />
-            {formattedDate}
-          </span>
-          {/* Barangay */}
-          {brgyName && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: 'var(--text-muted)' }}>
-              <MapPin size={11} strokeWidth={2} />
+            <span className="nc-meta-item">
+              <MapPin size={12} strokeWidth={2} />
               {brgyName}
             </span>
-          )}
+
+            {readingTime && (
+              <span className="nc-meta-item">
+                <Clock size={12} strokeWidth={2} />
+                {readingTime}
+              </span>
+            )}
+          </div>
+
+          {/* Genuine Accessible Button */}
+          <button
+            type="button"
+            className="nc-action-btn"
+            onClick={handleReadMore}
+            aria-label={`Read full notice: ${item.title}`}
+          >
+            <span>Read Notice</span>
+            <ChevronRight size={14} strokeWidth={2.5} />
+          </button>
         </div>
-        {/* Read more visual CTA */}
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-hidden="true"
-          className="nc-read-btn"
-          onClick={(e) => {
-            e.stopPropagation()
-            handleClick()
-          }}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 3,
-            fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
-            background: 'none', border: 'none', cursor: 'pointer',
-            fontFamily: 'var(--font-body)', padding: 0,
-          }}
-        >
-          Read More
-          <ChevronRight size={13} strokeWidth={2.5} />
-        </button>
       </div>
-    </div>
+    </article>
   )
 }

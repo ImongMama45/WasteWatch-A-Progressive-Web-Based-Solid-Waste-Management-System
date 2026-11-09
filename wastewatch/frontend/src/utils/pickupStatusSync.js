@@ -86,6 +86,7 @@ export const COMPLETED_STOP_STATUSES = new Set([
 export const isCompletedStopStatus = (status) =>
   COMPLETED_STOP_STATUSES.has(normalizeStopStatus(status))
 
+
 export const MISSED_STOP_STATUSES = new Set([
   'PENDING_INSPECTION',
   'READY_FOR_COLLECTION',
@@ -113,33 +114,58 @@ export function isScheduleFullyResolved(schedule, statusMap) {
   if (total <= 0) return false
   for (let i = 1; i <= total; i++) {
     const s = normalizeStopStatus(statusMap.get(i))
-    if (!isCompletedStopStatus(s) && !isMissedStopStatus(s) && s !== 'DRIVER_MISSED') return false
+    if (!isCompletedStopStatus(s) && s !== 'DRIVER_MISSED') return false
   }
   return true
 }
 
-/** Shared stop marker HTML — used by MapView and ShiftRouteModule */
-export function buildStopMarkerHtml(stopNumber, status, details = null, isActive = false) {
+/** Shared stop marker HTML — used by MapView, WatcherMapTaskModule, and ShiftRouteModule */
+export function buildStopMarkerHtml(stopNumber, status, details = null, isActive = false, isSatellite = false) {
   const safeStatus = normalizeStopStatus(status)
   const c = STOP_STATUS_COLORS[safeStatus] || STOP_STATUS_COLORS.PENDING_INSPECTION
-  const size = isActive ? 28 : 24
+  const size = isActive ? 34 : 28
   const markerLabel = safeStatus === 'VERIFIED_COLLECTED' ? '✓'
     : safeStatus === 'COLLECTION_DISPUTED' ? '×'
     : safeStatus === 'COLLECTION_REPORTED' ? '?'
     : stopNumber
 
   const pulse = isActive ? `
-    <span style="position:absolute;inset:-5px;border-radius:50%;
-      border:2.5px solid ${c.bg === 'transparent' ? '#f59e0b' : c.bg};
+    <span style="position:absolute;inset:-6px;border-radius:50%;
+      border:2.5px solid ${isSatellite ? '#f59e0b' : (c.bg === 'transparent' ? '#f59e0b' : (c.border || '#f59e0b'))};
+      box-shadow:0 0 14px ${c.border || '#f59e0b'};
       animation:wwPulse 1.8s ease infinite;pointer-events:none;"></span>
   ` : ''
 
-  const glowShadow = ['VERIFIED_COLLECTED', 'COLLECTION_DISPUTED', 'COLLECTION_REPORTED'].includes(safeStatus)
-    ? `0 2px 10px ${c.shadow}, 0 0 0 3px ${c.bg === 'transparent' ? 'rgba(148,163,184,0.3)' : `${c.bg}44`}`
-    : `0 2px 10px ${c.shadow}`
-  const fillColor = safeStatus === 'PENDING_INSPECTION' ? 'transparent' : c.bg
-  const borderStyle = safeStatus === 'PENDING_INSPECTION' ? `2px dashed ${c.border}` : `2.5px solid ${c.border}`
-  const textColor = safeStatus === 'PENDING_INSPECTION' ? '#94a3b8' : c.label
+  let fillColor
+  let borderStyle
+  let textColor
+  let glowShadow
+
+  if (isSatellite) {
+    // Satellite view: White Version (solid white circle with dark text, like PostCollectionOverlay.jsx)
+    fillColor = '#ffffff'
+    textColor = '#0f172a'
+    const statusBorderColor = safeStatus === 'PENDING_INSPECTION'
+      ? (isActive ? '#f59e0b' : '#94a3b8')
+      : (c.bg !== 'transparent' ? c.bg : (c.border || '#16a34a'))
+    borderStyle = isActive ? '2.5px solid #f59e0b' : `2.5px solid ${statusBorderColor}`
+    glowShadow = '0 2px 10px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.2)'
+  } else {
+    // Default view: Transparent inside and dotted lines on the side for pending stops
+    if (safeStatus === 'PENDING_INSPECTION') {
+      fillColor = 'transparent'
+      borderStyle = isActive ? '2.5px dotted #f59e0b' : `2.5px dotted ${c.border || '#94a3b8'}`
+      textColor = isActive ? '#d97706' : '#64748b'
+      glowShadow = isActive ? '0 0 10px rgba(245,158,11,0.5)' : 'none'
+    } else {
+      fillColor = c.bg
+      borderStyle = `2.5px solid ${c.border}`
+      textColor = c.label
+      glowShadow = ['VERIFIED_COLLECTED', 'COLLECTION_DISPUTED', 'COLLECTION_REPORTED'].includes(safeStatus)
+        ? `0 2px 10px ${c.shadow}, 0 0 0 3px ${c.bg === 'transparent' ? 'rgba(148,163,184,0.3)' : `${c.bg}44`}`
+        : isActive ? '0 4px 16px rgba(0,0,0,0.35)' : '0 2px 8px rgba(0,0,0,0.22)'
+    }
+  }
 
   return `
     <div style="position:relative;width:${size}px;height:${size}px;">
@@ -147,8 +173,8 @@ export function buildStopMarkerHtml(stopNumber, status, details = null, isActive
       <div style="
         position:absolute;inset:0;background:${fillColor};border:${borderStyle};
         border-radius:50%;display:flex;align-items:center;justify-content:center;
-        color:${textColor};font-size:${isActive ? 12 : 10}px;font-weight:900;
-        font-family:monospace;box-shadow:${glowShadow};
+        color:${textColor};font-size:${isActive ? 13 : 11}px;font-weight:900;
+        font-family:system-ui,-apple-system,sans-serif;box-shadow:${glowShadow};
       ">${markerLabel}</div>
       ${details?.collectedAt ? `<div style="position:absolute;top:-6px;right:-6px;background:rgba(0,0,0,0.75);color:#fff;font-size:10px;padding:2px 6px;border-radius:10px;">${details.collectedAt}</div>` : ''}
     </div>`

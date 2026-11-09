@@ -34,6 +34,34 @@ import { DB_NAME, openDB } from '../utils/idbSchema'
 
 const STORE_NAME = 'reports'
 const MAX_RETRY = 3
+const AUTO_RETRY_INTERVAL_MS = 15000
+
+// Shared across every useOfflineReports() instance so that multiple mounted
+// components cannot POST the same report simultaneously.
+const inFlightReportIds = new Set()
+let globalSyncing = false
+let recoveredTransientFailures = false
+
+/**
+ * A transient error means the server was unreachable or restarting, not that
+ * the report itself is invalid. These must never consume the retry budget.
+ * Vite's dev proxy answers 500 with an empty body when the backend is down.
+ */
+function isTransientError(err) {
+  if (!err) return false
+  if (!err.response) return true // network error / timeout / proxy refused
+  const status = err.response.status
+  if ([408, 429, 502, 503, 504].includes(status)) return true
+  if (status === 500) {
+    const data = err.response.data
+    return data == null || data === ''
+  }
+  return false
+}
+
+function looksTransientMessage(msg) {
+  return /Network Error|timeout|unreachable|status code (500|502|503|504)/i.test(msg || '')
+}
 
 if (import.meta.env.DEV) {
   window.__wwResetIDB = () => indexedDB.deleteDatabase(DB_NAME)
@@ -187,6 +215,8 @@ export function useOfflineReports() {
 
   // ── Try to push one report to the backend ────────────────────────────────────
   const pushReport = useCallback(async (report) => {
+    if (inFlightReportIds.has(report.id)) return report
+    inFlightReportIds.add(report.id)
     try {
       const formData = new FormData()
       formData.append('issue_type', report.issue_type)
@@ -194,6 +224,9 @@ export function useOfflineReports() {
       formData.append('description', report.description)
       formData.append('address', report.address || '')
       formData.append('created_at', report.createdAt || new Date().toISOString())
+      if (report.is_watcher_spot) {
+        formData.append('is_watcher_spot', 'true')
+      }
 
       if (report.latitude != null && !isNaN(report.latitude)) {
         formData.append('latitude', Number(report.latitude).toFixed(6))
@@ -222,8 +255,16 @@ export function useOfflineReports() {
       })
       console.log(`[useOfflineReports] Synced report ${report.id}`, response.data)
 
-      const updated = { ...report, status: 'synced', syncedAt: new Date().toISOString() }
+      const updated = {
+        ...report,
+        status: 'synced',
+        syncedAt: new Date().toISOString(),
+        serverData: response.data,
+      }
       try { await idbPut(updated) } catch (e) { console.warn('[pushReport] IDB put failed on success', e) }
+      try {
+        window.dispatchEvent(new CustomEvent('ww-report-created', { detail: response.data }))
+      } catch { }
       return updated
     } catch (err) {
       console.error(`[useOfflineReports] Failed to sync report ${report.id}:`, JSON.stringify(err.response?.data || err.message))
@@ -234,27 +275,59 @@ export function useOfflineReports() {
          return { ...report, status: 'failed' }
       }
 
+      // Server down / restarting: keep the report pending, do NOT burn a retry.
+      if (isTransientError(err)) {
+        const waiting = {
+          ...report,
+          status: 'pending',
+          error: 'Server unreachable. Will retry automatically.',
+        }
+        try { await idbPut(waiting) } catch (e) { console.warn('[pushReport] IDB put failed on transient error', e) }
+        return waiting
+      }
+
       const retryCount = (report.retryCount || 0) + 1
       const status = retryCount >= MAX_RETRY ? 'failed' : 'pending'
-      const updated = { ...report, status, retryCount }
+      let errorMessage = 'Failed to submit report.'
+      const data = err.response?.data
+      if (typeof data === 'string') {
+        errorMessage = data
+      } else if (data?.detail) {
+        errorMessage = data.detail
+      } else if (data && typeof data === 'object') {
+        const entries = Object.entries(data).map(([field, errs]) => {
+          const val = Array.isArray(errs) ? errs.join(', ') : String(errs)
+          return `${field}: ${val}`
+        })
+        errorMessage = entries.join(' | ')
+      } else if (err.message) {
+        errorMessage = err.message
+      }
+      const updated = { ...report, status, retryCount, error: errorMessage }
       try { await idbPut(updated) } catch (e) { console.warn('[pushReport] IDB put failed on error', e) }
       
       if (status === 'failed') throw err // Let the caller know it completely failed
       return updated
+    } finally {
+      inFlightReportIds.delete(report.id)
     }
   }, [])
 
   // ── Add a new report (always queued locally first) ───────────────────────────
-  const addReport = useCallback(async (fields) => {
+  const addReport = useCallback(async (fields, options = {}) => {
+    const parsedLat = fields.latitude != null && fields.latitude !== '' ? Number(fields.latitude) : NaN
+    const parsedLng = fields.longitude != null && fields.longitude !== '' ? Number(fields.longitude) : NaN
     const record = {
       id: crypto.randomUUID(),
       ownerId: currentOwnerId, // Explicit: '123' or 'anonymous'
       issue_type: fields.issue_type || 'overflow',
       severity: fields.severity || 'medium',
       description: fields.description || '',
-      latitude: (typeof fields.latitude === 'number' && !isNaN(fields.latitude)) ? fields.latitude : null,
-      longitude: (typeof fields.longitude === 'number' && !isNaN(fields.longitude)) ? fields.longitude : null,
+      latitude: Number.isFinite(parsedLat) ? parsedLat : null,
+      longitude: Number.isFinite(parsedLng) ? parsedLng : null,
+      barangay_name: fields.barangay_name || null,
       address: fields.address || 'Unknown',
+      is_watcher_spot: Boolean(fields.is_watcher_spot),
       photo: fields.photo || null, // fallback for legacy
       photos: fields.photos || [], // array of base64 strings
       createdAt: new Date().toISOString(),
@@ -268,8 +341,8 @@ export function useOfflineReports() {
     }
     setReports(prev => [record, ...prev])
     
-    // Automatically try to sync immediately if online
-    if (isOnline) {
+    // Automatically try to sync immediately if online (unless caller explicitly manages sync)
+    if (isOnline && !options.skipAutoSync) {
       setTimeout(async () => {
         try {
           notify({ variant: 'success', message: 'Processing report...', duration: 2500, icon: 'sync' })
@@ -293,26 +366,40 @@ export function useOfflineReports() {
 
   // ── Sync all pending reports ─────────────────────────────────────────────────
   const syncAll = useCallback(async () => {
-    if (!isOnline || syncingRef.current) return
+    if (!isOnline || syncingRef.current || globalSyncing) return
 
     syncingRef.current = true
+    globalSyncing = true
     setIsSyncing(true)
     try {
       const all = await idbGetAll()
+      const isMine = r => String(r.ownerId || 'anonymous') === currentOwnerId
+
+      // One-time recovery per page load: reports marked failed only because the
+      // server was down (older builds counted outages as retries) get a fresh try.
+      if (!recoveredTransientFailures) {
+        recoveredTransientFailures = true
+        for (const r of all) {
+          if (r.status === 'failed' && isMine(r) && looksTransientMessage(r.error)) {
+            r.status = 'pending'
+            r.retryCount = 0
+            await idbPut(r)
+          }
+        }
+      }
+
       // Only sync reports belonging to the CURRENT session user
-      const pending = all.filter(r =>
-        r.status === 'pending' &&
-        String(r.ownerId || 'anonymous') === currentOwnerId
-      )
+      const pending = all.filter(r => r.status === 'pending' && isMine(r))
 
       if (pending.length === 0) return
 
-      notify({ variant: 'success', message: `Processing ${pending.length} report(s)...`, duration: 2500, icon: 'sync' })
+      // Silent for background retries; only notify once the outcome is known
+      const results = await Promise.all(
+        pending.map(r => pushReport(r).catch(() => ({ ...r, status: 'failed' })))
+      )
 
-      const results = await Promise.all(pending.map(pushReport))
-      
       const successCount = results.filter(r => r.status === 'synced').length
-      const failCount = results.length - successCount
+      const failCount = results.filter(r => r.status === 'failed').length
 
       if (successCount > 0) {
         notify({ variant: 'success', message: `Successfully synced ${successCount} report(s)!`, duration: 4500, icon: 'check_circle' })
@@ -333,8 +420,9 @@ export function useOfflineReports() {
     } finally {
       setIsSyncing(false)
       syncingRef.current = false
+      globalSyncing = false
     }
-  }, [isOnline, pushReport, currentOwnerId])
+  }, [isOnline, pushReport, currentOwnerId, notify])
 
   // ── Retry a single failed report ─────────────────────────────────────────────
   const retryReport = useCallback(async (id) => {
@@ -367,6 +455,15 @@ export function useOfflineReports() {
   useEffect(() => {
     if (isOnline) syncAll()
   }, [isOnline]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Keep retrying while reports are pending (covers backend restarts, where
+  //    the browser itself never leaves the online state) ────────────────────────
+  const hasPending = reports.some(r => r.status === 'pending')
+  useEffect(() => {
+    if (!isOnline || !hasPending) return
+    const t = setInterval(() => syncAll(), AUTO_RETRY_INTERVAL_MS)
+    return () => clearInterval(t)
+  }, [isOnline, hasPending, syncAll])
 
   const pendingCount = reports.filter(r => r.status === 'pending').length
   const failedCount = reports.filter(r => r.status === 'failed').length

@@ -17,6 +17,7 @@ import api from '../../api/client'
 import DashboardLayout from '../../components/DashboardLayout'
 import { ICONS } from '../../api/navConfig'
 import { useEscalations } from '../../hooks/useEscalations'
+import { FeedCardSkeleton } from '../../components/ui/Skeleton'
 
 const SEVERITY_OPTIONS = [
   { key: 'low', label: 'Low', desc: 'Minor issue, not urgent', color: 'var(--accent)', bg: 'rgba(46,204,113,0.08)', border: 'rgba(46,204,113,0.35)' },
@@ -40,13 +41,17 @@ export default function EscalateToAdmin() {
   // Pre-filled context from truck monitor navigation
   const initShiftId = location.state?.shiftId || ''
   const initSeverity = location.state?.severity || 'medium'
+  const initSubject = location.state?.subject || ''
+  const initMessage = location.state?.message || ''
+  const initTruckId = location.state?.truckId || ''
+  const initDriverId = location.state?.driverId || ''
 
   const [form, setForm] = useState({
     severity: initSeverity,
-    subject: '',
-    message: '',
-    truckId: '',
-    driverId: '',
+    subject: initSubject,
+    message: initMessage,
+    truckId: initTruckId,
+    driverId: initDriverId,
     shiftId: initShiftId,
   })
 
@@ -67,13 +72,13 @@ export default function EscalateToAdmin() {
 
         // Auto-select if navigated from a specific shift
         if (initShiftId) {
-          const shift = res.data.find(s => s.id === initShiftId)
+          const shift = res.data.find(s => String(s.id) === String(initShiftId))
           if (shift) {
             setForm(prev => ({
               ...prev,
-              truckId: shift.truck_id,
-              driverId: shift.driver_id,
-              subject: `Missed collection — Truck ${shift.truck_plate} (${shift.driver_name})`
+              truckId: prev.truckId || shift.truck_id,
+              driverId: prev.driverId || shift.driver_id,
+              subject: prev.subject || `Missed collection — Truck ${shift.truck_plate} (${shift.driver_name})`
             }))
           }
         }
@@ -324,14 +329,14 @@ export default function EscalateToAdmin() {
                     Select a truck/driver from the left to view their history.
                   </div>
                 ) : loadingEscalations ? (
-                  <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading...</div>
+                  <FeedCardSkeleton count={3} compact />
                 ) : driverHistory.length === 0 ? (
                   <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, marginTop: 40 }}>
                     <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10, color: 'var(--accent)' }}><div style={{ width: 32, height: 32 }}>{ICONS.check}</div></div>
                     Clean record (within your barangay).<br />No past escalations found for this driver in your jurisdiction.
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div className="ww-stagger" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     {driverHistory.slice(0, 5).map(esc => (
                       <div key={esc.id} style={{
                         padding: 12, borderRadius: 10,

@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect } from 'react'
+import { Loader2, Pencil } from 'lucide-react'
 import api from '../api/client'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import DashboardLayout from '../components/DashboardLayout'
 import BarangaySelect from '../components/BarangaySelect'
 import { ICONS } from '../api/navConfig'
+import { AppShellSkeleton } from '../components/ui/Skeleton'
 
 // Mock extra data for demo purposes since the backend might not have all fields yet
 const MOCK_EXTRA_DATA = {
@@ -24,7 +26,6 @@ const MOCK_ACTIVITIES = [
 export default function Profile() {
   const { user, barangays, updateUser } = useAuth()
   const navigate = useNavigate()
-
 
   const [siteData, setSiteData] = useState(null)
   const [uploading, setUploading] = useState(false)
@@ -47,26 +48,26 @@ export default function Profile() {
   // Password state
   const [pwd, setPwd] = useState({ current: '', new: '', confirm: '' })
 
-  if (!user) {
-    return (
-      <DashboardLayout>
-        <div style={{ padding: 40, textAlign: 'center' }}>Loading profile...</div>
-      </DashboardLayout>
-    )
-  }
-
-  const role = user.role?.toLowerCase() || 'citizen'
+  const role = user?.role?.toLowerCase() || 'citizen'
   const extra = MOCK_EXTRA_DATA[role] || MOCK_EXTRA_DATA.citizen
 
-  function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
-
   useEffect(() => {
-    if (role === 'dumpsite') {
+    if (user && role === 'dumpsite') {
       api.get('/api/dumpsite/dumpsites/').then(res => {
         if (res.data.length > 0) setSiteData(res.data[0])
       }).catch(() => { })
     }
-  }, [role])
+  }, [user, role])
+
+  if (!user) {
+    return (
+      <DashboardLayout>
+        <AppShellSkeleton showTopBar={false} />
+      </DashboardLayout>
+    )
+  }
+
+  function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
   const handlePhoto = async (e) => {
     const file = e.target.files[0]
@@ -83,7 +84,6 @@ export default function Profile() {
       setUploading(false)
     }
   }
-
 
   async function handleSaveProfile(e) {
     e.preventDefault()
@@ -136,7 +136,7 @@ export default function Profile() {
         .role-badge { background: var(--accent); color: #0d1117; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 800; text-transform: uppercase; display: inline-block; }
       `}</style>
 
-      <div className="page" style={{ maxWidth: 1200, margin: '0 auto' }}>
+      <div className="page ww-fade-in" style={{ maxWidth: 1200, margin: '0 auto' }}>
 
         <div style={{ marginBottom: 24 }}>
           <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 24, fontWeight: 800, margin: '0 0 4px' }}>My Profile</h2>
@@ -144,7 +144,7 @@ export default function Profile() {
         </div>
 
         {/* 1. Header Card */}
-        <div className="profile-card" style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+        <div className="profile-card ww-fade-in" style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
           <div style={{ position: 'relative' }}>
             {user.profile_pic ? (
               <img
@@ -169,7 +169,7 @@ export default function Profile() {
               }}
               title="Change photo"
             >
-              {uploading ? '⏳' : '✏️'}
+              {uploading ? <Loader2 size={14} className="spin" /> : <Pencil size={13} />}
             </button>
             <input ref={fileRef} type="file" accept="image/*" onChange={handlePhoto} style={{ display: 'none' }} />
           </div>
@@ -185,10 +185,10 @@ export default function Profile() {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 20 }}>
+        <div className="ww-stagger" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 20 }}>
 
           {/* 2. Personal Information */}
-          <div className="profile-card">
+          <div className="profile-card ww-fade-in">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div className="section-title" style={{ margin: 0 }}>Personal Information</div>
               {!isEditing && (
@@ -273,7 +273,7 @@ export default function Profile() {
           </div>
 
           {/* 3. Role-Specific Information */}
-          <div className="profile-card">
+          <div className="profile-card ww-fade-in">
             <div className="section-title">Assignment Details</div>
 
             {role === 'admin' && (
@@ -313,7 +313,6 @@ export default function Profile() {
               </>
             )}
 
-
             {role === 'dumpsite' && siteData && (
               <>
                 <div className="info-row">
@@ -341,7 +340,7 @@ export default function Profile() {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
             {/* 4. Security Section */}
-            <div className="profile-card">
+            <div className="profile-card ww-fade-in">
               <div className="section-title">Security</div>
               <form onSubmit={handleSavePassword}>
                 <div style={{ marginBottom: 12 }}>
@@ -361,7 +360,7 @@ export default function Profile() {
             </div>
 
             {/* 5. Activity Summary */}
-            <div className="profile-card">
+            <div className="profile-card ww-fade-in">
               <div className="section-title">Recent Activity</div>
               {MOCK_ACTIVITIES.map((act, i) => (
                 <div key={act.id} style={{ display: 'flex', gap: 12, marginBottom: i === MOCK_ACTIVITIES.length - 1 ? 0 : 16 }}>

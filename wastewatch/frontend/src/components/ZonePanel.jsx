@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { ICONS } from '../api/navConfig'
 import { normalizeStopStatus, STOP_STATUS_LABELS } from '../utils/pickupStatusSync'
+import { SidebarWidgetSkeleton } from './ui/Skeleton'
 
 const STATUS_COLORS = {
   active: '#22c55e',
@@ -241,11 +242,8 @@ export default function ZonePanel({ zone, barangayData, schedules = [], onClearF
         </div>
       )}
 
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: '24px 0', color: '#64748b', fontSize: 13 }}>
-          <div style={{ marginBottom: 8 }}><span className="material-symbols-outlined" style={{ fontSize: 24 }}>sync</span></div>
-          Loading trucks &amp; stops…
-        </div>
+      {loading && trucks.length === 0 ? (
+        <SidebarWidgetSkeleton rows={4} dark style={{ marginBottom: 14 }} />
       ) : trucks.length === 0 ? (
         <div style={{
           padding: '14px 16px', background: 'rgba(255,255,255,0.04)',

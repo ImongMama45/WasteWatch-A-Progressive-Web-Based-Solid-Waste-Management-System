@@ -1,12 +1,16 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { ClipboardList, Flame, AlertTriangle, Users } from 'lucide-react'
+import { MapSkeleton } from '../../../components/ui/Skeleton'
 
-export default function BarangayOverviewTab({ detail, barangayId }) {
+export default function BarangayOverviewTab({ detail, barangayId, leafletReady = !!window.L }) {
   const mapContainerRef = useRef(null)
+  const [mapReady, setMapReady] = useState(false)
 
   useEffect(() => {
-    if (!window.L || !mapContainerRef.current || !detail) return
+    setMapReady(false)
+    if (!leafletReady || !window.L || !mapContainerRef.current || !detail) return
 
+    let active = true
     const L = window.L
     const map = L.map(mapContainerRef.current, {
       zoomControl: true,
@@ -34,12 +38,13 @@ export default function BarangayOverviewTab({ detail, barangayId }) {
 
     if (geojson) {
       drawBoundary(geojson)
+      setMapReady(true)
     } else if (detail.name) {
       // Fallback: fetch from static file and match by name
       fetch('/data/lucena_barangays.geojson')
         .then(res => res.json())
         .then(data => {
-          if (!mapContainerRef.current) return; // Unmounted
+          if (!active || !mapContainerRef.current) return
           const feature = data.features?.find(f => 
             f.properties?.brgy_name?.toLowerCase() === detail.name.toLowerCase() ||
             f.properties?.name?.toLowerCase() === detail.name.toLowerCase()
@@ -54,10 +59,16 @@ export default function BarangayOverviewTab({ detail, barangayId }) {
               map.setView([13.93, 121.61], 13) // Default Lucena
             }
           }
+          setMapReady(true)
         })
         .catch(() => {
+          if (!active) return
           map.setView([13.93, 121.61], 13)
+          setMapReady(true)
         })
+    } else {
+      map.setView([13.93, 121.61], 13)
+      setMapReady(true)
     }
 
     // Hotspot pins — color by severity if available, else default red
@@ -69,8 +80,11 @@ export default function BarangayOverviewTab({ detail, barangayId }) {
         .addTo(map)
     })
 
-    return () => { map.remove() }
-  }, [barangayId, detail])
+    return () => {
+      active = false
+      map.remove()
+    }
+  }, [barangayId, detail, leafletReady])
 
   const statCards = [
     { 
@@ -111,9 +125,14 @@ export default function BarangayOverviewTab({ detail, barangayId }) {
 
   return (
     <div>
-      <div style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', border: '1px solid #E2E8F0', marginBottom: 20, boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
+      <div style={{ position: 'relative', height: 280, borderRadius: 16, overflow: 'hidden', border: '1px solid #E2E8F0', marginBottom: 20, boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
         <style>{`.leaflet-control-container { z-index: 1 !important; }`}</style>
-        <div ref={mapContainerRef} style={{ height: 280, width: '100%', zIndex: 0 }} />
+        <div ref={mapContainerRef} style={{ height: '100%', width: '100%', zIndex: 0 }} />
+        {!mapReady && (
+          <div style={{ position: 'absolute', inset: 0, zIndex: 5 }}>
+            <MapSkeleton height="100%" dark={false} label="Loading boundary map..." showControls={false} />
+          </div>
+        )}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
         {statCards.map(stat => {

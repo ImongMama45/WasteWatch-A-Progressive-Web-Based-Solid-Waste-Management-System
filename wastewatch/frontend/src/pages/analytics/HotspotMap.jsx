@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { Info } from 'lucide-react'
+import { MapSkeleton } from '../../components/ui/Skeleton'
 
 // ─── Score → color (matches existing analytics palette) ──────────────────────
 function scoreColor(s) {
@@ -258,12 +259,8 @@ export default function HotspotMap({ userBarangay, mapData }) {
         height:       320,
       }}>
         {!ready && (
-          <div style={{
-            position: 'absolute', inset: 0, display: 'flex',
-            alignItems: 'center', justifyContent: 'center',
-            color: 'var(--text-muted)', fontSize: 12,
-          }}>
-            Loading map…
+          <div style={{ position: 'absolute', inset: 0, zIndex: 10 }}>
+            <MapSkeleton height="100%" dark label="Loading hotspot map..." showControls={false} />
           </div>
         )}
         <div ref={containerRef} style={{ width: '100%', height: '100%' }} />

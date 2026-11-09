@@ -12,10 +12,26 @@
 
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import {
+    Award,
+    TrendingUp,
+    Clock,
+    MapPin,
+    WifiOff,
+    CheckCircle2,
+    BarChart3,
+    Calendar,
+    ChevronRight,
+    Flame
+} from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
-
-// ─── MOCK DATA REMOVED ────────────────────────────────────────────────────────
+import {
+    FeedCardSkeleton,
+    StatCardSkeleton,
+    ChartSkeleton,
+    TableSkeleton,
+} from '../../components/ui/Skeleton'
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -23,23 +39,35 @@ function fmt(n) { return n.toLocaleString() }
 
 // ─── STAT CARD ────────────────────────────────────────────────────────────────
 
-function StatCard({ label, value, unit, icon, color, sub }) {
+function StatCard({ label, value, unit, icon: Icon, color = '#15803d', sub }) {
     return (
         <div style={{
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 14, padding: '18px 16px',
-            display: 'flex', flexDirection: 'column', gap: 6,
+            background: '#ffffff',
+            border: '1px solid #e4e6eb',
+            borderRadius: 8,
+            padding: '16px',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
         }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div className="form-label" style={{ marginBottom: 0 }}>{label}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase' }}>
+                    {label}
+                </span>
+                {Icon && (
+                    <div style={{ width: 28, height: 28, borderRadius: 6, background: '#f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#65676b' }}>
+                        <Icon size={14} />
+                    </div>
+                )}
             </div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                <span style={{ fontFamily: 'var(--font-head)', fontSize: 32, fontWeight: 800, color }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 2 }}>
+                <span style={{ fontSize: 24, fontWeight: 700, color: '#1c1e21' }}>
                     {value}
                 </span>
-                {unit && <span className="text-muted text-sm">{unit}</span>}
+                {unit && <span style={{ fontSize: 12, fontWeight: 500, color: '#65676b' }}>{unit}</span>}
             </div>
-            {sub && <div className="text-muted text-xs">{sub}</div>}
+            {sub && <div style={{ fontSize: 11, color: '#65676b' }}>{sub}</div>}
         </div>
     )
 }
@@ -54,7 +82,7 @@ function BarChart({ data, color = '#2ecc71' }) {
             {data.map((d, i) => {
                 const pct = (d.stops / max) * 100
                 return (
-                    <div key={i} 
+                    <div key={i}
                         onMouseEnter={() => setHoverIndex(i)}
                         onMouseLeave={() => setHoverIndex(null)}
                         style={{
@@ -216,8 +244,8 @@ function LineChart({ data, color = '#3b82f6', label = 'm' }) {
                 strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
             {pts.map(([x, y], i) => (
                 <g key={i}
-                   onMouseEnter={() => setHoverNode({ 
-                       i, x, y, 
+                   onMouseEnter={() => setHoverNode({
+                       i, x, y,
                        val: typeof data[i] === 'object' ? data[i].val : data[i],
                        date: typeof data[i] === 'object' ? data[i].date : null
                    })}
@@ -228,7 +256,7 @@ function LineChart({ data, color = '#3b82f6', label = 'm' }) {
                 </g>
             ))}
         </svg>
-    
+
             {/* CUSTOM HTML TOOLTIP */}
             {hoverNode && (
                 <div style={{
@@ -270,7 +298,7 @@ function LineChart({ data, color = '#3b82f6', label = 'm' }) {
                 </div>
             )}
         </div>
-)
+    )
 }
 
 // ─── PERIOD TAB ───────────────────────────────────────────────────────────────
@@ -278,81 +306,97 @@ function LineChart({ data, color = '#3b82f6', label = 'm' }) {
 function PeriodTab({ label, active, onClick }) {
     return (
         <button onClick={onClick} style={{
-            padding: '5px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
-            fontFamily: 'var(--font-body)', fontSize: 12, fontWeight: 700,
-            background: active ? 'var(--accent)' : 'transparent',
-            color: active ? '#0d1117' : 'var(--text-muted)',
+            padding: '4px 12px', borderRadius: 4, border: 'none', cursor: 'pointer',
+            fontSize: 12, fontWeight: 600,
+            background: active ? '#ffffff' : 'transparent',
+            color: active ? '#1c1e21' : '#65676b',
+            boxShadow: active ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
             transition: 'all .15s',
         }}>{label}</button>
     )
 }
 
 const BADGE_META = {
-    gold:   { label: 'Gold',   bg: 'linear-gradient(135deg,#f6c94e,#e0a800)', fg: '#7a5100' },
-    silver: { label: 'Silver', bg: 'linear-gradient(135deg,#c0c7d1,#8e9aaa)', fg: '#3a4350' },
-    bronze: { label: 'Bronze', bg: 'linear-gradient(135deg,#d4876a,#a85f3d)', fg: '#5c2d12' },
+    gold:   { label: 'Gold',   bg: '#fef3c7', fg: '#b45309', border: '#fde68a' },
+    silver: { label: 'Silver', bg: '#f1f5f9', fg: '#475569', border: '#e2e8f0' },
+    bronze: { label: 'Bronze', bg: '#ffedd5', fg: '#c2410c', border: '#fed7aa' },
 }
 
 function DriverScoreCard({ score, period }) {
     if (!score?.me) {
         return (
-            <div className="card da-card" style={{ marginBottom: 20, textAlign: 'center' }}>
-                <div className="form-label">Driver Score</div>
-                <p className="text-muted text-xs">Complete a stop this {period} to appear on the board.</p>
+            <div style={{
+                background: '#ffffff',
+                border: '1px solid #e4e6eb',
+                borderRadius: 8,
+                padding: '16px',
+                marginBottom: 16,
+                boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                textAlign: 'center',
+            }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase' }}>Driver Score</div>
+                <p style={{ fontSize: 12, color: '#65676b', margin: '4px 0 0' }}>Complete a stop this {period} to appear on the board.</p>
             </div>
         )
     }
     const { me, leaders, fleet_size } = score
     const badge = me.badge ? BADGE_META[me.badge] : null
     return (
-        <div className="card da-card" style={{ marginBottom: 20 }}>
+        <div style={{
+            background: '#ffffff',
+            border: '1px solid #e4e6eb',
+            borderRadius: 8,
+            padding: '16px 18px',
+            marginBottom: 16,
+            boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+        }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                 <div style={{
-                    width: 56, height: 56, borderRadius: 14, flexShrink: 0,
-                    background: badge ? badge.bg : 'var(--bg)',
-                    border: badge ? 'none' : '1px solid var(--border)',
-                    color: badge ? badge.fg : 'var(--text-muted)',
+                    width: 48, height: 48, borderRadius: 6, flexShrink: 0,
+                    background: badge ? badge.bg : '#f0f2f5',
+                    border: `1px solid ${badge ? badge.border : '#e4e6eb'}`,
+                    color: badge ? badge.fg : '#65676b',
                     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                 }}>
-                    <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 20, lineHeight: 1 }}>#{me.rank}</span>
-                    {badge && <span style={{ fontSize: 8, fontWeight: 800, textTransform: 'uppercase' }}>{badge.label}</span>}
+                    <span style={{ fontWeight: 700, fontSize: 16, lineHeight: 1 }}>#{me.rank}</span>
+                    {badge && <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', marginTop: 2 }}>{badge.label}</span>}
                 </div>
                 <div style={{ flex: 1 }}>
-                    <div className="form-label" style={{ marginBottom: 0 }}>Driver Score</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase' }}>Driver Score</div>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                        <span style={{ fontFamily: 'var(--font-head)', fontSize: 32, fontWeight: 800, color: 'var(--accent)' }}>
+                        <span style={{ fontSize: 24, fontWeight: 700, color: '#15803d' }}>
                             {me.points.toLocaleString()}
                         </span>
-                        <span className="text-muted text-sm">pts</span>
+                        <span style={{ fontSize: 12, color: '#65676b', fontWeight: 500 }}>pts</span>
                     </div>
-                    <div className="text-muted text-xs">
+                    <div style={{ fontSize: 12, color: '#65676b', marginTop: 2 }}>
                         Top {me.rank} of {me.of || fleet_size} · this {period}
                     </div>
                 </div>
             </div>
 
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12 }}>
                 {[
-                    { l: 'stops', v: `+${me.stops_completed * 50}`, c: 'var(--accent)' },
-                    { l: 'missed', v: me.stops_missed ? `-${me.stops_missed * 20}` : '0', c: me.stops_missed ? 'var(--danger)' : 'var(--text-muted)' },
-                    { l: 'fill bonus', v: me.fill_bonus > 0 ? `+${me.fill_bonus}` : me.fill_bonus, c: me.fill_bonus < 0 ? 'var(--danger)' : me.fill_bonus > 0 ? 'var(--accent)' : 'var(--text-muted)' },
+                    { l: 'stops', v: `+${me.stops_completed * 50}`, c: '#15803d' },
+                    { l: 'missed', v: me.stops_missed ? `-${me.stops_missed * 20}` : '0', c: me.stops_missed ? '#b91c1c' : '#65676b' },
+                    { l: 'fill bonus', v: me.fill_bonus > 0 ? `+${me.fill_bonus}` : me.fill_bonus, c: me.fill_bonus < 0 ? '#b91c1c' : me.fill_bonus > 0 ? '#15803d' : '#65676b' },
                 ].map(p => (
                     <span key={p.l} style={{
-                        fontSize: 11, padding: '3px 10px', borderRadius: 20,
-                        background: 'var(--bg)', border: '1px solid var(--border)',
+                        fontSize: 11, padding: '2px 8px', borderRadius: 4,
+                        background: '#f8fafc', border: '1px solid #e4e6eb',
                     }}>
-                        <b style={{ color: p.c }}>{p.v}</b> <span className="text-muted">{p.l}</span>
+                        <b style={{ color: p.c }}>{p.v}</b> <span style={{ color: '#65676b' }}>{p.l}</span>
                     </span>
                 ))}
             </div>
 
             {leaders?.length > 0 && (
-                <div style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-                    <div className="form-label">Fleet leaders</div>
+                <div style={{ marginTop: 12, borderTop: '1px solid #f0f2f5', paddingTop: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', marginBottom: 6 }}>Fleet leaders</div>
                     {leaders.map(l => (
                         <div key={l.rank} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 0' }}>
-                            <span>#{l.rank} {l.name}</span>
-                            <b>{l.points.toLocaleString()}</b>
+                            <span style={{ color: '#1c1e21' }}>#{l.rank} {l.name}</span>
+                            <b style={{ color: '#1c1e21' }}>{l.points.toLocaleString()}</b>
                         </div>
                     ))}
                 </div>
@@ -405,218 +449,209 @@ export default function DriverAnalytics() {
     const bestDay = [...weekly].sort((a, b) => b.stops - a.stops)[0]
 
     return (
-        <>
-            <style>{`
-        @keyframes fadeUp {
-          from { opacity:0; transform:translateY(10px); }
-          to   { opacity:1; transform:translateY(0); }
-        }
-        .da-card { animation: fadeUp .25s ease both; }
-      `}</style>
-
-            <div className="page" style={{ paddingBottom: 80 }}>
+        <div style={{ background: '#f0f2f5', minHeight: '100vh', padding: '20px 24px 80px' }}>
+            <div style={{ maxWidth: 1240, margin: '0 auto' }}>
 
                 {/* ── HEADER ── */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                     <div>
-                        <h1 style={{ fontFamily: 'var(--font-head)', fontSize: 18, fontWeight: 800, margin: 0 }}>
+                        <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, color: '#1c1e21' }}>
                             My Analytics
                         </h1>
-                        <p className="text-muted text-xs" style={{ marginTop: 2 }}>
+                        <p style={{ margin: '2px 0 0', fontSize: 12, color: '#65676b' }}>
                             {user?.full_name || 'Driver'} · Performance Overview
                         </p>
                     </div>
-                </div>
 
-                {/* ── PERIOD TABS ── */}
-                <div style={{
-                    display: 'inline-flex', background: 'var(--surface)',
-                    border: '1px solid var(--border)', borderRadius: 24, padding: 4, marginBottom: 20,
-                }}>
-                    {['week', 'month'].map(p => (
-                        <PeriodTab key={p}
-                            label={p === 'week' ? 'This Week' : 'This Month'}
-                            active={period === p}
-                            onClick={() => setPeriod(p)}
-                        />
-                    ))}
+                    {/* ── PERIOD TABS (Meta Segmented Control) ── */}
+                    <div style={{
+                        display: 'inline-flex', background: '#e4e6eb',
+                        borderRadius: 6, padding: 2,
+                    }}>
+                        {['week', 'month'].map(p => (
+                            <PeriodTab key={p}
+                                label={p === 'week' ? 'This Week' : 'This Month'}
+                                active={period === p}
+                                onClick={() => setPeriod(p)}
+                            />
+                        ))}
+                    </div>
                 </div>
 
                 {/* ── ERROR & LOADING STATES ── */}
                 {loading && (
-                    <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
-                        <div className="spinner" style={{ margin: '0 auto 12px', width: 24, height: 24, border: '3px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>Loading analytics...</div>
-                        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                    <div>
+                        <FeedCardSkeleton count={1} compact style={{ marginBottom: 16 }} />
+                        <StatCardSkeleton count={4} style={{ marginBottom: 18 }} />
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+                            <ChartSkeleton height={180} variant="bar" />
+                            <ChartSkeleton height={180} variant="line" />
+                        </div>
+                        <TableSkeleton rows={4} cols={4} style={{ marginTop: 18 }} />
                     </div>
                 )}
 
                 {error && !loading && (
-                    <div style={{ padding: '24px 16px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 12, marginBottom: 24, textAlign: 'center' }}>
-                        <span className="material-symbols-rounded" style={{ color: '#ef4444', fontSize: 28, marginBottom: 8 }}>wifi_off</span>
-                        <div style={{ color: '#ef4444', fontSize: 14, fontWeight: 600, marginBottom: 12 }}>{error}</div>
-                        <button onClick={fetchAnalytics} className="btn" style={{ padding: '6px 16px', fontSize: 13 }}>Try Again</button>
+                    <div style={{ padding: '20px 16px', background: '#fee2e2', border: '1px solid #fecaca', borderRadius: 8, marginBottom: 16, textAlign: 'center' }}>
+                        <WifiOff size={24} style={{ color: '#b91c1c', margin: '0 auto 8px', display: 'block' }} />
+                        <div style={{ color: '#b91c1c', fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{error}</div>
+                        <button
+                            onClick={fetchAnalytics}
+                            style={{
+                                padding: '6px 14px',
+                                fontSize: 12,
+                                fontWeight: 600,
+                                background: '#16a34a',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: 6,
+                                cursor: 'pointer',
+                            }}
+                        >
+                            Try Again
+                        </button>
                     </div>
                 )}
 
                 {/* ── STAT CARDS 2×2 ── */}
                 {!loading && !error && (
-                    <>
-                <DriverScoreCard score={score} period={period} />
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}
-                    className="da-card">
-                    <StatCard label="Routes Done" value={fmt(summary.routesCompleted)} color="#2ecc71" sub={`this ${period}`} />
-                    <StatCard label="Stops Done" value={fmt(summary.stopsCompleted)} color="#3b82f6" sub={`this ${period}`} />
-                    <StatCard label="Working Time" value={summary.totalWorkingHours} unit="hrs" color="#f59e0b" sub="total hours logged" />
-                    <StatCard label="Avg. Completion" value={summary.avgCompletionMins} unit="min" color="#a78bfa" sub="per route" />
-                </div>
+                    <div className="ww-fade-in">
+                    <DriverScoreCard score={score} period={period} />
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 16 }}>
+                        <StatCard label="Routes Done" value={fmt(summary.routesCompleted)} icon={CheckCircle2} color="#15803d" sub={`this ${period}`} />
+                        <StatCard label="Stops Done" value={fmt(summary.stopsCompleted)} icon={MapPin} color="#1d4ed8" sub={`this ${period}`} />
+                        <StatCard label="Working Time" value={summary.totalWorkingHours} unit="hrs" icon={Clock} color="#b45309" sub="total hours logged" />
+                        <StatCard label="Avg. Completion" value={summary.avgCompletionMins} unit="min" icon={TrendingUp} color="#7c3aed" sub="per route" />
+                    </div>
 
-                {/* ── WEEKLY/MONTHLY BAR CHART ── */}
-                <div className="card da-card" style={{ marginBottom: 20 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-                        <div>
-                            <h2 className="section-title" style={{ margin: 0, fontSize: 15 }}>
-                                {period === 'week' ? 'Stops This Week' : 'Stops This Month'}
-                            </h2>
-                            <p className="text-muted text-xs" style={{ marginTop: 3 }}>
-                                {weekStops} stops · Best: {bestDay?.day} ({bestDay?.stops})
+                    {/* ── WEEKLY/MONTHLY BAR CHART ── */}
+                    <div style={{
+                        background: '#ffffff',
+                        border: '1px solid #e4e6eb',
+                        borderRadius: 8,
+                        padding: '18px 20px',
+                        marginBottom: 16,
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+                            <div>
+                                <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#1c1e21' }}>
+                                    {period === 'week' ? 'Stops This Week' : 'Stops This Month'}
+                                </h2>
+                                <p style={{ margin: '2px 0 0', fontSize: 12, color: '#65676b' }}>
+                                    {weekStops} stops · Best: {bestDay?.day} ({bestDay?.stops})
+                                </p>
+                            </div>
+                            <div style={{
+                                background: '#e7f5eb', border: '1px solid #bbf7d0',
+                                borderRadius: 6, padding: '4px 10px', textAlign: 'center',
+                            }}>
+                                <div style={{ fontWeight: 700, fontSize: 16, color: '#15803d' }}>
+                                    {weekStops}
+                                </div>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: '#65676b', textTransform: 'uppercase' }}>TOTAL</div>
+                            </div>
+                        </div>
+                        <BarChart data={weekly} color="#16a34a" />
+                    </div>
+
+                    {/* ── LINE CHART: COMPLETION TREND ── */}
+                    <div style={{
+                        background: '#ffffff',
+                        border: '1px solid #e4e6eb',
+                        borderRadius: 8,
+                        padding: '18px 20px',
+                        marginBottom: 16,
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                    }}>
+                        <div style={{ marginBottom: 14 }}>
+                            <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#1c1e21' }}>Completion Time Trend</h2>
+                            <p style={{ margin: '2px 0 0', fontSize: 12, color: '#65676b' }}>
+                                Avg. minutes per route — last {trend.length} routes
                             </p>
                         </div>
-                        <div style={{
-                            background: 'rgba(46,204,113,0.1)', border: '1px solid rgba(46,204,113,0.3)',
-                            borderRadius: 10, padding: '4px 10px', textAlign: 'center',
-                        }}>
-                            <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 18, color: '#2ecc71' }}>
-                                {weekStops}
-                            </div>
-                            <div className="form-label" style={{ marginBottom: 0 }}>TOTAL</div>
+                        <LineChart data={trend} color="#16a34a" label="m" />
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
+                            <span style={{ fontSize: 11, color: '#65676b' }}>Route 1</span>
+                            <span style={{ fontSize: 11, color: '#65676b' }}>Route {trend.length}</span>
                         </div>
-                    </div>
-                    <BarChart data={weekly} color="#2ecc71" />
-                </div>
 
-                {/* ── LINE CHART: COMPLETION TREND ── */}
-                <div className="card da-card" style={{ marginBottom: 20 }}>
-                    <div style={{ marginBottom: 14 }}>
-                        <h2 className="section-title" style={{ margin: 0, fontSize: 15 }}>Completion Time Trend</h2>
-                        <p className="text-muted text-xs" style={{ marginTop: 3 }}>
-                            Avg. minutes per route — last {trend.length} routes
-                        </p>
-                    </div>
-                    <LineChart data={trend} color="#3b82f6" label="m" />
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
-                        <span className="text-muted text-xs">Route 1</span>
-                        <span className="text-muted text-xs">Route {trend.length}</span>
-                    </div>
-
-                    {/* Trend badge */}
-                    {trend.length >= 2 && (() => {
-                        const vals = trend.map(t => typeof t === 'object' ? t.val : t)
-                        const diff = vals[vals.length - 1] - vals[0]
-                        const faster = diff < 0
-                        return (
-                            <div style={{
-                                marginTop: 12, padding: '8px 12px', borderRadius: 10,
-                                background: faster ? 'rgba(46,204,113,0.08)' : 'rgba(245,158,11,0.08)',
-                                border: `1px solid ${faster ? 'rgba(46,204,113,0.25)' : 'rgba(245,158,11,0.25)'}`,
-                                display: 'flex', alignItems: 'center', gap: 8,
-                            }}>
-                                <span style={{ fontSize: 13, fontWeight: 600, color: faster ? 'var(--accent)' : 'var(--warning)' }}>
-                                    {faster
-                                        ? `You're ${Math.abs(diff)} min faster than your first route!`
-                                        : `${Math.abs(diff)} min slower than your first route — keep pushing!`}
-                                </span>
-                            </div>
-                        )
-                    })()}
-                </div>
-
-                {/* ── BREAKDOWN TABLE ── */}
-                <div className="card da-card">
-                    <h2 className="section-title" style={{ fontSize: 15, marginBottom: 14 }}>
-                        {period === 'week' ? 'Weekly Breakdown' : 'Monthly Breakdown'}
-                    </h2>
-                    <div>
-                        {weekly.map((d, i) => {
-                            const pct = weekStops > 0 ? (d.stops / weekStops) * 100 : 0
+                        {/* Trend badge */}
+                        {trend.length >= 2 && (() => {
+                            const vals = trend.map(t => typeof t === 'object' ? t.val : t)
+                            const diff = vals[vals.length - 1] - vals[0]
+                            const faster = diff < 0
                             return (
-                                <div key={i} 
-                                    onMouseEnter={() => setHoverRow(i)}
-                                    onMouseLeave={() => setHoverRow(null)}
-                                    style={{
-                                    display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0',
-                                    borderBottom: i < weekly.length - 1 ? '1px solid var(--border)' : 'none',
-                                    position: 'relative', cursor: 'pointer'
+                                <div style={{
+                                    marginTop: 12, padding: '8px 12px', borderRadius: 6,
+                                    background: faster ? '#e7f5eb' : '#fef3c7',
+                                    border: `1px solid ${faster ? '#bbf7d0' : '#fde68a'}`,
+                                    display: 'flex', alignItems: 'center', gap: 8,
                                 }}>
-                                    {/* CUSTOM HTML TOOLTIP */}
-                                    {hoverRow === i && (
-                                        <div style={{
-                                            position: 'absolute',
-                                            left: '50%',
-                                            top: -35,
-                                            transform: 'translate(-50%, 0)',
-                                            background: 'var(--surface)',
-                                            border: '1px solid var(--border)',
-                                            borderRadius: 8,
-                                            padding: '8px 12px',
-                                            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-                                            pointerEvents: 'none',
-                                            textAlign: 'center',
-                                            minWidth: 90,
-                                            zIndex: 10,
-                                            animation: 'fadeUp 0.15s ease-out'
-                                        }}>
-                                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 2 }}>
-                                                {d.day}
-                                                <div style={{ fontSize: 9, fontWeight: 500, opacity: 0.8 }}>{d.date}</div>
-                                            </div>
-                                            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>
-                                                {d.stops} <span style={{ fontSize: 11, fontWeight: 600 }}>stops</span>
-                                            </div>
-                                            {/* Tooltip Tail */}
-                                            <div style={{
-                                                position: 'absolute',
-                                                bottom: -5,
-                                                left: '50%',
-                                                transform: 'translateX(-50%) rotate(45deg)',
-                                                width: 10,
-                                                height: 10,
-                                                background: 'var(--surface)',
-                                                borderRight: '1px solid var(--border)',
-                                                borderBottom: '1px solid var(--border)',
-                                            }} />
-                                        </div>
-                                    )}
-
-                                    <div style={{ width: 36, fontWeight: 700, fontSize: 13 }}>{d.day}</div>
-                                    <div style={{ flex: 1 }}>
-                                        <div style={{ height: 7, borderRadius: 99, background: 'var(--bg)', overflow: 'hidden' }}>
-                                            <div style={{
-                                                height: '100%', borderRadius: 99,
-                                                background: d.stops === 0
-                                                    ? 'var(--border)'
-                                                    : 'linear-gradient(90deg,#2ecc71,#27ae60)',
-                                                width: `${pct}%`, transition: 'width .4s ease',
-                                            }} />
-                                        </div>
-                                    </div>
-                                    <div style={{
-                                        width: 28, textAlign: 'right',
-                                        fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 14,
-                                        color: d.stops === 0 ? 'var(--text-muted)' : 'var(--accent)',
-                                    }}>
-                                        {d.stops}
-                                    </div>
+                                    <span style={{ fontSize: 12, fontWeight: 600, color: faster ? '#15803d' : '#b45309' }}>
+                                        {faster
+                                            ? `You're ${Math.abs(diff)} min faster than your first route!`
+                                            : `${Math.abs(diff)} min slower than your first route — keep pushing!`}
+                                    </span>
                                 </div>
                             )
-                        })}
+                        })()}
                     </div>
-                </div>
-                </>
+
+                    {/* ── BREAKDOWN TABLE ── */}
+                    <div style={{
+                        background: '#ffffff',
+                        border: '1px solid #e4e6eb',
+                        borderRadius: 8,
+                        padding: '18px 20px',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                    }}>
+                        <h2 style={{ fontSize: 15, fontWeight: 700, margin: '0 0 14px', color: '#1c1e21' }}>
+                            {period === 'week' ? 'Weekly Breakdown' : 'Monthly Breakdown'}
+                        </h2>
+                        <div>
+                            {weekly.map((d, i) => {
+                                const pct = weekStops > 0 ? (d.stops / weekStops) * 100 : 0
+                                return (
+                                    <div key={i}
+                                        onMouseEnter={() => setHoverRow(i)}
+                                        onMouseLeave={() => setHoverRow(null)}
+                                        style={{
+                                        display: 'flex', alignItems: 'center', gap: 10, padding: '9px 8px',
+                                        borderBottom: i < weekly.length - 1 ? '1px solid #f0f2f5' : 'none',
+                                        position: 'relative', cursor: 'pointer',
+                                        background: hoverRow === i ? '#f8fafc' : 'transparent',
+                                        borderRadius: 4,
+                                        transition: 'background 0.15s ease',
+                                    }}>
+                                        <div style={{ width: 36, fontWeight: 600, fontSize: 13, color: '#1c1e21' }}>{d.day}</div>
+                                        <div style={{ flex: 1 }}>
+                                            <div style={{ height: 6, borderRadius: 3, background: '#f0f2f5', overflow: 'hidden' }}>
+                                                <div style={{
+                                                    height: '100%', borderRadius: 3,
+                                                    background: d.stops === 0
+                                                        ? '#ced0d4'
+                                                        : '#16a34a',
+                                                    width: `${pct}%`, transition: 'width .3s ease',
+                                                }} />
+                                            </div>
+                                        </div>
+                                        <div style={{
+                                            width: 32, textAlign: 'right',
+                                            fontWeight: 700, fontSize: 13,
+                                            color: d.stops === 0 ? '#65676b' : '#15803d',
+                                        }}>
+                                            {d.stops}
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
+                    </div>
                 )}
 
             </div>
-        </>
+        </div>
     )
 }

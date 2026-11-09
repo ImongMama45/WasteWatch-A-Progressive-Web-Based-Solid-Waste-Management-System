@@ -6,6 +6,7 @@ import Navbar from '../components/Navbar'
 import { useAuth } from '../context/AuthContext'
 import { useNotification } from '../context/NotificationContext'
 import api from '../api/client'
+import { MapSkeleton } from '../components/ui/Skeleton'
 import { ICONS } from '../api/navConfig'
 import ZonePanel from '../components/ZonePanel'
 import ReactDOMServer from 'react-dom/server'
@@ -19,8 +20,11 @@ import {
   subscribePickupStatusSync,
 } from '../utils/pickupStatusSync'
 import useUserLocation from '../hooks/useUserLocation'
+import { AlertTriangle, MapPin, User, Clock, Tag, Pin, Info, CheckCircle, XCircle, MessageSquare } from 'lucide-react'
+import CommentThread from './community/components/CommentThread'
+import ReportVoting from '../components/community/ReportVoting'
+import { getGarbageReportId } from '../utils/reportIdentity'
 import { getApiErrorMessage } from '../utils/notificationHelpers'
-import { AlertTriangle, MapPin, User, Clock, Tag, Pin, Info, CheckCircle, XCircle } from 'lucide-react'
 
 export const LUCENA_CENTER = [13.9373, 121.6170];
 
@@ -444,8 +448,11 @@ export default function MapView() {
     const focus = location.state?.focusReport
     if (!focus) return
 
-    // Find in current data
-    const found = reports.find(r => r.id === focus.id) || focus
+    // Find in current data matching by authoritative GarbageReport ID
+    const targetReportId = getGarbageReportId(focus)
+    const found = (targetReportId != null
+      ? reports.find(r => r.report_id != null && Number(r.report_id) === targetReportId)
+      : null) || focus
 
     const lat = found.latitude || found.lat || found.location?.lat
     const lng = found.longitude || found.lng || found.location?.lng
@@ -543,8 +550,8 @@ export default function MapView() {
         })
         .catch(err => console.error('[MapView] active_shifts error', err))
 
-      api.get('/api/driver/collection-schedules/')
-        .then(res => setSchedules(res.data))
+      api.get('/api/driver/collection-schedules/?paginate=false')
+        .then(res => setSchedules(Array.isArray(res.data) ? res.data : (res.data?.results || [])))
         .catch(err => console.error('[MapView] collection-schedules error', err))
 
       api.get('/api/watcher/stop-validations/')
@@ -1648,7 +1655,7 @@ export default function MapView() {
         {/* Loading overlay */}
         {!mapReady && (
           <div style={{ position: "absolute", inset: 0, background: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
-            <div style={{ color: "#14b8a6", fontSize: 18, fontWeight: 600, letterSpacing: 1 }}>Loading Map…</div>
+            <MapSkeleton height="100%" dark label="Loading Operations Map..." />
           </div>
         )}
 
@@ -2261,11 +2268,22 @@ function DetailRow({ icon, label, value, accent, last }) {
 function ReportPanel({ report, onStatusChange, onClose }) {
   const { user } = useAuth()
   const { notify } = useNotification()
+  const navigate = useNavigate()
+  const [commentsOpen, setCommentsOpen] = useState(false)
+  const [commentCount, setCommentCount] = useState(report.comment_count || 0)
   const [isRejecting, setIsRejecting] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
   const canModerate = REPORT_MODERATOR_ROLES.includes(user?.role)
   const severityColors = { high: "#ef4444", medium: "#f59e0b", low: "#22c55e" }
   const typeLabels = { overflow: "Overflow", illegal_dumping: "Illegal Dumping", missed: "Missed Pickup" }
+
+  const garbageReportId = getGarbageReportId(report)
+  const hasReport = garbageReportId !== null
+  const hasThread = Boolean(report.community_post_id || hasReport)
+
+  useEffect(() => {
+    setCommentCount(report.comment_count || 0)
+  }, [report.comment_count, report.id, report.report_id])
 
   const reportedStr = report.created_at || report.reported
     ? new Date(report.created_at || report.reported).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
@@ -2298,8 +2316,8 @@ function ReportPanel({ report, onStatusChange, onClose }) {
   }).filter(Boolean)
 
   function handleApprove() {
-    const id = report.report_id || report.id
-    api.post(`/api/watcher/reports/${id}/approve/`)
+    if (!garbageReportId) return notify({ variant: 'error-solid', message: 'No associated waste report to approve.' })
+    api.post(`/api/watcher/reports/${garbageReportId}/approve/`)
       .then(() => onStatusChange?.())
       .catch(err => {
         console.error(err)
@@ -2308,9 +2326,9 @@ function ReportPanel({ report, onStatusChange, onClose }) {
   }
 
   function submitReject() {
+    if (!garbageReportId) return notify({ variant: 'error-solid', message: 'No associated waste report to reject.' })
     if (!rejectReason.trim()) return notify({ variant: 'error-solid', message: 'Reason is required for rejection.' })
-    const id = report.report_id || report.id
-    api.post(`/api/watcher/reports/${id}/reject/`, { rejection_reason: rejectReason })
+    api.post(`/api/watcher/reports/${garbageReportId}/reject/`, { rejection_reason: rejectReason })
       .then(() => onStatusChange?.())
       .catch(err => {
         console.error(err)
@@ -2319,8 +2337,8 @@ function ReportPanel({ report, onStatusChange, onClose }) {
   }
 
   function handleResolve() {
-    const id = report.report_id || report.id
-    api.post('/api/watcher/confirmations/', { report: id })
+    if (!garbageReportId) return notify({ variant: 'error-solid', message: 'No associated waste report to resolve.' })
+    api.post('/api/watcher/confirmations/', { report: garbageReportId })
       .then(() => onStatusChange?.())
       .catch(err => {
         console.error(err)
@@ -2426,7 +2444,7 @@ function ReportPanel({ report, onStatusChange, onClose }) {
           </div>
         ) : null}
 
-        {canModerate && (
+        {canModerate && hasReport && (
           <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
             {report.status === 'pending' && !isRejecting && (
               <>
@@ -2459,9 +2477,87 @@ function ReportPanel({ report, onStatusChange, onClose }) {
           </div>
         )}
 
-        {!canModerate && (
+        {!hasReport && (
+          <div style={{ marginTop: 10, padding: "12px 16px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, color: "#94a3b8", fontSize: 12 }}>
+            Hotspot monitoring location. No official resident report attached to this pin.
+          </div>
+        )}
+
+        {hasReport && !canModerate && (
           <div style={{ marginTop: 10, padding: "12px 16px", background: "rgba(59,130,246,0.05)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: 12, color: "#60a5fa", fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Info size={16} /> Barangay Officials, and Admins can moderate reports.
+          </div>
+        )}
+
+        {/* Civic Verification Voting & Consensus Indicators */}
+        {hasReport && (
+          <div style={{ marginTop: 14 }}>
+            <ReportVoting
+              key={`vote-${garbageReportId}`}
+              reportId={garbageReportId}
+              initialUpvotes={report.upvotes}
+              initialDownvotes={report.downvotes}
+              initialNetVotes={report.net_votes}
+              initialUserVote={report.user_vote}
+              status={report.status}
+              isArchived={report.is_archived}
+              theme="dark"
+              onAuthRequired={() => navigate('/login')}
+            />
+          </div>
+        )}
+
+        {/* Unified Comment Thread */}
+        {hasThread && (
+          <div style={{ marginTop: 20, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setCommentsOpen(o => !o)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  background: commentsOpen ? 'rgba(56, 189, 248, 0.12)' : 'var(--surface-2)',
+                  border: commentsOpen ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid var(--border)',
+                  color: commentsOpen ? '#38bdf8' : 'var(--text)',
+                  padding: '6px 12px',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <MessageSquare size={14} />
+                <span>{commentCount} {commentCount === 1 ? 'Comment' : 'Comments'}</span>
+              </button>
+
+              {report.community_post_id && (
+                <a
+                  href={`/community?post=${report.community_post_id}`}
+                  style={{
+                    color: 'var(--text-muted)',
+                    fontSize: 12,
+                    textDecoration: 'none',
+                    fontWeight: 500,
+                  }}
+                >
+                  View in Community
+                </a>
+              )}
+            </div>
+
+            {commentsOpen && (
+              <CommentThread
+                key={report.community_post_id ? `post-${report.community_post_id}` : `report-${garbageReportId}`}
+                postId={report.community_post_id}
+                reportId={garbageReportId}
+                theme="dark"
+                onCommentCountChange={setCommentCount}
+                onAuthRequired={() => navigate('/login')}
+              />
+            )}
           </div>
         )}
       </div>

@@ -287,6 +287,7 @@ export default function BottomNav() {
           setReportFormPhoto(null)
         }}
         initialPhoto={reportFormPhoto}
+        isWatcherSpot={isWatcher}
       />
     </div>
   )

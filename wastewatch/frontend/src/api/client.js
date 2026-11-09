@@ -13,7 +13,7 @@ function getCsrfToken() {
 // baseURL is intentionally empty in dev — all requests go through the Vite dev proxy
 // In production (Vercel), it uses VITE_API_URL to point to the Render backend.
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '',
+  baseURL: (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || '',
   withCredentials: true,
   headers: {
     'Accept': 'application/json',
@@ -24,7 +24,9 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   // Append timestamp to all GET requests to prevent aggressive browser caching
   if (config.method === 'get') {
-    config.params = config.params || {}
+    if (!config.params || typeof config.params !== 'object') {
+      config.params = {}
+    }
     config.params._t = Date.now()
   }
 
@@ -55,7 +57,7 @@ export function handleStaleShift(err) {
         window.location.reload()
       }
     } catch (e) {
-      window.location.reload()
+      // Storage unavailable or restricted; prevent uncontrolled reload loop
     }
     return true
   }

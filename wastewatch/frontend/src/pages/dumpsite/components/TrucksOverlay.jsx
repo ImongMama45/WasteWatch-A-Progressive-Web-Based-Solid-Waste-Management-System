@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import api from '../../../api/client'
+import { SidebarWidgetSkeleton } from '../../../components/ui/Skeleton'
 
 const Ico = ({ d, size = 14, color = 'currentColor', sw = 1.75, style = {}, className = '' }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={sw}
@@ -27,12 +28,12 @@ export default function TrucksOverlay({ open, onClose, siteId }) {
     if (open && siteId) {
       setLoading(true)
       Promise.all([
-        api.get('/api/driver/trucks/'),
-        api.get('/api/driver/collection-schedules/')
+        api.get('/api/driver/trucks/?paginate=false'),
+        api.get('/api/driver/collection-schedules/?paginate=false')
       ])
         .then(([trucksRes, schedRes]) => {
-          const allTrucks = trucksRes.data
-          const schedules = schedRes.data
+          const allTrucks = Array.isArray(trucksRes.data) ? trucksRes.data : (trucksRes.data?.results || [])
+          const schedules = Array.isArray(schedRes.data) ? schedRes.data : (schedRes.data?.results || [])
           
           // Get unique truck IDs from schedules assigned to this dumpsite
           const assignedTruckIds = new Set(
@@ -51,6 +52,8 @@ export default function TrucksOverlay({ open, onClose, siteId }) {
           console.error(err)
           setLoading(false)
         })
+    } else if (open && !siteId) {
+      setLoading(false)
     }
   }, [open, siteId])
 
@@ -86,7 +89,7 @@ export default function TrucksOverlay({ open, onClose, siteId }) {
 
         <div style={{ padding: '16px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {loading ? (
-            <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Loading trucks...</div>
+            <SidebarWidgetSkeleton rows={4} />
           ) : trucks.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>No trucks found.</div>
           ) : (

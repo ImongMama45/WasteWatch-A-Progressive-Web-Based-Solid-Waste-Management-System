@@ -1,7 +1,9 @@
 /**
- * ValidateReports.jsx — Barangay Report Validation Page
- * -------------------------------------------------------
- * Route: /brgy/validate-reports
+ * ValidateReports.jsx — Report Validation & Moderation Suite
+ * -------------------------------------------------------------
+ * Route: /admin/validate-reports & /brgy/validate-reports
+ * Modeled after: EscalationManagement.jsx (Meta Business Suite style)
+ * Accessible to: Barangay Officials & System Administrators
  */
 
 import { useState, useMemo, useEffect, useRef } from 'react'
@@ -9,106 +11,322 @@ import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
-import { ICONS } from '../../api/navConfig'
 import { useLeaflet } from '../../hooks/useLeaflet'
+import { StatCardSkeleton, FeedCardSkeleton } from '../../components/ui/Skeleton'
+import Pagination from '../../components/ui/Pagination'
+import {
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  AlertCircle,
+  Clock,
+  MapPin,
+  User,
+  Search,
+  X,
+  RotateCcw,
+  FileText,
+  Flame,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Layers,
+  ShieldCheck,
+  Camera,
+  Archive,
+  RefreshCw,
+  Truck,
+  Trash2,
+  Maximize2,
+  ExternalLink,
+  Ban,
+  Activity,
+  Calendar,
+  Info
+} from 'lucide-react'
 
-const TYPE_META = {
-  overflow: { label: 'Overflow', icon: ICONS.trash, color: '#ef4444', bg: 'rgba(239,68,68,0.1)' },
-  illegal_dumping: { label: 'Illegal Dumping', icon: ICONS.warning, color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' },
-  missed: { label: 'Missed Pickup', icon: ICONS.box, color: '#5dade2', bg: 'rgba(93,173,226,0.1)' },
+const SEVERITY_CONFIG = {
+  high: {
+    label: 'High',
+    color: '#ef4444',
+    bg: 'rgba(239, 68, 68, 0.1)',
+    border: 'rgba(239, 68, 68, 0.3)',
+    desc: 'Urgent / hazardous dump or road blockage',
+    bar: '#ef4444'
+  },
+  medium: {
+    label: 'Medium',
+    color: '#f59e0b',
+    bg: 'rgba(245, 158, 11, 0.1)',
+    border: 'rgba(245, 158, 11, 0.3)',
+    desc: 'Standard overflow, needs attention',
+    bar: '#f59e0b'
+  },
+  low: {
+    label: 'Low',
+    color: '#10b981',
+    bg: 'rgba(16, 185, 129, 0.1)',
+    border: 'rgba(16, 185, 129, 0.3)',
+    desc: 'Minor accumulation, non-hazardous',
+    bar: '#10b981'
+  },
 }
+
 const STATUS_META = {
-  pending: { label: 'Pending', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' },
-  approved: { label: 'Approved', color: '#22c55e', bg: 'rgba(34,197,94,0.1)' },
-  rejected: { label: 'Rejected', color: '#ef4444', bg: 'rgba(239,68,68,0.1)' },
-  resolved: { label: 'Resolved', color: '#3b82f6', bg: 'rgba(59,130,246,0.1)' },
+  pending: {
+    label: 'Pending',
+    color: '#ef4444',
+    bg: 'rgba(239, 68, 68, 0.12)',
+    border: 'rgba(239, 68, 68, 0.3)'
+  },
+  approved: {
+    label: 'Approved',
+    color: '#16a34a',
+    bg: 'rgba(22, 163, 74, 0.12)',
+    border: 'rgba(22, 163, 74, 0.3)'
+  },
+  rejected: {
+    label: 'Rejected',
+    color: '#64748b',
+    bg: 'rgba(100, 116, 139, 0.12)',
+    border: 'rgba(100, 116, 139, 0.3)'
+  },
+  resolved: {
+    label: 'Resolved',
+    color: '#2563eb',
+    bg: 'rgba(37, 99, 235, 0.12)',
+    border: 'rgba(37, 99, 235, 0.3)'
+  },
 }
-const SEVERITY_COLORS = { high: '#ef4444', medium: '#f59e0b', low: '#22c55e' }
 
-const TABS = [
-  { key: 'pending', label: 'Pending' },
-  { key: 'approved', label: 'Approved' },
-  { key: 'history', label: 'History' },
+const ISSUE_TYPE_META = {
+  overflow: { label: 'Overflow', icon: Trash2, color: '#ef4444', bg: 'rgba(239,68,68,0.1)', border: 'rgba(239,68,68,0.3)' },
+  missed: { label: 'Missed Pickup', icon: Truck, color: '#3b82f6', bg: 'rgba(59,130,246,0.1)', border: 'rgba(59,130,246,0.3)' },
+  illegal_dumping: { label: 'Illegal Dumping', icon: AlertTriangle, color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.3)' },
+}
+
+const REJECT_PRESETS = [
+  'Duplicate report',
+  'Not municipal solid waste',
+  'Insufficient photo or location details',
+  'Already cleared / resolved',
+  'False or invalid reporting'
 ]
 
+function getIssueIcon(type) {
+  const t = (type || '').toLowerCase()
+  if (t.includes('missed') || t.includes('pickup') || t.includes('truck')) {
+    return <Truck size={17} />
+  }
+  if (t.includes('illegal') || t.includes('dump') || t.includes('hazard')) {
+    return <AlertTriangle size={17} />
+  }
+  if (t.includes('overflow') || t.includes('bin') || t.includes('trash')) {
+    return <Trash2 size={17} />
+  }
+  return <FileText size={17} />
+}
+
+function SeverityBadge({ s }) {
+  const m = SEVERITY_CONFIG[s] || SEVERITY_CONFIG.medium
+  return (
+    <span style={{
+      background: m.bg,
+      border: `1px solid ${m.border}`,
+      color: m.color,
+      borderRadius: 4,
+      padding: '2px 7px',
+      fontSize: 10,
+      fontWeight: 700,
+      letterSpacing: '0.04em',
+      textTransform: 'uppercase',
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4
+    }}>
+      <span style={{ width: 5, height: 5, borderRadius: '50%', background: m.color }} />
+      {m.label}
+    </span>
+  )
+}
+
+function StatusBadge({ s }) {
+  const m = STATUS_META[s] || STATUS_META.pending
+  return (
+    <span style={{
+      background: m.bg,
+      border: `1px solid ${m.border}`,
+      color: m.color,
+      borderRadius: 4,
+      padding: '2px 7px',
+      fontSize: 10,
+      fontWeight: 700,
+      letterSpacing: '0.04em',
+      textTransform: 'uppercase'
+    }}>
+      {m.label}
+    </span>
+  )
+}
+
+function formatRelativeTime(dateStr) {
+  if (!dateStr) return 'recently'
+  const date = new Date(dateStr)
+  if (isNaN(date.getTime())) return dateStr
+  const diffSec = Math.floor((Date.now() - date.getTime()) / 1000)
+  if (diffSec < 60) return 'just now'
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`
+  if (diffSec < 604800) return `${Math.floor(diffSec / 86400)}d ago`
+  return date.toLocaleDateString()
+}
+
 export default function ValidateReports() {
-  const { user } = useAuth()
+  const { user, barangays } = useAuth()
   const navigate = useNavigate()
 
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('pending')
-  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+  const [summaryCounts, setSummaryCounts] = useState({ total: 0, pending: 0, approved: 0, rejected: 0 })
+
+  // Filters
+  const [severityFilter, setSeverityFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [barangayFilter, setBarangayFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
-  const [drawerReport, setDrawerReport] = useState(null)
+  const [sortBy, setSortBy] = useState('priority')
+  const [search, setSearch] = useState('')
+
+  // Card expansion & actions
+  const [expanded, setExpanded] = useState(null)
+  const [localSeverityMap, setLocalSeverityMap] = useState({})
   const [rejectModal, setRejectModal] = useState(null)
   const [rejectReason, setRejectReason] = useState('')
   const [toast, setToast] = useState(null)
-  const { mapReady, mapError } = useLeaflet()
-  const mapRef = useRef(null)
-  const mapInstance = useRef(null)
+  const [isActionLoading, setIsActionLoading] = useState(false)
+  const [lightboxImg, setLightboxImg] = useState(null)
+
+  // Mini-map Leaflet hook
+  const { mapReady } = useLeaflet()
+  const mapContainerRef = useRef(null)
+  const mapInstanceRef = useRef(null)
+
+  const isAdmin = user?.role === 'admin'
+  const isOfficial = user?.role === 'brgy_official'
 
   useEffect(() => {
     fetchReports()
-  }, [])
+  }, [page, statusFilter, severityFilter, typeFilter, barangayFilter, search])
 
-  // Initialize/cleanup the inline map when the drawer opens/closes or mapReady changes
+  // Reset pagination on filter change
   useEffect(() => {
-    if (!mapReady || !drawerReport || !mapRef.current) return;
+    setPage(1)
+  }, [statusFilter, severityFilter, typeFilter, barangayFilter, search])
 
-    const lat = drawerReport.latitude || 13.9373;
-    const lng = drawerReport.longitude || 121.617;
+  // Mini-map rendering inside expanded card
+  useEffect(() => {
+    if (!mapReady || !expanded || !mapContainerRef.current) return
 
-    // Cleanup previous instance if exists
-    if (mapInstance.current) {
-      mapInstance.current.remove();
-      mapInstance.current = null;
+    const report = reports.find(r => r.id === expanded)
+    if (!report) return
+
+    const lat = Number(report.latitude) || 13.9373
+    const lng = Number(report.longitude) || 121.617
+    const currentSev = localSeverityMap[report.id] || report.severity || 'medium'
+    const sevColor = SEVERITY_CONFIG[currentSev]?.color || '#f59e0b'
+
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.remove()
+      mapInstanceRef.current = null
     }
 
-    const map = window.L.map(mapRef.current, {
-      center: [lat, lng],
-      zoom: 16,
-      zoomControl: false,
-    });
+    try {
+      const map = window.L.map(mapContainerRef.current, {
+        center: [lat, lng],
+        zoom: 16,
+        zoomControl: false,
+      })
 
-    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(map);
+      window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap'
+      }).addTo(map)
 
-    const color = SEVERITY_COLORS[drawerReport.severity] || SEVERITY_COLORS.low;
-    window.L.circleMarker([lat, lng], {
-      radius: 8,
-      fillColor: color,
-      color: '#fff',
-      weight: 2,
-      opacity: 1,
-      fillOpacity: 0.8
-    }).addTo(map);
+      window.L.circleMarker([lat, lng], {
+        radius: 8,
+        fillColor: sevColor,
+        color: '#ffffff',
+        weight: 2,
+        opacity: 1,
+        fillOpacity: 0.9
+      }).addTo(map)
 
-    mapInstance.current = map;
+      mapInstanceRef.current = map
 
-    // Fix map rendering inside animated drawer
-    const timer = setTimeout(() => {
-      map.invalidateSize();
-    }, 400);
+      const t = setTimeout(() => {
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.invalidateSize()
+        }
+      }, 250)
 
-    return () => {
-      clearTimeout(timer);
-      if (mapInstance.current) {
-        mapInstance.current.remove();
-        mapInstance.current = null;
+      return () => {
+        clearTimeout(t)
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.remove()
+          mapInstanceRef.current = null
+        }
       }
-    };
-  }, [mapReady, drawerReport]);
+    } catch (err) {
+      console.warn('Map initialization:', err)
+    }
+  }, [expanded, mapReady, reports, localSeverityMap])
 
   async function fetchReports() {
     setLoading(true)
     try {
-      const res = await api.get('/api/watcher/reports/')
-      setReports(res.data)
+      const params = new URLSearchParams()
+      params.append('page', page)
+      params.append('page_size', '10')
+
+      if (statusFilter !== 'all') {
+        params.append('status', statusFilter)
+      }
+      if (severityFilter !== 'all') {
+        params.append('severity', severityFilter)
+      }
+      if (typeFilter !== 'all') {
+        params.append('issue_type', typeFilter)
+      }
+      if (isAdmin && barangayFilter) {
+        params.append('barangay', barangayFilter)
+      }
+      if (search.trim()) {
+        params.append('search', search.trim())
+      }
+
+      const res = await api.get(`/api/watcher/reports/?${params.toString()}`)
+      if (res.data?.results) {
+        setReports(res.data.results)
+        setTotalCount(res.data.count || 0)
+        setTotalPages(res.data.total_pages || 1)
+        if (res.data.summary) {
+          setSummaryCounts({
+            total: res.data.summary.total || 0,
+            pending: res.data.summary.pending || 0,
+            approved: res.data.summary.approved || 0,
+            rejected: res.data.summary.rejected || 0,
+          })
+        }
+      } else if (Array.isArray(res.data)) {
+        setReports(res.data)
+        setTotalCount(res.data.length)
+        setTotalPages(Math.ceil(res.data.length / 10) || 1)
+      }
     } catch (err) {
       console.error('Failed to fetch reports:', err)
-      showToast('❌ Failed to load reports', 'error')
+      showToast('Failed to load reports', 'error')
     } finally {
       setLoading(false)
     }
@@ -116,603 +334,1252 @@ export default function ValidateReports() {
 
   function showToast(msg, type = 'success') {
     setToast({ msg, type })
-    setTimeout(() => setToast(null), 3200)
+    setTimeout(() => setToast(null), 3500)
   }
 
-  function openRejectModal(id) {
-    setRejectModal(id)
-  }
+  const counts = useMemo(() => ({
+    all: summaryCounts.total || totalCount,
+    pending: summaryCounts.pending,
+    approved: summaryCounts.approved,
+    rejected: summaryCounts.rejected,
+    high: reports.filter(r => (localSeverityMap[r.id] || r.severity) === 'high').length,
+    medium: reports.filter(r => (localSeverityMap[r.id] || r.severity) === 'medium').length,
+    low: reports.filter(r => (localSeverityMap[r.id] || r.severity) === 'low').length,
+  }), [summaryCounts, totalCount, reports, localSeverityMap])
 
-  async function handleApprove(id) {
-    try {
-      await api.post(`/api/watcher/reports/${id}/approve/`)
-      setReports(prev => prev.map(r => r.id !== id ? r : { ...r, status: 'approved' }))
-      setDrawerReport(null)
-      showToast('✅ Report approved — now visible on the live map.')
-    } catch (err) {
-      showToast('❌ Failed to approve report', 'error')
-    }
-  }
+  const highPendingCount = useMemo(() => {
+    return reports.filter(r => r.status === 'pending' && (localSeverityMap[r.id] || r.severity) === 'high').length
+  }, [reports, localSeverityMap])
 
-  async function confirmReject() {
-    if (!rejectReason.trim()) return
-    try {
-      await api.post(`/api/watcher/reports/${rejectModal}/reject/`, { rejection_reason: rejectReason })
-      setReports(prev => prev.map(r => r.id !== rejectModal ? r : { ...r, status: 'rejected', rejection_reason: rejectReason }))
-      setRejectModal(null)
-      setRejectReason('')
-      showToast('Report rejected and moved to History.')
-    } catch (err) {
-      showToast('❌ Failed to reject report', 'error')
-    }
-  }
-
-  async function handleArchive(id) {
-    if (!window.confirm('Are you sure you want to permanently hide this rejected report?')) return
-    try {
-      await api.post(`/api/watcher/reports/${id}/archive/`)
-      setReports(prev => prev.filter(r => r.id !== id))
-      if (drawerReport?.id === id) setDrawerReport(null)
-      showToast('📦 Report archived.')
-    } catch (err) {
-      showToast('❌ Failed to archive report', 'error')
-    }
-  }
-
-  const filtered = useMemo(() => {
-    const statusKey = activeTab === 'history' ? 'rejected' : activeTab
-    return reports.filter(r => {
-      if (r.status !== statusKey) return false
-      if (typeFilter !== 'all' && r.issue_type !== typeFilter) return false
-      if (search) {
-        const q = search.toLowerCase()
-        return (r.description || '').toLowerCase().includes(q) ||
-          (r.issue_type || '').toLowerCase().includes(q) ||
-          (r.user_name || '').toLowerCase().includes(q)
+  // Sorting
+  const sortedReports = useMemo(() => {
+    return [...reports].sort((a, b) => {
+      if (sortBy === 'priority') {
+        const sevOrder = { high: 0, medium: 1, low: 2 }
+        const statusOrder = { pending: 0, approved: 1, rejected: 2, resolved: 3 }
+        const aSev = localSeverityMap[a.id] || a.severity || 'medium'
+        const bSev = localSeverityMap[b.id] || b.severity || 'medium'
+        return (statusOrder[a.status] - statusOrder[b.status]) || (sevOrder[aSev] - sevOrder[bSev])
       }
-      return true
+      if (sortBy === 'newest') {
+        return (b.id || 0) - (a.id || 0)
+      }
+      if (sortBy === 'oldest') {
+        return (a.id || 0) - (b.id || 0)
+      }
+      return 0
     })
-  }, [reports, activeTab, typeFilter, search])
+  }, [reports, sortBy, localSeverityMap])
 
-  const counts = {
-    pending: reports.filter(r => r.status === 'pending').length,
-    approved: reports.filter(r => r.status === 'approved').length,
-    history: reports.filter(r => r.status === 'rejected').length,
+  const handleSelectSeverity = async (reportId, newSeverity) => {
+    setLocalSeverityMap(prev => ({ ...prev, [reportId]: newSeverity }))
+    try {
+      await api.post(`/api/watcher/reports/${reportId}/set_severity/`, { severity: newSeverity })
+      setReports(prev => prev.map(r => r.id === reportId ? { ...r, severity: newSeverity } : r))
+      showToast(`Severity updated to ${newSeverity.toUpperCase()}`)
+    } catch (err) {
+      console.warn('Failed to update severity on server:', err)
+    }
+  }
+
+  const handleApprove = async (reportId, explicitSeverity) => {
+    if (isActionLoading) return
+    setIsActionLoading(true)
+    const severityToSave = explicitSeverity || localSeverityMap[reportId] || 'medium'
+
+    try {
+      // 1. Assign severity
+      try {
+        await api.post(`/api/watcher/reports/${reportId}/set_severity/`, { severity: severityToSave })
+      } catch (sevErr) {
+        console.warn('Set severity warning before approve:', sevErr)
+      }
+
+      // 2. Approve report
+      const res = await api.post(`/api/watcher/reports/${reportId}/approve/`)
+      if (res.data?.success || res.status === 200) {
+        showToast('Report approved and published to live map!')
+        setReports(prev => prev.map(r => r.id === reportId ? { ...r, status: 'approved', severity: severityToSave } : r))
+        setSummaryCounts(s => ({
+          ...s,
+          pending: Math.max(0, s.pending - 1),
+          approved: s.approved + 1
+        }))
+        if (expanded === reportId) setExpanded(null)
+      } else {
+        showToast('Failed to approve report', 'error')
+      }
+    } catch (err) {
+      console.error('Approve failed:', err)
+      const msg = err.response?.data?.error || err.response?.data?.detail || 'Approval failed'
+      showToast(msg, 'error')
+    } finally {
+      setIsActionLoading(false)
+    }
+  }
+
+  const handleReject = async (reportId, reason) => {
+    if (isActionLoading) return
+    setIsActionLoading(true)
+    const finalReason = (typeof reason === 'string' && reason.trim()) ? reason.trim() : 'Not suitable for live map'
+    try {
+      const res = await api.post(`/api/watcher/reports/${reportId}/reject/`, {
+        rejection_reason: finalReason
+      })
+      if (res.data?.success || res.status === 200) {
+        showToast('Report rejected.')
+        setReports(prev => prev.map(r => r.id === reportId ? { ...r, status: 'rejected', rejection_reason: finalReason } : r))
+        setSummaryCounts(s => ({
+          ...s,
+          pending: Math.max(0, s.pending - 1),
+          rejected: s.rejected + 1
+        }))
+        setRejectModal(null)
+        setRejectReason('')
+        if (expanded === reportId) setExpanded(null)
+      } else {
+        showToast('Failed to reject report', 'error')
+      }
+    } catch (err) {
+      console.error('Reject failed:', err)
+      const msg =
+        err.response?.data?.error ||
+        err.response?.data?.rejection_reason ||
+        err.response?.data?.detail ||
+        'Failed to reject report'
+      showToast(msg, 'error')
+    } finally {
+      setIsActionLoading(false)
+    }
   }
 
   return (
     <DashboardLayout>
       <style>{`
-        @keyframes fadeUp   { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes fadeIn   { from{opacity:0} to{opacity:1} }
-        @keyframes slideRight { from{transform:translateX(100%)} to{transform:translateX(0)} }
-        .vr-card { transition: box-shadow .18s, border-color .18s; cursor:pointer; }
-        .vr-card:hover { box-shadow:0 4px 20px rgba(0,0,0,.08); border-color:var(--accent) !important; }
-        .vr-btn { transition:opacity .15s,transform .1s; cursor:pointer; }
-        .vr-btn:hover { opacity:.88; }
-        .vr-btn:active { transform:scale(.97); }
-        .vr-pill { transition:all .15s; cursor:pointer; }
-        .vr-pill:hover { opacity:.85; }
+        @keyframes slideDown {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .meta-page-canvas {
+          background: #f0f2f5;
+          min-height: calc(100vh - 60px);
+          padding: 24px 32px 60px;
+        }
+        .meta-card {
+          background: #ffffff;
+          border: 1px solid #e4e6eb;
+          border-radius: 8px;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        }
+        .meta-stat-card {
+          background: #ffffff;
+          border: 1px solid #e4e6eb;
+          border-radius: 8px;
+          padding: 16px 20px;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .meta-stat-card:hover {
+          border-color: #ccd0d5;
+          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+        }
+        .meta-esc-card {
+          background: #ffffff;
+          border: 1px solid #e4e6eb;
+          border-radius: 8px;
+          margin-bottom: 12px;
+          overflow: hidden;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .meta-esc-card:hover {
+          border-color: #ccd0d5;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+        }
+        .meta-btn-secondary {
+          background: #ffffff;
+          border: 1px solid #ccd0d5;
+          color: #050505;
+          border-radius: 6px;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background-color 0.15s ease, border-color 0.15s ease;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 7px 14px;
+        }
+        .meta-btn-secondary:hover {
+          background: #f0f2f5;
+          border-color: #bec3c9;
+        }
+        .meta-btn-primary {
+          background: #16a34a;
+          border: 1px solid #16a34a;
+          color: #ffffff;
+          border-radius: 6px;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background-color 0.15s ease;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 7px 16px;
+        }
+        .meta-btn-primary:hover {
+          background: #15803d;
+          border-color: #15803d;
+        }
+        .meta-tab-btn {
+          padding: 7px 13px;
+          border-radius: 6px;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          border: 1px solid transparent;
+          background: transparent;
+          color: #65676b;
+          transition: all 0.15s ease;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          font-family: inherit;
+        }
+        .meta-tab-btn:hover {
+          background: #f0f2f5;
+          color: #050505;
+        }
+        .meta-tab-btn.active {
+          background: #ffffff;
+          color: #050505;
+          border: 1px solid #ccd0d5;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+        .meta-select {
+          height: 36px;
+          padding: 0 12px;
+          border-radius: 6px;
+          border: 1px solid #ccd0d5;
+          background: #ffffff;
+          color: #050505;
+          font-size: 13px;
+          font-weight: 500;
+          outline: none;
+          cursor: pointer;
+          transition: border-color 0.15s ease;
+        }
+        .meta-select:focus {
+          border-color: #16a34a;
+          box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.15);
+        }
+        .meta-input {
+          height: 36px;
+          padding: 0 12px;
+          border-radius: 6px;
+          border: 1px solid #ccd0d5;
+          background: #ffffff;
+          color: #050505;
+          font-size: 13px;
+          outline: none;
+          transition: border-color 0.15s ease;
+        }
+        .meta-input:focus {
+          border-color: #16a34a;
+          box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.15);
+        }
+        .meta-sev-card {
+          flex: 1;
+          min-width: 140px;
+          padding: 10px 14px;
+          border-radius: 8px;
+          cursor: pointer;
+          transition: all 0.15s ease;
+          border: 1.5px solid #e4e6eb;
+          background: #ffffff;
+          text-align: left;
+        }
+        .meta-sev-card:hover {
+          border-color: #ccd0d5;
+          transform: translateY(-1px);
+        }
+        @media (max-width: 768px) {
+          .meta-page-canvas {
+            padding: 16px 12px 60px;
+          }
+        }
       `}</style>
 
-      {/* ── Toast ── */}
+      {/* ── Toast Notification ── */}
       {toast && (
         <div style={{
-          position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)',
-          background: toast.type === 'success' ? '#0f172a' : '#1a0a0a',
-          color: '#fff', padding: '10px 22px', borderRadius: 12, zIndex: 9999,
-          fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
-          border: `1px solid ${toast.type === 'success' ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)'}`,
-          boxShadow: '0 8px 32px rgba(0,0,0,.35)', animation: 'fadeUp .2s',
+          position: 'fixed',
+          top: 24,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: toast.type === 'error' ? '#7f1d1d' : '#1c1e21',
+          color: '#ffffff',
+          padding: '10px 18px',
+          borderRadius: 6,
+          zIndex: 99999,
+          fontSize: 13,
+          fontWeight: 600,
+          border: `1px solid ${toast.type === 'error' ? '#991b1b' : '#333942'}`,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8
         }}>
-          {toast.msg}
+          {toast.type === 'error' ? (
+            <AlertTriangle size={16} color="#fca5a5" />
+          ) : (
+            <CheckCircle2 size={16} color="#16a34a" />
+          )}
+          <span>{toast.msg}</span>
         </div>
       )}
 
-      {/* ── REJECT REASON MODAL ── */}
+      {/* ── Image Lightbox Modal ── */}
+      {lightboxImg && (
+        <div
+          onClick={() => setLightboxImg(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.85)',
+            zIndex: 100000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20
+          }}
+        >
+          <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }}>
+            <button
+              type="button"
+              onClick={() => setLightboxImg(null)}
+              style={{
+                position: 'absolute',
+                top: -40,
+                right: 0,
+                background: 'none',
+                border: 'none',
+                color: '#ffffff',
+                cursor: 'pointer',
+                padding: 6
+              }}
+            >
+              <X size={24} />
+            </button>
+            <img
+              src={lightboxImg}
+              alt="Report Evidence"
+              style={{
+                maxWidth: '100%',
+                maxHeight: '85vh',
+                borderRadius: 8,
+                objectFit: 'contain',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── Reject Modal (Meta Style) ── */}
       {rejectModal && (
-        <>
-          <div onClick={() => setRejectModal(null)} style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)',
-            backdropFilter: 'blur(3px)', zIndex: 800, animation: 'fadeIn .2s',
-          }} />
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0, 0, 0, 0.45)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 16
+        }}>
           <div style={{
-            position: 'fixed', top: '50%', left: '50%',
-            transform: 'translate(-50%,-50%)',
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 16, padding: 24, zIndex: 900,
-            width: 'min(440px,calc(100vw - 32px))',
-            boxShadow: '0 24px 80px rgba(0,0,0,.35)',
-            animation: 'fadeUp .2s',
+            background: '#ffffff',
+            borderRadius: 8,
+            width: '100%',
+            maxWidth: 480,
+            padding: '20px 24px',
+            boxShadow: '0 8px 30px rgba(0,0,0,0.18)',
+            border: '1px solid #ccd0d5',
+            animation: 'slideDown 0.15s ease-out'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <div style={{
-                width: 40, height: 40, borderRadius: 10,
-                background: 'rgba(239,68,68,0.1)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
-              }}>✕</div>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 15 }}>Reject Report</div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  Provide a reason — this will be recorded in History.
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: 6,
+                  background: '#fee2e2', color: '#dc2626',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                  <XCircle size={18} />
                 </div>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#050505' }}>
+                  Reject Report #{rejectModal.id}
+                </h3>
               </div>
+              <button
+                type="button"
+                onClick={() => setRejectModal(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#65676b', padding: 4 }}
+              >
+                <X size={18} />
+              </button>
             </div>
 
-            <textarea
-              className="form-input"
-              rows={4}
-              placeholder="e.g. Could not verify on-site. No photo evidence provided."
-              value={rejectReason}
-              onChange={e => setRejectReason(e.target.value)}
-              style={{ marginBottom: 14 }}
-              autoFocus
-            />
+            <p style={{ margin: '0 0 14px', fontSize: 13, color: '#65676b', lineHeight: 1.4 }}>
+              Specify why this report is being rejected. The rejection reason will be recorded in the audit history.
+            </p>
 
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button className="vr-btn btn btn-outline" style={{ flex: 1 }}
-                onClick={() => setRejectModal(null)}>
+            {/* Quick Reason Presets */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+              {REJECT_PRESETS.map(preset => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setRejectReason(preset)}
+                  style={{
+                    background: rejectReason === preset ? '#fee2e2' : '#f0f2f5',
+                    color: rejectReason === preset ? '#991b1b' : '#050505',
+                    border: `1px solid ${rejectReason === preset ? '#fecaca' : '#e4e6eb'}`,
+                    borderRadius: 4,
+                    padding: '4px 8px',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ marginBottom: 18 }}>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 4 }}>
+                Rejection Reason Note
+              </label>
+              <textarea
+                rows={3}
+                value={rejectReason}
+                onChange={e => setRejectReason(e.target.value)}
+                placeholder="Explain why this report cannot be approved (e.g. duplicate, not solid waste, resolved)..."
+                style={{
+                  width: '100%',
+                  padding: '9px 12px',
+                  borderRadius: 6,
+                  border: '1px solid #ccd0d5',
+                  background: '#ffffff',
+                  color: '#050505',
+                  fontSize: 13,
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setRejectModal(null)}
+                className="meta-btn-secondary"
+              >
                 Cancel
               </button>
               <button
-                className="vr-btn btn btn-danger"
-                style={{ flex: 2, fontWeight: 700 }}
-                disabled={!rejectReason.trim()}
-                onClick={confirmReject}>
-                Confirm Rejection
-              </button>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* ── REPORT DETAIL DRAWER ── */}
-      {drawerReport && (
-        <>
-          <div onClick={() => setDrawerReport(null)} style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)',
-            backdropFilter: 'blur(2px)', zIndex: 700, animation: 'fadeIn .2s',
-          }} />
-          <div style={{
-            position: 'fixed', top: 0, right: 0, bottom: 0,
-            width: 'min(480px,100vw)',
-            background: 'var(--surface)',
-            borderLeft: '1px solid var(--border)',
-            zIndex: 750, overflowY: 'auto',
-            animation: 'slideRight .25s cubic-bezier(.4,0,.2,1)',
-            display: 'flex', flexDirection: 'column',
-          }}>
-            {/* Drawer header */}
-            <div style={{
-              padding: '16px 20px', borderBottom: '1px solid var(--border)',
-              display: 'flex', alignItems: 'center', gap: 12, position: 'sticky', top: 0,
-              background: 'var(--surface)', zIndex: 1,
-            }}>
-              <button className="vr-btn"
-                onClick={() => setDrawerReport(null)}
+                type="button"
+                onClick={() => handleReject(rejectModal.id, rejectReason)}
+                disabled={isActionLoading}
                 style={{
-                  background: 'none', border: 'none', fontSize: 20,
-                  color: 'var(--text-muted)', padding: 4
-                }}>
-                ✕
+                  background: '#dc2626',
+                  color: '#ffffff',
+                  border: '1px solid #dc2626',
+                  borderRadius: 6,
+                  padding: '7px 16px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: isActionLoading ? 'wait' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                <XCircle size={14} />
+                <span>{isActionLoading ? 'Rejecting...' : 'Confirm Rejection'}</span>
               </button>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: 15 }}>
-                  {TYPE_META[drawerReport.issue_type]?.label}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  Report #{drawerReport.id}
-                </div>
-              </div>
-              <StatusBadge status={drawerReport.status} />
             </div>
-
-            {/* Drawer content */}
-            <div style={{ padding: '20px', flex: 1 }}>
-              {/* Type + severity row */}
-              <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  background: TYPE_META[drawerReport.issue_type]?.bg,
-                  border: `1px solid ${TYPE_META[drawerReport.issue_type]?.color}44`,
-                  borderRadius: 10, padding: '8px 12px', flex: 1,
-                }}>
-                  <div style={{ width: 20, height: 20, color: TYPE_META[drawerReport.issue_type]?.color }}>{TYPE_META[drawerReport.issue_type]?.icon}</div>
-                  <div>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.06em' }}>TYPE</div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: TYPE_META[drawerReport.issue_type]?.color }}>
-                      {TYPE_META[drawerReport.issue_type]?.label}
-                    </div>
-                  </div>
-                </div>
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  background: `${SEVERITY_COLORS[drawerReport.severity]}11`,
-                  border: `1px solid ${SEVERITY_COLORS[drawerReport.severity]}44`,
-                  borderRadius: 10, padding: '8px 12px', flex: 1,
-                }}>
-                  <div style={{ width: 14, height: 14, borderRadius: '50%', background: SEVERITY_COLORS[drawerReport.severity] }} />
-                  <div>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.06em' }}>SEVERITY</div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: SEVERITY_COLORS[drawerReport.severity] }}>
-                      {drawerReport.severity.charAt(0).toUpperCase() + drawerReport.severity.slice(1)}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Detail rows */}
-              {[
-                { label: 'Reporter', value: drawerReport.user_name },
-                { label: 'Reported', value: new Date(drawerReport.created_at).toLocaleString() },
-                { label: 'Barangay', value: drawerReport.barangay_name },
-              ].map(row => (
-                <div key={row.label} style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-                  padding: '10px 0', borderBottom: '1px solid var(--border)', gap: 16,
-                }}>
-                  <span style={{
-                    fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
-                    letterSpacing: '.06em', flexShrink: 0
-                  }}>
-                    {row.label.toUpperCase()}
-                  </span>
-                  <span style={{ fontSize: 13, textAlign: 'right' }}>{row.value}</span>
-                </div>
-              ))}
-
-              {/* Location with Inline Map */}
-              <div style={{
-                padding: '10px 0', borderBottom: '1px solid var(--border)',
-              }}>
-                <div style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-                  marginBottom: 10
-                }}>
-                  <span style={{
-                    fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
-                    letterSpacing: '.06em', flexShrink: 0
-                  }}>
-                    LOCATION
-                  </span>
-                  <span style={{ fontSize: 13, textAlign: 'right', fontWeight: 600 }}>
-                    {drawerReport.latitude}, {drawerReport.longitude}
-                  </span>
-                </div>
-                <div
-                  ref={mapRef}
-                  style={{
-                    height: 120, width: '100%', borderRadius: 8,
-                    background: '#e2e8f0', overflow: 'hidden', position: 'relative',
-                    border: '1px solid var(--border)'
-                  }}
-                >
-                  {!mapReady && !mapError && (
-                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5, background: 'rgba(255,255,255,0.7)' }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Loading map...</span>
-                    </div>
-                  )}
-                  {mapError && (
-                    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 5, background: 'rgba(239,68,68,0.1)', color: 'var(--danger)' }}>
-                      <span style={{ fontSize: 18, marginBottom: 4 }}>⚠️</span>
-                      <span style={{ fontSize: 12, fontWeight: 700 }}>Map failed to load</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Description */}
-              <div style={{ marginTop: 16, marginBottom: 16 }}>
-                <div style={{
-                  fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
-                  letterSpacing: '.06em', marginBottom: 8
-                }}>DESCRIPTION</div>
-                <p style={{
-                  fontSize: 13, lineHeight: 1.7, color: 'var(--text)',
-                  background: 'var(--surface-2)', borderRadius: 8,
-                  padding: '10px 12px', margin: 0,
-                }}>
-                  {drawerReport.description}
-                </p>
-              </div>
-
-              {/* Rejection Feedback */}
-              {drawerReport.status === 'rejected' && (
-                <div style={{
-                  background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)',
-                  borderRadius: 10, padding: '14px 16px', marginBottom: 16,
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <div style={{ width: 16, height: 16, color: 'var(--danger)' }}>{ICONS.warning}</div>
-                    <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--danger)', letterSpacing: '.06em' }}>
-                      REJECTION FEEDBACK
-                    </div>
-                  </div>
-                  <p style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text)', margin: '0 0 10px' }}>
-                    {drawerReport.rejection_reason || <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>No reason provided.</span>}
-                  </p>
-                  <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-muted)' }}>
-                    {drawerReport.rejected_by_name && (
-                      <span><strong style={{ color: 'var(--text)' }}>Rejected by:</strong> {drawerReport.rejected_by_name}</span>
-                    )}
-                    {drawerReport.rejected_at && (
-                      <span><strong style={{ color: 'var(--text)' }}>On:</strong> {new Date(drawerReport.rejected_at).toLocaleString()}</span>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Photo */}
-              {drawerReport.image ? (
-                <div style={{
-                  background: 'var(--surface-2)', border: '1px solid var(--border)',
-                  borderRadius: 10, overflow: 'hidden',
-                  marginBottom: 16,
-                }}>
-                  <img src={drawerReport.image} alt="Evidence"
-                    style={{ width: '100%', height: 'auto', display: 'block' }}
-                    onError={(e) => { e.target.style.display = 'none'; }} />
-                </div>
-              ) : (
-                <div style={{
-                  background: 'rgba(239,68,68,0.04)', border: '1px solid rgba(239,68,68,0.2)',
-                  borderRadius: 10, padding: '12px 16px', marginBottom: 16,
-                  fontSize: 12, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 6
-                }}>
-                  <div style={{ width: 14, height: 14 }}>{ICONS.warning}</div> No photo evidence provided
-                </div>
-              )}
-
-              {/* Guidance for pending */}
-              {drawerReport.status === 'pending' && (
-                <div style={{
-                  background: 'rgba(20,184,166,0.05)', border: '1px solid rgba(20,184,166,0.18)',
-                  borderRadius: 8, padding: '10px 12px', marginBottom: 20,
-                  fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.65, display: 'flex', gap: 8, alignItems: 'flex-start'
-                }}>
-                  <div style={{ width: 16, height: 16, flexShrink: 0, marginTop: 2, color: 'var(--accent)' }}>{ICONS.warning}</div>
-                  <div><strong style={{ color: 'var(--text)' }}>Your call:</strong> Approving makes this report visible to everyone on the live map and adds it to the collection queue. Rejecting records it in History.</div>
-                </div>
-              )}
-            </div>
-
-            {/* Drawer footer actions */}
-            {drawerReport.status === 'pending' && (
-              <div style={{
-                padding: '16px 20px', borderTop: '1px solid var(--border)',
-                display: 'flex', gap: 10, position: 'sticky', bottom: 0,
-                background: 'var(--surface)',
-              }}>
-                <button className="vr-btn"
-                  onClick={() => openRejectModal(drawerReport.id)}
-                  style={{
-                    flex: 1, background: 'transparent',
-                    border: '1.5px solid var(--danger)', color: 'var(--danger)',
-                    borderRadius: 10, padding: '11px', fontWeight: 700, fontSize: 13,
-                  }}>
-                  ✕ Reject
-                </button>
-                <button className="vr-btn"
-                  onClick={() => handleApprove(drawerReport.id)}
-                  style={{
-                    flex: 2, background: 'var(--accent)', color: '#0d1117',
-                    border: 'none', borderRadius: 10, padding: '11px',
-                    fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
-                  }}>
-                  <div style={{ width: 14, height: 14 }}>{ICONS.check}</div> Approve & Publish
-                </button>
-              </div>
-            )}
           </div>
-        </>
+        </div>
       )}
 
-      <div className="page" style={{ maxWidth: 1200 }}>
-        <div style={{
-          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-          flexWrap: 'wrap', gap: 10, marginBottom: 20
-        }}>
-          <div>
-            <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 22, fontWeight: 800, margin: '0 0 3px' }}>
-              Validate Reports
-            </h2>
-            <p className="text-muted text-sm">
-              {user?.barangay_name || 'Your Barangay'} · Only you and Admins can approve reports before they appear on the map
-            </p>
-          </div>
+      {/* ── Main Canvas ── */}
+      <div className="meta-page-canvas">
+        <div style={{ maxWidth: 1400, margin: '0 auto' }}>
 
+          {/* ── Page Header (Meta Business Suite Style) ── */}
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 10, padding: '8px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 20,
+            flexWrap: 'wrap',
+            gap: 16
           }}>
             <div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.06em' }}>
-                YOUR BARANGAY
-              </div>
-              <div style={{ fontSize: 12, fontWeight: 700 }}>
-                {user?.barangay_name || 'Lucena City'}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── TABS ── */}
-        <div style={{
-          display: 'flex', gap: 4, marginBottom: 18,
-          background: 'var(--surface-2)', borderRadius: 10, padding: 4,
-        }}>
-          {TABS.map(t => (
-            <button key={t.key}
-              className="vr-btn"
-              onClick={() => setActiveTab(t.key)}
-              style={{
-                flex: 1, position: 'relative',
-                padding: '9px 12px', borderRadius: 8,
-                border: 'none', fontFamily: 'var(--font-body)',
-                fontSize: 13, fontWeight: 600,
-                background: activeTab === t.key ? 'var(--surface-3)' : 'transparent',
-                color: activeTab === t.key ? '#fff' : 'var(--text-muted)',
-                boxShadow: activeTab === t.key ? '0 2px 8px rgba(0,0,0,.15)' : 'none',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-              }}>
-              <span>{t.label}</span>
-              {counts[t.key] > 0 && (
-                <span style={{
-                  minWidth: 18, height: 18, borderRadius: 20, padding: '0 4px',
-                  background: t.key === 'pending' ? 'var(--warning)' : t.key === 'history' ? 'var(--danger)' : 'var(--accent)',
-                  color: '#fff', fontSize: 9, fontWeight: 800,
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <h1 style={{
+                  fontSize: 22,
+                  fontWeight: 700,
+                  margin: 0,
+                  color: '#050505',
+                  letterSpacing: '-0.02em',
+                  lineHeight: 1.2
                 }}>
-                  {counts[t.key]}
+                  Validate Reports
+                </h1>
+                {counts.pending > 0 && (
+                  <span style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    background: '#fee2e2',
+                    color: '#991b1b',
+                    border: '1px solid #fecaca',
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5
+                  }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444' }} />
+                    {counts.pending} PENDING
+                  </span>
+                )}
+              </div>
+              <p style={{ margin: '4px 0 0', fontSize: 13, color: '#65676b' }}>
+                {isAdmin
+                  ? 'Review citizen waste reports, evaluate severity, and approve or reject entries across Lucena City.'
+                  : `${user?.barangay_name || 'Barangay'} · Review citizen reports, assign waste severity, and approve for live map.`}
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => navigate('/admin/hotspots')}
+                  className="meta-btn-secondary"
+                  title="View Hotspot Map"
+                >
+                  <Flame size={14} color="#f97316" />
+                  <span>Hotspots Map</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => fetchReports()}
+                disabled={loading}
+                className="meta-btn-secondary"
+              >
+                <RefreshCw size={14} className={loading ? 'icon-spin' : ''} color="#65676b" />
+                <span>{loading ? 'Refreshing...' : 'Refresh Data'}</span>
+              </button>
+
+              {isAdmin ? (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.25)',
+                  color: '#2563eb', padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 700
+                }}>
+                  <ShieldCheck size={14} /> Admin Moderation Active
+                </span>
+              ) : (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  background: '#ffffff', border: '1px solid #ccd0d5',
+                  color: '#050505', padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 700
+                }}>
+                  <MapPin size={13} color="#16a34a" /> {user?.barangay_name || 'Lucena City'}
                 </span>
               )}
-            </button>
-          ))}
-        </div>
-
-        {/* ── SEARCH + FILTER ── */}
-        <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-          <input
-            type="text"
-            placeholder="Search address, type, reporter…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{
-              flex: 1, minWidth: 200,
-              background: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: 8, color: 'var(--text)',
-              padding: '9px 14px', fontSize: 13,
-              fontFamily: 'var(--font-body)', outline: 'none',
-            }}
-          />
-        </div>
-
-        {/* ── REPORT LIST ── */}
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: '40px' }}>Loading reports...</div>
-        ) : filtered.length === 0 ? (
-          <div className="card" style={{ textAlign: 'center', padding: '48px 20px' }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>
-              {activeTab === 'pending' ? 'No pending reports' :
-                activeTab === 'approved' ? 'No approved reports yet' :
-                  'No rejected reports in history'}
             </div>
           </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {filtered.map((report, i) => {
-              const tm = TYPE_META[report.issue_type] || TYPE_META.overflow
-              const sm = STATUS_META[report.status] || STATUS_META.pending
-              return (
-                <div key={report.id}
-                  className="vr-card"
-                  style={{
-                    background: 'var(--surface)', border: '1px solid var(--border)',
-                    borderRadius: 14, overflow: 'hidden',
-                    animation: `fadeUp .2s ease both`,
-                    animationDelay: `${i * 40}ms`,
-                  }}
-                  onClick={() => setDrawerReport(report)}
-                >
-                  <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+
+          {/* ── KPI Stat Strip (Meta Business Suite Style) ── */}
+          {loading && reports.length === 0 ? (
+            <StatCardSkeleton count={4} style={{ marginBottom: 18 }} />
+          ) : (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+              gap: 14,
+              marginBottom: 18
+            }}>
+              {[
+                {
+                  label: 'Total Reports',
+                  value: counts.all,
+                  subtext: 'City-wide logged reports',
+                  icon: Layers
+                },
+                {
+                  label: 'Pending Action',
+                  value: counts.pending,
+                  subtext: 'Awaiting severity & approval',
+                  icon: Clock,
+                  highlight: counts.pending > 0 ? '#b91c1c' : undefined
+                },
+                {
+                  label: 'Approved & Live',
+                  value: counts.approved,
+                  subtext: 'Published to operations map',
+                  icon: CheckCircle2,
+                  highlight: '#166534'
+                },
+                {
+                  label: 'Rejected / Declined',
+                  value: counts.rejected,
+                  subtext: 'Declined with reason recorded',
+                  icon: Archive
+                },
+              ].map(s => {
+                const IconComp = s.icon
+                return (
+                  <div key={s.label} className="meta-stat-card">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        {s.label}
+                      </span>
+                      <IconComp size={16} color="#8a8d91" />
+                    </div>
                     <div style={{
-                      width: 40, height: 40, borderRadius: 12, flexShrink: 0,
-                      background: tm.bg, display: 'flex', alignItems: 'center',
-                      justifyContent: 'center', color: tm.color
+                      fontSize: 26,
+                      fontWeight: 700,
+                      color: s.highlight || '#050505',
+                      lineHeight: 1.15,
+                      marginBottom: 4
                     }}>
-                      <div style={{ width: 20, height: 20 }}>{tm.icon}</div>
+                      {s.value}
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        flexWrap: 'wrap', marginBottom: 2
-                      }}>
-                        <span style={{ fontWeight: 700, fontSize: 14 }}>{tm.label}</span>
-                        <span style={{
-                          background: sm.bg, color: sm.color,
-                          fontSize: 9, fontWeight: 800, padding: '2px 8px',
-                          borderRadius: 20, letterSpacing: '.05em',
-                        }}>{sm.label.toUpperCase()}</span>
-                        <span style={{
-                          width: 7, height: 7, borderRadius: '50%',
-                          background: SEVERITY_COLORS[report.severity],
-                          display: 'inline-block',
-                          boxShadow: `0 0 5px ${SEVERITY_COLORS[report.severity]}`,
-                        }} />
-                        {report.has_marker && (
-                          <span style={{
-                            fontSize: 9, fontWeight: 700, color: 'var(--accent)',
-                            background: 'rgba(34,197,94,0.08)',
-                            border: '1px solid rgba(34,197,94,0.25)',
-                            padding: '2px 7px', borderRadius: 20, display: 'inline-flex', alignItems: 'center', gap: 4
-                          }}><div style={{ width: 10, height: 10 }}>{ICONS.map}</div> On Map</span>
-                        )}
-                        {!report.image && report.status === 'pending' && (
-                          <span style={{ fontSize: 10, color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><div style={{ width: 10, height: 10 }}>{ICONS.warning}</div> No photo</span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>
-                        {report.barangay_name} · {report.latitude}, {report.longitude}
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                        {report.user_name} · {new Date(report.created_at).toLocaleString()}
-                      </div>
+                    <div style={{ fontSize: 12, color: '#65676b' }}>
+                      {s.subtext}
                     </div>
-                    <div style={{ fontSize: 16, color: 'var(--text-muted)', flexShrink: 0 }}>›</div>
                   </div>
-                  {report.status === 'pending' && (
-                    <div style={{
-                      borderTop: '1px solid var(--border)',
-                      display: 'flex',
-                    }}
-                      onClick={e => e.stopPropagation()}>
-                      <button className="vr-btn"
-                        onClick={e => { e.stopPropagation(); openRejectModal(report.id) }}
-                        style={{
-                          flex: 1, padding: '10px', background: 'transparent',
-                          border: 'none', borderRight: '1px solid var(--border)',
-                          color: 'var(--danger)', fontSize: 12, fontWeight: 700,
-                        }}>
-                        ✕ Reject
-                      </button>
-                      <button className="vr-btn"
-                        onClick={e => { e.stopPropagation(); handleApprove(report.id) }}
-                        style={{
-                          flex: 2, padding: '10px', background: 'rgba(46,204,113,0.06)',
-                          border: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 700,
-                        }}>
-                        Approve & Publish to Map
-                      </button>
-                    </div>
-                  )}
-                  {report.status === 'rejected' && (
-                    <div style={{ borderTop: '1px solid var(--border)', display: 'flex' }} onClick={e => e.stopPropagation()}>
-                      <button className="vr-btn" onClick={e => { e.stopPropagation(); handleArchive(report.id) }} style={{ flex: 1, padding: '10px', background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                        <div style={{ width: 14, height: 14 }}>{ICONS.trash}</div> Archive
-                      </button>
-                    </div>
-                  )}
+                )
+              })}
+            </div>
+          )}
+
+          {/* ── Urgent Alert Banner (High-Severity Reports) ── */}
+          {highPendingCount > 0 && (
+            <div style={{
+              background: '#fee2e2',
+              border: '1px solid #fecaca',
+              borderRadius: 6,
+              padding: '12px 16px',
+              marginBottom: 18,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12
+            }}>
+              <Flame size={18} color="#991b1b" style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#991b1b', marginBottom: 2 }}>
+                  {highPendingCount} high-severity waste accumulation(s) require priority validation
                 </div>
-              )
-            })}
+                <div style={{ fontSize: 12, color: '#7f1d1d' }}>
+                  Evaluate waste severity and approve reports immediately to alert route dispatch and trigger collection.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Toolbar: Filters & Search ── */}
+          <div className="meta-card" style={{
+            padding: '12px 16px',
+            marginBottom: 16,
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 12,
+            alignItems: 'center'
+          }}>
+            {/* Severity Tabs */}
+            <div style={{ display: 'flex', gap: 4, background: '#f0f2f5', borderRadius: 6, padding: 3, flexWrap: 'wrap' }}>
+              {['all', 'high', 'medium', 'low'].map(f => {
+                const active = severityFilter === f
+                const pMeta = SEVERITY_CONFIG[f]
+                return (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setSeverityFilter(f)}
+                    className={`meta-tab-btn ${active ? 'active' : ''}`}
+                  >
+                    {f !== 'all' && (
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: pMeta.color }} />
+                    )}
+                    <span>
+                      {f === 'all'
+                        ? `All (${counts.all})`
+                        : `${pMeta.label} (${counts[f]})`}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Status Select */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Status:
+              </span>
+              <select
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
+                className="meta-select"
+              >
+                <option value="all">All Statuses</option>
+                <option value="pending">Pending</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+                <option value="resolved">Resolved</option>
+              </select>
+            </div>
+
+            {/* Barangay Select (Admins only) */}
+            {isAdmin && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Barangay:
+                </span>
+                <select
+                  value={barangayFilter}
+                  onChange={e => setBarangayFilter(e.target.value)}
+                  className="meta-select"
+                >
+                  <option value="">All Barangays</option>
+                  {(barangays || []).map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Issue Type Select */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Type:
+              </span>
+              <select
+                value={typeFilter}
+                onChange={e => setTypeFilter(e.target.value)}
+                className="meta-select"
+              >
+                <option value="all">All Types</option>
+                <option value="overflow">Overflow</option>
+                <option value="missed">Missed Pickup</option>
+                <option value="illegal_dumping">Illegal Dumping</option>
+              </select>
+            </div>
+
+            {/* Sort Select */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Sort:
+              </span>
+              <select
+                value={sortBy}
+                onChange={e => setSortBy(e.target.value)}
+                className="meta-select"
+              >
+                <option value="priority">Priority Urgency</option>
+                <option value="newest">Newest First</option>
+                <option value="oldest">Oldest First</option>
+              </select>
+            </div>
+
+            {/* Search Box */}
+            <div style={{ position: 'relative', width: 260, maxWidth: '100%', marginLeft: 'auto' }}>
+              <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#8a8d91' }} />
+              <input
+                className="meta-input"
+                placeholder="Search address, reporter, ID…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                style={{
+                  width: '100%',
+                  paddingLeft: 32,
+                  paddingRight: 28,
+                  boxSizing: 'border-box'
+                }}
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  style={{
+                    position: 'absolute',
+                    right: 8,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    color: '#8a8d91',
+                    cursor: 'pointer',
+                    padding: 0
+                  }}
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
           </div>
-        )}
+
+          {/* ── Reports Feed ── */}
+          {loading && reports.length === 0 ? (
+            <FeedCardSkeleton count={4} compact />
+          ) : sortedReports.length === 0 ? (
+            <div className="meta-card" style={{
+              textAlign: 'center',
+              padding: '50px 20px'
+            }}>
+              <CheckCircle2 size={32} color="#16a34a" style={{ margin: '0 auto 10px' }} />
+              <div style={{ fontWeight: 700, fontSize: 15, color: '#050505', marginBottom: 4 }}>
+                No Reports Found
+              </div>
+              <div style={{ fontSize: 12, color: '#65676b', maxWidth: 320, margin: '0 auto' }}>
+                No reports match your current filters. Clear filters or check back later.
+              </div>
+            </div>
+          ) : (
+            <div className="ww-stagger">
+              {sortedReports.map(r => {
+                const currentSev = localSeverityMap[r.id] || r.severity || 'medium'
+                const p = SEVERITY_CONFIG[currentSev] || SEVERITY_CONFIG.medium
+                const isOpen = expanded === r.id
+                const isTerminal = ['approved', 'rejected', 'resolved'].includes(r.status)
+                const isPending = r.status === 'pending'
+                const typeMeta = ISSUE_TYPE_META[r.issue_type] || { label: r.issue_type || 'Waste', color: '#64748b', bg: '#f0f2f5', border: '#e4e6eb' }
+
+                return (
+                  <div
+                    id={`report-${r.id}`}
+                    key={r.id}
+                    className="meta-esc-card"
+                    style={{
+                      borderLeft: `4px solid ${p.color}`,
+                      opacity: r.status === 'rejected' ? 0.75 : 1,
+                    }}
+                  >
+                    {/* Header Row */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 12,
+                        padding: '12px 16px',
+                        cursor: 'pointer',
+                        background: isOpen ? '#f7f8fa' : 'transparent',
+                        userSelect: 'none'
+                      }}
+                      onClick={() => setExpanded(prev => prev === r.id ? null : r.id)}
+                    >
+                      {/* Left Issue Icon */}
+                      <div style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 6,
+                        flexShrink: 0,
+                        background: typeMeta.bg,
+                        color: typeMeta.color,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: `1px solid ${typeMeta.border}`
+                      }}>
+                        {getIssueIcon(r.issue_type)}
+                      </div>
+
+                      {/* Main Details */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
+                          <span style={{ fontWeight: 700, fontSize: 13, color: '#050505' }}>
+                            {typeMeta.label} #{r.id}
+                          </span>
+                          <SeverityBadge s={currentSev} />
+                          <StatusBadge s={r.status} />
+                          {r.image && (
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 3,
+                              fontSize: 10, fontWeight: 700, color: '#2563eb',
+                              background: 'rgba(37,99,235,0.08)', padding: '1px 6px', borderRadius: 4
+                            }}>
+                              <Camera size={11} /> Photo
+                            </span>
+                          )}
+                        </div>
+
+                        <div style={{ fontSize: 12, color: '#65676b', display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <User size={12} color="#8a8d91" />
+                            <span>Reporter: <strong style={{ color: '#050505' }}>{r.reporter_name || 'Anonymous Citizen'}</strong></span>
+                          </span>
+
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <MapPin size={12} color="#16a34a" />
+                            <span>Brgy. {r.barangay_name || 'Lucena City'}</span>
+                          </span>
+
+                          {r.address && (
+                            <span style={{
+                              color: '#8a8d91',
+                              maxWidth: 260,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis'
+                            }}>
+                              · {r.address}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Right metadata, quick action buttons & expansion chevron */}
+                      <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ fontSize: 11, color: '#65676b', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <Clock size={11} />
+                          <span>{formatRelativeTime(r.created_at)}</span>
+                        </div>
+
+                        {/* Quick action buttons on pending items when collapsed */}
+                        {isPending && !isOpen && (
+                          <div style={{ display: 'flex', gap: 6 }} onClick={ev => ev.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => setRejectModal(r)}
+                              style={{
+                                background: '#ffffff',
+                                border: '1px solid #fecaca',
+                                color: '#dc2626',
+                                borderRadius: 5,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: '4px 9px',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4
+                              }}
+                            >
+                              <X size={12} /> Reject
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleApprove(r.id, currentSev)}
+                              style={{
+                                background: '#16a34a',
+                                border: '1px solid #16a34a',
+                                color: '#ffffff',
+                                borderRadius: 5,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: '4px 10px',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4
+                              }}
+                            >
+                              <Check size={12} /> Approve
+                            </button>
+                          </div>
+                        )}
+
+                        <div style={{
+                          width: 22,
+                          height: 22,
+                          borderRadius: 4,
+                          background: '#f0f2f5',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#65676b'
+                        }}>
+                          {isOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ── Expanded Details Section (Meta Style) ── */}
+                    {isOpen && (
+                      <div
+                        style={{
+                          borderTop: '1px solid #e4e6eb',
+                          padding: '16px 20px',
+                          background: '#ffffff',
+                          animation: 'slideDown 0.15s ease-out'
+                        }}
+                        onClick={ev => ev.stopPropagation()}
+                      >
+                        {/* Waste Severity Evaluation Selector Block */}
+                        <div style={{
+                          background: '#f7f8fa',
+                          border: '1px solid #e4e6eb',
+                          borderRadius: 6,
+                          padding: '12px 14px',
+                          marginBottom: 14
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <Flame size={15} color="#b45309" />
+                              <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#65676b' }}>
+                                Waste Severity Evaluation
+                              </span>
+                            </div>
+                            <span style={{
+                              fontSize: 10, fontWeight: 700, color: '#166534',
+                              background: '#dcfce7', border: '1px solid #bbf7d0',
+                              padding: '2px 8px', borderRadius: 4
+                            }}>
+                              {isAdmin ? 'Admin Moderation' : 'Official Evaluation'}
+                            </span>
+                          </div>
+
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                            gap: 10
+                          }}>
+                            {Object.entries(SEVERITY_CONFIG).map(([sevKey, conf]) => {
+                              const isSelected = currentSev === sevKey
+                              return (
+                                <button
+                                  key={sevKey}
+                                  type="button"
+                                  onClick={() => handleSelectSeverity(r.id, sevKey)}
+                                  className="meta-sev-card"
+                                  style={{
+                                    borderColor: isSelected ? conf.color : '#e4e6eb',
+                                    background: isSelected ? conf.bg : '#ffffff',
+                                    boxShadow: isSelected ? `0 0 0 1px ${conf.color}` : 'none'
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                                    <strong style={{ fontSize: 13, color: isSelected ? conf.color : '#050505', textTransform: 'uppercase' }}>
+                                      {conf.label}
+                                    </strong>
+                                    {isSelected && <Check size={14} color={conf.color} />}
+                                  </div>
+                                  <div style={{ fontSize: 11, color: '#65676b', lineHeight: 1.3 }}>
+                                    {conf.desc}
+                                  </div>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Two Column Grid: Location Map & Report Details */}
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                          gap: 14,
+                          marginBottom: 14
+                        }}>
+                          {/* Left Column: Mini Location Map */}
+                          <div style={{
+                            background: '#f7f8fa',
+                            border: '1px solid #e4e6eb',
+                            borderRadius: 6,
+                            padding: '12px 14px'
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                Report Location Pin
+                              </span>
+                              <span style={{ fontSize: 11, color: '#8a8d91', fontFamily: 'monospace' }}>
+                                {r.latitude ? `${Number(r.latitude).toFixed(5)}, ${Number(r.longitude).toFixed(5)}` : 'No GPS'}
+                              </span>
+                            </div>
+
+                            <div
+                              ref={mapContainerRef}
+                              style={{
+                                height: 160,
+                                width: '100%',
+                                borderRadius: 6,
+                                overflow: 'hidden',
+                                border: '1px solid #cbd5e1',
+                                background: '#e2e8f0',
+                                marginBottom: 8
+                              }}
+                            />
+
+                            <div style={{ fontSize: 12, color: '#050505', lineHeight: 1.4 }}>
+                              <MapPin size={12} color="#16a34a" style={{ display: 'inline', marginRight: 4 }} />
+                              <strong>{r.barangay_name || 'Lucena City'}</strong>
+                              {r.address ? ` · ${r.address}` : ''}
+                            </div>
+                          </div>
+
+                          {/* Right Column: Citizen Description & Evidence Photo */}
+                          <div style={{
+                            background: '#f7f8fa',
+                            border: '1px solid #e4e6eb',
+                            borderRadius: 6,
+                            padding: '12px 14px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between'
+                          }}>
+                            <div>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 6 }}>
+                                Citizen Submission Notes
+                              </span>
+                              <div style={{
+                                background: '#ffffff',
+                                border: '1px solid #e4e6eb',
+                                borderRadius: 6,
+                                padding: '10px 12px',
+                                fontSize: 13,
+                                color: r.notes || r.description ? '#050505' : '#8a8d91',
+                                fontStyle: r.notes || r.description ? 'normal' : 'italic',
+                                lineHeight: 1.5,
+                                marginBottom: 10
+                              }}>
+                                {r.notes || r.description || 'No additional notes provided by the citizen.'}
+                              </div>
+
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 12, marginBottom: 10 }}>
+                                <div style={{ background: '#ffffff', padding: '6px 10px', borderRadius: 4, border: '1px solid #e4e6eb' }}>
+                                  <span style={{ fontSize: 10, color: '#65676b', textTransform: 'uppercase', display: 'block', fontWeight: 700 }}>
+                                    Reporter
+                                  </span>
+                                  <strong style={{ color: '#050505' }}>{r.reporter_name || 'Anonymous Citizen'}</strong>
+                                </div>
+                                <div style={{ background: '#ffffff', padding: '6px 10px', borderRadius: 4, border: '1px solid #e4e6eb' }}>
+                                  <span style={{ fontSize: 10, color: '#65676b', textTransform: 'uppercase', display: 'block', fontWeight: 700 }}>
+                                    Submitted At
+                                  </span>
+                                  <strong style={{ color: '#050505' }}>{new Date(r.created_at).toLocaleString()}</strong>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Photo Thumbnail */}
+                            {r.image ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#ffffff', padding: '8px 10px', borderRadius: 6, border: '1px solid #e4e6eb' }}>
+                                <img
+                                  src={r.image}
+                                  alt="Report Photo"
+                                  style={{ width: 48, height: 48, borderRadius: 4, objectFit: 'cover', cursor: 'pointer', border: '1px solid #cbd5e1' }}
+                                  onClick={() => setLightboxImg(r.image)}
+                                />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 700, color: '#050505' }}>Photo Attached</div>
+                                  <div style={{ fontSize: 11, color: '#65676b' }}>Click preview to enlarge</div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setLightboxImg(r.image)}
+                                  className="meta-btn-secondary"
+                                  style={{ padding: '4px 8px', fontSize: 11 }}
+                                >
+                                  <Maximize2 size={12} /> View
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: 11, color: '#8a8d91', fontStyle: 'italic', background: '#ffffff', padding: '8px 10px', borderRadius: 4, border: '1px solid #e4e6eb' }}>
+                                No photographic evidence was attached to this report.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Action Buttons Section */}
+                        {isPending && (
+                          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', paddingTop: 6 }}>
+                            <button
+                              type="button"
+                              onClick={() => setRejectModal(r)}
+                              className="meta-btn-secondary"
+                              style={{
+                                flex: 1,
+                                minWidth: 150,
+                                justifyContent: 'center',
+                                color: '#991b1b',
+                                borderColor: '#fecaca',
+                                background: '#fee2e2'
+                              }}
+                            >
+                              <XCircle size={14} />
+                              <span>Reject Report</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleApprove(r.id, currentSev)}
+                              disabled={isActionLoading}
+                              className="meta-btn-primary"
+                              style={{
+                                flex: 2,
+                                minWidth: 200,
+                                justifyContent: 'center'
+                              }}
+                            >
+                              <CheckCircle2 size={14} />
+                              <span>{isActionLoading ? 'Approving...' : 'Approve & Publish to Map'}</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Terminal State Notices (Approved / Rejected) */}
+                        {isTerminal && (
+                          <div style={{
+                            background: r.status === 'rejected' ? '#f0f2f5' : '#e7f3ed',
+                            border: `1px solid ${r.status === 'rejected' ? '#e4e6eb' : '#bbf7d0'}`,
+                            borderRadius: 6,
+                            padding: '10px 14px',
+                            fontSize: 12,
+                            color: r.status === 'rejected' ? '#65676b' : '#166534',
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 8
+                          }}>
+                            {r.status === 'rejected' ? <Ban size={15} /> : <CheckCircle2 size={15} />}
+                            <span>
+                              {r.status === 'rejected'
+                                ? `This report was rejected: "${r.rejection_reason || 'Not suitable for live map'}"`
+                                : `This report was approved as ${currentSev.toUpperCase()} severity and published to the live operations map.`}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* ── Pagination ── */}
+          <div style={{ marginTop: 20 }}>
+            <Pagination
+              currentPage={page}
+              totalPages={totalPages}
+              totalCount={totalCount}
+              pageSize={10}
+              onPageChange={setPage}
+            />
+          </div>
+
+        </div>
       </div>
     </DashboardLayout>
-  )
-}
-
-function StatusBadge({ status }) {
-  const sm = STATUS_META[status] || STATUS_META.pending
-  return (
-    <span style={{
-      background: sm.bg, color: sm.color,
-      border: `1px solid ${sm.color}44`,
-      fontSize: 10, fontWeight: 800, padding: '3px 10px',
-      borderRadius: 20, letterSpacing: '.06em',
-    }}>
-      {sm.label.toUpperCase()}
-    </span>
   )
 }

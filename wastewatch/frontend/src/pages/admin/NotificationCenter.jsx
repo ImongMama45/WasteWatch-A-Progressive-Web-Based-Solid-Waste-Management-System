@@ -15,7 +15,7 @@
  *   - Zero emojis — Material / Lucide React SVG icons only
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Bell,
   Send,
@@ -41,6 +41,8 @@ import { useNotification } from '../../context/NotificationContext'
 import { useModal } from '../../hooks/useModal'
 import api from '../../api/client'
 import { getApiErrorMessage } from '../../utils/notificationHelpers'
+import { StatCardSkeleton, FeedCardSkeleton } from '../../components/ui/Skeleton'
+import Pagination from '../../components/ui/Pagination'
 
 // ─── Notification Types ────────────────────────────────────────────────────────
 const BROADCAST_TYPES = {
@@ -110,6 +112,7 @@ export default function NotificationCenter() {
   const [deletingId, setDeletingId] = useState(null)
   const [filterType, setFilterType] = useState('all')
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
   const [selectedBroadcast, setSelectedBroadcast] = useState(null)
   const [confirmDeleteModal, setConfirmDeleteModal] = useState(null)
   const mouseDownTargetRef = useRef(null)
@@ -325,6 +328,12 @@ export default function NotificationCenter() {
     })
   }, [broadcasts, filterType, search])
 
+  const totalPages = Math.ceil(filteredBroadcasts.length / 10) || 1
+  const paginatedBroadcasts = useMemo(() => {
+    const start = (page - 1) * 10
+    return filteredBroadcasts.slice(start, start + 10)
+  }, [filteredBroadcasts, page])
+
   // Accurate target scope label (zero fabricated reach numbers)
   const targetScopeText = useMemo(() => {
     if (form.target === 'city-wide') {
@@ -408,6 +417,9 @@ export default function NotificationCenter() {
         </div>
 
         {/* Top Summary Cards */}
+        {loading && broadcasts.length === 0 ? (
+          <StatCardSkeleton count={4} style={{ marginBottom: 20 }} />
+        ) : (
         <div
           style={{
             display: 'grid',
@@ -480,6 +492,7 @@ export default function NotificationCenter() {
             </div>
           </div>
         </div>
+        )}
 
         {/* 2-Column Responsive Layout */}
         <div className="nc-main-grid">
@@ -951,7 +964,7 @@ export default function NotificationCenter() {
               <div style={{ display: 'flex', gap: 4, background: 'var(--surface-2)', padding: 3, borderRadius: 10, border: '1px solid var(--border)' }}>
                 <button
                   type="button"
-                  onClick={() => setFilterType('all')}
+                  onClick={() => { setFilterType('all'); setPage(1); }}
                   style={{
                     padding: '5px 12px',
                     borderRadius: 8,
@@ -969,7 +982,7 @@ export default function NotificationCenter() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFilterType('ANNOUNCEMENT')}
+                  onClick={() => { setFilterType('ANNOUNCEMENT'); setPage(1); }}
                   style={{
                     padding: '5px 12px',
                     borderRadius: 8,
@@ -987,7 +1000,7 @@ export default function NotificationCenter() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFilterType('SCHEDULE_CHANGE')}
+                  onClick={() => { setFilterType('SCHEDULE_CHANGE'); setPage(1); }}
                   style={{
                     padding: '5px 12px',
                     borderRadius: 8,
@@ -1005,36 +1018,62 @@ export default function NotificationCenter() {
                 </button>
               </div>
 
-              {/* Search input */}
-              <div style={{ position: 'relative', minWidth: 200, flex: 1, maxWidth: 300 }}>
-                <Search
-                  size={14}
-                  strokeWidth={2}
-                  style={{
-                    position: 'absolute',
-                    left: 10,
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    color: 'var(--text-muted)',
-                  }}
-                />
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="Search broadcasts..."
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  style={{ paddingLeft: 30, fontSize: 12 }}
-                />
+              {/* Ratio Counter and Search input */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 12,
+                  color: 'var(--text-muted)',
+                  fontWeight: 600,
+                }}>
+                  <span>
+                    Showing <strong>{filteredBroadcasts.length === 0 ? 0 : (page - 1) * 10 + 1}–{Math.min(page * 10, filteredBroadcasts.length)}</strong> of <strong>{filteredBroadcasts.length}</strong>
+                  </span>
+                  <span
+                    className="ww-pagination-ratio"
+                    style={{
+                      background: 'var(--surface-2, #f0f2f5)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--accent, #10b981)',
+                      padding: '2px 8px',
+                      borderRadius: 999,
+                      fontSize: 11,
+                      fontWeight: 800
+                    }}
+                  >
+                    {paginatedBroadcasts.length}/{filteredBroadcasts.length}
+                  </span>
+                </div>
+
+                <div style={{ position: 'relative', minWidth: 180, maxWidth: 260 }}>
+                  <Search
+                    size={14}
+                    strokeWidth={2}
+                    style={{
+                      position: 'absolute',
+                      left: 10,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      color: 'var(--text-muted)',
+                    }}
+                  />
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Search broadcasts..."
+                    value={search}
+                    onChange={e => { setSearch(e.target.value); setPage(1); }}
+                    style={{ paddingLeft: 30, fontSize: 12 }}
+                  />
+                </div>
               </div>
             </div>
 
             {/* List */}
-            {loading ? (
-              <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                <Loader2 size={24} className="nc-spin" style={{ display: 'block', margin: '0 auto 10px' }} />
-                Loading broadcasts...
-              </div>
+            {loading && broadcasts.length === 0 ? (
+              <FeedCardSkeleton count={4} compact />
             ) : filteredBroadcasts.length === 0 ? (
               <div
                 style={{
@@ -1054,8 +1093,8 @@ export default function NotificationCenter() {
                 </div>
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {filteredBroadcasts.map(b => {
+              <div className="ww-stagger" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {paginatedBroadcasts.map(b => {
                   const cfg = BROADCAST_TYPES[b.type] || BROADCAST_TYPES.ANNOUNCEMENT
                   const { Icon } = cfg
                   const formattedDate = (() => {
@@ -1270,6 +1309,14 @@ export default function NotificationCenter() {
                 })}
               </div>
             )}
+
+            <Pagination
+              currentPage={page}
+              totalPages={totalPages}
+              totalCount={filteredBroadcasts.length}
+              pageSize={10}
+              onPageChange={setPage}
+            />
           </div>
 
         </div>

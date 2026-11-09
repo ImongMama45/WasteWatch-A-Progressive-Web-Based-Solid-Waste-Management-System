@@ -19,7 +19,10 @@ export function useNotifications() {
     const timerRef = useRef(null)
 
     const fetchUnread = useCallback(async () => {
-        if (!user) return
+        if (!user) {
+            setLoading(false)
+            return
+        }
         try {
             const res = await api.get('/api/notifications/unread/')
             setUnreadCount(res.data.count ?? 0)
@@ -40,7 +43,7 @@ export function useNotifications() {
         } catch {
             return []
         }
-    }, [])
+    }, [user])
 
     const markRead = useCallback(async (ids) => {
         try {

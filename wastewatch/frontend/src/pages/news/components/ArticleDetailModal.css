@@ -1,0 +1,444 @@
+/**
+ * ArticleDetailModal.css
+ * ----------------------
+ * Light-Themed Municipal Editorial stylesheet for WasteWatch Article Detail Modal.
+ * Lucena City CENRO Public Information Hub design language:
+ * High contrast, crisp slate typography, accessible focus rings, zero emojis.
+ */
+
+/* Backdrop overlay */
+.adm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 20px;
+  animation: admFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes admFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Modal window */
+.adm-modal-window {
+  background: #ffffff;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 680px;
+  max-height: 88vh;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.25);
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  animation: admSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes admSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Sticky top header */
+.adm-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid #e2e8f0;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.adm-badge-stack {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.adm-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+.adm-pill-pinned {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.adm-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.adm-share-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+
+.adm-share-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.adm-share-btn:focus-visible {
+  outline: 2px solid #0f172a;
+  outline-offset: 2px;
+}
+
+.adm-share-btn.copied {
+  background: #f0fdf4;
+  border-color: #86efac;
+  color: #16a34a;
+}
+
+.adm-close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #64748b;
+  padding: 6px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.adm-close-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.adm-close-btn:focus-visible {
+  outline: 2px solid #0f172a;
+  outline-offset: 2px;
+}
+
+/* Fallback manual copy drawer */
+.adm-fallback-drawer {
+  padding: 10px 20px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.adm-fallback-label {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.adm-fallback-input {
+  width: 100%;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0f172a;
+  box-sizing: border-box;
+}
+
+/* Scrollable content container */
+.adm-scroll-body {
+  overflow-y: auto;
+  padding: 24px 28px 32px;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f8fafc;
+}
+
+.adm-scroll-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.adm-scroll-body::-webkit-scrollbar-track {
+  background: #f8fafc;
+}
+
+.adm-scroll-body::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+/* Cover Image */
+.adm-media-frame {
+  margin-bottom: 20px;
+  border-radius: 12px;
+  overflow: hidden;
+  max-height: 320px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.adm-media-img {
+  width: 100%;
+  height: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  display: block;
+}
+
+/* Article title */
+.adm-title {
+  font-size: 24px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.3;
+  margin: 0 0 14px 0;
+  letter-spacing: -0.015em;
+}
+
+/* Metadata bar */
+.adm-meta-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #64748b;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 20px;
+}
+
+.adm-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Body content text */
+.adm-content-text {
+  font-size: 15px;
+  line-height: 1.75;
+  color: #334155;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.adm-empty-desc {
+  font-style: italic;
+  color: #64748b;
+  font-size: 14px;
+}
+
+/* ── Skeleton Loading State ─────────────────────────────────────────────────── */
+.adm-skeleton-pulse {
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: admPulse 1.5s infinite ease-in-out;
+  border-radius: 6px;
+}
+
+@keyframes admPulse {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.adm-skeleton-media {
+  width: 100%;
+  height: 180px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+.adm-skeleton-title-1 {
+  width: 85%;
+  height: 24px;
+  margin-bottom: 8px;
+}
+
+.adm-skeleton-title-2 {
+  width: 60%;
+  height: 24px;
+  margin-bottom: 18px;
+}
+
+.adm-skeleton-meta {
+  width: 45%;
+  height: 16px;
+  margin-bottom: 24px;
+}
+
+.adm-skeleton-p1 {
+  width: 100%;
+  height: 14px;
+  margin-bottom: 10px;
+}
+
+.adm-skeleton-p2 {
+  width: 95%;
+  height: 14px;
+  margin-bottom: 10px;
+}
+
+.adm-skeleton-p3 {
+  width: 90%;
+  height: 14px;
+  margin-bottom: 10px;
+}
+
+.adm-skeleton-p4 {
+  width: 70%;
+  height: 14px;
+}
+
+/* ── Not Found / Unavailable State ─────────────────────────────────────────── */
+.adm-notfound-card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 32px 28px;
+  max-width: 420px;
+  width: 100%;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.35);
+  border: 1px solid #e2e8f0;
+  text-align: center;
+  animation: admSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.adm-notfound-icon-wrap {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: #fee2e2;
+  color: #dc2626;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+}
+
+.adm-notfound-title {
+  font-size: 18px;
+  font-weight: 800;
+  margin: 0 0 8px;
+  color: #0f172a;
+}
+
+.adm-notfound-text {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.5;
+  margin: 0 0 22px;
+}
+
+.adm-notfound-close-btn {
+  width: 100%;
+  padding: 11px 16px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #ffffff;
+  border: none;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s ease;
+}
+
+.adm-notfound-close-btn:hover {
+  background: #1e293b;
+}
+
+.adm-notfound-close-btn:focus-visible {
+  outline: 2px solid #0f172a;
+  outline-offset: 2px;
+}
+
+/* ── Responsive Viewports ─────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .adm-modal-window {
+    max-width: 600px;
+    max-height: 90vh;
+  }
+
+  .adm-scroll-body {
+    padding: 20px 22px 28px;
+  }
+
+  .adm-title {
+    font-size: 21px;
+  }
+}
+
+@media (max-width: 640px) {
+  .adm-backdrop {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .adm-modal-window {
+    max-width: 100%;
+    max-height: 94vh;
+    border-radius: 16px 16px 0 0;
+    border-bottom: none;
+  }
+
+  .adm-header-bar {
+    padding: 12px 16px;
+  }
+
+  .adm-scroll-body {
+    padding: 16px 16px 24px;
+  }
+
+  .adm-title {
+    font-size: 19px;
+    margin-bottom: 10px;
+  }
+
+  .adm-meta-bar {
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .adm-content-text {
+    font-size: 14px;
+    line-height: 1.7;
+  }
+}
+

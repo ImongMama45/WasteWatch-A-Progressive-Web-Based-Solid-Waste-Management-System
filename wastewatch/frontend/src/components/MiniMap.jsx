@@ -12,6 +12,8 @@ import { useAuth } from '../context/AuthContext'
 import { useNotification } from '../context/NotificationContext'
 import { classifyShift } from '../utils/shiftState'
 import api from '../api/client'
+import { loadLeaflet } from '../api/leaflet'
+import { MapSkeleton } from './ui/Skeleton'
 import {
 
   buildStopMarkerHtml,
@@ -27,6 +29,7 @@ import {
   getUserBarangayName,
   isAdminRole,
 } from '../utils/barangayScope'
+import { getGarbageReportId, hasAssociatedGarbageReport } from '../utils/reportIdentity'
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -116,7 +119,8 @@ function injectStopStyles() {
 
 // ─── ROLES ───────────────────────────────────────────────────────────────────
 
-const MODERATOR_ROLES = ['brgy_official', 'watcher', 'admin']
+const REPORT_MODERATOR_ROLES = ['brgy_official', 'admin']
+const RESOLVE_ROLES = ['brgy_official', 'watcher', 'admin']
 const CAN_SEE_ALL_ROLES = ['admin', 'superadmin']
 
 // ─── PANEL SUB-COMPONENTS ────────────────────────────────────────────────────
@@ -147,7 +151,9 @@ function TruckPanel({ truck, onClose }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
         <div style={{ color: 'white', display: 'flex' }} dangerouslySetInnerHTML={{ __html: IcoTruckString }} />
         <div style={{ flex: 1 }}>
-          <div style={{ color: 'white', fontWeight: 800, fontSize: 15 }}>{truck.truckId}</div>
+          <div style={{ color: 'white', fontWeight: 800, fontSize: 15 }}>
+            {(!truck.truckId || truck.truckId === 'Hidden') ? 'Collection truck' : truck.truckId}
+          </div>
           <div style={{ color: '#94a3b8', fontSize: 11 }}>{truck.driver}</div>
         </div>
         <div style={{
@@ -167,7 +173,7 @@ function TruckPanel({ truck, onClose }) {
         </button>
       </div>
       <PanelRow label="DRIVER" value={truck.driver} />
-      <PanelRow label="PLATE" value={truck.truckId} accent />
+      <PanelRow label="PLATE" value={truck.truckId === 'Hidden' ? 'Protected' : truck.truckId} accent />
       <PanelRow label="LAST UPDATE" value={truck.lastUpdate || 'N/A'} />
       <p style={{ color: '#475569', fontSize: 10, margin: '10px 0 0', lineHeight: 1.5 }}>
         Stop progress visible to assigned driver only.
@@ -176,7 +182,7 @@ function TruckPanel({ truck, onClose }) {
   )
 }
 
-function ReportPanel({ report, canModerate, onAction, onClose }) {
+function ReportPanel({ report, canApproveReject, canResolve, onAction, onClose }) {
   const sev = { high: '#ef4444', medium: '#f59e0b', low: '#22c55e' }[report.severity] || '#f59e0b'
   const statusLabel = {
     pending: 'Pending Review',
@@ -253,9 +259,9 @@ function ReportPanel({ report, canModerate, onAction, onClose }) {
         </div>
       )}
 
-      {canModerate && (
+      {hasAssociatedGarbageReport(report) && (
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          {report.status === 'pending' && (
+          {report.status === 'pending' && canApproveReject && (
             <>
               <button onClick={() => onAction('approve', report)}
                 style={{
@@ -273,7 +279,7 @@ function ReportPanel({ report, canModerate, onAction, onClose }) {
               </button>
             </>
           )}
-          {report.status === 'approved' && (
+          {report.status === 'approved' && canResolve && (
             <button onClick={() => onAction('resolve', report)}
               style={{
                 flex: 1, background: 'rgba(34,197,94,0.1)', border: '1px solid #22c55e',
@@ -282,6 +288,15 @@ function ReportPanel({ report, canModerate, onAction, onClose }) {
               Mark Resolved
             </button>
           )}
+        </div>
+      )}
+      {(canApproveReject || canResolve) && !hasAssociatedGarbageReport(report) && (
+        <div style={{
+          marginTop: 12, padding: '8px 10px',
+          background: 'rgba(20,184,166,0.06)', border: '1px solid rgba(20,184,166,0.2)',
+          borderRadius: 8, color: '#94a3b8', fontSize: 11, fontStyle: 'italic', textAlign: 'center'
+        }}>
+          Hotspot monitoring pin (no direct report attached). Moderation actions unavailable.
         </div>
       )}
     </div>
@@ -302,7 +317,8 @@ export default function MiniMap({ height = 260, focusCoordinate = null, layers =
   const isAdmin = isAdminRole(user)
 
   const canSeeAll = CAN_SEE_ALL_ROLES.includes(role)
-  const canModerate = MODERATOR_ROLES.includes(role)
+  const canApproveReject = REPORT_MODERATOR_ROLES.includes(role)
+  const canResolve = RESOLVE_ROLES.includes(role)
   const isDriver = role === 'driver'
 
   // ── Refs ──
@@ -344,11 +360,7 @@ export default function MiniMap({ height = 260, focusCoordinate = null, layers =
   // ── Load Leaflet ──
   useEffect(() => {
     injectStopStyles()
-    if (window.L) { setLeafletReady(true); return }
-    const s = document.createElement('script')
-    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-    s.onload = () => setLeafletReady(true)
-    document.head.appendChild(s)
+    loadLeaflet().then(() => setLeafletReady(true)).catch(console.error)
   }, [])
 
   // ── Init map ──
@@ -424,8 +436,11 @@ export default function MiniMap({ height = 260, focusCoordinate = null, layers =
 
       // Schedules + stop validations — only for roles that show stops
       if (!isDriver) {
-        api.get('/api/driver/collection-schedules/')
-          .then(res => setSchedules(filterBarangayItems(res.data || [], user)))
+        api.get('/api/driver/collection-schedules/?paginate=false')
+          .then(res => {
+            const raw = Array.isArray(res.data) ? res.data : (res.data?.results || [])
+            setSchedules(filterBarangayItems(raw, user))
+          })
           .catch(() => { })
 
         api.get('/api/watcher/stop-validations/')
@@ -513,9 +528,10 @@ export default function MiniMap({ height = 260, focusCoordinate = null, layers =
       activeTrucksRef.current.forEach(truck => {
         if (truck.lat == null || truck.lng == null) return
 
+        const truckLabel = (!truck.truckId || truck.truckId === 'Hidden') ? 'Collection truck' : truck.truckId
         const color = STATUS_COLORS[truck.status] || '#14b8a6'
         const icon = L.divIcon({
-          html: makeTruckIconHtml(color, truck.truckId, truck.status),
+          html: makeTruckIconHtml(color, truckLabel, truck.status),
           className: '', iconSize: [36, 50], iconAnchor: [18, 50],
         })
         const lastUpdate = truck.last_update
@@ -525,7 +541,7 @@ export default function MiniMap({ height = 260, focusCoordinate = null, layers =
         const m = L.marker([truck.lat, truck.lng], { icon })
           .addTo(map)
           .bindPopup(`<div style="font-family:sans-serif;min-width:160px;">
-          <b style="font-size:13px;">${truck.truckId}</b><br/>
+          <b style="font-size:13px;">${truckLabel}</b><br/>
           <span style="font-size:11px;color:#64748b;">${truck.driver}</span><br/>
           <span style="font-size:11px;color:${color};font-weight:700;">${truck.status === 'active' ? 'LIVE' : truck.status === 'weak_signal' ? 'WEAK SIGNAL' : 'OFFLINE'
             }</span><br/>
@@ -628,18 +644,34 @@ export default function MiniMap({ height = 260, focusCoordinate = null, layers =
 
   // ── Moderation actions ──
   function handleReportAction(action, report) {
-    const id = report.report_id || report.id
+    const id = getGarbageReportId(report)
+    if (!id) {
+      notify({ variant: 'error-dark', message: 'No associated waste report found for this pin.' })
+      return
+    }
     if (action === 'approve') {
+      if (!canApproveReject) {
+        notify({ variant: 'error-dark', message: 'Not authorized to approve reports.' })
+        return
+      }
       api.post(`/api/watcher/reports/${id}/approve/`)
         .then(() => { setPanelType(null); fetchReportsFresh() })
         .catch(err => notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed') }))
     } else if (action === 'reject') {
+      if (!canApproveReject) {
+        notify({ variant: 'error-dark', message: 'Not authorized to reject reports.' })
+        return
+      }
       const reason = prompt('Reason for rejection:')
       if (!reason?.trim()) return
       api.post(`/api/watcher/reports/${id}/reject/`, { rejection_reason: reason })
         .then(() => { setPanelType(null); fetchReportsFresh() })
         .catch(err => notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed') }))
     } else if (action === 'resolve') {
+      if (!canResolve) {
+        notify({ variant: 'error-dark', message: 'Not authorized to resolve reports.' })
+        return
+      }
       api.post('/api/watcher/confirmations/', { report: id })
         .then(() => { setPanelType(null); fetchReportsFresh() })
         .catch(err => notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed to resolve') }))
@@ -700,7 +732,7 @@ export default function MiniMap({ height = 260, focusCoordinate = null, layers =
           background: '#0f172a',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-          <span style={{ color: '#14b8a6', fontSize: 12, fontWeight: 600 }}>Loading map…</span>
+          <MapSkeleton height={height} dark label="Loading live map..." showControls={false} />
         </div>
       )}
 
@@ -747,7 +779,8 @@ export default function MiniMap({ height = 260, focusCoordinate = null, layers =
       {panelType === 'report' && selectedReport && (
         <ReportPanel
           report={selectedReport}
-          canModerate={canModerate}
+          canApproveReject={canApproveReject}
+          canResolve={canResolve}
           onAction={handleReportAction}
           onClose={closePanel}
         />

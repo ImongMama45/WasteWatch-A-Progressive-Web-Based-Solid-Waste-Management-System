@@ -19,6 +19,7 @@ import '../../styles/pages/AnalyticsCenter.css'
 import api from '../../api/client'
 
 import { Zap, LayoutDashboard, LineChart, Download, Globe, Gauge, Shield, Flame, RefreshCw, Calendar, Users, Building2, Flag, CheckCircle2, Truck } from 'lucide-react'
+import { StatCardSkeleton, TableSkeleton } from '../../components/ui/Skeleton'
 
 
 
@@ -106,10 +107,15 @@ function AdminControls() {
             </div>
           </div>
           <button className="ac-export-btn" onClick={() => setTick(t => t + 1)} disabled={loading}>
-            <RefreshCw size={14} /> Refresh
+            <RefreshCw size={14} className={loading ? 'icon-spin' : ''} /> Refresh
           </button>
         </div>
-        {loading && !data && <div className="spinner" style={{ margin: '20px auto' }} />}
+        {loading && !data && (
+          <div>
+            <StatCardSkeleton count={4} />
+            <TableSkeleton rows={4} cols={4} style={{ marginTop: 18 }} />
+          </div>
+        )}
         {error && <div style={{ color: 'var(--danger)', fontSize: 13, fontWeight: 600 }}>{error}</div>}
         {data && (
           <div className="ac-sys-grid" style={{ opacity: loading ? .6 : 1 }}>

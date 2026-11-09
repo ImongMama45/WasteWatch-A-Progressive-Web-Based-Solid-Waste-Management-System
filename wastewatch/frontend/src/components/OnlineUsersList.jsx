@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
+import { AlertTriangle } from 'lucide-react'
 import api from '../api/client'
+import { SkeletonPill, SidebarWidgetSkeleton } from './ui/Skeleton'
 
 const ROLE_CONFIG = {
   driver:       { label: 'Drivers',            order: 1 },
@@ -79,8 +81,8 @@ export default function OnlineUsersList() {
           width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
           background: total > 0 ? '#16A34A' : 'var(--text-light)',
         }} />
-        <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
-          {loading ? 'Checking presence…' : `${total} personnel online`}
+        <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center' }}>
+          {loading && users.length === 0 ? <SkeletonPill width={96} height={16} /> : `${total} personnel online`}
         </span>
         {!loading && (
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
@@ -97,13 +99,20 @@ export default function OnlineUsersList() {
       {/* Expanded list */}
       {expanded && (
         <div style={{ borderTop: '1px solid var(--border)' }}>
-          {error && (
-            <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--danger)' }}>
-              ⚠ Could not fetch presence data
+          {loading && users.length === 0 && (
+            <div style={{ padding: 12 }}>
+              <SidebarWidgetSkeleton rows={3} showHeader={false} />
             </div>
           )}
 
-          {!error && total === 0 && (
+          {!loading && error && (
+            <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <AlertTriangle size={13} />
+              <span>Could not fetch presence data</span>
+            </div>
+          )}
+
+          {!loading && !error && total === 0 && (
             <div style={{
               padding: '18px 14px', textAlign: 'center',
               fontSize: 12, color: 'var(--text-muted)',

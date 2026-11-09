@@ -11,10 +11,10 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { ChevronLeft, ChevronRight, AlertTriangle, Megaphone, Newspaper, Trophy } from 'lucide-react'
 
 const TYPE_ICONS = {
-  emergency:    { Icon: AlertTriangle, label: 'Emergency' },
-  announcement: { Icon: Megaphone,    label: 'Announcement' },
-  news:         { Icon: Newspaper,    label: 'News' },
-  rankings:     { Icon: Trophy,       label: 'Rankings' },
+  emergency: { Icon: AlertTriangle, label: 'Emergency' },
+  announcement: { Icon: Megaphone, label: 'Announcement' },
+  news: { Icon: Newspaper, label: 'News' },
+  rankings: { Icon: Trophy, label: 'Rankings' },
 }
 
 const CSS = `
@@ -93,10 +93,10 @@ export default function FeaturedNewsCarousel({ items = [], onReadMore }) {
   const TOTAL = items.length
   const [active, setActive] = useState(0)
   const idx = Math.min(active, Math.max(0, TOTAL - 1))
-  const startX   = useRef(0)
+  const startX = useRef(0)
   const dragging = useRef(false)
-  const timer    = useRef(null)
-  const pause    = useRef(null)
+  const timer = useRef(null)
+  const pause = useRef(null)
 
   // Start auto-play only if items exist
   const startAuto = useCallback(() => {
@@ -112,9 +112,9 @@ export default function FeaturedNewsCarousel({ items = [], onReadMore }) {
     pause.current = setTimeout(startAuto, 4000)
   }, [startAuto, TOTAL])
 
-  useEffect(() => { 
+  useEffect(() => {
     if (TOTAL > 0) startAuto()
-    return () => { clearInterval(timer.current); clearTimeout(pause.current) } 
+    return () => { clearInterval(timer.current); clearTimeout(pause.current) }
   }, [startAuto, TOTAL])
 
   if (TOTAL === 0) return null
@@ -126,7 +126,7 @@ export default function FeaturedNewsCarousel({ items = [], onReadMore }) {
   function onUp(e) {
     if (!dragging.current) return; dragging.current = false
     const ex = (e.clientX ?? e.changedTouches?.[0]?.clientX) || startX.current
-    const d  = startX.current - ex
+    const d = startX.current - ex
     if (d > 40) next()
     else if (d < -40) prev()
   }

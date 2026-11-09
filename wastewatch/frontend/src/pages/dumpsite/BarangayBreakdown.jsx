@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import api from '../../api/client'
 import TrucksOverlay from './components/TrucksOverlay'
+import { ChartSkeleton, TableSkeleton } from '../../components/ui/Skeleton'
 
 const Ico = ({ d, size = 14, color = 'currentColor', sw = 1.75, style = {}, className = '' }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={sw}
@@ -25,9 +26,12 @@ export default function BarangayBreakdown() {
   const [overlayOpen, setOverlayOpen] = useState(false)
 
   useEffect(() => {
-    api.get('/api/dumpsite/dumpsites/').then(res => {
-      if (res.data.length > 0) setSiteId(res.data[0].id)
-    })
+    api.get('/api/dumpsite/dumpsites/')
+      .then(res => {
+        if (res.data?.length > 0) setSiteId(res.data[0].id)
+        else setLoading(false)
+      })
+      .catch(() => setLoading(false))
   }, [])
 
   useEffect(() => {
@@ -74,14 +78,17 @@ export default function BarangayBreakdown() {
       </header>
 
       {loading ? (
-        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>Loading...</div>
+        <div>
+          <ChartSkeleton height={220} variant="bar" style={{ marginBottom: 20 }} />
+          <TableSkeleton rows={5} cols={3} />
+        </div>
       ) : data.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '3rem', border: '2px dashed var(--border)', borderRadius: 20, color: 'var(--text-muted)' }}>
+        <div className="ww-fade-in" style={{ textAlign: 'center', padding: '3rem', border: '2px dashed var(--border)', borderRadius: 20, color: 'var(--text-muted)' }}>
           <IcoChartBar size={36} style={{ marginBottom: 8, margin: '0 auto', opacity: 0.5 }} />
           <p style={{ fontWeight: 600 }}>No data for this period.</p>
         </div>
       ) : (
-        <>
+        <div className="ww-fade-in">
           {/* Bar Chart */}
           <div className="card-light" style={{ padding: '1.5rem', borderRadius: 24, marginBottom: '1.25rem' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
@@ -123,7 +130,7 @@ export default function BarangayBreakdown() {
               </div>
             ))}
           </div>
-        </>
+        </div>
       )}
 
       <TrucksOverlay open={overlayOpen} onClose={() => setOverlayOpen(false)} siteId={siteId} />

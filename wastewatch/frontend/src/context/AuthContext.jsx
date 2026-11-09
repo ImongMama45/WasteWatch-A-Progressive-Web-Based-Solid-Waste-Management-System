@@ -8,11 +8,12 @@
  *   • `register()` now passes the full payload including `barangay` (ID).
  */
 
-import { createContext, useContext, useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import api from '../api/client'
 import { clearLiveAnalyticsCache } from '../api/analyticsCache'
+import { AuthContext, useAuth } from './calendarAuthBridge.js'
 
-const AuthContext = createContext(null)
+export { AuthContext, useAuth }
 
 // ── Persistence helpers ───────────────────────────────────────────────────────
 
@@ -114,17 +115,43 @@ export function AuthProvider({ children }) {
     return res.data
   }
 
+  async function verifyEmail(token) {
+    const res = await api.post('/api/auth/verify-email/', { token })
+    return res.data
+  }
+
+  async function resendVerification(email) {
+    const res = await api.post('/api/auth/resend-verification/', { email })
+    return res.data
+  }
+
+  async function forgotPassword(email) {
+    const res = await api.post('/api/auth/forgot-password/', { email })
+    return res.data
+  }
+
+  async function resetPassword(payload) {
+    const res = await api.post('/api/auth/reset-password/', payload)
+    return res.data
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, barangays, login, logout, register, updateUser }}>
+    <AuthContext.Provider value={{
+      user,
+      loading,
+      barangays,
+      login,
+      logout,
+      register,
+      updateUser,
+      verifyEmail,
+      resendVerification,
+      forgotPassword,
+      resetPassword,
+    }}>
       {children}
     </AuthContext.Provider>
   )
-
-
 }
 
-export function useAuth() {
-  const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error('useAuth must be used inside <AuthProvider>')
-  return ctx
-}
+

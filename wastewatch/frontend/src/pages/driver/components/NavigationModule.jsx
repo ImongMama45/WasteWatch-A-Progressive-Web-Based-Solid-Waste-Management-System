@@ -31,7 +31,6 @@
 import { useState, useEffect, useRef } from 'react'
 import useShiftTimer from '../../../hooks/useShiftTimer'
 import useGpsTracking from '../../../hooks/useGpsTracking'
-import Navbar from '../../../components/Navbar'
 import api from '../../../api/client'
 import { useAuth } from '../../../context/AuthContext'
 import TurnArrow, { TURN_COLOR } from './TurnArrow'
@@ -391,7 +390,6 @@ export default function NavigationModule({ setRouteState }) {
 
   return (
     <>
-      <Navbar />
       <style>{`
         @keyframes navPulse { 0%,100%{opacity:1} 50%{opacity:.3} }
         @keyframes navFadeUp { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }

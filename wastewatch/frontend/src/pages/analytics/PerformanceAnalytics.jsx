@@ -11,6 +11,7 @@ import { useMemo } from 'react'
 import { Trophy, Scale, Route, ClipboardCheck, Truck, Droplet, CheckCircle2, XCircle, TrendingUp, BarChart3, PieChart, Clock, ShieldCheck, ThumbsUp, AlertTriangle, AlertCircle, Hourglass } from 'lucide-react'
 import { useLiveAnalytics } from './useLiveAnalytics'
 import { toPerf } from './perfMapper'
+import { StatCardSkeleton, FeedCardSkeleton, ChartSkeleton, TableSkeleton } from '../../components/ui/Skeleton'
 
 // ── Chart primitives ──────────────────────────────────────────────────────────
 
@@ -143,7 +144,16 @@ export default function PerformanceAnalytics({ selectedBarangay, dateFrom, dateT
   const { raw, loading, error } = useLiveAnalytics({ selectedBarangay, dateFrom, dateTo })
   const data = useMemo(() => toPerf(raw), [raw])
 
-  if (loading && !raw) return <div className="spinner" style={{ margin: '40px auto' }} />
+  if (loading && !raw) return (
+    <div>
+      <StatCardSkeleton count={5} minCardWidth={150} style={{ marginBottom: 20 }} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: 16 }}>
+        <FeedCardSkeleton count={3} compact />
+        <ChartSkeleton height={200} variant="line" />
+      </div>
+      <TableSkeleton rows={5} cols={5} style={{ marginTop: 20 }} />
+    </div>
+  )
   if (error && !raw) return <div className="ac-card">{error}</div>
   if (!data || (data.kpi.routes === 0 && data.kpi.collected === 0))
     return <div className="ac-card">No collection activity in this range.</div>
@@ -156,7 +166,7 @@ export default function PerformanceAnalytics({ selectedBarangay, dateFrom, dateT
   const maxKg = Math.max(...topBrgy.map(b => b.kg), 1)
 
   return (
-    <>
+    <div className="ww-fade-in">
       {(() => {
         // Fleet score: completion rate (70%) + fill quality (30%)
         // Report resolution is a citizen metric, not fleet performance
@@ -275,9 +285,9 @@ export default function PerformanceAnalytics({ selectedBarangay, dateFrom, dateT
             poor: { label: 'At Risk', bg: 'rgba(231,76,60,.12)', color: 'var(--danger)', border: 'rgba(231,76,60,.3)' },
           }
           const RANK_STYLES = [
-            { bg: 'linear-gradient(135deg,#f6c94e,#e0a800)', color: '#7a5100', label: '🥇' },
-            { bg: 'linear-gradient(135deg,#c0c7d1,#8e9aaa)', color: '#3a4350', label: '🥈' },
-            { bg: 'linear-gradient(135deg,#d4876a,#a85f3d)', color: '#5c2d12', label: '🥉' },
+            { bg: 'linear-gradient(135deg,#f6c94e,#e0a800)', color: '#7a5100', label: '#1' },
+            { bg: 'linear-gradient(135deg,#c0c7d1,#8e9aaa)', color: '#3a4350', label: '#2' },
+            { bg: 'linear-gradient(135deg,#d4876a,#a85f3d)', color: '#5c2d12', label: '#3' },
             { bg: 'var(--border)', color: 'var(--text-muted)', label: '' },
           ]
           return (
@@ -424,7 +434,7 @@ export default function PerformanceAnalytics({ selectedBarangay, dateFrom, dateT
             fair: { color: 'var(--warning)', bg: 'rgba(243,156,18,.1)', border: 'rgba(243,156,18,.28)' },
             poor: { color: 'var(--danger)', bg: 'rgba(231,76,60,.1)', border: 'rgba(231,76,60,.28)' },
           }
-          const MEDALS = ['🥇', '🥈', '🥉']
+          const MEDALS = ['#1', '#2', '#3']
           return (
             <PaCard icon={<BarChart3 size={18} />} iconVariant="red" title="Barangay Performance Leaderboard" subtitle="Service score · resolution efficiency · activity">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
@@ -464,7 +474,7 @@ export default function PerformanceAnalytics({ selectedBarangay, dateFrom, dateT
                                 fontSize: 8, fontWeight: 800, padding: '1px 6px', borderRadius: 20, flexShrink: 0,
                                 background: 'rgba(231,76,60,.12)', color: 'var(--danger)', border: '1px solid rgba(231,76,60,.3)',
                                 textTransform: 'uppercase', letterSpacing: '.06em',
-                              }}>⚠ Needs Attention</span>
+                              }}><AlertTriangle size={9} style={{ verticalAlign: 'middle', marginRight: 2 }} />Needs Attention</span>
                             )}
                           </div>
                           <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 1 }}>
@@ -698,6 +708,6 @@ export default function PerformanceAnalytics({ selectedBarangay, dateFrom, dateT
           </PaCard>
         )
       })()}
-    </>
+    </div>
   )
 }

@@ -11,6 +11,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { Camera, X, RefreshCw, AlertCircle, Check } from 'lucide-react'
 
 export default function GlobalCameraModal({
   visible,
@@ -153,19 +154,19 @@ export default function GlobalCameraModal({
         <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <div style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: 800, letterSpacing: '.1em', color: 'rgba(255,255,255,0.6)', marginBottom: 2 }}>
-              REPORT PHOTO
+              REAL-TIME REPORT PHOTO
             </div>
             <div style={{ fontSize: 18, fontWeight: 800, color: '#fff' }}>
-              Capture Issue
+              Capture Live Photo
             </div>
           </div>
           <button onClick={handleClose} style={{
             width: 40, height: 40, borderRadius: '50%',
             background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.15)',
-            color: 'rgba(255,255,255,0.9)', fontSize: 18, cursor: 'pointer',
+            color: 'rgba(255,255,255,0.9)', cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             transition: 'background 0.2s',
-          }}>✕</button>
+          }}><X size={20} /></button>
         </div>
 
         {/* Viewfinder (Flex 1 to take available space) */}
@@ -219,18 +220,30 @@ export default function GlobalCameraModal({
           {isError && (
             <div style={{
               position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
-              alignItems: 'center', justifyContent: 'center', gap: 12,
-              background: 'rgba(13,17,23,0.9)', padding: '0 24px',
+              alignItems: 'center', justifyContent: 'center', gap: 14,
+              background: 'rgba(13,17,23,0.92)', padding: '0 24px',
             }}>
-              <span style={{ fontSize: 36 }}>📵</span>
-              <div style={{ fontSize: 14, color: '#fca5a5', textAlign: 'center', fontWeight: 600, lineHeight: 1.5 }}>
-                {cameraError}
+              <AlertCircle size={44} color="#ef4444" />
+              <div style={{ fontSize: 17, color: '#fff', fontWeight: 800 }}>
+                Camera Not Available
               </div>
-              <button onClick={startCamera} style={{
-                marginTop: 12, padding: '12px 28px', borderRadius: 24,
-                background: '#16a34a', border: 'none', color: '#fff',
-                fontSize: 14, fontWeight: 700, cursor: 'pointer',
-              }}>Try again</button>
+              <div style={{ fontSize: 13, color: '#fca5a5', textAlign: 'center', fontWeight: 500, lineHeight: 1.5, maxWidth: 340 }}>
+                {cameraError || 'Camera permission is required. To ensure authentic real-time reports, photo uploads are not permitted.'}
+              </div>
+              <div style={{ display: 'flex', gap: 10, marginTop: 8, justifyContent: 'center' }}>
+                <button
+                  onClick={startCamera}
+                  style={{
+                    padding: '12px 24px', borderRadius: 24,
+                    background: '#16a34a', border: 'none',
+                    color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    boxShadow: '0 4px 14px rgba(22,163,74,0.4)',
+                  }}
+                >
+                  <RefreshCw size={15} /> Retry Camera
+                </button>
+              </div>
             </div>
           )}
 
@@ -261,7 +274,7 @@ export default function GlobalCameraModal({
 
         {/* Bottom controls panel */}
         <div style={{
-          padding: '24px 24px 40px',
+          padding: '20px 24px 36px',
           background: '#0d1117',
           flexShrink: 0
         }}>
@@ -269,7 +282,7 @@ export default function GlobalCameraModal({
             /* Captured: retake / use photo */
             <div style={{ display: 'flex', gap: 12 }}>
               <button onClick={handleRetake} style={{
-                flex: '0 0 auto', padding: '16px 24px', borderRadius: 16,
+                flex: '0 0 auto', padding: '14px 22px', borderRadius: 14,
                 background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
                 color: 'rgba(255,255,255,0.8)', fontSize: 15, fontWeight: 700,
                 cursor: 'pointer',
@@ -277,45 +290,41 @@ export default function GlobalCameraModal({
                 Retake
               </button>
               <button onClick={handleUsePhoto} style={{
-                flex: 1, padding: '16px', borderRadius: 16, border: 'none',
+                flex: 1, padding: '14px', borderRadius: 14, border: 'none',
                 background: '#16a34a', color: '#fff',
                 fontFamily: 'inherit', fontSize: 16, fontWeight: 800, letterSpacing: '.04em',
                 cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                 boxShadow: '0 8px 24px rgba(22,163,74,0.3)',
               }}>
-                ✓ Use Photo
+                <Check size={18} /> Use Photo
               </button>
             </div>
 
           ) : (
-            /* Live / starting: shutter button */
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative', width: '100%' }}>
+            /* Live / starting: shutter button & cancel */
+            <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 80px', alignItems: 'center', width: '100%', maxWidth: 420, margin: '0 auto' }}>
 
-              {/* Cancel Button (Bottom Left) */}
+              {/* Cancel Button */}
               <button
                 onClick={handleClose}
                 style={{
-                  position: 'absolute',
-                  left: 0,
                   background: 'none',
                   border: 'none',
-                  color: 'rgba(255,255,255,0.9)',
-                  fontSize: 16,
+                  color: 'rgba(255,255,255,0.7)',
+                  fontSize: 15,
                   fontWeight: 600,
                   cursor: 'pointer',
                   padding: '10px 0',
+                  textAlign: 'left',
                 }}
               >
                 Cancel
               </button>
 
-              {isError ? (
-                <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, fontWeight: 600 }}>
-                  Camera access required to report issues
-                </div>
-              ) : (
+              {/* Center Shutter */}
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
                 <button onClick={handleCapture} disabled={!isLive} style={{
-                  width: 80, height: 80, borderRadius: '50%', border: 'none',
+                  width: 76, height: 76, borderRadius: '50%', border: 'none',
                   background: isLive ? '#fff' : 'rgba(255,255,255,0.15)',
                   cursor: isLive ? 'pointer' : 'not-allowed',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -325,21 +334,22 @@ export default function GlobalCameraModal({
                   transition: 'all .2s', position: 'relative',
                 }}>
                   <div style={{
-                    width: 66, height: 66, borderRadius: '50%',
+                    width: 62, height: 62, borderRadius: '50%',
                     border: '3px solid #0d1117',
                     background: isLive ? '#fff' : 'rgba(255,255,255,0.1)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}>
-                    <span style={{ fontSize: 24, color: '#0d1117', display: isLive ? 'block' : 'none' }}></span>
-                  </div>
+                  }} />
                 </button>
-              )}
+              </div>
+
+              {/* Empty placeholder to keep shutter centered */}
+              <div />
             </div>
           )}
 
           {!isCaptured && isLive && (
-            <div style={{ textAlign: 'center', marginTop: 16, fontSize: 12, color: 'rgba(255,255,255,0.4)', letterSpacing: '.05em', fontWeight: 600 }}>
-              TAP TO CAPTURE ISSUE
+            <div style={{ textAlign: 'center', marginTop: 14, fontSize: 11, color: 'rgba(255,255,255,0.45)', letterSpacing: '.05em', fontWeight: 600 }}>
+              TAP SHUTTER TO CAPTURE REAL-TIME PHOTO
             </div>
           )}
         </div>

@@ -307,7 +307,7 @@ export const ROLE_NAV_CONFIG = {
     {
       type: 'group', label: 'Monitoring', icon: 'hotspot',
       items: [
-
+        { path: '/admin/validate-reports', label: 'Validate Reports', icon: 'check' },
         { path: '/admin/hotspots', label: 'Reported Hotspots', icon: 'hotspot' },
         { path: '/admin/escalations', label: 'Escalations', icon: 'escalation' },
         { path: '/admin/activity-log', label: 'Activity Logs', icon: 'activity' },
@@ -322,6 +322,8 @@ export const ROLE_NAV_CONFIG = {
     {
       type: 'group', label: 'Administration', icon: 'users',
       items: [
+        { path: '/admin/content', label: 'Content Management', icon: 'news' },
+        { path: '/admin/events', label: 'Event Management', icon: 'schedule' },
         { path: '/admin/users', label: 'User Management', icon: 'users' },
         { path: '/admin/barangays', label: 'Barangay Management', icon: 'map' },
       ],
@@ -411,6 +413,7 @@ export const ROLE_NAV_CONFIG = {
     {
       type: 'group', label: 'Community', icon: 'barangay',
       items: [
+        { path: '/community', label: 'Community Forum', icon: 'users' },
         { path: '/analytics', label: 'Barangay Analytics', icon: 'barangay' },
         { path: '/announcements', label: 'News & Alerts', icon: 'news' },
       ],
@@ -444,11 +447,14 @@ export const SIDEBAR_NAV = {
     { path: '/schedule', label: 'Schedule', icon: '📅' },
     { path: '/map', label: 'Live Map', icon: '🗺️' },
 
+    { path: '/admin/content', label: 'Content Management', icon: '📰' },
+    { path: '/admin/events', label: 'Event Management', icon: '📅' },
     { path: '/admin/trucks', label: 'Trucks & Drivers', icon: '🚛' },
     { path: '/admin/users', label: 'User Management', icon: '👥' },
     { path: '/admin/barangays', label: 'Barangay Management', icon: '🗺️' },
     { path: '/admin/dumpsites', label: 'Dumpsites', icon: '🏔️' },
     { path: '/admin/routes', label: 'Routes', icon: '🗺️' },
+    { path: '/admin/validate-reports', label: 'Validate Reports', icon: '📋' },
     { path: '/admin/escalations', label: 'Escalations', icon: '⚠️' },
     { path: '/admin/analytics', label: 'Analytics', icon: '📈' },
     { path: '/admin/hotspots', label: 'Hotspots', icon: '🔥' },

@@ -23,7 +23,8 @@ function normalizeDays(daysInput) {
   return new Set(normalized)
 }
 
-export function detectConflicts(newSched, existingSchedules) {
+export function detectConflicts(newSched, existingSchedules = []) {
+  const schedList = Array.isArray(existingSchedules) ? existingSchedules : (existingSchedules?.results || [])
   const newStart = timeToMinutes(newSched.start_time)
   const newEnd   = timeToMinutes(newSched.end_time)
   const newDays  = normalizeDays(newSched.days)
@@ -36,7 +37,7 @@ export function detectConflicts(newSched, existingSchedules) {
 
   const conflicts = []
 
-  for (const ex of existingSchedules) {
+  for (const ex of schedList) {
     if (newSched.editId && String(ex.id) === String(newSched.editId)) continue
 
     const exDays = normalizeDays(ex.days)

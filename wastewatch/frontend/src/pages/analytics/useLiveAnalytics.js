@@ -1,3 +1,5 @@
+// useLiveAnalytics.js
+
 import { useState, useEffect } from 'react'
 import api from '../../api/client'
 import { useAuth } from '../../context/AuthContext'
@@ -29,8 +31,10 @@ export function useLiveAnalytics({ selectedBarangay, dateFrom, dateTo }) {
       })
       .catch(err => {
         if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') return
-        setState(s => ({ raw: null, loading: false,
-          error: err.response?.data?.detail || 'Could not load live data.' }))
+        setState(s => ({
+          raw: null, loading: false,
+          error: err.response?.data?.detail || 'Could not load live data.'
+        }))
       })
     return () => ctrl.abort()
   }, [user?.id, selectedBarangay, dateFrom, dateTo])

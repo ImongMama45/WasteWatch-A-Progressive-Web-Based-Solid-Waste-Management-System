@@ -7,16 +7,32 @@
 import { useState, useEffect, useCallback } from 'react'
 import api from '../api/client'
 
+function normalizeEscalationsPayload(data) {
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data?.results)) return data.results
+  return []
+}
+
 export function useEscalations() {
   const [items, setItems] = useState([])
+  const [pagination, setPagination] = useState({ count: 0, total_pages: 1, current_page: 1, page_size: 10, summary: null })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  const refresh = useCallback(async (silent = false) => {
+  const refresh = useCallback(async (params = {}, silent = false) => {
     if (!silent) setLoading(true)
     try {
-      const res = await api.get('/api/watcher/escalations/')
-      setItems(res.data)
+      const res = await api.get('/api/watcher/escalations/', { params })
+      setItems(normalizeEscalationsPayload(res.data))
+      if (res.data && typeof res.data === 'object' && 'count' in res.data) {
+        setPagination({
+          count: res.data.count || 0,
+          total_pages: res.data.total_pages || 1,
+          current_page: res.data.current_page || 1,
+          page_size: res.data.page_size || 10,
+          summary: res.data.summary || null
+        })
+      }
       setError(null)
     } catch (err) {
       setError('Failed to fetch escalations')
@@ -52,5 +68,5 @@ export function useEscalations() {
     refresh()
   }, [refresh])
 
-  return { items, loading, error, refresh, saveEscalation, resolveEscalation }
+  return { items, pagination, loading, error, refresh, saveEscalation, resolveEscalation }
 }

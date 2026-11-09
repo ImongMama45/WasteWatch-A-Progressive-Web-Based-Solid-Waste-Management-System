@@ -25,6 +25,8 @@ import OfflineReportBuilder from '../../components/OfflineReportBuilder'
 import { useOfflineReports } from '../../hooks/useOfflineReports'
 import { useBarangayTracker } from '../../hooks/useBarangayTracker'
 import LiveTrackerCard from '../../components/analytics/LiveTrackerCard'
+import { StatCardSkeleton, FeedCardSkeleton, SidebarWidgetSkeleton } from '../../components/ui/Skeleton'
+import Pagination from '../../components/ui/Pagination'
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 
@@ -82,7 +84,7 @@ const STATUS_LABELS = { collecting: 'Collecting', en_route: 'En Route', idle: 'I
 export default function BrgyDashboard() {
   const { user } = useAuth()
   const { notify } = useNotification()
-  const trucksRef = useRef(null);
+  const trucksRef = useRef(null)
   const navigate = useNavigate()
   const { items: escalations } = useEscalations()
   const { addReport } = useOfflineReports()
@@ -92,7 +94,11 @@ export default function BrgyDashboard() {
 
   const [stats, setStats] = useState({ pending: 0, approved: 0, rejected: 0, resolved: 0 })
   const [loading, setLoading] = useState(true)
+  const [scheduleLoading, setScheduleLoading] = useState(true)
   const [allReports, setAllReports] = useState([])
+  const [reportPage, setReportPage] = useState(1)
+  const [reportTotalCount, setReportTotalCount] = useState(0)
+  const [reportTotalPages, setReportTotalPages] = useState(1)
   const [trucks, setTrucks] = useState([])
   const [schedule, setSchedule] = useState([])
   const [activeMainTab, setActiveMainTab] = useState('validation')
@@ -111,10 +117,10 @@ export default function BrgyDashboard() {
         const liveRes = await api.get('/api/public/live/')
 
         if (liveRes.data) {
-          const userBrgy = user?.barangay_name || user?.barangay?.name;
+          const userBrgy = user?.barangay_name || user?.barangay?.name
           if (userBrgy) {
-            const dispatched = liveRes.data.find(d => d.barangays && d.barangays.includes(userBrgy));
-            if (dispatched) setActiveDispatch(dispatched);
+            const dispatched = liveRes.data.find(d => d.barangays && d.barangays.includes(userBrgy))
+            if (dispatched) setActiveDispatch(dispatched)
           }
 
           const mappedTrucks = liveRes.data.map(d => ({
@@ -139,6 +145,7 @@ export default function BrgyDashboard() {
   }, [user?.barangay_name, user?.barangay?.name])
 
   async function fetchSchedule() {
+    setScheduleLoading(true)
     try {
       const res = await api.get('/api/public/schedule/')
       const userBrgy = user?.barangay_name || user?.barangay?.name
@@ -150,6 +157,8 @@ export default function BrgyDashboard() {
       setSchedule(brgySchedules.length > 0 ? brgySchedules : res.data)
     } catch (err) {
       console.error('Failed to fetch schedule:', err)
+    } finally {
+      setScheduleLoading(false)
     }
   }
 
@@ -180,8 +189,25 @@ export default function BrgyDashboard() {
   async function fetchReports() {
     setLoading(true)
     try {
-      const res = await api.get('/api/watcher/reports/')
-      setAllReports(res.data)
+      const params = new URLSearchParams()
+      params.append('page', reportPage)
+      params.append('page_size', '10')
+      if (reportFilter && reportFilter !== 'All') {
+        params.append('status', reportFilter.toLowerCase())
+      }
+      const res = await api.get(`/api/watcher/reports/?${params.toString()}`)
+      if (res.data?.results) {
+        setAllReports(res.data.results)
+        setReportTotalCount(res.data.count || 0)
+        setReportTotalPages(res.data.total_pages || 1)
+        if (res.data.summary) {
+          setStats(prev => ({ ...prev, ...res.data.summary }))
+        }
+      } else if (Array.isArray(res.data)) {
+        setAllReports(res.data)
+        setReportTotalCount(res.data.length)
+        setReportTotalPages(Math.ceil(res.data.length / 10) || 1)
+      }
     } catch (err) {
       console.error('Failed to fetch reports:', err)
     } finally {
@@ -189,10 +215,9 @@ export default function BrgyDashboard() {
     }
   }
 
-  function showToast(msg) {
-    setToast(msg)
-    setTimeout(() => setToast(null), 3000)
-  }
+  useEffect(() => {
+    fetchReports()
+  }, [reportPage, reportFilter])
 
   function showToast(msg) {
     setToast(msg)
@@ -207,13 +232,10 @@ export default function BrgyDashboard() {
     return () => clearTimeout(timer)
   }, [activeMainTab])
 
-  const pendingCount = allReports.filter(r => r.status === 'pending').length
+  const pendingCount = stats.pending ?? allReports.filter(r => r.status === 'pending').length
   const missedCount = trucks.filter(t => t.missedYesterday).length
 
-  const filteredReports = allReports.filter(report => {
-    if (reportFilter === 'All') return true
-    return report.status === reportFilter.toLowerCase()
-  })
+  const filteredReports = allReports
 
   return (
     <>
@@ -250,44 +272,51 @@ export default function BrgyDashboard() {
         </div>
       )}
 
+      <div className="page ww-page-enter">
 
-
-      <div className="page">
-
-        {/* ── PAGE HEADER ── */}
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 3 }}>
-            <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 22, fontWeight: 800, margin: 0 }}>
-              Barangay Dashboard
-            </h2>
-            <span style={{
-              background: 'rgba(46,204,113,0.1)', color: 'var(--accent)',
-              border: '1px solid rgba(46,204,113,0.28)',
-              fontSize: 9, fontWeight: 800, padding: '3px 10px',
-              borderRadius: 20, letterSpacing: '.08em',
-            }}>OFFICIAL</span>
+        {/* ── PAGE HEADER WITH CORNER LIVE TRACKER ── */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          flexWrap: 'wrap',
+          gap: 16,
+          marginBottom: 20,
+        }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 3 }}>
+              <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 22, fontWeight: 800, margin: 0 }}>
+                Barangay Dashboard
+              </h2>
+              <span style={{
+                background: 'rgba(46,204,113,0.1)', color: 'var(--accent)',
+                border: '1px solid rgba(46,204,113,0.28)',
+                fontSize: 9, fontWeight: 800, padding: '3px 10px',
+                borderRadius: 20, letterSpacing: '.08em',
+              }}>OFFICIAL</span>
+            </div>
+            <p className="text-muted text-sm">
+              {user?.barangay_name || 'Your Barangay'} · Monitor, validate &amp; coordinate
+            </p>
           </div>
-          <p className="text-muted text-sm">
-            {user?.barangay_name || 'Your Barangay'} · Monitor, validate &amp; coordinate
-          </p>
-        </div>
 
-        {tracker.data?.trucks?.length > 0 ? (
-          tracker.data.trucks.map(t => <LiveTrackerCard key={t.schedule_id} truck={t} />)
-        ) : (
-          <DispatchCard
-            dispatchData={activeDispatch}
-            userBarangay={user?.barangay_name || user?.barangay?.name}
-          />
-        )}
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {tracker.loading ? (
+              <LiveTrackerCard loading />
+            ) : tracker.data?.trucks?.length > 0 ? (
+              tracker.data.trucks.map(t => <LiveTrackerCard key={t.schedule_id} truck={t} />)
+            ) : (
+              <DispatchCard
+                dispatchData={activeDispatch}
+                userBarangay={user?.barangay_name || user?.barangay?.name}
+              />
+            )}
+          </div>
+        </div>
 
         <div className='mobile-schedule'>
-          <HomeCarousel role="brgy_official" userBarangay={user?.barangay_name} onReport={() => setShowBuilder(true)} extraSecondCta={{ label: '✔ Validate', onClick: () => navigate('/brgy/validate-reports') }} />
+          <HomeCarousel role="brgy_official" userBarangay={user?.barangay_name} onReport={() => setShowBuilder(true)} extraSecondCta={{ label: 'Validate', onClick: () => navigate('/brgy/validate-reports') }} />
         </div>
-
-
-
-
 
         <div className="page-grid">
 
@@ -297,20 +326,24 @@ export default function BrgyDashboard() {
           <div>
 
             {/* ── STAT CARDS ── */}
-            <div className="stat-grid" style={{ marginBottom: 20 }}>
-              {[
-                { label: 'Pending Validation', value: pendingCount, color: 'var(--card)' },
-                { label: 'Approved', value: stats.approved || 0, color: 'var(--card)' },
-                { label: 'Rejected', value: stats.rejected || 0, color: 'var(--card)' },
-                { label: 'Missed Pickups', value: missedCount, color: 'var(--card)' },
-              ].map(s => (
-                <div key={s.label} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
-                  <div style={{ position: 'absolute', top: 12, right: 14, fontSize: 18, opacity: .15 }}>{s.icon}</div>
-                  <div className="label">{s.label}</div>
-                  <div className="value" style={{ color: s.color, fontSize: 30 }}>{s.value}</div>
-                </div>
-              ))}
-            </div>
+            {loading ? (
+              <StatCardSkeleton count={4} useStatGridClass style={{ marginBottom: 20 }} />
+            ) : (
+              <div className="stat-grid ww-fade-in" style={{ marginBottom: 20 }}>
+                {[
+                  { label: 'Pending Validation', value: pendingCount, color: 'var(--card)' },
+                  { label: 'Approved', value: stats.approved || 0, color: 'var(--card)' },
+                  { label: 'Rejected', value: stats.rejected || 0, color: 'var(--card)' },
+                  { label: 'Missed Pickups', value: missedCount, color: 'var(--card)' },
+                ].map(s => (
+                  <div key={s.label} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
+                    <div style={{ position: 'absolute', top: 12, right: 14, fontSize: 18, opacity: .15 }}>{s.icon}</div>
+                    <div className="label">{s.label}</div>
+                    <div className="value" style={{ color: s.color, fontSize: 30 }}>{s.value}</div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* ── MISSED COLLECTION ALERT BAR ── */}
             {missedCount > 0 && (
@@ -397,10 +430,13 @@ export default function BrgyDashboard() {
               <div style={{ animation: 'slideDown .2s' }}>
 
                 {/* Filter pills */}
-                <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
                   {['All', 'Pending', 'Approved', 'Rejected'].map(f => (
                     <button key={f} className="fpill"
-                      onClick={() => setReportFilter(f)}
+                      onClick={() => {
+                        setReportFilter(f)
+                        setReportPage(1)
+                      }}
                       style={{
                         padding: '5px 14px', borderRadius: 20, border: '1px solid',
                         fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-body)',
@@ -411,6 +447,37 @@ export default function BrgyDashboard() {
                       {f}
                     </button>
                   ))}
+
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontSize: 12,
+                    color: 'var(--text-muted)',
+                    fontWeight: 600,
+                    marginLeft: 6
+                  }}>
+                    <span>
+                      Showing <strong style={{ color: 'var(--text)' }}>
+                        {reportTotalCount === 0 ? 0 : (reportPage - 1) * 10 + 1}–{Math.min(reportPage * 10, reportTotalCount)}
+                      </strong> of <strong style={{ color: 'var(--text)' }}>{reportTotalCount}</strong>
+                    </span>
+                    <span
+                      className="ww-pagination-ratio"
+                      style={{
+                        background: 'var(--surface-2, #f1f5f9)',
+                        border: '1px solid var(--border, #cbd5e1)',
+                        color: 'var(--accent, #10b981)',
+                        padding: '2px 8px',
+                        borderRadius: 999,
+                        fontSize: 11,
+                        fontWeight: 800
+                      }}
+                    >
+                      {filteredReports.length}/{reportTotalCount}
+                    </span>
+                  </div>
+
                   <button onClick={() => navigate('/brgy/validate-reports')}
                     style={{
                       border: '1px dashed var(--border)', borderRadius: 20,
@@ -424,9 +491,7 @@ export default function BrgyDashboard() {
                 </div>
 
                 {loading ? (
-                  <div className="card" style={{ textAlign: 'center', padding: '40px 20px' }}>
-                    <div className="text-muted text-sm">Loading reports…</div>
-                  </div>
+                  <FeedCardSkeleton count={3} compact />
                 ) : filteredReports.length === 0 ? (
                   <div className="card" style={{ textAlign: 'center', padding: '40px 20px' }}>
                     <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12, color: 'var(--accent)' }}>
@@ -438,7 +503,7 @@ export default function BrgyDashboard() {
                     </div>
                   </div>
                 ) : (
-                  <>
+                  <div className="ww-stagger">
                     {filteredReports.map(report => {
                       const issueType = getIssueType(report)
                       const statusBadge = STATUS_BADGE[report.status] || STATUS_BADGE.pending
@@ -492,10 +557,17 @@ export default function BrgyDashboard() {
                         </div>
                       )
                     })}
-
-
-                  </>
+                  </div>
                 )}
+
+                <Pagination
+                  currentPage={reportPage}
+                  totalPages={reportTotalPages}
+                  totalCount={reportTotalCount}
+                  pageSize={10}
+                  onPageChange={setReportPage}
+                  loading={loading}
+                />
               </div>
             )}
 
@@ -558,13 +630,13 @@ export default function BrgyDashboard() {
                             <span style={{
                               background: 'rgba(231,76,60,0.1)', color: 'var(--danger)',
                               fontSize: 9, fontWeight: 800, padding: '2px 8px', borderRadius: 20,
-                            }}>⚠️ MISSED</span>
+                            }}>MISSED</span>
                           )}
                           {truck.flagged && (
                             <span style={{
                               background: 'rgba(243,156,18,0.1)', color: 'var(--warning)',
                               fontSize: 9, fontWeight: 800, padding: '2px 8px', borderRadius: 20,
-                            }}>🚩 FLAGGED</span>
+                            }}>FLAGGED</span>
                           )}
                         </div>
                         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
@@ -600,13 +672,13 @@ export default function BrgyDashboard() {
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
                             <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.06em' }}>ROUTE PROGRESS</span>
                             <span style={{ fontSize: 12, fontWeight: 700 }}>
-                              {Math.round((truck.stopsCompleted / truck.totalStops) * 100)}%
+                              {Math.round((truck.stopsCompleted / (truck.totalStops || 1)) * 100)}%
                             </span>
                           </div>
                           <div style={{ background: 'var(--border)', borderRadius: 20, height: 7, overflow: 'hidden' }}>
                             <div style={{
                               height: '100%', borderRadius: 20,
-                              width: `${(truck.stopsCompleted / truck.totalStops) * 100}%`,
+                              width: `${(truck.stopsCompleted / (truck.totalStops || 1)) * 100}%`,
                               background: 'linear-gradient(90deg,var(--accent),#14b8a6)',
                               transition: 'width .4s',
                             }} />
@@ -640,8 +712,8 @@ export default function BrgyDashboard() {
                           fontSize: 12, lineHeight: 1.6, color: 'var(--text-muted)',
                         }}>
                           {truck.missedYesterday
-                            ? <><strong style={{ color: 'var(--danger)' }}>⚠️ Missed collection yesterday.</strong> This truck did not complete its route.</>
-                            : <><strong style={{ color: 'var(--accent)' }}>✅ On schedule.</strong> No missed collections in the past 7 days.</>
+                            ? <><strong style={{ color: 'var(--danger)' }}>Missed collection yesterday.</strong> This truck did not complete its route.</>
+                            : <><strong style={{ color: 'var(--accent)' }}>On schedule.</strong> No missed collections in the past 7 days.</>
                           }
                         </div>
 
@@ -722,7 +794,9 @@ export default function BrgyDashboard() {
                   View Brgy Collection Schedule
                 </button>
                 <div className="card" style={{ padding: 16, animation: 'slideDown .2s' }}>
-                  {schedule.length === 0 ? (
+                  {scheduleLoading ? (
+                    <SidebarWidgetSkeleton rows={4} />
+                  ) : schedule.length === 0 ? (
                     <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>No schedules found.</div>
                   ) : schedule.map((s, i) => (
                     <div key={i} style={{
@@ -799,26 +873,32 @@ export default function BrgyDashboard() {
 
             <div className="card">
               <h3 className="section-title" style={{ marginBottom: 12, fontSize: 15 }}>Pending Summary</h3>
-              {[
-                { label: 'Reports to Validate', value: pendingCount, color: 'var(--warning)' },
-                { label: 'Missed Collections', value: missedCount, color: 'var(--danger)' },
-                { label: 'Flagged Trucks', value: trucks.filter(t => t.flagged).length, color: 'var(--warning)' },
-              ].map(s => (
-                <div key={s.label} style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  padding: '9px 0', borderBottom: '1px solid var(--border)',
-                }}>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{s.label}</span>
-                  <span style={{ fontSize: 18, fontWeight: 800, color: s.color, fontFamily: 'var(--font-head)' }}>
-                    {s.value}
-                  </span>
-                </div>
-              ))}
+              {loading ? (
+                <SidebarWidgetSkeleton rows={3} />
+              ) : (
+                [
+                  { label: 'Reports to Validate', value: pendingCount, color: 'var(--warning)' },
+                  { label: 'Missed Collections', value: missedCount, color: 'var(--danger)' },
+                  { label: 'Flagged Trucks', value: trucks.filter(t => t.flagged).length, color: 'var(--warning)' },
+                ].map(s => (
+                  <div key={s.label} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '9px 0', borderBottom: '1px solid var(--border)',
+                  }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{s.label}</span>
+                    <span style={{ fontSize: 18, fontWeight: 800, color: s.color, fontFamily: 'var(--font-head)' }}>
+                      {s.value}
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
 
             <div className="card">
               <h3 className="section-title" style={{ marginBottom: 12, fontSize: 15 }}>Collection Schedule</h3>
-              {schedule.length === 0 ? (
+              {scheduleLoading ? (
+                <SidebarWidgetSkeleton rows={3} />
+              ) : schedule.length === 0 ? (
                 <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>No schedules available.</div>
               ) : schedule.slice(0, 3).map((s, i) => (
                 <div key={i} style={{

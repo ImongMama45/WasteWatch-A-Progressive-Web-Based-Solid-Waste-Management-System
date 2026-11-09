@@ -7,16 +7,33 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import api from '../api/client'
 
-export function useTrucks() {
+function normalizeTrucksPayload(data) {
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data?.results)) return data.results
+  return []
+}
+
+export function useTrucks(defaultParams = null) {
   const [trucks, setTrucks] = useState([])
+  const [pagination, setPagination] = useState({ count: 0, total_pages: 1, current_page: 1, page_size: 10, summary: null })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const defaultParamsRef = useRef(defaultParams)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (params) => {
     setLoading(true)
     try {
-      const res = await api.get('/api/driver/trucks/')
-      setTrucks(res.data)
+      const res = await api.get('/api/driver/trucks/', { params: params || defaultParamsRef.current || {} })
+      setTrucks(normalizeTrucksPayload(res.data))
+      if (res.data && typeof res.data === 'object' && 'count' in res.data) {
+        setPagination({
+          count: res.data.count || 0,
+          total_pages: res.data.total_pages || 1,
+          current_page: res.data.current_page || 1,
+          page_size: res.data.page_size || 10,
+          summary: res.data.summary || null
+        })
+      }
       setError(null)
     } catch (err) {
       setError('Failed to fetch trucks')
@@ -57,5 +74,5 @@ export function useTrucks() {
     refresh()
   }, [refresh])
 
-  return { trucks, loading, error, refresh, saveTruck, deleteTruck }
+  return { trucks, pagination, loading, error, refresh, saveTruck, deleteTruck }
 }

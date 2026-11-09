@@ -22,11 +22,24 @@ import api from '../../../api/client'
 import { useNotification } from '../../../context/NotificationContext'
 import useGpsTracking from '../../../hooks/useGpsTracking'
 import useReassignedStops from '../../../hooks/useReassignedStops'
-import Navbar from '../../../components/Navbar'
 import {
   normalizeStopStatus,
   isCompletedStopStatus,
 } from '../../../utils/pickupStatusSync'
+import {
+  Package,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  LocateFixed,
+  X,
+  AlertTriangle,
+  RotateCcw,
+  Compass,
+  Plus,
+  Minus,
+} from 'lucide-react'
+import { calculateBearing, getShortestAngle, create3DVehicleIcon } from './map3DUtils'
 
 const ORS_API_KEY = import.meta.env.VITE_ORS_API_KEY
 
@@ -116,7 +129,27 @@ export default function TruckNotFull({ visible, shift, schedule, stopStatuses, o
 
   const [loading, setLoading] = useState(false)
   const [leafletReady, setLeafletReady] = useState(false)
+  const [is3D, setIs3D] = useState(false)
+  const [mapHeading, setMapHeading] = useState(0)
+  const prevGpsPosRef = useRef(null)
+  const isFollowCamRef = useRef(true)
+  const [isUserPanned, setIsUserPanned] = useState(false)
+  const [isRetracted, setIsRetracted] = useState(false)
+  const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false)
+  const [isTurnCardCollapsed, setIsTurnCardCollapsed] = useState(false)
   const [isPanelExpanded, setIsPanelExpanded] = useState(false)
+
+  const toggleRetract = () => {
+    setIsRetracted(prev => {
+      const next = !prev
+      setIsHeaderCollapsed(next)
+      return next
+    })
+  }
+
+  const toggleHeader = () => {
+    setIsHeaderCollapsed(prev => !prev)
+  }
   // ORS routing state
   const [orsLoading, setOrsLoading] = useState(false)
   const [orsDist, setOrsDist] = useState(null)   // metres, from ORS
@@ -142,6 +175,39 @@ export default function TruckNotFull({ visible, shift, schedule, stopStatuses, o
       setOrsFetchKey(k => k + 1)
     }
   }, [gpsPos])
+
+  // Track heading & course angle
+  useEffect(() => {
+    if (!gpsPos) return
+    let newHeading = null
+
+    if (gpsPos.heading != null && !Number.isNaN(gpsPos.heading) && gpsPos.heading > 0) {
+      newHeading = gpsPos.heading
+    } else if (prevGpsPosRef.current) {
+      const dist = haversineDistance(prevGpsPosRef.current.lat, prevGpsPosRef.current.lng, gpsPos.lat, gpsPos.lng)
+      if (dist >= 1.5) {
+        newHeading = calculateBearing(prevGpsPosRef.current.lat, prevGpsPosRef.current.lng, gpsPos.lat, gpsPos.lng)
+      }
+    }
+
+    if (newHeading == null && orsData?.geometry) {
+      try {
+        const pts = decodePolyline(orsData.geometry)
+        if (pts.length >= 2) {
+          newHeading = calculateBearing(pts[0][0], pts[0][1], pts[1][0], pts[1][1])
+        }
+      } catch { }
+    }
+
+    if (newHeading == null && nearestMissed) {
+      newHeading = calculateBearing(gpsPos.lat, gpsPos.lng, Number(nearestMissed.lat), Number(nearestMissed.lng))
+    }
+
+    if (newHeading != null) {
+      setMapHeading(prev => getShortestAngle(prev, newHeading))
+    }
+    prevGpsPosRef.current = gpsPos
+  }, [gpsPos, nearestMissed, orsData])
 
   // Reassigned stops from other drivers
   const [reassignedStops, setReassignedStops] = useState([])
@@ -247,10 +313,21 @@ export default function TruckNotFull({ visible, shift, schedule, stopStatuses, o
     const center = gpsPos ? [gpsPos.lat, gpsPos.lng]
       : nearestMissed?.lat ? [Number(nearestMissed.lat), Number(nearestMissed.lng)]
         : LUCENA_FALLBACK
-    const map = L.map(mapRef.current, { center, zoom: 15, zoomControl: false })
+    const map = L.map(mapRef.current, { center, zoom: 17.5, zoomControl: false })
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
       { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(map)
     mapInstance.current = map
+
+    const pauseFollow = () => {
+      isFollowCamRef.current = false
+      setIsUserPanned(true)
+    }
+    map.on('dragstart zoomstart movestart', (e) => {
+      if (e.originalEvent || e.type === 'dragstart' || e.type === 'zoomstart') {
+        pauseFollow()
+      }
+    })
+
     setTimeout(() => map.invalidateSize(), 250)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, leafletReady])
@@ -301,7 +378,7 @@ export default function TruckNotFull({ visible, shift, schedule, stopStatuses, o
         .addTo(mapInstance.current)
         .bindPopup(`
           <div style="font-family:sans-serif;min-width:160px;">
-            <b style="font-size:13px;">❌ ${wp.label || 'Stop ' + wp.idx}</b><br/>
+            <b style="font-size:13px;">${wp.label || 'Stop ' + wp.idx}</b><br/>
             <span style="font-size:11px;color:#ef4444;font-weight:700;">MISSED STOP</span>
             ${isNearest ? '<div style="margin-top:4px;font-size:10px;color:#64748b;">← Nearest to you</div>' : ''}
           </div>`)
@@ -321,19 +398,29 @@ export default function TruckNotFull({ visible, shift, schedule, stopStatuses, o
   useEffect(() => {
     if (!gpsPos || !mapInstance.current || !window.L) return
     const L = window.L
-    const html = `<div style="position:relative;width:18px;height:18px;">
-      <span style="position:absolute;inset:-6px;border-radius:50%;border:2px solid #2563eb;opacity:0.4;animation:tnfPulse 2s ease infinite;"></span>
-      <div style="position:absolute;inset:0;background:#2563eb;border:3px solid white;border-radius:50%;box-shadow:0 0 12px rgba(37,99,235,.7);"></div>
-    </div>`
+    const heading = mapHeading || gpsPos?.heading || 0
     if (!driverMarkerRef.current) {
       driverMarkerRef.current = L.marker([gpsPos.lat, gpsPos.lng], {
-        icon: L.divIcon({ html, className: '', iconSize: [18, 18], iconAnchor: [9, 9] }),
+        icon: create3DVehicleIcon(L, heading, is3D, mapHeading),
         zIndexOffset: 2000,
       }).addTo(mapInstance.current)
     } else {
       driverMarkerRef.current.setLatLng([gpsPos.lat, gpsPos.lng])
+      driverMarkerRef.current.setIcon(create3DVehicleIcon(L, heading, is3D, mapHeading))
     }
-  }, [gpsPos, leafletReady])
+
+    if (isFollowCamRef.current) {
+      mapInstance.current.panTo([gpsPos.lat, gpsPos.lng], { animate: true, duration: 0.4 })
+    }
+  }, [gpsPos, leafletReady, is3D, mapHeading])
+
+  // Sync 3D vehicle avatar when 3D mode toggles
+  useEffect(() => {
+    if (driverMarkerRef.current && window.L && gpsPos) {
+      const heading = mapHeading || gpsPos.heading || 0
+      driverMarkerRef.current.setIcon(create3DVehicleIcon(window.L, heading, is3D, mapHeading))
+    }
+  }, [is3D, mapHeading, gpsPos])
 
   // ── ORS route to nearest missed stop ──────────────────────────────────────
   // Re-fetches only when the nearest stop changes (not on every GPS tick).
@@ -498,142 +585,492 @@ export default function TruckNotFull({ visible, shift, schedule, stopStatuses, o
 
   return (
     <>
-      <Navbar />
+      {/* ── TOP NAV BAR WITH COLLAPSIBLE SLIDE-UP ── */}
+      <div style={{
+        position: 'fixed',
+        top: isHeaderCollapsed ? -65 : 0,
+        left: 0,
+        right: 0,
+        height: 60,
+        zIndex: 1005,
+        transition: 'top 0.35s cubic-bezier(0.2, 0.8, 0.2, 1)',
+        overflow: 'hidden',
+        pointerEvents: isHeaderCollapsed ? 'none' : 'auto',
+      }}>
+      </div>
       <style>{`
         @keyframes tnfPulse { 0%,100%{transform:scale(1);opacity:.5} 50%{transform:scale(1.75);opacity:0} }
         @keyframes tnfFadeUp { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
         @keyframes tnfSpin { to{transform:rotate(360deg)} }
       `}</style>
 
-      {/* Main container fills viewport BELOW the navbar */}
+      {/* Main container fills viewport */}
       <div style={{
-        position: 'fixed', top: 60, bottom: 0, left: 0, right: 0, zIndex: 900,
-        display: 'flex', flexDirection: 'column',
-        fontFamily: 'var(--font-body)', background: '#1e293b',
-        overflow: 'hidden'
+        position: 'fixed',
+        top: isHeaderCollapsed ? 0 : 60,
+        bottom: 0,
+        left: 0,
+        right: 0,
+        zIndex: 900,
+        display: 'flex',
+        flexDirection: 'column',
+        fontFamily: 'var(--font-body)',
+        background: '#1e293b',
+        overflow: 'hidden',
+        transition: 'top 0.35s cubic-bezier(0.2, 0.8, 0.2, 1)',
       }}>
 
         {/* ── MAP ── */}
-        <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
-          <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+        <div style={{ position: 'absolute', inset: 0, zIndex: 0, overflow: 'hidden' }}>
+          <div
+            ref={mapRef}
+            onTouchStart={() => { isFollowCamRef.current = false; setIsUserPanned(true) }}
+            onMouseDown={() => { isFollowCamRef.current = false; setIsUserPanned(true) }}
+            onWheel={() => { isFollowCamRef.current = false; setIsUserPanned(true) }}
+            style={{
+              width: '100%',
+              height: '100%',
+              position: 'absolute',
+              inset: 0,
+              transform: is3D ? `perspective(900px) rotateX(50deg) rotateZ(${-mapHeading}deg) scale(1.85)` : 'none',
+              transformOrigin: '50% 65%',
+              transition: 'transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1)',
+            }}
+          />
 
-          {/* DEV: teleport to nearest missed */}
-          {import.meta.env.DEV && nearestMissed?.lat && (
-            <div style={{ position: 'absolute', top: '50%', right: 14, marginTop: 54, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {/* ── FLOATING MAP CONTROLS (Right side HUD) ── */}
+          <div style={{
+            position: 'absolute',
+            right: 14,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }}>
+            {/* 3D / 2D Camera Toggle */}
+            <button
+              type="button"
+              onClick={() => {
+                setIs3D(prev => {
+                  const next = !prev
+                  if (mapInstance.current && gpsPos) {
+                    isFollowCamRef.current = true
+                    setIsUserPanned(false)
+                    mapInstance.current.setView([gpsPos.lat, gpsPos.lng], next ? 18 : 17.5, { animate: true })
+                    setTimeout(() => mapInstance.current?.invalidateSize(), 300)
+                  }
+                  return next
+                })
+              }}
+              title={is3D ? "Switch to 2D Top-Down View" : "Switch to 3D Cockpit View"}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: '50%',
+                background: is3D ? '#16a34a' : 'rgba(15, 23, 42, 0.85)',
+                backdropFilter: 'blur(10px)',
+                border: is3D ? '2px solid #22c55e' : '1px solid rgba(255,255,255,0.2)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+                transition: 'all 0.2s ease',
+                fontFamily: 'var(--font-head)',
+                fontSize: 13,
+                fontWeight: 900,
+                letterSpacing: '0.04em',
+              }}
+            >
+              {is3D ? '2D' : '3D'}
+            </button>
+
+            {/* Compass / Heading Reset in 3D Mode */}
+            {is3D && (
               <button
-                onClick={() => {
-                  const lat = Number(nearestMissed.lat), lng = Number(nearestMissed.lng)
-                  setMockGps({ lat, lng })
-                  mapInstance.current?.panTo([lat, lng])
+                type="button"
+                onClick={() => setMapHeading(0)}
+                title="Reset to North"
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: '50%',
+                  background: 'rgba(15, 23, 42, 0.85)',
+                  backdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+                  transition: 'all 0.2s ease',
                 }}
-                title="DEV: Teleport to nearest missed stop"
-                style={{ width: 44, height: 44, borderRadius: '50%', background: '#ef4444', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,.3)', fontSize: 18 }}
-              >❌</button>
-              {isMock && (
-                <button onClick={() => setMockGps(null)} title="Clear Mock GPS"
-                  style={{ width: 44, height: 44, borderRadius: '50%', background: '#64748b', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 14, fontWeight: 800, color: '#fff' }}>✕</button>
-              )}
+              >
+                <div style={{ transform: `rotate(${-mapHeading}deg)`, transition: 'transform 0.4s ease' }}>
+                  <Compass size={20} color="#f87171" />
+                </div>
+              </button>
+            )}
+
+            {/* Re-center GPS */}
+            <button
+              type="button"
+              onClick={() => {
+                if (gpsPos && mapInstance.current) {
+                  isFollowCamRef.current = true
+                  setIsUserPanned(false)
+                  mapInstance.current.setView([gpsPos.lat, gpsPos.lng], is3D ? 18 : 17.5, { animate: true })
+                }
+              }}
+              title="Re-center on My Location"
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: '50%',
+                background: isUserPanned ? '#2563eb' : 'rgba(15, 23, 42, 0.85)',
+                backdropFilter: 'blur(10px)',
+                border: isUserPanned ? '2px solid #60a5fa' : '1px solid rgba(255,255,255,0.2)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                boxShadow: isUserPanned ? '0 0 16px rgba(37,99,235,0.7)' : '0 4px 16px rgba(0,0,0,0.3)',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <LocateFixed size={20} />
+            </button>
+
+            {/* Zoom In / Out Buttons */}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              background: 'rgba(15, 23, 42, 0.85)',
+              backdropFilter: 'blur(10px)',
+              borderRadius: 22,
+              border: '1px solid rgba(255,255,255,0.2)',
+              overflow: 'hidden',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+            }}>
+              <button
+                type="button"
+                onClick={() => {
+                  isFollowCamRef.current = false
+                  setIsUserPanned(true)
+                  mapInstance.current?.zoomIn()
+                }}
+                title="Zoom In"
+                style={{
+                  width: 44,
+                  height: 38,
+                  background: 'transparent',
+                  border: 'none',
+                  borderBottom: '1px solid rgba(255,255,255,0.12)',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  transition: 'background 0.15s ease',
+                }}
+              >
+                <Plus size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  isFollowCamRef.current = false
+                  setIsUserPanned(true)
+                  mapInstance.current?.zoomOut()
+                }}
+                title="Zoom Out"
+                style={{
+                  width: 44,
+                  height: 38,
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  transition: 'background 0.15s ease',
+                }}
+              >
+                <Minus size={18} />
+              </button>
             </div>
-          )}
+
+            {/* DEV: teleport to nearest missed */}
+            {import.meta.env.DEV && nearestMissed?.lat && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const lat = Number(nearestMissed.lat), lng = Number(nearestMissed.lng)
+                    setMockGps({ lat, lng })
+                    mapInstance.current?.panTo([lat, lng])
+                  }}
+                  title="DEV: Teleport to nearest missed stop"
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: '50%',
+                    background: '#ef4444',
+                    border: '2px solid #fff',
+                    color: '#fff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(0,0,0,.3)',
+                  }}
+                >
+                  <AlertTriangle size={18} />
+                </button>
+                {isMock && (
+                  <button
+                    type="button"
+                    onClick={() => setMockGps(null)}
+                    title="Clear Mock GPS"
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: '50%',
+                      background: '#64748b',
+                      border: '2px solid #fff',
+                      color: '#fff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 12px rgba(0,0,0,.3)',
+                    }}
+                  >
+                    <X size={18} />
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         </div>
 
-        {/* ── HEADER ── */}
+        {/* ── RETRACTABLE HEADER ── */}
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
-          background: 'rgba(15,23,42,0.93)', backdropFilter: 'blur(8px)',
-          padding: '76px 18px 16px', color: '#fff',
-          boxShadow: '0 4px 20px rgba(0,0,0,.25)',
+          background: 'rgba(15,23,42,0.95)', backdropFilter: 'blur(10px)',
+          color: '#fff',
+          boxShadow: '0 4px 20px rgba(0,0,0,.22)',
+          transition: 'transform 0.35s cubic-bezier(0.3, 0.8, 0.3, 1)',
+          transform: isHeaderCollapsed ? 'translateY(calc(-100% + 32px))' : 'translateY(0)',
+          display: 'flex', flexDirection: 'column',
         }}>
-          {/* Pills */}
-          <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: `${gpsColor}18`, border: `1px solid ${gpsColor}44`, borderRadius: 20, padding: '3px 10px' }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: gpsColor, display: 'inline-block', animation: isTracking && !gpsError ? 'tnfPulse 2s ease infinite' : 'none' }} />
-              <span style={{ fontSize: 10, fontWeight: 700, color: gpsColor, letterSpacing: '.04em' }}>{gpsLabel}</span>
+          {/* Main Content */}
+          <div style={{
+            padding: '12px 18px 8px',
+            opacity: isHeaderCollapsed ? 0 : 1,
+            pointerEvents: isHeaderCollapsed ? 'none' : 'auto',
+            transition: 'opacity 0.25s ease',
+          }}>
+            {/* Pills */}
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: `${gpsColor}18`, border: `1px solid ${gpsColor}44`, borderRadius: 20, padding: '3px 10px' }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: gpsColor, display: 'inline-block', animation: isTracking && !gpsError ? 'tnfPulse 2s ease infinite' : 'none' }} />
+                <span style={{ fontSize: 10, fontWeight: 700, color: gpsColor, letterSpacing: '.04em' }}>{gpsLabel}</span>
+              </div>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.5)', borderRadius: 20, padding: '3px 10px' }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#ef4444', letterSpacing: '.04em' }}>
+                  {missedStops.length} MISSED STOP{missedStops.length !== 1 ? 'S' : ''}
+                </span>
+              </div>
             </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.5)', borderRadius: 20, padding: '3px 10px' }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: '#ef4444', letterSpacing: '.04em' }}>
-                {missedStops.length} MISSED STOP{missedStops.length !== 1 ? 'S' : ''}
+
+            {/* Route summary */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, background: 'rgba(255,255,255,0.15)', borderRadius: 8 }}>
+                <RouteIcon size={16} color="#fff" />
               </span>
+              <div>
+                <div style={{ fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900, marginBottom: 2 }}>
+                  Route Complete
+                </div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.6)' }}>
+                  {collectedCount} of {totalStops} stops collected · {missedStops.length} missed
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Route summary */}
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-            <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, background: 'rgba(255,255,255,0.15)', borderRadius: 8, marginTop: 1 }}>
-              <RouteIcon size={16} color="#fff" />
-            </span>
-            <div>
-              <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 900, marginBottom: 2 }}>
+          {/* Collapsible Handle Lip */}
+          <div
+            onClick={toggleHeader}
+            title={isHeaderCollapsed ? "Tap to expand header" : "Tap to collapse header"}
+            style={{
+              height: 32,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '0 16px',
+              cursor: 'pointer',
+              userSelect: 'none',
+              borderTop: isHeaderCollapsed ? 'none' : '1px solid rgba(255,255,255,0.08)',
+              background: isHeaderCollapsed ? 'rgba(15,23,42,0.96)' : 'rgba(0,0,0,0.12)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <RouteIcon size={13} color="#22c55e" />
+              <span style={{
+                fontSize: 12,
+                fontWeight: 800,
+                color: '#ffffff',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}>
                 Route Complete
-              </div>
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,.55)' }}>
-                {collectedCount} of {totalStops} stops collected · {missedStops.length} missed
-              </div>
+              </span>
+              <span style={{ fontSize: 10, color: '#f87171', fontWeight: 600 }}>
+                ({missedStops.length} missed)
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0 }}>
+              <span>{isHeaderCollapsed ? 'Expand Header' : 'Collapse'}</span>
+              {isHeaderCollapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
             </div>
           </div>
         </div>
 
-        {/* ── NEAREST MISSED STOP CARD ── */}
+        {/* ── NEAREST MISSED STOP CARD (Ride-Hailing Emerald style) ── */}
         {nearestMissed && (!orsDist || orsDist > 30) && (
-          <div style={{
-            position: 'absolute', top: 182, left: 14, right: 14, zIndex: 10,
-            background: 'rgba(255,255,255,0.97)', borderRadius: 16,
-            overflow: 'hidden', display: 'flex', alignItems: 'stretch',
-            boxShadow: '0 6px 28px rgba(0,0,0,.18)',
-            animation: 'tnfFadeUp .25s ease',
-          }}>
+          <div
+            onClick={() => setIsTurnCardCollapsed(p => !p)}
+            style={{
+              position: 'absolute',
+              top: isHeaderCollapsed ? 42 : 76,
+              left: 14,
+              right: 14,
+              zIndex: 10,
+              background: 'linear-gradient(135deg, #005944 0%, #064e3b 100%)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: isTurnCardCollapsed ? 12 : 18,
+              overflow: 'hidden',
+              display: 'flex',
+              alignItems: 'center',
+              padding: isTurnCardCollapsed ? '8px 14px' : '12px 14px',
+              boxShadow: '0 8px 30px rgba(0,0,0,.32)',
+              animation: 'tnfFadeUp .25s ease',
+              transition: 'all 0.35s cubic-bezier(0.3, 0.8, 0.3, 1)',
+              gap: 12,
+              cursor: 'pointer',
+            }}
+          >
             <div style={{
-              width: 76, flexShrink: 0,
-              background: `${accentColor}12`,
-              borderRight: `3px solid ${accentColor}28`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              padding: '16px 0',
+              width: isTurnCardCollapsed ? 32 : 46,
+              height: isTurnCardCollapsed ? 32 : 46,
+              flexShrink: 0,
+              background: 'rgba(255,255,255,0.12)',
+              borderRadius: isTurnCardCollapsed ? 8 : 12,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#ffffff',
             }}>
-              <TurnArrow type={stepType} bearing={stepBearing} color={accentColor} size={42} />
+              <TurnArrow type={stepType} bearing={stepBearing} color="#ffffff" size={isTurnCardCollapsed ? 20 : 40} />
             </div>
-            <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.06em', marginBottom: 3 }}>
-                NEAREST MISSED STOP
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontFamily: 'var(--font-head)',
+                fontSize: isTurnCardCollapsed ? 15 : 22,
+                fontWeight: 900,
+                color: '#ffffff',
+                lineHeight: 1.1,
+                letterSpacing: '-0.02em',
+                marginBottom: isTurnCardCollapsed ? 0 : 3,
+              }}>
+                {distLabel}
               </div>
-              <div style={{ fontFamily: 'var(--font-head)', fontSize: 17, fontWeight: 900, color: '#0f172a', lineHeight: 1.2, marginBottom: 4 }}>
-                {orsInstruction}
-              </div>
-              <div style={{ fontSize: 13, color: accentColor, fontWeight: 700 }}>{distLabel}</div>
+              {!isTurnCardCollapsed && (
+                <div style={{
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: 'rgba(255,255,255,0.92)',
+                  lineHeight: 1.25,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}>
+                  {orsInstruction}
+                </div>
+              )}
+            </div>
+            <div style={{ color: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center' }}>
+              {isTurnCardCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
             </div>
           </div>
         )}
 
-        {/* ── BOTTOM PANEL ── */}
+        {/* ── RETRACTABLE BOTTOM SHEET ── */}
         <div style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10,
-          background: 'rgba(255,255,255,0.97)', backdropFilter: 'blur(12px)',
-          borderTopLeftRadius: 24, borderTopRightRadius: 24,
-          boxShadow: '0 -4px 24px rgba(0,0,0,.12)',
-          display: 'flex', flexDirection: 'column',
-          paddingBottom: 'env(safe-area-inset-bottom, 16px)',
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          zIndex: 10,
+          background: 'rgba(255,255,255,0.97)',
+          backdropFilter: 'blur(16px)',
+          borderTopLeftRadius: 24,
+          borderTopRightRadius: 24,
+          boxShadow: '0 -6px 28px rgba(0,0,0,.15)',
+          display: 'flex',
+          flexDirection: 'column',
+          paddingBottom: isRetracted ? 0 : 'env(safe-area-inset-bottom, 16px)',
+          transition: 'transform 0.35s cubic-bezier(0.3, 0.8, 0.3, 1)',
+          transform: isRetracted ? 'translateY(calc(100% - 32px))' : 'translateY(0)',
         }}>
-          {/* Drag pill (clickable to toggle panel) */}
+          {/* Retractable Handle Bar */}
           <div
-            onClick={() => setIsPanelExpanded(p => !p)}
-            style={{ padding: '12px 0', cursor: 'pointer', display: 'flex', justifyContent: 'center' }}
+            onClick={toggleRetract}
+            style={{
+              height: 32,
+              cursor: 'pointer',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              userSelect: 'none',
+              padding: '6px 16px 2px',
+            }}
           >
-            <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2 }} />
+            <div style={{ width: 40, height: 4, background: '#cbd5e1', borderRadius: 2, marginBottom: 2 }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {isRetracted ? (
+                <>
+                  <ChevronUp size={13} />
+                  <span>Tap to view actions</span>
+                </>
+              ) : (
+                <>
+                  <ChevronDown size={13} />
+                  <span>Tap to collapse stats</span>
+                </>
+              )}
+            </div>
           </div>
 
-          <div style={{ textAlign: 'center', marginBottom: 6 }}>
-            <button onClick={() => setIsPanelExpanded(p => !p)} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: 11, fontWeight: 800, letterSpacing: '.05em', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              {isPanelExpanded ? 'HIDE ROUTE ACTIONS' : 'SHOW ROUTE ACTIONS'}
-              <span style={{ transform: isPanelExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', fontSize: 14 }}>▼</span>
-            </button>
-          </div>
-
-          {/* ── COLLAPSIBLE CONTENT (STATS + ACTIONS) ── */}
-          {isPanelExpanded && (
+          {!isRetracted && (
+            /* When EXPANDED: Full 3-column stats & decisions */
             <div style={{ display: 'flex', flexDirection: 'column', overflowY: 'auto', maxHeight: '55vh' }}>
-
-              {/* ── STATS ROW + INLINE LEGEND ── */}
+              {/* Stats Row */}
               <div style={{
-                padding: '0px 12px 14px', display: 'flex', flexDirection: 'column',
+                padding: '4px 12px 14px',
+                display: 'flex',
+                flexDirection: 'column',
                 borderBottom: '1px solid rgba(0,0,0,.06)',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center' }}>
@@ -654,13 +1091,12 @@ export default function TruckNotFull({ visible, shift, schedule, stopStatuses, o
                     </div>
                   ))}
                 </div>
-                {/* Inline legend — only shown when there's something to explain */}
+                {/* Inline legend */}
                 {(missedStops.length > 0 || reassignedStops.length > 0) && (
                   <div style={{
                     display: 'flex', gap: 14, justifyContent: 'center',
                     marginTop: 10, fontSize: 11, color: '#64748b', fontWeight: 600,
                   }}>
-
                     {reassignedStops.length > 0 && (
                       <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                         <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#a855f7', display: 'inline-block', flexShrink: 0 }} />
@@ -671,10 +1107,8 @@ export default function TruckNotFull({ visible, shift, schedule, stopStatuses, o
                 )}
               </div>
 
-              {/* ── ACTION AREA ── */}
+              {/* Action Area */}
               <div style={{ padding: '16px 20px 8px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-
-                {/* Waiting for new stops — shown right after extended mode API succeeds */}
                 {extendedActivated && (
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 10,
@@ -709,7 +1143,7 @@ export default function TruckNotFull({ visible, shift, schedule, stopStatuses, o
                     disabled={loading}
                     onClick={handleExtendedMode}
                     style={{
-                      width: '100%', padding: '17px 20px', borderRadius: 30, border: 'none',
+                      width: '100%', padding: '16px 20px', borderRadius: 30, border: 'none',
                       background: loading ? '#e2e8f0' : '#0f172a',
                       color: loading ? '#94a3b8' : '#fff',
                       fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 900,
@@ -720,9 +1154,17 @@ export default function TruckNotFull({ visible, shift, schedule, stopStatuses, o
                       transition: 'all .2s',
                     }}
                   >
-                    {loading
-                      ? <><span style={{ width: 16, height: 16, border: '2px solid #94a3b8', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block', animation: 'tnfSpin .7s linear infinite' }} /> Activating…</>
-                      : '📦 My Truck is Still Not Full'}
+                    {loading ? (
+                      <>
+                        <span style={{ width: 16, height: 16, border: '2px solid #94a3b8', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block', animation: 'tnfSpin .7s linear infinite' }} />
+                        Activating…
+                      </>
+                    ) : (
+                      <>
+                        <Package size={18} />
+                        <span>My Truck is Still Not Full</span>
+                      </>
+                    )}
                   </button>
                 )}
 
@@ -740,9 +1182,20 @@ export default function TruckNotFull({ visible, shift, schedule, stopStatuses, o
                     cursor: loading ? 'not-allowed' : 'pointer',
                     letterSpacing: '.03em', transition: 'all .2s',
                     marginBottom: 4,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
                   }}
                 >
-                  {loading ? 'Processing…' : "✓ I'm Done — End Shift"}
+                  {loading ? (
+                    'Processing…'
+                  ) : (
+                    <>
+                      <CheckCircle2 size={18} />
+                      <span>I'm Done — End Shift</span>
+                    </>
+                  )}
                 </button>
 
                 {/* DEV skip */}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../api/client'
+import { DetailModalSkeleton } from '../../components/ui/Skeleton'
 
 const Ico = ({ d, size = 14, color = 'currentColor', sw = 1.75, style = {}, className = '' }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={sw}
@@ -41,6 +42,7 @@ export default function ArrivalLogger({ open, onClose, defaultTruckId }) {
   const [inbound,   setInbound]   = useState([])
   const [estimates, setEstimates] = useState({})   // truckId → { level → kg }
   const [barangays, setBarangays] = useState([])
+  const [initialLoading, setInitialLoading] = useState(true)
 
   // Form state
   const [selectedTruck, setSelectedTruck] = useState(defaultTruckId || '')
@@ -58,22 +60,32 @@ export default function ArrivalLogger({ open, onClose, defaultTruckId }) {
   // Derived truck info
   const truckInfo = trucks.find(t => String(t.id) === String(selectedTruck))
 
-  // Load site ID
+  // Load initial metadata (site ID, trucks, barangays)
   useEffect(() => {
-    api.get('/api/dumpsite/dumpsites/').then(res => {
-      if (res.data.length > 0) setSiteId(res.data[0].id)
+    setInitialLoading(true)
+    Promise.allSettled([
+      api.get('/api/dumpsite/dumpsites/'),
+      api.get('/api/driver/trucks/?paginate=false'),
+      api.get('/api/accounts/barangays/'),
+    ]).then(([siteRes, trucksRes, brgyRes]) => {
+      if (siteRes.status === 'fulfilled' && siteRes.value.data?.length > 0) {
+        setSiteId(siteRes.value.data[0].id)
+      }
+      if (trucksRes.status === 'fulfilled') {
+        const tData = trucksRes.value.data
+        setTrucks(Array.isArray(tData) ? tData : (tData?.results || []))
+      }
+      if (brgyRes.status === 'fulfilled') {
+        setBarangays(brgyRes.value.data || [])
+      }
+    }).finally(() => {
+      setInitialLoading(false)
     })
-  }, [])
-
-  // Load trucks + inbound queue
-  useEffect(() => {
-    api.get('/api/driver/trucks/').then(res => setTrucks(res.data))
-    api.get('/api/accounts/barangays/').then(res => setBarangays(res.data))
   }, [])
 
   useEffect(() => {
     if (!siteId) return
-    api.get(`/api/dumpsite/dumpsites/${siteId}/inbound_queue/`).then(res => setInbound(res.data))
+    api.get(`/api/dumpsite/dumpsites/${siteId}/inbound_queue/`).then(res => setInbound(res.data)).catch(() => {})
   }, [siteId])
 
   // When truck changes, load fill estimates and auto-fill
@@ -216,7 +228,10 @@ export default function ArrivalLogger({ open, onClose, defaultTruckId }) {
         </button>
       </div>
 
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      {initialLoading ? (
+        <DetailModalSkeleton showBanner={false} style={{ padding: '0.5rem 0' }} />
+      ) : (
+      <form className="ww-fade-in" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
         {/* Truck selection */}
         <div className="card-light" style={{ padding: '1.25rem', borderRadius: 20 }}>
@@ -387,6 +402,7 @@ export default function ArrivalLogger({ open, onClose, defaultTruckId }) {
           {submitting ? <><IcoHourglass size={18} style={{ animation: 'spin 1s linear infinite' }} /> Logging...</> : <><IcoCheckCircle size={18} /> Confirm Arrival</>}
         </button>
       </form>
+      )}
         </div>
       </div>
     </div>

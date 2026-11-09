@@ -12,8 +12,14 @@ import BarangaySelect from '../components/BarangaySelect'
 import { ICONS } from '../api/navConfig'
 
 export default function Register() {
-  const { register, barangays } = useAuth()
+  const { user, register, barangays } = useAuth()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    if (user) {
+      navigate('/dashboard', { replace: true })
+    }
+  }, [user, navigate])
 
   const [form, setForm] = useState({
     first_name: '',

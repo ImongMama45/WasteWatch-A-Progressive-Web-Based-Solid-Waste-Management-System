@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { ArrowLeft, Info } from 'lucide-react'
 import api from '../../api/client'
 import DashboardLayout from '../../components/DashboardLayout'
+import { DetailModalSkeleton } from '../../components/ui/Skeleton'
 
 const SEVERITY_COLORS = {
   critical: '#DC2626',
@@ -51,8 +53,26 @@ export default function EscalationDetail() {
     }
   }
 
-  if (loading) return <div style={{ padding: 40, textAlign: 'center' }}>Loading escalation...</div>
-  if (error) return <div style={{ padding: 40, textAlign: 'center', color: '#DC2626' }}>{error}</div>
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div style={{ maxWidth: 800, margin: '0 auto', padding: '24px 16px' }}>
+          <div style={{ background: '#fff', borderRadius: 16, border: '1px solid #E2E8F0', overflow: 'hidden' }}>
+            <DetailModalSkeleton showBanner={false} />
+          </div>
+        </div>
+      </DashboardLayout>
+    )
+  }
+  if (error) {
+    return (
+      <DashboardLayout>
+        <div style={{ maxWidth: 800, margin: '0 auto', padding: '40px 16px', textAlign: 'center', color: '#DC2626' }}>
+          {error}
+        </div>
+      </DashboardLayout>
+    )
+  }
   if (!escalation) return null
 
   const isResolved = escalation.status === 'resolved'
@@ -60,14 +80,14 @@ export default function EscalationDetail() {
 
   return (
     <DashboardLayout>
-      <div style={{ maxWidth: 800, margin: '0 auto', padding: '24px 16px' }}>
+      <div className="ww-fade-in" style={{ maxWidth: 800, margin: '0 auto', padding: '24px 16px' }}>
 
         <button onClick={() => navigate(-1)} style={{
           background: 'none', border: 'none', color: '#64748B',
           fontSize: 14, fontWeight: 600, cursor: 'pointer',
           display: 'flex', alignItems: 'center', gap: 6, marginBottom: 24
         }}>
-          <span style={{ fontSize: 18 }}>←</span> Back
+          <ArrowLeft size={16} /> Back
         </button>
 
         <div style={{ background: '#fff', borderRadius: 16, border: '1px solid #E2E8F0', overflow: 'hidden' }}>
@@ -162,7 +182,7 @@ export default function EscalationDetail() {
                     lineHeight: 1.5, marginBottom: 8
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, marginBottom: 4 }}>
-                      <span style={{ fontSize: 16 }}>ℹ️</span> Suspension Auto-Lift
+                      <Info size={16} /> Suspension Auto-Lift
                     </div>
                     {escalation.driver_open_escalations === 0
                       ? "This is their only open escalation — resolving it WILL lift their suspension."

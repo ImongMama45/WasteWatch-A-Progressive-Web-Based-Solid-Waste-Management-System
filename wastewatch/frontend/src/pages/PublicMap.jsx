@@ -1,11 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import ReactDOMServer from 'react-dom/server'
-import { Truck, Trash2, AlertTriangle, Navigation2, X, Map as MapIcon, Layers, Search } from 'lucide-react'
+import { Truck, Trash2, AlertTriangle, Navigation2, X, Map as MapIcon, Layers, Search, MessageSquare } from 'lucide-react'
 import Navbar from '../components/Navbar'
 import api from '../api/client'
 import useUserLocation from '../hooks/useUserLocation'
 import { useAuth } from '../context/AuthContext'
+import CommentThread from './community/components/CommentThread'
+import ReportVoting from '../components/community/ReportVoting'
+import { getGarbageReportId } from '../utils/reportIdentity'
+import { MapSkeleton, SidebarWidgetSkeleton } from '../components/ui/Skeleton'
 
 export const LUCENA_CENTER = [13.9373, 121.6170]
 
@@ -216,7 +220,10 @@ export default function PublicMap() {
         if (token !== zoneRequestSeqRef.current) return
         setZoneStops(res.data)
       })
-      .catch(console.error)
+      .catch(err => {
+        console.error(err)
+        if (token === zoneRequestSeqRef.current) setZoneStops({ trucks: [], stops: [] })
+      })
   }, [styleFeature])
 
   const clearZoneSelection = useCallback(() => {
@@ -317,8 +324,11 @@ export default function PublicMap() {
       setLoadingReports(false)
       return
     }
-    api.get('/api/watcher/reports/mine/')
-      .then((res) => setMyReports(res.data || []))
+    api.get('/api/watcher/reports/mine/?paginate=false')
+      .then((res) => {
+        const raw = res.data
+        setMyReports(Array.isArray(raw) ? raw : (raw?.results || []))
+      })
       .catch((err) => console.error('[PublicMap] mine reports error', err))
       .finally(() => setLoadingReports(false))
   }, [user])
@@ -570,7 +580,10 @@ export default function PublicMap() {
         if (token !== zoneRequestSeqRef.current) return
         setZoneStops(res.data)
       })
-      .catch(console.error)
+      .catch(err => {
+        console.error(err)
+        if (token === zoneRequestSeqRef.current) setZoneStops({ trucks: [], stops: [] })
+      })
   }
 
   const filteredBarangays = useMemo(() => {
@@ -588,8 +601,8 @@ export default function PublicMap() {
         <div ref={mapRef} style={{ position: 'absolute', inset: 0 }} />
 
         {!mapReady && (
-          <div style={{ position: 'absolute', inset: 0, background: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}>
-            <div style={{ color: '#14b8a6', fontSize: 18, fontWeight: 600 }}>Loading Map…</div>
+          <div style={{ position: 'absolute', inset: 0, zIndex: 10 }}>
+            <MapSkeleton height="100%" dark label="Loading Lucena Public Map..." />
           </div>
         )}
 
@@ -814,6 +827,7 @@ export default function PublicMap() {
               barangays={barangaysRef.current}
               zoneStops={zoneStops}
               isCollapsed={isPanelCollapsed}
+              onAuthRequired={() => navigate('/login')}
             />
           </div>
         )}
@@ -867,7 +881,7 @@ function StatusChip({ icon, label, color, title, onClick }) {
   )
 }
 
-function SelectedPanel({ selected, summaryData, barangays, zoneStops, isCollapsed }) {
+function SelectedPanel({ selected, summaryData, barangays, zoneStops, isCollapsed, onAuthRequired }) {
   const { type, data } = selected
 
   if (type === 'zone') {
@@ -908,9 +922,9 @@ function SelectedPanel({ selected, summaryData, barangays, zoneStops, isCollapse
               <Row label="Active Trucks" value={zoneStops.trucks.length} color="#f59e0b" />
             )}
 
-            {!zoneStops && statusStr !== 'No active collection' && (
-              <div style={{ marginTop: 14, color: '#94a3b8', fontSize: 12, textAlign: 'center' }}>
-                Loading street-level collection stops...
+            {zoneStops === null && statusStr !== 'No active collection' && (
+              <div style={{ marginTop: 14 }}>
+                <SidebarWidgetSkeleton rows={3} dark />
               </div>
             )}
           </>
@@ -971,16 +985,36 @@ function SelectedPanel({ selected, summaryData, barangays, zoneStops, isCollapse
   }
 
   // report
+  return (
+    <ReportSelectedPanel
+      data={data}
+      isCollapsed={isCollapsed}
+      onAuthRequired={onAuthRequired}
+    />
+  )
+}
+
+function ReportSelectedPanel({ data, isCollapsed, onAuthRequired }) {
+  const [commentsOpen, setCommentsOpen] = useState(false)
+  const [commentCount, setCommentCount] = useState(data.comment_count || 0)
+
+  useEffect(() => {
+    setCommentCount(data.comment_count || 0)
+  }, [data.comment_count, data.id, data.report_id])
+
   const color = SEVERITY_COLORS[data.severity] || '#f59e0b'
   const typeLabel = TYPE_LABELS[data.issue_type || data.type] || (data.issue_type || data.type)
   const reportedStr = data.created_at || data.reported ? new Date(data.created_at || data.reported).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }) : 'Unknown'
+  const reportId = getGarbageReportId(data)
+  const hasThread = Boolean(data.community_post_id || reportId)
+
   return (
     <div style={{ opacity: isCollapsed ? 0.6 : 1, transition: '0.3s' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: isCollapsed ? 0 : 16 }}>
         <div style={{ width: 44, height: 44, borderRadius: 12, background: `${color}22`, border: `2px solid ${color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color }}>
           <AlertTriangle size={22} />
         </div>
-        <div>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ color: 'white', fontWeight: 800, fontSize: 18 }}>{typeLabel}</div>
           <div style={{ color: '#94a3b8', fontSize: 13 }}>{reportedStr}</div>
         </div>
@@ -994,6 +1028,84 @@ function SelectedPanel({ selected, summaryData, barangays, zoneStops, isCollapse
               {data.description || data.notes}
             </div>
           )}
+
+          {/* Civic Verification Voting & Consensus Indicators */}
+          {reportId && (
+            <div style={{ marginTop: 14 }}>
+              <ReportVoting
+                key={`vote-${reportId}`}
+                reportId={reportId}
+                initialUpvotes={data.upvotes}
+                initialDownvotes={data.downvotes}
+                initialNetVotes={data.net_votes}
+                initialUserVote={data.user_vote}
+                status={data.status}
+                isArchived={data.is_archived}
+                theme="dark"
+                onAuthRequired={onAuthRequired}
+              />
+            </div>
+          )}
+
+          {/* Unified Comment Thread Toggle / Notice */}
+          <div style={{ marginTop: 16, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 14 }}>
+            {hasThread ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => setCommentsOpen(o => !o)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      background: commentsOpen ? 'rgba(56, 189, 248, 0.12)' : 'rgba(255,255,255,0.05)',
+                      border: commentsOpen ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid rgba(255,255,255,0.1)',
+                      color: commentsOpen ? '#38bdf8' : '#e2e8f0',
+                      padding: '6px 12px',
+                      borderRadius: 8,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <MessageSquare size={14} />
+                    <span>{commentCount} {commentCount === 1 ? 'Comment' : 'Comments'}</span>
+                  </button>
+
+                  {data.community_post_id && (
+                    <a
+                      href={`/community?post=${data.community_post_id}`}
+                      style={{
+                        color: '#94a3b8',
+                        fontSize: 12,
+                        textDecoration: 'none',
+                        fontWeight: 500,
+                      }}
+                    >
+                      View in Community
+                    </a>
+                  )}
+                </div>
+
+                {commentsOpen && (
+                  <CommentThread
+                    key={data.community_post_id ? `post-${data.community_post_id}` : `report-${reportId}`}
+                    postId={data.community_post_id}
+                    reportId={reportId}
+                    theme="dark"
+                    onCommentCountChange={setCommentCount}
+                    onAuthRequired={onAuthRequired}
+                  />
+                )}
+              </>
+            ) : (
+              <div style={{ padding: '10px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, color: '#94a3b8', fontSize: 12 }}>
+                Hotspot monitoring location. No resident report attached.
+              </div>
+            )}
+          </div>
         </>
       )}
     </div>

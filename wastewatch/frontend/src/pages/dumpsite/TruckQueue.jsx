@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '../../api/client'
 import TrucksOverlay from './components/TrucksOverlay'
 import ArrivalLogger from './ArrivalLogger'
+import { LiveTrackerSkeleton } from '../../components/ui/Skeleton'
 
 const Ico = ({ d, size = 14, color = 'currentColor', sw = 1.75, style = {}, className = '' }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={sw}
@@ -26,13 +27,17 @@ export default function TruckQueue() {
   const intervalRef = useRef(null)
 
   useEffect(() => {
-    api.get('/api/dumpsite/dumpsites/').then(res => {
-      if (res.data.length > 0) setSiteId(res.data[0].id)
-    })
+    api.get('/api/dumpsite/dumpsites/')
+      .then(res => {
+        if (res.data?.length > 0) setSiteId(res.data[0].id)
+        else setLoading(false)
+      })
+      .catch(() => setLoading(false))
     return () => clearInterval(intervalRef.current)
   }, [])
 
   const fetchQueue = (id) => {
+    if (!id) return
     api.get(`/api/dumpsite/dumpsites/${id}/inbound_queue/`)
       .then(res => { setQueue(res.data); setLoading(false); setLastUpdate(new Date()) })
       .catch(() => setLoading(false))
@@ -73,15 +78,18 @@ export default function TruckQueue() {
       </header>
 
       {loading ? (
-        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>Loading queue...</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <LiveTrackerSkeleton />
+          <LiveTrackerSkeleton />
+        </div>
       ) : queue.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '4rem 2rem', border: '2px dashed var(--border)', borderRadius: 24, color: 'var(--text-muted)' }}>
+        <div className="ww-fade-in" style={{ textAlign: 'center', padding: '4rem 2rem', border: '2px dashed var(--border)', borderRadius: 24, color: 'var(--text-muted)' }}>
           <IcoTruck size={48} style={{ marginBottom: 12, margin: '0 auto', opacity: 0.5 }} />
           <p style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 4 }}>No trucks inbound right now</p>
           <p style={{ fontSize: '0.875rem' }}>Trucks will appear here when drivers mark themselves as heading to the dumpsite.</p>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div className="ww-stagger" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           {queue.map(item => (
             <div key={item.shift_id} className="card-light" style={{ padding: '1.25rem', borderRadius: 22, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
               {/* Left: Truck + Driver */}
@@ -161,7 +169,7 @@ export default function TruckQueue() {
         open={logOpen} 
         onClose={(refresh) => { 
           setLogOpen(false)
-          if (refresh) fetchQueue() 
+          if (refresh && siteId) fetchQueue(siteId) 
         }} 
         defaultTruckId={logTruckId} 
       />

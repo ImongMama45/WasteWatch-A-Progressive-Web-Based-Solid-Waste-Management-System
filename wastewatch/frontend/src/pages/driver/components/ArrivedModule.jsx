@@ -16,12 +16,14 @@
 
 import { useState, useEffect } from 'react'
 import api from '../../../api/client'
+import { extractArray } from '../../../utils/driverSchedule'
 import Navbar from '../../../components/Navbar'
 import { broadcastPickupStatusSync } from '../../../utils/pickupStatusSync'
 import { useOnline } from '../../../hooks/useOnline'
 import { getQueue } from '../../../hooks/useOfflineQueue'
 import { useAuth } from '../../../context/AuthContext'
 import MultiPhotoPicker from '../../../components/MultiPhotoPicker'
+import { CheckCircle2, Camera } from 'lucide-react'
 
 // ─── QUICK NOTE PRESETS ───────────────────────────────────────────────────────
 
@@ -76,11 +78,11 @@ export default function ArrivedModule({ setRouteState }) {
     setLoading(true)
     Promise.all([
       api.get('/api/driver/stops/current/').catch(() => ({ data: null })),
-      api.get('/api/driver/collection-schedules/').catch(() => ({ data: [] })),
+      api.get('/api/driver/collection-schedules/?paginate=false').catch(() => ({ data: [] })),
     ])
       .then(([stopRes, scheduleRes]) => {
         setStop(stopRes.data || null)
-        const match = (scheduleRes.data || []).find(s => s.driver != null)
+        const match = extractArray(scheduleRes.data).find(s => s.driver != null)
         setSchedule(match || null)
       })
       .catch(console.error)
@@ -403,9 +405,25 @@ export default function ArrivedModule({ setRouteState }) {
               cursor: submitting || photos.length === 0 ? 'not-allowed' : 'pointer',
               boxShadow: submitting || photos.length === 0 ? 'none' : '0 6px 20px rgba(15,23,42,0.3)',
               transition: 'all .2s',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
             }}
           >
-            {submitting ? 'Saving…' : photos.length > 0 ? '✓ Confirm Collection' : 'Take a photo to confirm'}
+            {submitting ? (
+              'Saving…'
+            ) : photos.length > 0 ? (
+              <>
+                <CheckCircle2 size={18} />
+                <span>Confirm Collection</span>
+              </>
+            ) : (
+              <>
+                <Camera size={18} />
+                <span>Take a photo to confirm</span>
+              </>
+            )}
           </button>
         </div>
 

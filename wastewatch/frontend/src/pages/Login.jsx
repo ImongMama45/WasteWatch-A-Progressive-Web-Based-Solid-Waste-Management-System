@@ -5,16 +5,22 @@
  * Shows a "Back to Home" link so users aren't trapped.
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { ICONS } from '../api/navConfig'
 
 export default function Login() {
-  const { login } = useAuth()
+  const { user, login } = useAuth()
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const nextUrl = params.get('next') || '/dashboard'
+
+  useEffect(() => {
+    if (user) {
+      navigate(nextUrl, { replace: true })
+    }
+  }, [user, navigate, nextUrl])
 
   const [form, setForm] = useState({ email: '', password: '' })
   const [error, setError] = useState('')

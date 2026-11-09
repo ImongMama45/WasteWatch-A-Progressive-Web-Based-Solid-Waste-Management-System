@@ -71,24 +71,33 @@ export default function DumpsiteArrivalAlert() {
     }}>
       {visibleTrucks.map(truck => (
         <div key={truck.truck_id} style={{
-          background: '#fff',
-          border: '2px solid #ef4444',
-          borderRadius: '16px',
-          boxShadow: '0 10px 25px rgba(239,68,68,0.3)',
-          padding: '16px',
+          background: '#ffffff',
+          border: '1px solid #e4e6eb',
+          borderLeft: '4px solid #16a34a',
+          borderRadius: '8px',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
+          padding: '14px 16px',
           width: '320px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '12px',
-          animation: 'slideInRight 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards'
+          gap: '10px',
+          animation: 'slideInRight 0.25s ease-out forwards',
+          fontFamily: 'var(--font-body, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif)'
         }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444' }}>
-              <div style={{ width: 20, height: 20, animation: 'pulse 2s infinite' }}>
-                {ICONS.warning}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+              <div style={{ 
+                width: 22, height: 22, borderRadius: '4px', 
+                background: '#e7f5eb', color: '#16a34a',
+                display: 'flex', alignItems: 'center', justifyContent: 'center' 
+              }}>
+                {ICONS.truck || ICONS.warning}
               </div>
-              <span style={{ fontWeight: 900, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                Truck Arrived!
+              <span style={{ 
+                fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', 
+                letterSpacing: '0.04em', color: '#15803d' 
+              }}>
+                Truck Arrived at Dumpsite
               </span>
             </div>
             <button 
@@ -96,45 +105,50 @@ export default function DumpsiteArrivalAlert() {
               style={{
                 background: 'transparent',
                 border: 'none',
-                color: '#94a3b8',
+                color: '#8a8d91',
                 cursor: 'pointer',
                 padding: '4px',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center'
+                justifyContent: 'center',
+                borderRadius: '4px'
               }}
+              title="Dismiss"
             >
-              <IcoX size={16} sw={3} />
+              <IcoX size={15} sw={2.5} />
             </button>
           </div>
           
-          <div>
-            <div style={{ fontSize: '16px', fontWeight: 800, color: '#0f172a' }}>
+          <div style={{ padding: '2px 0' }}>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: '#1c1e21', letterSpacing: '-0.01em' }}>
               {truck.truck_plate}
             </div>
-            <div style={{ fontSize: '13px', color: '#64748b', marginTop: '2px' }}>
-              Driver: {truck.driver}
+            <div style={{ fontSize: '12px', color: '#65676b', marginTop: '2px' }}>
+              Driver: <span style={{ color: '#1c1e21', fontWeight: 500 }}>{truck.driver}</span>
             </div>
           </div>
 
           <button 
             onClick={() => navigate(`/dumpsite/queue`)}
             style={{
-              background: '#ef4444',
-              color: '#fff',
+              background: '#16a34a',
+              color: '#ffffff',
               border: 'none',
-              padding: '12px',
-              borderRadius: '10px',
-              fontWeight: 800,
-              fontSize: '14px',
+              padding: '8px 12px',
+              borderRadius: '6px',
+              fontWeight: 600,
+              fontSize: '13px',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '8px'
+              gap: '6px',
+              transition: 'background-color 0.15s ease'
             }}
+            onMouseEnter={e => e.currentTarget.style.background = '#15803d'}
+            onMouseLeave={e => e.currentTarget.style.background = '#16a34a'}
           >
-            Review in Queue <IcoArrowRight size={16} sw={2.5} />
+            Review in Queue <IcoArrowRight size={14} sw={2.5} />
           </button>
         </div>
       ))}

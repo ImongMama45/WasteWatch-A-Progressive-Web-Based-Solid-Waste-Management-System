@@ -7,8 +7,8 @@
 
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
-import Navbar from '../../../components/Navbar'
 import api from '../../../api/client'
+import { resolveDriverSchedule } from '../../../utils/driverSchedule'
 
 export default function StopCompletedModule({ setRouteState }) {
   const { user } = useAuth()
@@ -26,9 +26,9 @@ export default function StopCompletedModule({ setRouteState }) {
     if (!user?.id) return
     setLoading(true)
     api
-      .get('/api/driver/collection-schedules/')
+      .get('/api/driver/collection-schedules/?paginate=false')
       .then(res => {
-        const match = res.data.find(s => String(s.driver) === String(user.id))
+        const match = resolveDriverSchedule(res.data, user.id)
         setSchedule(match || null)
       })
       .catch(() => setSchedule(null))
@@ -93,7 +93,6 @@ export default function StopCompletedModule({ setRouteState }) {
 
   return (
     <>
-      <Navbar />
       <div style={{ minHeight: '100vh', background: '#f8fafc', fontFamily: 'var(--font-body)' }}>
         <div style={{ maxWidth: 760, margin: '0 auto', padding: 20 }}>
 

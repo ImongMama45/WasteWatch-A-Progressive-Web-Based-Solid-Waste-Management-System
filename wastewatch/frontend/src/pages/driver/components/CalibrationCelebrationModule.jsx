@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useMemo } from 'react'
-import Navbar from '../../../components/Navbar'
 import RouteCompletionMiniMap from './RouteCompletionMiniMap'
 
 const CheckIcon = () => (
@@ -40,7 +39,7 @@ export default function CalibrationCelebrationModule({ calibrationData, schedule
     if (stopStatuses && stopStatuses.size > 0) return stopStatuses
     try {
       const raw = sessionStorage.getItem('ww_stop_statuses_snapshot') ||
-                  sessionStorage.getItem('ww_stop_statuses')
+        sessionStorage.getItem('ww_stop_statuses')
       if (raw) return new Map(JSON.parse(raw).map(([k, v]) => [Number(k), v]))
     } catch { }
     return new Map()
@@ -95,7 +94,6 @@ export default function CalibrationCelebrationModule({ calibrationData, schedule
 
   return (
     <>
-      <Navbar />
       <style>{`
         @keyframes fadeInScale {
           0% { opacity: 0; transform: scale(0.95); }
