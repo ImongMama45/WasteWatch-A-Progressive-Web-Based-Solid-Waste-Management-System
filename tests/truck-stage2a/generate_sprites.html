@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>WasteWatch - 3D Truck Sprite Generator (Stage 2A)</title>
+  <style>
+    body {
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: sans-serif;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 { color: #38bdf8; font-size: 20px; margin-bottom: 16px; }
+    .grid { display: flex; gap: 24px; margin-bottom: 24px; }
+    .card {
+      background: #1e293b;
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid #334155;
+      text-align: center;
+    }
+    canvas {
+      background: radial-gradient(circle, #334155 0%, #1e293b 100%);
+      border: 1px dashed #64748b;
+      border-radius: 8px;
+    }
+    #log {
+      width: 100%;
+      max-width: 600px;
+      background: #020617;
+      padding: 12px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 12px;
+      color: #4ade80;
+      white-space: pre-wrap;
+      min-height: 120px;
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/wastewatch/frontend/node_modules/three/build/three.module.js",
+        "three/addons/": "/wastewatch/frontend/node_modules/three/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <h1>Stage 2A: Authentic 3D Model Sprite Generator</h1>
+  <div class="grid">
+    <div class="card">
+      <h3>1. Top-Down Sprite (Orthographic)</h3>
+      <canvas id="canvas-topdown" width="256" height="256"></canvas>
+      <p style="font-size:12px; color:#94a3b8; margin-top:8px;">truck-topdown.webp (256x256)</p>
+    </div>
+    <div class="card">
+      <h3>2. Chase-View Sprite (Oblique 3D)</h3>
+      <canvas id="canvas-chase" width="256" height="256"></canvas>
+      <p style="font-size:12px; color:#94a3b8; margin-top:8px;">truck-chase.webp (256x256)</p>
+    </div>
+  </div>
+  <div id="log">Initializing Three.js generator...</div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
+    import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+
+    const logEl = document.getElementById('log');
+    function log(msg) {
+      logEl.textContent += '\n' + msg;
+      console.log(msg);
+    }
+
+    // Geometry offsets from audit:
+    // Raw Z span: [-0.3117, 0.0924], Center Z = -0.1097
+    // Raw Y min: 0.0069 (ground contact)
+    const OFFSET_X = 0.0;
+    const OFFSET_Y = -0.0069;
+    const OFFSET_Z = -0.1097;
+
+    async function generate() {
+      try {
+        log('Loading MTL: /wastewatch/frontend/public/models/camion jugete.mtl');
+        const mtlLoader = new MTLLoader();
+        const materials = await new Promise((res, rej) => {
+          mtlLoader.load('/wastewatch/frontend/public/models/camion jugete.mtl', res, undefined, rej);
+        });
+        materials.preload();
+        log('Materials preloaded: ' + Object.keys(materials.materials).join(', '));
+
+        log('Loading OBJ: /wastewatch/frontend/public/models/camion jugete.obj');
+        const objLoader = new OBJLoader();
+        objLoader.setMaterials(materials);
+        const obj = await new Promise((res, rej) => {
+          objLoader.load('/wastewatch/frontend/public/models/camion jugete.obj', res, undefined, rej);
+        });
+        log('OBJ mesh loaded successfully.');
+
+        // 1. SETUP TOP-DOWN SCENE
+        const canvasTop = document.getElementById('canvas-topdown');
+        const rendererTop = new THREE.WebGLRenderer({
+          canvas: canvasTop,
+          alpha: true,
+          antialias: true,
+          preserveDrawingBuffer: true
+        });
+        rendererTop.setSize(256, 256);
+        rendererTop.setPixelRatio(1);
+        rendererTop.setClearColor(0x000000, 0); // Transparent background
+
+        const sceneTop = new THREE.Scene();
+
+        // Top-Down Lighting: Crisp sunlight from upper-left with balanced ambient
+        const ambTop = new THREE.AmbientLight(0xffffff, 1.4);
+        sceneTop.add(ambTop);
+
+        const sunTop = new THREE.DirectionalLight(0xffffff, 2.0);
+        sunTop.position.set(4, 10, 6);
+        sceneTop.add(sunTop);
+
+        const fillTop = new THREE.DirectionalLight(0x93c5fd, 0.8);
+        fillTop.position.set(-4, 6, -6);
+        sceneTop.add(fillTop);
+
+        // Top-Down Camera: Orthographic, looking directly down +Y
+        // Frustum: 0.55 width/height units to fit truck (length ~0.41, width ~0.23) with pleasant padding
+        const frustumSize = 0.54;
+        const aspect = 1;
+        const camTop = new THREE.OrthographicCamera(
+          -frustumSize / 2, frustumSize / 2,
+          frustumSize / 2, -frustumSize / 2,
+          0.1, 10
+        );
+        camTop.position.set(0, 2, 0);
+        camTop.up.set(0, 0, -1); // Screen UP is -Z (North)
+        camTop.lookAt(0, 0, 0);
+
+        // Pivot for Top-Down truck
+        const pivotTop = new THREE.Group();
+        const truckTop = obj.clone();
+        // Center the truck geometry at origin and rotate so Cab points North (-Z)
+        truckTop.position.set(OFFSET_X, OFFSET_Y, OFFSET_Z);
+        truckTop.rotation.y = Math.PI; // Inverts +Z (front) to -Z (North)
+        pivotTop.add(truckTop);
+        sceneTop.add(pivotTop);
+
+        rendererTop.render(sceneTop, camTop);
+        log('Top-down scene rendered to canvas.');
+
+        // 2. SETUP CHASE-VIEW SCENE
+        const canvasChase = document.getElementById('canvas-chase');
+        const rendererChase = new THREE.WebGLRenderer({
+          canvas: canvasChase,
+          alpha: true,
+          antialias: true,
+          preserveDrawingBuffer: true
+        });
+        rendererChase.setSize(256, 256);
+        rendererChase.setPixelRatio(1);
+        rendererChase.setClearColor(0x000000, 0); // Transparent background
+
+        const sceneChase = new THREE.Scene();
+
+        // Chase Lighting: Sun from top-left, headlights/reflections, fill from right
+        const ambChase = new THREE.AmbientLight(0xffffff, 1.3);
+        sceneChase.add(ambChase);
+
+        const sunChase = new THREE.DirectionalLight(0xffffff, 2.2);
+        sunChase.position.set(5, 8, 7);
+        sceneChase.add(sunChase);
+
+        const rearFill = new THREE.DirectionalLight(0x60a5fa, 0.9);
+        rearFill.position.set(-4, 5, 5);
+        sceneChase.add(rearFill);
+
+        // Chase Camera:
+        // Positioned behind the truck (+Z) and elevated (+Y), looking down-forward at the truck
+        // With truck facing North (-Z), the rear is at +Z.
+        // Camera at Y = 0.52, Z = 0.70 looking forward at (0, 0.08, -0.05)
+        // Pitch angle ~36 degrees oblique perspective
+        const camChase = new THREE.PerspectiveCamera(38, 1, 0.05, 10);
+        camChase.position.set(0, 0.55, 0.76);
+        camChase.lookAt(0, 0.09, -0.06);
+
+        const pivotChase = new THREE.Group();
+        const truckChase = obj.clone();
+        truckChase.position.set(OFFSET_X, OFFSET_Y, OFFSET_Z);
+        truckChase.rotation.y = Math.PI; // Cab faces forward (-Z)
+        pivotChase.add(truckChase);
+        sceneChase.add(pivotChase);
+
+        rendererChase.render(sceneChase, camChase);
+        log('Chase-view scene rendered to canvas.');
+
+        // 3. EXPORT WEBP (with PNG fallback)
+        async function exportCanvas(canvas, filename) {
+          let dataUrl = canvas.toDataURL('image/webp', 0.95);
+          if (!dataUrl.startsWith('data:image/webp')) {
+            log('WebP export not native in this context, falling back to image/png');
+            dataUrl = canvas.toDataURL('image/png');
+            filename = filename.replace('.webp', '.png');
+          }
+          
+          log(`Posting ${filename} to /save-image...`);
+          const res = await fetch(`/save-image?name=${filename}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: dataUrl })
+          });
+          const result = await res.json();
+          log(`Saved ${filename}: ${result.size} bytes`);
+          return result;
+        }
+
+        const topRes = await exportCanvas(canvasTop, 'truck-topdown.webp');
+        const chaseRes = await exportCanvas(canvasChase, 'truck-chase.webp');
+
+        log('SUCCESS: Both sprites generated and saved!');
+        log('1. truck-topdown.webp: ' + topRes.size + ' bytes');
+        log('2. truck-chase.webp: ' + chaseRes.size + ' bytes');
+
+        document.body.setAttribute('data-generator-status', 'COMPLETE');
+      } catch (err) {
+        log('ERROR during generation: ' + err.message + '\n' + err.stack);
+        document.body.setAttribute('data-generator-status', 'ERROR');
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', generate);
+  </script>
+</body>
+</html>

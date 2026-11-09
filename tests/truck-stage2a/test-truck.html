@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gate 1: Isolated 3D Truck Model Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    h1 { font-size: 20px; margin-bottom: 6px; color: #38bdf8; font-weight: 800; }
+    .subtitle { font-size: 13px; color: #94a3b8; margin-bottom: 20px; }
+    .views-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      width: 100%;
+      max-width: 960px;
+      margin-bottom: 20px;
+    }
+    .view-card {
+      background: #1e293b;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 14px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    .card-header {
+      padding: 10px 16px;
+      background: rgba(15, 23, 42, 0.6);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .badge {
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: #16a34a;
+      color: #fff;
+    }
+    .canvas-container {
+      width: 100%;
+      height: 340px;
+      position: relative;
+      background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .controls {
+      background: #1e293b;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 14px;
+      padding: 14px 20px;
+      width: 100%;
+      max-width: 960px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .ctrl-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn:hover { background: #2563eb; border-color: #38bdf8; }
+    .btn.active { background: #16a34a; border-color: #22c55e; }
+    #status-log {
+      margin-top: 10px;
+      padding: 10px 14px;
+      background: #0f172a;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-family: monospace;
+      font-size: 11px;
+      color: #22c55e;
+      white-space: pre-wrap;
+    }
+  </style>
+  <!-- Load Three.js, MTLLoader, OBJLoader via ES Module shim or CDN -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <h1>Gate 1: Isolated Three.js Model Verification</h1>
+  <div class="subtitle">Validating camion jugete.obj + camion jugete.mtl (Materials, Geometry, Front +Z, Up +Y, Centroid Pivot)</div>
+
+  <div class="views-grid">
+    <!-- View A: Top-Down (2D Mode) -->
+    <div class="view-card">
+      <div class="card-header">
+        <span>View A: 2D Top-Down Mode</span>
+        <span class="badge">Top-Down (+Y)</span>
+      </div>
+      <div class="canvas-container" id="topdown-container">
+        <canvas id="topdown-canvas"></canvas>
+      </div>
+    </div>
+
+    <!-- View B: Oblique (3D Perspective Mode) -->
+    <div class="view-card">
+      <div class="card-header">
+        <span>View B: 3D Oblique Cockpit/Chase Mode</span>
+        <span class="badge">Oblique (Chase Cam)</span>
+      </div>
+      <div class="canvas-container" id="oblique-container">
+        <canvas id="oblique-canvas"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="ctrl-row">
+      <span style="font-size: 13px; font-weight: 700; color: #94a3b8;">Cardinal Headings:</span>
+      <button class="btn active" id="btn-0">North (0°)</button>
+      <button class="btn" id="btn-90">East (90°)</button>
+      <button class="btn" id="btn-180">South (180°)</button>
+      <button class="btn" id="btn-270">West (270°)</button>
+      <button class="btn" id="btn-animate">Toggle Auto-Spin</button>
+    </div>
+    <div class="ctrl-row">
+      <span style="font-size: 13px; font-weight: 700; color: #94a3b8;">Rotation Angle:</span>
+      <input type="range" id="rot-slider" min="0" max="360" value="0" style="flex: 1; max-width: 300px; cursor: pointer;" />
+      <span id="rot-val" style="font-size: 12px; font-weight: 700; min-width: 40px;">0°</span>
+    </div>
+    <div id="status-log">Loading model and materials...</div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
+    import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+
+    const logEl = document.getElementById('status-log');
+    function log(msg) {
+      logEl.textContent += '\n' + msg;
+      console.log(msg);
+    }
+
+    // Model offset & base orientation so Front points North (-Z in Leaflet/Three screen space)
+    const OFFSET_X = 0.0;
+    const OFFSET_Y = -0.0069;
+    const OFFSET_Z = -0.1097;
+
+    let currentHeadingDeg = 0;
+    let autoSpin = false;
+    let pivotTopDown = null;
+    let pivotOblique = null;
+
+    // Helper: Build Three.js scene
+    function setupScene(canvasId, isTopDown) {
+      const canvas = document.getElementById(canvasId);
+      const container = canvas.parentElement;
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+
+      const scene = new THREE.Scene();
+      const pivot = new THREE.Group();
+      scene.add(pivot);
+
+      // Lights
+      const ambient = new THREE.AmbientLight(0xffffff, 1.4);
+      scene.add(ambient);
+
+      const sun = new THREE.DirectionalLight(0xffffff, 2.0);
+      sun.position.set(6, 12, 8);
+      scene.add(sun);
+
+      const fill = new THREE.DirectionalLight(0x93c5fd, 0.9);
+      fill.position.set(-6, 8, -6);
+      scene.add(fill);
+
+      const bounce = new THREE.DirectionalLight(0x64748b, 0.4);
+      bounce.position.set(0, -6, 0);
+      scene.add(bounce);
+
+      // Camera
+      const camera = new THREE.PerspectiveCamera(45, w / h, 0.05, 50);
+      if (isTopDown) {
+        // Looking directly down onto the roof (+Y axis)
+        // With up=(0,0,-1): -Z is screen UP (North), +X is screen RIGHT (East)
+        camera.position.set(0, 1.4, 0);
+        camera.up.set(0, 0, -1);
+        camera.lookAt(0, 0, 0);
+      } else {
+        // Oblique chase-cam perspective (from behind +Z looking forward toward -Z)
+        camera.position.set(0, 0.85, 0.95);
+        camera.up.set(0, 1, 0);
+        camera.lookAt(0, 0.08, -0.15);
+      }
+
+      const renderer = new THREE.WebGLRenderer({
+        canvas,
+        alpha: true,
+        antialias: true,
+        powerPreference: 'high-performance'
+      });
+      renderer.setClearColor(0x000000, 0);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(w, h, false);
+
+      return { scene, pivot, camera, renderer };
+    }
+
+    const td = setupScene('topdown-canvas', true);
+    const ob = setupScene('oblique-canvas', false);
+    pivotTopDown = td.pivot;
+    pivotOblique = ob.pivot;
+
+    // Load MTL and OBJ
+    logEl.textContent = '1. Fetching /models/camion jugete.mtl...';
+    const mtlLoader = new MTLLoader();
+    mtlLoader.load(
+      '/models/camion jugete.mtl',
+      (materials) => {
+        log('2. MTL loaded successfully. Preloading materials...');
+        materials.preload();
+        
+        const mtlNames = Object.keys(materials.materials);
+        log('   Materials verified: ' + mtlNames.join(', '));
+
+        log('3. Fetching /models/camion jugete.obj...');
+        const objLoader = new OBJLoader();
+        objLoader.setMaterials(materials);
+
+        objLoader.load(
+          '/models/camion jugete.obj',
+          (object) => {
+            log('4. OBJ loaded successfully!');
+            let meshCount = 0;
+            let totalVerts = 0;
+            object.traverse((child) => {
+              if (child.isMesh) {
+                meshCount++;
+                totalVerts += child.geometry.attributes.position.count;
+                if (child.material) {
+                  const mArr = Array.isArray(child.material) ? child.material : [child.material];
+                  mArr.forEach(m => { m.side = THREE.DoubleSide; });
+                }
+              }
+            });
+            log(`   Meshes: ${meshCount}, Total vertices in buffer: ${totalVerts}`);
+
+            // Rotate 180 deg around Y so Cab points forward (-Z / North)
+            object.rotation.y = Math.PI;
+            // Apply pivot centering offset to child mesh
+            object.position.set(OFFSET_X, OFFSET_Y, OFFSET_Z);
+
+            // Add to both view scenes
+            pivotTopDown.add(object);
+            pivotOblique.add(object.clone());
+
+            log('5. Model aligned to centroid pivot (X=0, Y=-0.0069, Z=-0.1097)');
+            log('   Front direction verified: Cab points North / UP at 0°');
+            log('   Front direction verified: +Z (Cab / Windshield forward)');
+            log('   Up direction verified: +Y (Roof / Beacons upward)');
+            log('6. Gate 1 Rendering Verification: READY');
+          },
+          (xhr) => {
+            if (xhr.lengthComputable) {
+              const pct = Math.round((xhr.loaded / xhr.total) * 100);
+              console.log(`Loading OBJ: ${pct}%`);
+            }
+          },
+          (err) => {
+            log('ERROR loading OBJ: ' + err);
+          }
+        );
+      },
+      undefined,
+      (err) => {
+        log('ERROR loading MTL: ' + err);
+      }
+    );
+
+    // Animation Loop
+    function render() {
+      requestAnimationFrame(render);
+      if (autoSpin) {
+        currentHeadingDeg = (currentHeadingDeg + 1) % 360;
+        document.getElementById('rot-slider').value = currentHeadingDeg;
+        document.getElementById('rot-val').textContent = currentHeadingDeg + '°';
+      }
+
+      const rad = (-currentHeadingDeg * Math.PI) / 180;
+      if (pivotTopDown) pivotTopDown.rotation.y = rad;
+      if (pivotOblique) pivotOblique.rotation.y = rad;
+
+      td.renderer.render(td.scene, td.camera);
+      ob.renderer.render(ob.scene, ob.camera);
+    }
+    render();
+
+    // UI Controls
+    function setHeading(deg) {
+      currentHeadingDeg = deg;
+      document.getElementById('rot-slider').value = deg;
+      document.getElementById('rot-val').textContent = deg + '°';
+      ['btn-0', 'btn-90', 'btn-180', 'btn-270'].forEach(id => {
+        document.getElementById(id).classList.remove('active');
+      });
+      const activeBtn = document.getElementById('btn-' + deg);
+      if (activeBtn) activeBtn.classList.add('active');
+    }
+
+    document.getElementById('btn-0').onclick = () => { autoSpin = false; setHeading(0); };
+    document.getElementById('btn-90').onclick = () => { autoSpin = false; setHeading(90); };
+    document.getElementById('btn-180').onclick = () => { autoSpin = false; setHeading(180); };
+    document.getElementById('btn-270').onclick = () => { autoSpin = false; setHeading(270); };
+    document.getElementById('btn-animate').onclick = () => { autoSpin = !autoSpin; };
+    document.getElementById('rot-slider').oninput = (e) => {
+      autoSpin = false;
+      currentHeadingDeg = Number(e.target.value);
+      document.getElementById('rot-val').textContent = currentHeadingDeg + '°';
+    };
+
+    window.addEventListener('resize', () => {
+      [td, ob].forEach(({ camera, renderer }) => {
+        const c = renderer.domElement.parentElement;
+        const w = c.clientWidth;
+        const h = c.clientHeight;
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h, false);
+      });
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>WasteWatch - Stage 2D-B2: Touch Interaction and Mode Sync (Supplementary Harness)</title>
+  <style>
+    body {
+      background: #0b1120;
+      color: #e2e8f0;
+      font: 13px system-ui;
+      margin: 20px;
+    }
+    #notice {
+      background: #1e293b;
+      border-left: 4px solid #38bdf8;
+      padding: 10px 14px;
+      margin-bottom: 16px;
+      border-radius: 4px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    #log {
+      background: #020617;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 12px;
+      font: 12px/1.6 monospace;
+      white-space: pre-wrap;
+      max-width: 850px;
+    }
+    .pass { color: #4ade80; font-weight: bold; }
+    .fail { color: #f87171; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h2>Stage 2D-B2: Touch Interaction and Mode Sync (Supplementary In-Browser Model & Unit Harness - Unexecuted)</h2>
+  <div id="notice">
+    <strong>Notice:</strong> This file provides an optional in-browser execution harness for the simulated component model and NavCamera unit checks. It has not been run in a live browser for this report. Direct runtime validation is performed via the automated Node test suite.
+  </div>
+  <div id="viewport" style="width: 390px; height: 784px; position: relative; overflow: hidden; display: none;">
+    <div id="map" style="position: absolute;"></div>
+  </div>
+  <pre id="log">Running tests...</pre>
+
+  <script type="module">
+    import { NavCamera } from '/wastewatch/frontend/src/pages/driver/components/navCamera.js'
+
+    const logEl = document.getElementById('log')
+    logEl.textContent = ''
+    const results = []
+
+    function log(msg) {
+      logEl.textContent += msg + '\n'
+      console.log(msg)
+    }
+
+    function assert(name, condition, extra = '') {
+      const status = condition ? 'PASS' : 'FAIL'
+      results.push({ name, pass: !!condition, extra })
+      log(`[${status}] ${name}${extra ? ' -- ' + extra : ''}`)
+    }
+
+    function createMockEnv(viewportWidth = 390, viewportHeight = 784) {
+      const calls = { panTo: [], setLatLng: [], invalidateSize: 0 }
+      const viewportEl = document.createElement('div')
+      viewportEl.style.width = viewportWidth + 'px'
+      viewportEl.style.height = viewportHeight + 'px'
+      viewportEl.getBoundingClientRect = () => ({
+        width: viewportWidth,
+        height: viewportHeight,
+        top: 0,
+        left: 0,
+        right: viewportWidth,
+        bottom: viewportHeight,
+      })
+
+      const mapEl = document.createElement('div')
+      mapEl.style.width = '100%'
+      mapEl.style.height = '100%'
+      mapEl.style.transform = 'none'
+
+      const markerEl = document.createElement('div')
+      const wrapperEl = document.createElement('div')
+      wrapperEl.className = 'ww-truck-sprite-wrapper'
+      markerEl.appendChild(wrapperEl)
+
+      const map = {
+        invalidateSize: () => { calls.invalidateSize++ },
+        panTo: (latlng, opts) => { calls.panTo.push({ latlng, opts }) },
+        dragging: { enable: () => {}, disable: () => {} },
+        touchZoom: { enable: () => {}, disable: () => {} },
+        scrollWheelZoom: { enable: () => {}, disable: () => {} },
+        doubleClickZoom: { enable: () => {}, disable: () => {} },
+        boxZoom: { enable: () => {}, disable: () => {} },
+      }
+
+      const marker = {
+        getElement: () => markerEl,
+        setLatLng: (latlng) => { calls.setLatLng.push(latlng) },
+      }
+
+      return { viewportEl, mapEl, wrapperEl, getMap: () => map, getMarker: () => marker, calls }
+    }
+
+    function createSimulatedModule(initialIs3D = false, navCamera = null) {
+      let is3D = initialIs3D
+      const isFollowCamRef = { current: true }
+      let isUserPanned = false
+      const navCameraRef = { current: navCamera }
+
+      const onTouchStart = () => {
+        if (!is3D) {
+          isFollowCamRef.current = false
+          isUserPanned = true
+          if (navCameraRef.current) navCameraRef.current.follow = false
+        }
+      }
+
+      const onMouseDown = () => {
+        if (!is3D) {
+          isFollowCamRef.current = false
+          isUserPanned = true
+          if (navCameraRef.current) navCameraRef.current.follow = false
+        }
+      }
+
+      const onWheel = () => {
+        if (!is3D) {
+          isFollowCamRef.current = false
+          isUserPanned = true
+          if (navCameraRef.current) navCameraRef.current.follow = false
+        }
+      }
+
+      const handleToggle3D = () => {
+        isFollowCamRef.current = true
+        isUserPanned = false
+
+        if (navCameraRef.current) {
+          navCameraRef.current.follow = true
+          const targetMode = (navCameraRef.current.mode === '3D' || is3D) ? '2D' : '3D'
+          const actualMode = navCameraRef.current.setMode(targetMode)
+          is3D = (actualMode === '3D')
+        } else {
+          is3D = false
+        }
+        return is3D
+      }
+
+      return {
+        getState: () => ({ is3D, isFollowCam: isFollowCamRef.current, isUserPanned }),
+        onTouchStart,
+        onMouseDown,
+        onWheel,
+        handleToggle3D,
+      }
+    }
+
+    async function runSuite() {
+      log('=== Stage 2D-B2: Supplementary Touch Interaction and Mode Sync Harness ===\n')
+
+      // Test 1: In 3D, touching or dragging does not switch to 2D
+      const env1 = createMockEnv(390, 784)
+      const cam1 = new NavCamera(env1)
+      cam1.setMode('3D')
+      const mod1 = createSimulatedModule(true, cam1)
+
+      mod1.onTouchStart()
+      assert('Test 1.1: [Model] onTouchStart in 3D preserves is3D = true', mod1.getState().is3D === true)
+      assert('Test 1.2: [Model] onTouchStart in 3D preserves follow cam', mod1.getState().isFollowCam === true)
+      assert('Test 1.3: [Model] onTouchStart in 3D does not mark user panned', mod1.getState().isUserPanned === false)
+
+      mod1.onMouseDown()
+      assert('Test 1.4: [Model] onMouseDown in 3D preserves is3D = true', mod1.getState().is3D === true)
+
+      mod1.onWheel()
+      assert('Test 1.5: [Model] onWheel in 3D preserves is3D = true', mod1.getState().is3D === true)
+
+      // Test 2: In 2D, normal touch interaction is preserved
+      const mod2 = createSimulatedModule(false, cam1)
+      cam1.setMode('2D')
+      mod2.onTouchStart()
+      assert('Test 2.1: [Model] onTouchStart in 2D pauses follow cam', mod2.getState().isFollowCam === false)
+      assert('Test 2.2: [Model] onTouchStart in 2D marks user panned', mod2.getState().isUserPanned === true)
+      assert('Test 2.3: [Model] onTouchStart in 2D marks navCamera.follow = false', cam1.follow === false)
+
+      // Test 3: Explicit toggle switches between modes
+      const env3 = createMockEnv(390, 784)
+      const cam3 = new NavCamera(env3)
+      const mod3 = createSimulatedModule(false, cam3)
+      mod3.handleToggle3D()
+      assert('Test 3.1: [Model] Explicit toggle activates 3D', mod3.getState().is3D === true && cam3.mode === '3D')
+      assert('Test 3.2: [Model] Explicit toggle reactivates follow cam', mod3.getState().isFollowCam === true && cam3.follow === true)
+      mod3.handleToggle3D()
+      assert('Test 3.3: [Model] Explicit toggle returns to 2D', mod3.getState().is3D === false && cam3.mode === '2D')
+
+      // Test 4: Refused 3D request leaves React state in 2D
+      const envOversized = createMockEnv(3000, 3000)
+      const camOversized = new NavCamera(envOversized)
+      const refused1 = camOversized.setMode('3D')
+      assert('Test 4.1: [NavCamera Unit] setMode refuses 3D on oversized viewport', refused1 === '2D' && camOversized.mode === '2D')
+
+      const modOversized = createSimulatedModule(false, camOversized)
+      modOversized.handleToggle3D()
+      assert('Test 4.2: [Model] is3D stays false when 3D is refused by limit', modOversized.getState().is3D === false)
+
+      const envZero = createMockEnv(0, 0)
+      const camZero = new NavCamera(envZero)
+      const refused2 = camZero.setMode('3D')
+      assert('Test 4.3: [NavCamera Unit] setMode refuses 3D on zero viewport', refused2 === '2D' && camZero.mode === '2D')
+
+      const modZero = createSimulatedModule(false, camZero)
+      modZero.handleToggle3D()
+      assert('Test 4.4: [Model] is3D stays false when 3D refused on zero viewport', modZero.getState().is3D === false)
+
+      // Summary
+      const passed = results.filter(r => r.pass).length
+      const failed = results.filter(r => !r.pass).length
+      log(`\n=== Total: ${results.length} | Passed: ${passed} | Failed: ${failed} ===`)
+      window.testResults = { total: results.length, passed, failed, results }
+    }
+
+    runSuite()
+  </script>
+</body>
+</html>

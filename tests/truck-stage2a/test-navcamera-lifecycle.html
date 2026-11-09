@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>WasteWatch - Stage 2D-B1: NavCamera Lifecycle Verification</title>
+  <style>
+    body {
+      background: #0b1120;
+      color: #e2e8f0;
+      font: 13px system-ui;
+      margin: 20px;
+    }
+    #log {
+      background: #020617;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 12px;
+      font: 12px/1.6 monospace;
+      white-space: pre-wrap;
+      max-width: 800px;
+    }
+    .pass { color: #4ade80; font-weight: bold; }
+    .fail { color: #f87171; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h2>Stage 2D-B1: NavCamera Lifecycle Verification</h2>
+  <div id="viewport" style="width: 390px; height: 784px; position: relative; overflow: hidden; display: none;">
+    <div id="map" style="position: absolute;"></div>
+  </div>
+  <pre id="log">Running tests...</pre>
+
+  <script type="module">
+    import { NavCamera } from '/wastewatch/frontend/src/pages/driver/components/navCamera.js'
+
+    const logEl = document.getElementById('log')
+    logEl.textContent = ''
+    const results = []
+
+    function log(msg) {
+      logEl.textContent += msg + '\n'
+      console.log(msg)
+    }
+
+    function assert(name, condition, extra = '') {
+      const status = condition ? 'PASS' : 'FAIL'
+      results.push({ name, pass: !!condition, extra })
+      log(`[${status}] ${name}${extra ? ' -- ' + extra : ''}`)
+    }
+
+    // Mock DOM environment helper
+    function createMockEnv() {
+      const viewportEl = document.createElement('div')
+      viewportEl.style.width = '390px'
+      viewportEl.style.height = '784px'
+      viewportEl.getBoundingClientRect = () => ({ width: 390, height: 784, top: 0, left: 0, right: 390, bottom: 784 })
+
+      const mapEl = document.createElement('div')
+      mapEl.style.width = '100%'
+      mapEl.style.height = '100%'
+      mapEl.style.transform = 'none'
+
+      const markerEl = document.createElement('div')
+      const wrapperEl = document.createElement('div')
+      wrapperEl.className = 'ww-truck-sprite-wrapper'
+      markerEl.appendChild(wrapperEl)
+
+      const map = {
+        invalidateSize: () => {},
+        panTo: () => {},
+        dragging: { enable: () => {}, disable: () => {} },
+        touchZoom: { enable: () => {}, disable: () => {} },
+        scrollWheelZoom: { enable: () => {}, disable: () => {} },
+        doubleClickZoom: { enable: () => {}, disable: () => {} },
+        boxZoom: { enable: () => {}, disable: () => {} },
+      }
+
+      const marker = {
+        getElement: () => markerEl,
+        setLatLng: () => {},
+      }
+
+      return {
+        viewportEl,
+        mapEl,
+        wrapperEl,
+        getMap: () => map,
+        getMarker: () => marker,
+      }
+    }
+
+    async function runSuite() {
+      log('=== NavCamera Lifecycle Verification Suite ===\n')
+
+      // Test 1: A normal instance can receive targets and animate
+      const env1 = createMockEnv()
+      const cam1 = new NavCamera(env1)
+      assert('Test 1.1: New instance has _destroyed = false', cam1._destroyed === false)
+      cam1.setTargetHeading(90)
+      assert('Test 1.2: Normal instance schedules rAF on heading target', cam1._raf !== 0)
+      assert('Test 1.3: Target heading set correctly', cam1.targetH === 90)
+
+      // Test 2: Calling destroy() cancels the scheduled animation frame and resets 3D DOM
+      cam1.setMode('3D')
+      const had3DTransform = env1.mapEl.style.transform.includes('perspective')
+      assert('Test 2.1: 3D perspective transform applied prior to destroy', had3DTransform)
+      cam1.destroy()
+      assert('Test 2.2: Calling destroy() marks _destroyed = true', cam1._destroyed === true)
+      assert('Test 2.3: Calling destroy() resets _raf to 0', cam1._raf === 0)
+      assert('Test 2.4: Calling destroy() resets mapEl transform to none from active 3D state', env1.mapEl.style.transform === 'none')
+
+      // Test 3: Calling setTargetHeading() after destruction does not schedule a frame
+      const headingBefore = cam1.targetH
+      cam1.setTargetHeading(180)
+      assert('Test 3.1: setTargetHeading() after destruction does not schedule frame', cam1._raf === 0)
+      assert('Test 3.2: setTargetHeading() after destruction does not alter targetH', cam1.targetH === headingBefore)
+
+      // Test 4: Calling setTargetPosition() after destruction does not schedule a frame
+      cam1.setTargetPosition(14.0, 121.0)
+      assert('Test 4.1: setTargetPosition() after destruction does not schedule frame', cam1._raf === 0)
+      assert('Test 4.2: setTargetPosition() after destruction does not alter targetPos', cam1.targetPos === null)
+
+      // Test 5: Calling setMode() after destruction does not schedule a frame and returns current mode
+      const currentMode = cam1.mode
+      const returnedMode = cam1.setMode('3D')
+      assert('Test 5.1: setMode() after destruction returns current mode', returnedMode === currentMode)
+      assert('Test 5.2: setMode() after destruction does not schedule frame', cam1._raf === 0)
+      assert('Test 5.3: setMode() after destruction leaves mode unchanged', cam1.mode === currentMode)
+
+      // Test 6: Calling apply() after destruction does not mutate DOM with valid CSS transform sentinels
+      env1.mapEl.style.transform = 'translateX(7px)'
+      env1.wrapperEl.style.transform = 'translateY(7px)'
+      cam1.apply()
+      assert('Test 6.1: apply() after destruction does not mutate mapEl transform', env1.mapEl.style.transform === 'translateX(7px)')
+      assert('Test 6.2: apply() after destruction does not mutate marker transform', env1.wrapperEl.style.transform === 'translateY(7px)')
+
+      // Test 7: Calling step() after destruction returns false
+      const stepResult = cam1.step(16)
+      assert('Test 7.1: step() after destruction returns false', stepResult === false)
+
+      // Test 8: Calling destroy() repeatedly does not throw
+      let repeatThrew = false
+      try {
+        cam1.destroy()
+        cam1.destroy()
+        cam1.destroy()
+      } catch (e) {
+        repeatThrew = true
+      }
+      assert('Test 8.1: Repeated destroy() calls do not throw', repeatThrew === false)
+      assert('Test 8.2: Instance remains permanently destroyed', cam1._destroyed === true)
+
+      // Test 9: Constructing a new instance after destroying an older one works normally
+      const env2 = createMockEnv()
+      const cam2 = new NavCamera(env2)
+      assert('Test 9.1: Fresh instance has _destroyed = false after previous instance destroyed', cam2._destroyed === false)
+      cam2.setTargetHeading(45)
+      assert('Test 9.2: Fresh instance schedules rAF normally', cam2._raf !== 0)
+      assert('Test 9.3: Fresh instance updates targetH', cam2.targetH === 45)
+      cam2.destroy()
+      assert('Test 9.4: Fresh instance destroys cleanly', cam2._destroyed === true && cam2._raf === 0)
+
+      // Summary
+      const passed = results.filter(r => r.pass).length
+      const failed = results.filter(r => !r.pass).length
+      log(`\n=== Total: ${results.length} | Passed: ${passed} | Failed: ${failed} ===`)
+      window.testResults = { total: results.length, passed, failed, results }
+    }
+
+    runSuite()
+  </script>
+</body>
+</html>

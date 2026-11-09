@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WasteWatch - Stage 2A: 3D Truck Sprites & Tilted Map Investigation</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0b1120;
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 24px;
+      line-height: 1.5;
+    }
+    h1 { font-size: 22px; color: #38bdf8; font-weight: 800; margin-bottom: 6px; }
+    .subtitle { font-size: 13px; color: #94a3b8; margin-bottom: 24px; }
+    
+    .section-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #cbd5e1;
+      margin: 28px 0 14px;
+      border-left: 4px solid #38bdf8;
+      padding-left: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 18px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+
+    .preview-box {
+      width: 100%;
+      height: 220px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      background-image: 
+        linear-gradient(to right, rgba(255,255,255,0.04) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255,255,255,0.04) 1px, transparent 1px);
+      background-size: 20px 20px;
+    }
+
+    .sprite-img {
+      display: block;
+      transition: transform 0.2s ease-out;
+    }
+
+    .anchor-marker {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background: #ef4444;
+      border: 2px solid #ffffff;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      box-shadow: 0 0 8px #ef4444;
+      z-index: 10;
+    }
+
+    .compass-indicator {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 20px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #38bdf8;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      z-index: 10;
+    }
+
+    .compass-needle {
+      width: 14px;
+      height: 14px;
+      border-left: 2px solid transparent;
+      border-right: 2px solid transparent;
+      border-bottom: 12px solid #ef4444;
+      transform-origin: 50% 80%;
+    }
+
+    .stats-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 12px;
+    }
+    .stats-table td {
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .stats-table td:first-child {
+      color: #94a3b8;
+      font-weight: 600;
+      width: 45%;
+    }
+    .stats-table td:last-child {
+      color: #f8fafc;
+      font-family: monospace;
+      text-align: right;
+    }
+
+    /* MAP SIMULATION STYLES */
+    .map-stage-outer {
+      width: 100%;
+      height: 380px;
+      background: #090d16;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Actual repository CSS transform: perspective(900px) rotateX(50deg) rotateZ(0deg) scale(1.85) */
+    .map-container-sim {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      inset: 0;
+      transform: perspective(900px) rotateX(50deg) rotateZ(0deg) scale(1.85);
+      transform-origin: 50% 65%;
+      transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+      background: #1c2430;
+      background-image: 
+        radial-gradient(#334155 1.5px, transparent 1.5px),
+        linear-gradient(to right, rgba(56, 189, 248, 0.15) 2px, transparent 2px),
+        linear-gradient(to bottom, rgba(56, 189, 248, 0.15) 2px, transparent 2px);
+      background-size: 40px 40px, 120px 120px, 120px 120px;
+      transform-style: preserve-3d;
+    }
+
+    .road-strip {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 80px;
+      transform: translateX(-50%);
+      background: #252f3f;
+      border-left: 2px dashed #94a3b8;
+      border-right: 2px dashed #94a3b8;
+    }
+
+    .road-centerline {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      border-left: 2px dashed #eab308;
+      transform: translateX(-50%);
+    }
+
+    .marker-slot {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .marker-label {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid #38bdf8;
+      color: #38bdf8;
+      font-size: 8px;
+      font-weight: 700;
+      padding: 1px 4px;
+      border-radius: 4px;
+      white-space: nowrap;
+      margin-top: 2px;
+    }
+
+    .ctrl-bar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      background: #1e293b;
+      border: 1px solid #475569;
+      color: #f8fafc;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn.active {
+      background: #0284c7;
+      border-color: #38bdf8;
+    }
+
+    .findings-box {
+      margin-top: 20px;
+      background: #0f172a;
+      border-left: 4px solid #10b981;
+      padding: 14px 18px;
+      border-radius: 0 8px 8px 0;
+      font-size: 13px;
+    }
+    .findings-box h4 {
+      color: #34d399;
+      margin-bottom: 6px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Stage 2A: 3D Truck Sprites & Tilted Map Investigation</h1>
+  <div class="subtitle">Validating authentic OBJ/MTL sprite renders, anchor coordinates, heading alignment, and CSS 3D map tilt compensation.</div>
+
+  <!-- SECTION 1: SPRITE ASSETS VALIDATION -->
+  <div class="section-title">
+    <span>Task 3: Sprite Assets & Anchor Measurement</span>
+    <span style="font-size: 12px; font-weight: 400; color: #94a3b8;">Source: camion jugete.obj + camion jugete.mtl</span>
+  </div>
+
+  <div class="grid-2">
+    <!-- Card 1: Top-down -->
+    <div class="card">
+      <h3 style="font-size: 14px; color: #38bdf8; margin-bottom: 8px;">1. Top-Down Sprite (`truck-topdown.webp`)</h3>
+      <div class="preview-box" id="box-topdown">
+        <div class="compass-indicator">
+          <div class="compass-needle" id="needle-topdown"></div>
+          <span id="heading-topdown-lbl">0 deg (North)</span>
+        </div>
+        <img src="truck-topdown.webp" id="img-topdown" class="sprite-img" width="128" height="128" alt="Topdown truck" />
+        <div class="anchor-marker" id="anchor-topdown" style="left: 50%; top: 50%;"></div>
+      </div>
+      <table class="stats-table">
+        <tr><td>File Path</td><td>public/models/truck-topdown.webp</td></tr>
+        <tr><td>File Size</td><td id="size-topdown">2,436 bytes (2.38 KB)</td></tr>
+        <tr><td>Native Dimensions</td><td>256 x 256 px</td></tr>
+        <tr><td>Render Projection</td><td>Orthographic (Top +Y down)</td></tr>
+        <tr><td>Cab Direction</td><td style="color:#4ade80;">Facing North (-Z / Screen UP)</td></tr>
+        <tr><td>Anchor Coordinate</td><td style="color:#f59e0b;">(128, 128) - Exact 50% / 50%</td></tr>
+        <tr><td>Materials Rendered</td><td>RedPaint, BlackWindow, BlackMatte, RedPaint.001</td></tr>
+      </table>
+    </div>
+
+    <!-- Card 2: Chase-view -->
+    <div class="card">
+      <h3 style="font-size: 14px; color: #38bdf8; margin-bottom: 8px;">2. Chase-View Sprite (`truck-chase.webp`)</h3>
+      <div class="preview-box" id="box-chase">
+        <div class="compass-indicator">
+          <div class="compass-needle" id="needle-chase"></div>
+          <span id="heading-chase-lbl">0 deg (Forward)</span>
+        </div>
+        <img src="truck-chase.webp" id="img-chase" class="sprite-img" width="128" height="128" alt="Chase truck" />
+        <div class="anchor-marker" id="anchor-chase" style="left: 50%; top: 72%;"></div>
+      </div>
+      <table class="stats-table">
+        <tr><td>File Path</td><td>public/models/truck-chase.webp</td></tr>
+        <tr><td>File Size</td><td id="size-chase">2,818 bytes (2.75 KB)</td></tr>
+        <tr><td>Native Dimensions</td><td>256 x 256 px</td></tr>
+        <tr><td>Camera Pitch</td><td>36 deg Oblique Perspective</td></tr>
+        <tr><td>Cab Direction</td><td style="color:#4ade80;">Facing Forward (Upward on screen)</td></tr>
+        <tr><td>Anchor Coordinate</td><td style="color:#f59e0b;">(128, 184) - Ground Axle Baseline</td></tr>
+        <tr><td>Materials Rendered</td><td>RedPaint, BlackWindow, BlackMatte, RedPaint.001</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- SECTION 2: MAP TILT INVESTIGATION -->
+  <div class="section-title">
+    <span>Task 4: Tilted Map Appearance Investigation</span>
+    <span style="font-size: 12px; font-weight: 400; color: #94a3b8;">Transform: perspective(900px) rotateX(50deg) scale(1.85)</span>
+  </div>
+
+  <div class="ctrl-bar">
+    <button class="btn active" id="btn-tilt-toggle" onclick="toggleTilt()">Toggle Map Tilt (3D / 2D)</button>
+    <button class="btn" onclick="setSimHeading(0)">Heading 0 deg</button>
+    <button class="btn" onclick="setSimHeading(90)">Heading 90 deg</button>
+    <button class="btn" onclick="setSimHeading(180)">Heading 180 deg</button>
+    <button class="btn" onclick="setSimHeading(270)">Heading 270 deg</button>
+    <span style="font-size: 12px; color: #94a3b8; margin-left: 12px;">Map Mode: <strong id="lbl-mode" style="color:#38bdf8;">3D Tilted Navigation</strong></span>
+  </div>
+
+  <div class="map-stage-outer">
+    <div class="map-container-sim" id="map-sim">
+      <div class="road-strip">
+        <div class="road-centerline"></div>
+      </div>
+
+      <!-- Test Marker A: Raw Top-Down in Map -->
+      <div class="marker-slot" style="left: 24%; top: 55%;">
+        <div style="width: 56px; height: 56px; position: relative;">
+          <img src="truck-topdown.webp" class="sim-truck-img" style="width: 56px; height: 56px;" />
+          <div class="anchor-marker" style="left: 50%; top: 50%; width: 6px; height: 6px;"></div>
+        </div>
+        <div class="marker-label">A: Top-Down Flat</div>
+      </div>
+
+      <!-- Test Marker B: Raw Chase Sprite (Double Perspective) -->
+      <div class="marker-slot" style="left: 42%; top: 55%;">
+        <div style="width: 56px; height: 56px; position: relative;">
+          <img src="truck-chase.webp" class="sim-truck-img" style="width: 56px; height: 56px;" />
+          <div class="anchor-marker" style="left: 50%; top: 72%; width: 6px; height: 6px;"></div>
+        </div>
+        <div class="marker-label">B: Chase Raw (Double Tilt)</div>
+      </div>
+
+      <!-- Test Marker C: Chase Sprite with ScaleY Compensation -->
+      <div class="marker-slot" style="left: 60%; top: 55%;">
+        <div style="width: 56px; height: 56px; position: relative; transform: scaleY(1.5557); transform-origin: 50% 72%;">
+          <img src="truck-chase.webp" class="sim-truck-img" style="width: 56px; height: 56px;" />
+          <div class="anchor-marker" style="left: 50%; top: 72%; width: 6px; height: 6px;"></div>
+        </div>
+        <div class="marker-label">C: Chase + ScaleY(1.56)</div>
+      </div>
+
+      <!-- Test Marker D: Chase Sprite with Billboarding (rotateX(-50deg)) -->
+      <div class="marker-slot" style="left: 78%; top: 55%;">
+        <div style="width: 56px; height: 56px; position: relative; transform: rotateX(-50deg); transform-origin: 50% 72%;">
+          <img src="truck-chase.webp" class="sim-truck-img" style="width: 56px; height: 56px;" />
+          <div class="anchor-marker" style="left: 50%; top: 72%; width: 6px; height: 6px;"></div>
+        </div>
+        <div class="marker-label">D: Chase + Upright Billboard</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="findings-box" id="findings-summary">
+    <h4>Double-Tilt Investigation Findings:</h4>
+    <p><strong>1. Double-Tilt Phenomenon in Marker B:</strong> When `truck-chase.webp` (already rendered at 36 deg oblique pitch) is placed flat on the map plane inside `perspective(900px) rotateX(50deg)`, it undergoes an additional vertical compression of $\cos(50^\circ) \approx 0.64$. This produces an excessively squashed, foreshortened appearance.</p>
+    <p style="margin-top: 6px;"><strong>2. Counter-Scale in Marker C:</strong> Applying `scaleY(1.56)` restores the vertical aspect ratio, but creates uneven pixel stretch along the Y axis.</p>
+    <p style="margin-top: 6px;"><strong>3. Upright Billboarding in Marker D:</strong> Counter-rotating the inner wrapper with `rotateX(-50deg)` using `transform-origin: 50% 72%` causes the 3D-rendered chase sprite to stand completely upright on the tilted road surface, creating an authentic 3D pop-out effect with exact ground anchor stability.</p>
+    <p style="margin-top: 6px;"><strong>4. Top-Down in 2D vs 3D (Marker A):</strong> In 2D mode, Marker A provides a clean, accurate orthographic map icon. In 3D mode, switching dynamically from `truck-topdown.webp` to `truck-chase.webp` with upright billboarding delivers the best visual clarity.</p>
+  </div>
+
+  <script>
+    let isTilted = true;
+    let currentSimHeading = 0;
+
+    function toggleTilt() {
+      isTilted = !isTilted;
+      const map = document.getElementById('map-sim');
+      const btn = document.getElementById('btn-tilt-toggle');
+      const lbl = document.getElementById('lbl-mode');
+
+      if (isTilted) {
+        map.style.transform = `perspective(900px) rotateX(50deg) rotateZ(${-currentSimHeading}deg) scale(1.85)`;
+        btn.classList.add('active');
+        lbl.textContent = '3D Tilted Navigation';
+      } else {
+        map.style.transform = 'none';
+        btn.classList.remove('active');
+        lbl.textContent = '2D Top-Down Mode';
+      }
+    }
+
+    function setSimHeading(deg) {
+      currentSimHeading = deg;
+      const map = document.getElementById('map-sim');
+      if (isTilted) {
+        map.style.transform = `perspective(900px) rotateX(50deg) rotateZ(${-deg}deg) scale(1.85)`;
+      }
+
+      // Rotate standalone sprites
+      document.getElementById('img-topdown').style.transform = `rotate(${deg}deg)`;
+      document.getElementById('needle-topdown').style.transform = `rotate(${deg}deg)`;
+      document.getElementById('heading-topdown-lbl').textContent = `${deg} deg`;
+
+      document.getElementById('img-chase').style.transform = `rotate(${deg}deg)`;
+      document.getElementById('needle-chase').style.transform = `rotate(${deg}deg)`;
+      document.getElementById('heading-chase-lbl').textContent = `${deg} deg`;
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      document.body.setAttribute('data-test-harness', 'READY');
+    });
+  </script>
+</body>
+</html>
