@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver App - Wireframe</title>
+    <style>
+        body {
+            font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            padding: 20px;
+        }
+        .mobile-frame {
+            width: 375px;
+            height: 812px;
+            background: white;
+            border: 4px solid #333;
+            border-radius: 30px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+        .status-bar {
+            height: 30px;
+            border-bottom: 2px solid #333;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 15px;
+            align-items: center;
+            font-size: 12px;
+        }
+        .header {
+            padding: 15px;
+            border-bottom: 2px solid #333;
+            text-align: center;
+            font-weight: bold;
+        }
+        .map-placeholder {
+            height: 300px;
+            background: #e9e9e9;
+            border-bottom: 2px solid #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            position: relative;
+        }
+        .map-placeholder::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: linear-gradient(to bottom right, transparent 49%, #ccc 49%, #ccc 51%, transparent 51%),
+                        linear-gradient(to top right, transparent 49%, #ccc 49%, #ccc 51%, transparent 51%);
+        }
+        .content {
+            padding: 15px;
+        }
+        .stop-card {
+            border: 2px solid #333;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #333;
+            background: #fff;
+            text-align: center;
+            font-family: inherit;
+            font-weight: bold;
+            margin-top: 10px;
+            cursor: pointer;
+        }
+        .btn.primary {
+            background: #d4d4d4;
+        }
+        .camera-btn {
+            border: 2px dashed #333;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 10px 0;
+            color: #666;
+        }
+        .bottom-nav {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            height: 60px;
+            background: white;
+            border: 2px solid #333;
+            border-radius: 30px;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .nav-item {
+            width: 40px;
+            height: 40px;
+            border: 2px solid #333;
+            border-radius: 50%;
+        }
+    </style>
+</head>
+<body>
+    <div class="mobile-frame">
+        <div class="status-bar">
+            <span>9:41 AM</span>
+            <span>LTE []</span>
+        </div>
+        <div class="header">
+            WasteWatch - Driver Active Shift
+        </div>
+        
+        <div class="map-placeholder">
+            <span style="z-index: 1; background: white; padding: 5px; border: 2px solid #333;">Live GIS Map / Route</span>
+        </div>
+
+        <div class="content">
+            <div class="stop-card">
+                <strong>Next Stop:</strong> Quezon Ave. (Bin 4)<br>
+                Status: Arrived<br>
+                <div class="camera-btn">
+                    [ Camera Modal Icon ]<br>Take Proof Photo
+                </div>
+                <button class="btn primary">Mark Completed</button>
+            </div>
+            
+            <button class="btn">Report Issue / Escalation</button>
+        </div>
+
+        <div class="bottom-nav">
+            <div class="nav-item" title="Home"></div>
+            <div class="nav-item" title="Route"></div>
+            <div class="nav-item" title="Dumpsite"></div>
+            <div class="nav-item" title="Profile"></div>
+        </div>
+    </div>
+</body>
+</html>

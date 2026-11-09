@@ -1,0 +1,1177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WasteWatch · Low-Fidelity Wireframes</title>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #f0ede8;
+  font-family: 'Caveat', cursive;
+  padding: 40px 32px 60px;
+  min-width: 1100px;
+}
+
+h1 {
+  font-size: 28px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin-bottom: 4px;
+  letter-spacing: -0.3px;
+}
+
+.subtitle {
+  font-size: 16px;
+  color: #777;
+  margin-bottom: 48px;
+}
+
+/* Role sections */
+.role-section { margin-bottom: 64px; }
+
+.role-label {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1a1a1a;
+  border-bottom: 2px solid #c2bdb5;
+  padding-bottom: 6px;
+  margin-bottom: 28px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.screens-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 36px;
+  align-items: flex-start;
+}
+
+/* Phone frame — sketchy */
+.phone-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.phone {
+  width: 210px;
+  background: #fff;
+  border-radius: 28px;
+  border: 3px solid #2a2a2a;
+  box-shadow: 4px 5px 0 #c2bdb5;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.phone-notch {
+  width: 64px;
+  height: 16px;
+  background: #2a2a2a;
+  border-radius: 0 0 10px 10px;
+  margin: 0 auto 4px;
+}
+
+.phone-inner {
+  padding: 0 0 12px;
+  min-height: 380px;
+}
+
+/* Desktop frame - sketchy */
+.desktop-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.desktop {
+  width: 800px;
+  background: #fff;
+  border-radius: 8px;
+  border: 3px solid #2a2a2a;
+  box-shadow: 6px 8px 0 #c2bdb5;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.desktop-topbar {
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 3px solid #2a2a2a;
+  background: #f8f6f2;
+}
+
+.desktop-dots {
+  display: flex;
+  gap: 6px;
+  margin-right: 16px;
+}
+.desktop-dot {
+  width: 12px; height: 12px; border: 2px solid #2a2a2a; border-radius: 50%;
+}
+.desktop-sidebar {
+  width: 180px;
+  border-right: 3px solid #2a2a2a;
+  background: #faf8f5;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.desktop-main {
+  flex: 1;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.desktop-body {
+  display: flex;
+  flex: 1;
+  min-height: 400px;
+}
+
+/* Screen meta below phone/desktop */
+.screen-id {
+  font-size: 13px;
+  font-weight: 700;
+  color: #555;
+}
+
+.screen-name {
+  font-size: 14px;
+  color: #1a1a1a;
+  font-weight: 600;
+  text-align: center;
+  max-width: 200px;
+  line-height: 1.3;
+}
+
+/* LoFi UI building blocks */
+.lo-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 6px;
+  border-bottom: 2px solid #2a2a2a;
+}
+
+.lo-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.lo-icon-row {
+  display: flex;
+  gap: 6px;
+}
+
+.lo-icon {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #2a2a2a;
+  border-radius: 3px;
+}
+
+.lo-body { padding: 8px 10px; }
+
+/* Placeholder image box (X pattern) */
+.lo-img {
+  width: 100%;
+  background: #e8e4df;
+  border: 2px solid #2a2a2a;
+  border-radius: 4px;
+  position: relative;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.lo-img::before,
+.lo-img::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(to bottom right, transparent calc(50% - 1px), #aaa8a3 calc(50% - 1px), #aaa8a3 calc(50% + 1px), transparent calc(50% + 1px));
+}
+
+.lo-img::after {
+  background: linear-gradient(to bottom left, transparent calc(50% - 1px), #aaa8a3 calc(50% - 1px), #aaa8a3 calc(50% + 1px), transparent calc(50% + 1px));
+}
+
+/* Text line placeholders */
+.lo-line {
+  height: 8px;
+  background: #d4cfc9;
+  border-radius: 4px;
+  margin-bottom: 5px;
+}
+
+/* Card */
+.lo-card {
+  border: 2px solid #2a2a2a;
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: #faf8f5;
+}
+
+/* Button */
+.lo-btn {
+  width: 100%;
+  border: 2px solid #2a2a2a;
+  border-radius: 5px;
+  padding: 7px 10px;
+  font-family: 'Caveat', cursive;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  background: #fff;
+  margin-bottom: 6px;
+  color: #1a1a1a;
+}
+
+.lo-btn-filled {
+  background: #2a2a2a;
+  color: #fff;
+}
+
+/* Label */
+.lo-label {
+  font-size: 11px;
+  color: #999;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 4px;
+  margin-top: 8px;
+}
+
+/* Input field */
+.lo-input {
+  width: 100%;
+  border: 2px solid #2a2a2a;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-family: 'Caveat', cursive;
+  font-size: 12px;
+  color: #888;
+  background: #faf8f5;
+  margin-bottom: 6px;
+}
+
+/* Bottom nav */
+.lo-nav {
+  display: flex;
+  border-top: 2px solid #2a2a2a;
+  margin-top: 10px;
+}
+
+.lo-nav-item {
+  flex: 1;
+  text-align: center;
+  padding: 6px 2px 4px;
+  font-size: 10px;
+  color: #888;
+  border-right: 1px solid #d4cfc9;
+}
+
+.lo-nav-item:last-child { border-right: none; }
+.lo-nav-item.active { color: #1a1a1a; font-weight: 700; }
+
+.lo-nav-icon {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #aaa;
+  border-radius: 2px;
+  margin: 0 auto 2px;
+}
+.lo-nav-item.active .lo-nav-icon { border-color: #2a2a2a; background: #2a2a2a; }
+
+/* Map placeholder */
+.lo-map {
+  width: 100%;
+  background: #e8e4df;
+  border: 2px solid #2a2a2a;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lo-map::before {
+  content: '🗺 Map';
+  font-family: 'Caveat', cursive;
+  font-size: 13px;
+  color: #888;
+  font-weight: 600;
+}
+
+/* Pin dot on map */
+.lo-pin {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #2a2a2a;
+  border-radius: 50%;
+  background: #fff;
+}
+
+/* Stats row */
+.lo-stats {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.lo-stat {
+  flex: 1;
+  border: 2px solid #2a2a2a;
+  border-radius: 5px;
+  padding: 6px 4px;
+  text-align: center;
+  background: #faf8f5;
+}
+
+.lo-stat-num {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.lo-stat-lbl {
+  font-size: 9px;
+  color: #999;
+}
+
+/* List row */
+.lo-list-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 0;
+  border-bottom: 1px solid #d4cfc9;
+}
+
+.lo-list-thumb {
+  width: 26px;
+  height: 26px;
+  border: 2px solid #2a2a2a;
+  border-radius: 4px;
+  flex-shrink: 0;
+  background: #e8e4df;
+  position: relative;
+  overflow: hidden;
+}
+
+.lo-list-thumb::before, .lo-list-thumb::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(to bottom right, transparent calc(50% - 0.5px), #aaa calc(50% - 0.5px), #aaa calc(50% + 0.5px), transparent calc(50% + 0.5px));
+}
+.lo-list-thumb::after {
+  background: linear-gradient(to bottom left, transparent calc(50% - 0.5px), #aaa calc(50% - 0.5px), #aaa calc(50% + 0.5px), transparent calc(50% + 0.5px));
+}
+
+.lo-list-lines { flex: 1; }
+.lo-chip {
+  font-size: 9px;
+  border: 1.5px solid #2a2a2a;
+  border-radius: 10px;
+  padding: 1px 5px;
+  color: #444;
+  white-space: nowrap;
+}
+
+/* Radio / checkbox row */
+.lo-radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #333;
+  margin-bottom: 5px;
+}
+
+.lo-radio-dot {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #2a2a2a;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.lo-radio-dot.filled {
+  background: #2a2a2a;
+}
+
+/* Bar chart placeholder */
+.lo-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 44px;
+  margin-bottom: 8px;
+  padding: 0 2px;
+}
+
+.lo-bar {
+  flex: 1;
+  background: #c2bdb5;
+  border: 1.5px solid #2a2a2a;
+  border-radius: 2px 2px 0 0;
+}
+
+/* Circle gauge */
+.lo-gauge {
+  width: 56px;
+  height: 56px;
+  border: 4px solid #2a2a2a;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0 auto 4px;
+  background: #faf8f5;
+}
+
+/* Section divider */
+.lo-divider {
+  height: 1px;
+  background: #d4cfc9;
+  margin: 8px 0;
+}
+
+/* Tab row */
+.lo-tabs {
+  display: flex;
+  border-bottom: 2px solid #2a2a2a;
+  margin-bottom: 8px;
+}
+
+.lo-tab {
+  flex: 1;
+  text-align: center;
+  font-size: 11px;
+  padding: 4px 2px;
+  color: #999;
+}
+
+.lo-tab.active {
+  color: #1a1a1a;
+  font-weight: 700;
+  border-bottom: 3px solid #2a2a2a;
+  margin-bottom: -2px;
+}
+
+/* Progress bar */
+.lo-progress {
+  height: 6px;
+  background: #e8e4df;
+  border: 1.5px solid #2a2a2a;
+  border-radius: 3px;
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+
+.lo-progress-fill {
+  height: 100%;
+  background: #2a2a2a;
+  border-radius: 2px;
+}
+
+/* back arrow */
+.lo-back { font-size: 13px; color: #555; }
+</style>
+</head>
+<body>
+
+<h1>WasteWatch · Low-Fidelity Wireframes</h1>
+<p class="subtitle">Sketch-level screens per user role — for thesis documentation</p>
+
+<!-- ===================== ADMINISTRATOR (DESKTOP) ===================== -->
+<div class="role-section">
+  <div class="role-label">💻 Administrator (Web Portal)</div>
+  <div class="screens-row">
+
+    <!-- A-1 Dashboard -->
+    <div class="desktop-wrap">
+      <div class="desktop">
+        <div class="desktop-topbar">
+          <div class="desktop-dots">
+            <div class="desktop-dot"></div><div class="desktop-dot"></div><div class="desktop-dot"></div>
+          </div>
+          <div class="lo-title">WasteWatch Admin · Dashboard</div>
+        </div>
+        <div class="desktop-body">
+          <div class="desktop-sidebar">
+            <div class="lo-list-item"><div class="lo-nav-icon"></div><div style="font-weight:bold">Dashboard</div></div>
+            <div class="lo-list-item"><div class="lo-nav-icon"></div><div>Users</div></div>
+            <div class="lo-list-item"><div class="lo-nav-icon"></div><div>Trucks</div></div>
+            <div class="lo-list-item"><div class="lo-nav-icon"></div><div>Reports</div></div>
+            <div class="lo-list-item"><div class="lo-nav-icon"></div><div>Escalations</div></div>
+          </div>
+          <div class="desktop-main">
+            <div class="lo-stats" style="gap:20px">
+              <div class="lo-stat" style="padding:15px"><div class="lo-stat-num" style="font-size:24px">12</div><div class="lo-stat-lbl" style="font-size:12px">Active Trucks</div></div>
+              <div class="lo-stat" style="padding:15px"><div class="lo-stat-num" style="font-size:24px">8</div><div class="lo-stat-lbl" style="font-size:12px">Reports Today</div></div>
+              <div class="lo-stat" style="padding:15px"><div class="lo-stat-num" style="font-size:24px">3</div><div class="lo-stat-lbl" style="font-size:12px">Hotspots Active</div></div>
+              <div class="lo-stat" style="padding:15px"><div class="lo-stat-num" style="font-size:24px">85%</div><div class="lo-stat-lbl" style="font-size:12px">Route Completion</div></div>
+            </div>
+            
+            <div style="display:flex; gap:16px; flex:1;">
+              <div style="flex:2">
+                <div class="lo-label">Live Operation Map</div>
+                <div class="lo-map" style="height:200px; border-radius:8px"></div>
+              </div>
+              <div style="flex:1; display:flex; flex-direction:column; gap:10px">
+                <div class="lo-card" style="flex:1">
+                  <div class="lo-label">Recent Escalations</div>
+                  <div class="lo-list-item"><div class="lo-chip" style="background:#2a2a2a;color:#fff">High</div><div class="lo-list-lines"><div class="lo-line" style="width:90%"></div></div></div>
+                  <div class="lo-list-item"><div class="lo-chip">Mid</div><div class="lo-list-lines"><div class="lo-line" style="width:70%"></div></div></div>
+                  <div class="lo-btn" style="margin-top:10px">View All</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">A-1</div>
+      <div class="screen-name">Admin Command Center</div>
+    </div>
+
+    <!-- A-6 Escalations -->
+    <div class="desktop-wrap">
+      <div class="desktop">
+        <div class="desktop-topbar">
+          <div class="desktop-dots">
+            <div class="desktop-dot"></div><div class="desktop-dot"></div><div class="desktop-dot"></div>
+          </div>
+          <div class="lo-title">WasteWatch Admin · Escalations Queue</div>
+        </div>
+        <div class="desktop-body">
+          <div class="desktop-sidebar">
+            <div class="lo-list-item"><div class="lo-nav-icon"></div><div>Dashboard</div></div>
+            <div class="lo-list-item"><div class="lo-nav-icon"></div><div>Users</div></div>
+            <div class="lo-list-item"><div class="lo-nav-icon"></div><div>Trucks</div></div>
+            <div class="lo-list-item"><div class="lo-nav-icon"></div><div>Reports</div></div>
+            <div class="lo-list-item"><div class="lo-nav-icon"></div><div style="font-weight:bold">Escalations</div></div>
+          </div>
+          <div class="desktop-main">
+            <div class="lo-tabs" style="justify-content:flex-start; gap:20px; border-bottom:3px solid #2a2a2a">
+              <div class="lo-tab active" style="font-size:14px; padding:10px">All Open</div>
+              <div class="lo-tab" style="font-size:14px; padding:10px">Critical</div>
+              <div class="lo-tab" style="font-size:14px; padding:10px">High</div>
+              <div class="lo-tab" style="font-size:14px; padding:10px">Resolved</div>
+            </div>
+            
+            <div style="display:flex; gap:20px">
+              <!-- Escalation Card 1 -->
+              <div class="lo-card" style="flex:1; padding:16px">
+                <div style="display:flex; justify-content:space-between; margin-bottom:12px">
+                  <div class="lo-chip" style="background:#2a2a2a; color:#fff; font-size:12px">🔴 CRITICAL</div>
+                  <div style="font-size:12px; color:#777">2 hrs ago</div>
+                </div>
+                <div class="lo-title">Driver Complaint (No-Show)</div>
+                <div style="font-size:13px; color:#555; margin-bottom:16px">Brgy Isabang · Watcher: Maria S.</div>
+                <div class="lo-label">Assigned To:</div>
+                <input class="lo-input" placeholder="Select Admin ▼" readonly>
+                <div style="display:flex; gap:10px; margin-top:16px">
+                  <div class="lo-btn lo-btn-filled" style="margin:0">Approve & Assign</div>
+                  <div class="lo-btn" style="margin:0">Reject</div>
+                </div>
+              </div>
+              
+              <!-- Escalation Card 2 -->
+              <div class="lo-card" style="flex:1; padding:16px">
+                <div style="display:flex; justify-content:space-between; margin-bottom:12px">
+                  <div class="lo-chip" style="background:#2a2a2a; color:#fff; font-size:12px">🟠 HIGH</div>
+                  <div style="font-size:12px; color:#777">5 hrs ago</div>
+                </div>
+                <div class="lo-title">Hotspot Escalated</div>
+                <div style="font-size:13px; color:#555; margin-bottom:16px">Brgy Gulang · Area 4</div>
+                <div class="lo-label">Assigned To:</div>
+                <input class="lo-input" value="Admin Juan" readonly>
+                <div style="display:flex; gap:10px; margin-top:16px">
+                  <div class="lo-btn lo-btn-filled" style="margin:0">Inject into Route</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">A-6</div>
+      <div class="screen-name">Escalations Management</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===================== LOGIN / SHARED ===================== -->
+<div class="role-section">
+  <div class="role-label">👤 Shared / Login</div>
+  <div class="screens-row">
+
+    <!-- Login -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-inner">
+          <div class="lo-topbar"><div class="lo-title">WasteWatch</div></div>
+          <div class="lo-body">
+            <div style="text-align:center;padding:12px 0 10px">
+              <div style="width:50px;height:50px;border:3px solid #2a2a2a;border-radius:50%;margin:0 auto 6px;background:#e8e4df;display:flex;align-items:center;justify-content:center;font-size:20px">🗑️</div>
+              <div style="font-size:14px;font-weight:700;color:#1a1a1a">Sign In</div>
+            </div>
+            <div class="lo-label">Email</div>
+            <input class="lo-input" placeholder="email@example.com" readonly>
+            <div class="lo-label">Password</div>
+            <input class="lo-input" type="password" placeholder="••••••••" readonly>
+            <div class="lo-btn lo-btn-filled" style="margin-top:8px">Log In</div>
+            <div class="lo-btn">Register</div>
+            <div class="lo-line" style="width:60%;margin:8px auto 0"></div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">U-1a</div>
+      <div class="screen-name">Login Screen</div>
+    </div>
+
+    <!-- Role Select -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-inner">
+          <div class="lo-topbar"><div class="lo-title">Select Role</div></div>
+          <div class="lo-body">
+            <div class="lo-line" style="width:80%;margin-bottom:12px"></div>
+            <div class="lo-card">
+              <div class="lo-radio"><div class="lo-radio-dot filled"></div> Admin</div>
+            </div>
+            <div class="lo-card">
+              <div class="lo-radio"><div class="lo-radio-dot"></div> Driver</div>
+            </div>
+            <div class="lo-card">
+              <div class="lo-radio"><div class="lo-radio-dot"></div> Watcher</div>
+            </div>
+            <div class="lo-card">
+              <div class="lo-radio"><div class="lo-radio-dot"></div> Citizen</div>
+            </div>
+            <div class="lo-card">
+              <div class="lo-radio"><div class="lo-radio-dot"></div> Dumpsite Op.</div>
+            </div>
+            <div class="lo-btn lo-btn-filled" style="margin-top:10px">Continue</div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">U-1b</div>
+      <div class="screen-name">Role Selection</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===================== DRIVER ===================== -->
+<div class="role-section">
+  <div class="role-label">🚛 Driver / Sanitation Worker</div>
+  <div class="screens-row">
+
+    <!-- D-1 Dashboard -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-inner">
+          <div class="lo-topbar"><div class="lo-title">Dashboard</div><div class="lo-icon-row"><div class="lo-icon"></div></div></div>
+          <div class="lo-body">
+            <div class="lo-label">Today's Shift</div>
+            <div class="lo-stats">
+              <div class="lo-stat"><div class="lo-stat-num">8</div><div class="lo-stat-lbl">Stops</div></div>
+              <div class="lo-stat"><div class="lo-stat-num">3</div><div class="lo-stat-lbl">Done</div></div>
+              <div class="lo-stat"><div class="lo-stat-num">5</div><div class="lo-stat-lbl">Left</div></div>
+            </div>
+            <div class="lo-progress"><div class="lo-progress-fill" style="width:38%"></div></div>
+            <div class="lo-label">Current Route</div>
+            <div class="lo-map" style="height:80px"></div>
+            <div class="lo-btn lo-btn-filled">▶ Start Shift</div>
+            <div class="lo-label">Recent Activity</div>
+            <div class="lo-list-item">
+              <div class="lo-list-thumb"></div>
+              <div class="lo-list-lines"><div class="lo-line" style="width:90%;margin-bottom:3px"></div><div class="lo-line" style="width:65%"></div></div>
+              <div class="lo-chip">Done</div>
+            </div>
+            <div class="lo-list-item">
+              <div class="lo-list-thumb"></div>
+              <div class="lo-list-lines"><div class="lo-line" style="width:90%;margin-bottom:3px"></div><div class="lo-line" style="width:65%"></div></div>
+              <div class="lo-chip">Pending</div>
+            </div>
+          </div>
+          <div class="lo-nav">
+            <div class="lo-nav-item active"><div class="lo-nav-icon"></div>Home</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Route</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Log</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Profile</div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">D-1</div>
+      <div class="screen-name">Driver Dashboard</div>
+    </div>
+
+    <!-- D-3 Route Map -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-inner">
+          <div class="lo-topbar"><div class="lo-title">Active Route</div><div class="lo-icon-row"><div class="lo-icon"></div></div></div>
+          <div class="lo-body">
+            <div class="lo-map" style="height:180px;position:relative">
+              <div class="lo-pin" style="top:30%;left:40%"></div>
+              <div class="lo-pin" style="top:50%;left:55%"></div>
+              <div class="lo-pin" style="top:65%;left:35%"></div>
+            </div>
+            <div class="lo-label">Next Stop</div>
+            <div class="lo-card">
+              <div class="lo-line" style="width:70%;margin-bottom:5px"></div>
+              <div class="lo-line" style="width:50%"></div>
+              <div class="lo-btn" style="margin-top:8px;font-size:11px;padding:5px">📍 Navigate</div>
+            </div>
+            <div class="lo-btn lo-btn-filled">✓ Mark Arrived</div>
+          </div>
+          <div class="lo-nav">
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Home</div>
+            <div class="lo-nav-item active"><div class="lo-nav-icon"></div>Route</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Log</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Profile</div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">D-3</div>
+      <div class="screen-name">Active Route Map</div>
+    </div>
+
+    <!-- D-4 Arrived at Stop -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-inner">
+          <div class="lo-topbar"><div class="lo-back">← Back</div><div class="lo-title">At Stop</div></div>
+          <div class="lo-body">
+            <div class="lo-label">Stop Info</div>
+            <div class="lo-card">
+              <div class="lo-line" style="width:80%;margin-bottom:5px"></div>
+              <div class="lo-line" style="width:55%"></div>
+            </div>
+            <div class="lo-label">Photo Proof</div>
+            <div class="lo-img" style="height:80px"></div>
+            <div class="lo-btn">📷 Take Photo</div>
+            <div class="lo-label">Pickup Notes</div>
+            <input class="lo-input" placeholder="Optional notes…" readonly>
+            <div class="lo-btn lo-btn-filled">✓ Confirm Collection</div>
+            <div class="lo-btn" style="color:#c00">✗ Skip / Unable</div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">D-4</div>
+      <div class="screen-name">Arrived at Stop — Confirm</div>
+    </div>
+
+    <!-- D-8 End Shift -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-inner">
+          <div class="lo-topbar"><div class="lo-title">End Shift</div></div>
+          <div class="lo-body">
+            <div class="lo-label">Shift Summary</div>
+            <div class="lo-stats">
+              <div class="lo-stat"><div class="lo-stat-num">8</div><div class="lo-stat-lbl">Stops</div></div>
+              <div class="lo-stat"><div class="lo-stat-num">7</div><div class="lo-stat-lbl">Done</div></div>
+              <div class="lo-stat"><div class="lo-stat-num">1</div><div class="lo-stat-lbl">Missed</div></div>
+            </div>
+            <div class="lo-label">Truck Plate</div>
+            <input class="lo-input" placeholder="WAA-123" readonly>
+            <div class="lo-label">Dumpsite Check-In</div>
+            <div class="lo-img" style="height:60px"></div>
+            <div class="lo-btn">📷 Photo at Dumpsite</div>
+            <div class="lo-btn lo-btn-filled" style="margin-top:6px">✓ End Shift</div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">D-8</div>
+      <div class="screen-name">End Shift / Dumpsite Check-In</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===================== WATCHER ===================== -->
+<div class="role-section">
+  <div class="role-label">👁 Watcher / Barangay Official</div>
+  <div class="screens-row">
+
+    <!-- W-1 Dashboard -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-inner">
+          <div class="lo-topbar"><div class="lo-title">Watcher</div><div class="lo-icon-row"><div class="lo-icon"></div></div></div>
+          <div class="lo-body">
+            <div class="lo-stats">
+              <div class="lo-stat"><div class="lo-stat-num">12</div><div class="lo-stat-lbl">Reports</div></div>
+              <div class="lo-stat"><div class="lo-stat-num">4</div><div class="lo-stat-lbl">Hotspots</div></div>
+              <div class="lo-stat"><div class="lo-stat-num">2</div><div class="lo-stat-lbl">Pending</div></div>
+            </div>
+            <div class="lo-label">Hotspot Map</div>
+            <div class="lo-map" style="height:90px"></div>
+            <div class="lo-label">Pending Verifications</div>
+            <div class="lo-list-item">
+              <div class="lo-list-thumb"></div>
+              <div class="lo-list-lines"><div class="lo-line" style="width:90%;margin-bottom:3px"></div><div class="lo-line" style="width:60%"></div></div>
+              <div class="lo-chip">New</div>
+            </div>
+            <div class="lo-list-item">
+              <div class="lo-list-thumb"></div>
+              <div class="lo-list-lines"><div class="lo-line" style="width:90%;margin-bottom:3px"></div><div class="lo-line" style="width:60%"></div></div>
+              <div class="lo-chip">New</div>
+            </div>
+          </div>
+          <div class="lo-nav">
+            <div class="lo-nav-item active"><div class="lo-nav-icon"></div>Home</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Reports</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Map</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Profile</div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">W-1</div>
+      <div class="screen-name">Watcher Dashboard</div>
+    </div>
+
+    <!-- W-2 Verification Queue -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-inner">
+          <div class="lo-topbar"><div class="lo-title">Verify Reports</div></div>
+          <div class="lo-body">
+            <div class="lo-tabs">
+              <div class="lo-tab active">Pending</div>
+              <div class="lo-tab">Verified</div>
+              <div class="lo-tab">Rejected</div>
+            </div>
+            <div class="lo-card">
+              <div class="lo-img" style="height:60px"></div>
+              <div class="lo-line" style="width:80%;margin-top:6px;margin-bottom:4px"></div>
+              <div class="lo-line" style="width:55%"></div>
+              <div style="display:flex;gap:6px;margin-top:8px">
+                <div class="lo-btn" style="background:#2a2a2a;color:#fff;font-size:11px;padding:5px;margin:0">✓ Verify</div>
+                <div class="lo-btn" style="font-size:11px;padding:5px;margin:0;color:#c00">✗ Reject</div>
+              </div>
+            </div>
+            <div class="lo-card">
+              <div class="lo-img" style="height:60px"></div>
+              <div class="lo-line" style="width:80%;margin-top:6px;margin-bottom:4px"></div>
+              <div class="lo-line" style="width:55%"></div>
+            </div>
+          </div>
+          <div class="lo-nav">
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Home</div>
+            <div class="lo-nav-item active"><div class="lo-nav-icon"></div>Reports</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Map</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Profile</div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">W-2</div>
+      <div class="screen-name">Report Verification Queue</div>
+    </div>
+
+    <!-- W-5 Hotspot Map -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-inner">
+          <div class="lo-topbar"><div class="lo-title">Hotspot Map</div><div class="lo-icon-row"><div class="lo-icon"></div></div></div>
+          <div class="lo-body">
+            <div class="lo-map" style="height:160px;position:relative">
+              <div class="lo-pin" style="top:25%;left:30%;background:#e8e4df"></div>
+              <div class="lo-pin" style="top:45%;left:60%;background:#e8e4df"></div>
+              <div class="lo-pin" style="top:65%;left:40%;background:#e8e4df"></div>
+            </div>
+            <div class="lo-label">Hotspot List</div>
+            <div class="lo-list-item">
+              <div class="lo-list-thumb"></div>
+              <div class="lo-list-lines"><div class="lo-line" style="width:90%;margin-bottom:3px"></div><div class="lo-line" style="width:55%"></div></div>
+              <div class="lo-chip">High</div>
+            </div>
+            <div class="lo-list-item">
+              <div class="lo-list-thumb"></div>
+              <div class="lo-list-lines"><div class="lo-line" style="width:90%;margin-bottom:3px"></div><div class="lo-line" style="width:55%"></div></div>
+              <div class="lo-chip">Mid</div>
+            </div>
+          </div>
+          <div class="lo-nav">
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Home</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Reports</div>
+            <div class="lo-nav-item active"><div class="lo-nav-icon"></div>Map</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Profile</div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">W-5</div>
+      <div class="screen-name">Hotspot Management Map</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===================== CITIZEN ===================== -->
+<div class="role-section">
+  <div class="role-label">🏠 Resident / Citizen</div>
+  <div class="screens-row">
+
+    <!-- R-1 Dashboard -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-inner">
+          <div class="lo-topbar"><div class="lo-title">My Dashboard</div></div>
+          <div class="lo-body">
+            <div class="lo-label">Next Collection</div>
+            <div class="lo-card">
+              <div class="lo-line" style="width:70%;margin-bottom:5px"></div>
+              <div class="lo-line" style="width:50%"></div>
+            </div>
+            <div class="lo-label">My Reports</div>
+            <div class="lo-stats">
+              <div class="lo-stat"><div class="lo-stat-num">3</div><div class="lo-stat-lbl">Filed</div></div>
+              <div class="lo-stat"><div class="lo-stat-num">2</div><div class="lo-stat-lbl">Verified</div></div>
+              <div class="lo-stat"><div class="lo-stat-num">1</div><div class="lo-stat-lbl">Pending</div></div>
+            </div>
+            <div class="lo-btn lo-btn-filled" style="margin-top:8px">📷 Report Waste</div>
+            <div class="lo-btn">📅 View Schedule</div>
+            <div class="lo-label">Announcements</div>
+            <div class="lo-card"><div class="lo-line" style="width:90%;margin-bottom:4px"></div><div class="lo-line" style="width:70%"></div></div>
+          </div>
+          <div class="lo-nav">
+            <div class="lo-nav-item active"><div class="lo-nav-icon"></div>Home</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Report</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Schedule</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Profile</div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">R-1</div>
+      <div class="screen-name">Resident Dashboard</div>
+    </div>
+
+    <!-- R-3 Submit Report -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-inner">
+          <div class="lo-topbar"><div class="lo-back">← Back</div><div class="lo-title">File Report</div></div>
+          <div class="lo-body">
+            <div style="display:flex;gap:4px;margin-bottom:10px">
+              <div style="flex:1;height:4px;background:#2a2a2a;border-radius:2px"></div>
+              <div style="flex:1;height:4px;background:#2a2a2a;border-radius:2px"></div>
+              <div style="flex:1;height:4px;background:#d4cfc9;border-radius:2px"></div>
+            </div>
+            <div class="lo-label">Step 2 of 3 · Add Photo</div>
+            <div class="lo-img" style="height:100px"></div>
+            <div class="lo-btn">📷 Take Photo</div>
+            <div class="lo-label">Location</div>
+            <div class="lo-map" style="height:60px"></div>
+            <div class="lo-label">Description</div>
+            <input class="lo-input" placeholder="Describe the waste…" readonly>
+            <div class="lo-btn lo-btn-filled">Next →</div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">R-3</div>
+      <div class="screen-name">Submit Report (Step 2)</div>
+    </div>
+
+    <!-- R-2 Schedule -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-inner">
+          <div class="lo-topbar"><div class="lo-title">Collection Schedule</div></div>
+          <div class="lo-body">
+            <div class="lo-tabs">
+              <div class="lo-tab active">Mon</div>
+              <div class="lo-tab">Tue</div>
+              <div class="lo-tab">Wed</div>
+              <div class="lo-tab">Thu</div>
+              <div class="lo-tab">Fri</div>
+            </div>
+            <div class="lo-list-item">
+              <div class="lo-list-thumb"></div>
+              <div class="lo-list-lines"><div class="lo-line" style="width:80%;margin-bottom:3px"></div><div class="lo-line" style="width:55%"></div></div>
+              <div class="lo-chip">7AM</div>
+            </div>
+            <div class="lo-list-item">
+              <div class="lo-list-thumb"></div>
+              <div class="lo-list-lines"><div class="lo-line" style="width:80%;margin-bottom:3px"></div><div class="lo-line" style="width:55%"></div></div>
+              <div class="lo-chip">10AM</div>
+            </div>
+            <div class="lo-list-item">
+              <div class="lo-list-thumb"></div>
+              <div class="lo-list-lines"><div class="lo-line" style="width:80%;margin-bottom:3px"></div><div class="lo-line" style="width:55%"></div></div>
+              <div class="lo-chip">2PM</div>
+            </div>
+            <div style="text-align:center;font-size:11px;color:#aaa;margin-top:8px">📶 Available offline</div>
+          </div>
+          <div class="lo-nav">
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Home</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Report</div>
+            <div class="lo-nav-item active"><div class="lo-nav-icon"></div>Schedule</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Profile</div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">R-2</div>
+      <div class="screen-name">Collection Schedule</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===================== DUMPSITE OPERATOR ===================== -->
+<div class="role-section">
+  <div class="role-label">🏭 Dumpsite Operator</div>
+  <div class="screens-row">
+
+    <!-- DO-1 Dashboard -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-inner">
+          <div class="lo-topbar"><div class="lo-title">Dumpsite</div></div>
+          <div class="lo-body">
+            <div class="lo-label">Current Capacity</div>
+            <div class="lo-gauge" style="margin-top:4px">85%</div>
+            <div class="lo-progress"><div class="lo-progress-fill" style="width:85%"></div></div>
+            <div class="lo-stats">
+              <div class="lo-stat"><div class="lo-stat-num">6</div><div class="lo-stat-lbl">Trucks Today</div></div>
+              <div class="lo-stat"><div class="lo-stat-num">2</div><div class="lo-stat-lbl">Incoming</div></div>
+            </div>
+            <div class="lo-label">Alert</div>
+            <div class="lo-card" style="border-color:#c00">
+              <div class="lo-line" style="width:90%;margin-bottom:4px"></div>
+              <div class="lo-line" style="width:70%"></div>
+            </div>
+            <div class="lo-btn lo-btn-filled">📦 Log Delivery</div>
+          </div>
+          <div class="lo-nav">
+            <div class="lo-nav-item active"><div class="lo-nav-icon"></div>Site</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Deliveries</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Analytics</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Profile</div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">DO-1</div>
+      <div class="screen-name">Dumpsite Dashboard</div>
+    </div>
+
+    <!-- DO-2 Truck Check-in -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-inner">
+          <div class="lo-topbar"><div class="lo-back">← Back</div><div class="lo-title">Truck Check-In</div></div>
+          <div class="lo-body">
+            <div class="lo-label">Truck Plate</div>
+            <input class="lo-input" placeholder="WAA-123" readonly>
+            <div class="lo-label">Driver Name</div>
+            <input class="lo-input" placeholder="J. Cruz" readonly>
+            <div class="lo-label">Fill Level</div>
+            <div style="display:flex;gap:4px;margin-bottom:8px">
+              <div class="lo-btn" style="flex:1;font-size:10px;padding:5px;margin:0;background:#2a2a2a;color:#fff">25%</div>
+              <div class="lo-btn" style="flex:1;font-size:10px;padding:5px;margin:0">50%</div>
+              <div class="lo-btn" style="flex:1;font-size:10px;padding:5px;margin:0">75%</div>
+              <div class="lo-btn" style="flex:1;font-size:10px;padding:5px;margin:0">Full</div>
+            </div>
+            <div class="lo-label">Photo</div>
+            <div class="lo-img" style="height:64px"></div>
+            <div class="lo-btn">📷 Capture</div>
+            <div class="lo-btn lo-btn-filled" style="margin-top:6px">✓ Confirm</div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">DO-2</div>
+      <div class="screen-name">Receive Truck / Check-In</div>
+    </div>
+
+    <!-- DO-4 Analytics -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-inner">
+          <div class="lo-topbar"><div class="lo-title">Analytics</div></div>
+          <div class="lo-body">
+            <div class="lo-label">7-Day Capacity Trend</div>
+            <div class="lo-bars">
+              <div class="lo-bar" style="height:40%"></div>
+              <div class="lo-bar" style="height:55%"></div>
+              <div class="lo-bar" style="height:50%"></div>
+              <div class="lo-bar" style="height:70%"></div>
+              <div class="lo-bar" style="height:65%"></div>
+              <div class="lo-bar" style="height:85%"></div>
+              <div class="lo-bar" style="height:90%"></div>
+            </div>
+            <div class="lo-label">Daily Deliveries (14 days)</div>
+            <div class="lo-bars">
+              <div class="lo-bar" style="height:30%"></div><div class="lo-bar" style="height:50%"></div><div class="lo-bar" style="height:45%"></div><div class="lo-bar" style="height:60%"></div><div class="lo-bar" style="height:55%"></div><div class="lo-bar" style="height:70%"></div><div class="lo-bar" style="height:80%"></div><div class="lo-bar" style="height:65%"></div><div class="lo-bar" style="height:75%"></div><div class="lo-bar" style="height:85%"></div><div class="lo-bar" style="height:95%"></div><div class="lo-bar" style="height:80%"></div><div class="lo-bar" style="height:70%"></div><div class="lo-bar" style="height:100%"></div>
+            </div>
+            <div class="lo-label">Top Drivers</div>
+            <div class="lo-list-item">
+              <div class="lo-list-lines"><div class="lo-line" style="width:80%;margin-bottom:3px"></div><div class="lo-line" style="width:55%"></div></div>
+              <div style="font-size:12px;font-weight:700;color:#1a1a1a">8</div>
+            </div>
+            <div class="lo-list-item">
+              <div class="lo-list-lines"><div class="lo-line" style="width:80%;margin-bottom:3px"></div><div class="lo-line" style="width:55%"></div></div>
+              <div style="font-size:12px;font-weight:700;color:#1a1a1a">6</div>
+            </div>
+          </div>
+          <div class="lo-nav">
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Site</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Deliveries</div>
+            <div class="lo-nav-item active"><div class="lo-nav-icon"></div>Analytics</div>
+            <div class="lo-nav-item"><div class="lo-nav-icon"></div>Profile</div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-id">DO-4</div>
+      <div class="screen-name">Dumpsite Analytics</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Legend -->
+<div style="border-top:2px solid #c2bdb5;padding-top:20px;font-size:14px;color:#777;text-align:center">
+  WasteWatch Low-Fidelity Wireframes &nbsp;·&nbsp; Lucena City Solid Waste Management System &nbsp;·&nbsp; Dalubhasaan ng Lungsod ng Lucena
+</div>
+
+</body>
+</html>

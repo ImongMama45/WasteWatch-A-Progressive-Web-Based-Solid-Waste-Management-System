@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resident App - Wireframe</title>
+    <style>
+        body {
+            font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            padding: 20px;
+        }
+        .mobile-frame {
+            width: 375px;
+            height: 812px;
+            background: white;
+            border: 4px solid #333;
+            border-radius: 30px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+        .status-bar {
+            height: 30px;
+            border-bottom: 2px solid #333;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 15px;
+            align-items: center;
+            font-size: 12px;
+        }
+        .header {
+            padding: 15px;
+            border-bottom: 2px solid #333;
+            text-align: center;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .profile-icon {
+            width: 30px; height: 30px;
+            border: 2px solid #333;
+            border-radius: 50%;
+        }
+        .content {
+            padding: 15px;
+            overflow-y: auto;
+            height: calc(100% - 160px);
+        }
+        .card {
+            border: 2px solid #333;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #333;
+            background: #d4d4d4;
+            text-align: center;
+            font-family: inherit;
+            font-weight: bold;
+            cursor: pointer;
+            box-sizing: border-box;
+        }
+        .calendar-widget {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .day {
+            flex: 1;
+            border: 2px solid #333;
+            text-align: center;
+            padding: 5px;
+            border-radius: 5px;
+        }
+        .day.active { background: #d4d4d4; }
+        .bottom-nav {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            height: 60px;
+            background: white;
+            border: 2px solid #333;
+            border-radius: 30px;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .nav-item {
+            width: 40px;
+            height: 40px;
+            border: 2px solid #333;
+            border-radius: 50%;
+        }
+    </style>
+</head>
+<body>
+    <div class="mobile-frame">
+        <div class="status-bar">
+            <span>9:41 AM</span>
+            <span>LTE []</span>
+        </div>
+        <div class="header">
+            <span>Welcome, Resident!</span>
+            <div class="profile-icon"></div>
+        </div>
+        
+        <div class="content">
+            <div class="card">
+                <strong>Next Collection: Tomorrow</strong>
+                <div class="calendar-widget">
+                    <div class="day">M</div>
+                    <div class="day active">T</div>
+                    <div class="day">W</div>
+                    <div class="day">T</div>
+                    <div class="day">F</div>
+                </div>
+            </div>
+            
+            <button class="btn" style="margin-bottom: 15px;">+ Report Hotspot / Issue</button>
+            
+            <div class="card">
+                <strong>Your Reports</strong>
+                <div style="margin-top: 10px; border-bottom: 1px dashed #333; padding-bottom: 5px;">
+                    Illegal Dumping at Park - <span style="color: green">Resolved</span>
+                </div>
+                <div style="margin-top: 10px;">
+                    Overflowing Bin - <span style="color: orange">Pending</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <strong>City Announcements</strong>
+                <p>No collection on Holiday (Dec 25). Please secure your bins.</p>
+            </div>
+        </div>
+
+        <div class="bottom-nav">
+            <div class="nav-item" title="Home"></div>
+            <div class="nav-item" title="Calendar"></div>
+            <div class="nav-item" title="Reports"></div>
+            <div class="nav-item" title="Alerts"></div>
+        </div>
+    </div>
+</body>
+</html>

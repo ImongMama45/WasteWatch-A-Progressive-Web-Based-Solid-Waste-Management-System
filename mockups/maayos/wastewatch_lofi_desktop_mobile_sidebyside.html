@@ -1,0 +1,555 @@
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;600;700&display=swap');
+
+  .ww-wrap {
+    font-family: 'Caveat', cursive;
+    background: #f0ede8;
+    padding: 24px 16px 40px;
+    min-width: 900px;
+  }
+
+  .ww-title { font-size: 22px; font-weight: 700; color: #1a1a1a; margin-bottom: 2px; }
+  .ww-sub { font-size: 13px; color: #888; margin-bottom: 28px; }
+
+  .pair { display: flex; gap: 32px; margin-bottom: 56px; align-items: flex-start; }
+  .pair-label {
+    font-size: 16px; font-weight: 700; color: #1a1a1a;
+    border-bottom: 2px solid #c2bdb5; padding-bottom: 5px; margin-bottom: 12px;
+  }
+
+  /* ---- DESKTOP FRAME ---- */
+  .desktop { width: 560px; flex-shrink: 0; border: 3px solid #2a2a2a; border-radius: 10px; background: #fff; box-shadow: 5px 6px 0 #c2bdb5; overflow: hidden; }
+  .bbar { background: #e8e4df; border-bottom: 2px solid #2a2a2a; padding: 6px 12px; display: flex; align-items: center; gap: 8px; }
+  .bdots { display: flex; gap: 4px; }
+  .bdot { width: 9px; height: 9px; border-radius: 50%; border: 2px solid #2a2a2a; background: #fff; }
+  .burl { flex: 1; height: 18px; border: 2px solid #2a2a2a; border-radius: 4px; background: #fff; font-size: 10px; color: #888; display: flex; align-items: center; padding: 0 6px; }
+
+  /* ---- MOBILE FRAME ---- */
+  .mobile-wrap { flex-shrink: 0; }
+  .mobile {
+    width: 220px;
+    border: 3px solid #2a2a2a;
+    border-radius: 24px;
+    background: #fff;
+    box-shadow: 4px 5px 0 #c2bdb5;
+    overflow: hidden;
+    position: relative;
+  }
+  .mobile-notch {
+    height: 14px; background: #e8e4df; border-bottom: 2px solid #2a2a2a;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .notch-pill { width: 40px; height: 5px; background: #2a2a2a; border-radius: 3px; }
+
+  /* ---- SHARED ELEMENTS ---- */
+  .nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 7px 12px; border-bottom: 2px solid #2a2a2a; background: #fff;
+  }
+  .brand { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: #1a1a1a; }
+  .brand-icon { width: 20px; height: 20px; border: 2px solid #2a2a2a; border-radius: 5px; background: #d4cfc9; font-size: 9px; display: flex; align-items: center; justify-content: center; }
+  .m-bell { width: 14px; height: 14px; border: 2px solid #2a2a2a; border-radius: 3px; background: #e8e4df; position: relative; }
+  .m-bell::after { content: ''; position: absolute; top: -4px; right: -3px; width: 5px; height: 5px; border-radius: 50%; background: #e05c5c; border: 1px solid #fff; }
+
+  /* ---- HERO (mobile) ---- */
+  .m-hero {
+    height: 190px; background: #c8c4be; position: relative; overflow: hidden;
+    display: flex; align-items: flex-start;
+  }
+  .m-hero::before { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom right, transparent calc(50% - 1px), #bbb8b3 calc(50% - 1px), #bbb8b3 calc(50% + 1px), transparent calc(50% + 1px)); }
+  .m-hero::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom left, transparent calc(50% - 1px), #bbb8b3 calc(50% - 1px), #bbb8b3 calc(50% + 1px), transparent calc(50% + 1px)); }
+  .m-hero-overlay { position: absolute; inset: 0; background: rgba(30,30,25,0.50); }
+  .m-hero-content { position: relative; z-index: 2; padding: 10px 12px; }
+  .m-badge { display: inline-block; border: 1.5px solid #fff; border-radius: 12px; padding: 1px 8px; font-size: 8px; color: #fff; margin-bottom: 7px; }
+  .m-hero-title { font-size: 18px; font-weight: 700; color: #fff; line-height: 1.2; margin-bottom: 6px; }
+  .m-hero-title span { color: #b5e5b0; }
+  .m-hero-sub { font-size: 9px; color: #ddd; margin-bottom: 10px; line-height: 1.4; }
+  .m-btn { border: 2px solid #fff; border-radius: 5px; padding: 4px 10px; font-family: 'Caveat', cursive; font-size: 9px; font-weight: 700; color: #fff; background: transparent; display: flex; align-items: center; gap: 4px; }
+  .m-btn-dark { background: rgba(30,30,25,0.7); border-color: rgba(255,255,255,0.5); }
+  .m-btns { display: flex; flex-direction: column; gap: 5px; }
+
+  /* ---- HERO BOTTOM BAR ---- */
+  .m-hero-bar { position: absolute; bottom: 0; left: 0; right: 0; height: 26px; background: rgba(30,30,25,0.7); border-top: 1.5px solid rgba(255,255,255,0.2); display: flex; z-index: 2; }
+  .m-bar-item { flex: 1; display: flex; align-items: center; justify-content: center; border-right: 1px solid rgba(255,255,255,0.2); font-size: 10px; font-weight: 700; color: #fff; }
+  .m-bar-item:last-child { border-right: none; }
+
+  /* ---- MOBILE SECTIONS ---- */
+  .m-section { padding: 12px; border-bottom: 1.5px solid #e8e4df; }
+  .m-section-title { font-size: 14px; font-weight: 700; color: #1a1a1a; margin-bottom: 10px; }
+
+  /* Feature card (mobile, vertical) */
+  .m-feat-card { border: 2px solid #2a2a2a; border-radius: 8px; padding: 10px; background: #faf8f5; box-shadow: 2px 2px 0 #c2bdb5; margin-bottom: 7px; display: flex; align-items: flex-start; gap: 8px; }
+  .m-feat-icon { width: 24px; height: 24px; border: 2px solid #2a2a2a; border-radius: 5px; background: #e8e4df; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; }
+  .m-feat-name { font-size: 11px; font-weight: 700; color: #1a1a1a; margin-bottom: 3px; }
+  .m-line { height: 6px; background: #d4cfc9; border-radius: 3px; margin-bottom: 3px; }
+
+  /* Schedule card (mobile) */
+  .m-sched-card { border: 2px solid #2a2a2a; border-radius: 7px; padding: 9px; background: #fff; margin-bottom: 7px; box-shadow: 2px 2px 0 #c2bdb5; }
+  .m-sched-label { font-size: 7px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .m-sched-day { font-size: 13px; font-weight: 700; color: #1a1a1a; }
+  .m-pill { display: inline-block; border: 1.5px solid #2a2a2a; border-radius: 12px; padding: 1px 7px; font-size: 8px; color: #1a1a1a; margin: 2px 2px 2px 0; }
+
+  /* Weekly list (mobile) */
+  .m-week { border: 1.5px solid #d4cfc9; border-radius: 7px; padding: 7px; background: #fff; }
+  .m-week-row { display: flex; justify-content: space-between; font-size: 9px; color: #555; padding: 3px 0; border-bottom: 1px solid #e8e4df; }
+  .m-week-row:last-child { border-bottom: none; }
+
+  /* Eyebrow */
+  .m-eyebrow { display: inline-flex; align-items: center; gap: 3px; font-size: 8px; font-weight: 700; border: 1.5px solid #2a2a2a; border-radius: 12px; padding: 1px 7px; margin-bottom: 6px; color: #1a1a1a; }
+
+  /* Reports card (mobile) */
+  .m-reports-card { background: #2a2a2a; border-radius: 7px; padding: 8px 10px; margin-bottom: 7px; display: flex; align-items: center; justify-content: space-between; }
+  .m-reports-title { font-size: 10px; font-weight: 700; color: #fff; }
+  .m-reports-sub { font-size: 7px; color: #aaa; margin-top: 1px; }
+  .m-online { display: flex; align-items: center; gap: 3px; }
+  .m-online-dot { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid #7ee87e; background: transparent; }
+
+  /* Empty state */
+  .m-empty { border: 1.5px dashed #c2bdb5; border-radius: 7px; padding: 16px; text-align: center; font-size: 9px; color: #aaa; }
+  .m-empty-icon { width: 20px; height: 20px; border: 1.5px solid #c2bdb5; border-radius: 50%; margin: 0 auto 5px; background: #e8e4df; }
+
+  /* Announcement card (mobile) */
+  .m-news-img { width: 100%; height: 80px; background: #c8c4be; position: relative; overflow: hidden; }
+  .m-news-img::before { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom right, transparent calc(50% - 1px), #bbb8b3 calc(50% - 1px), #bbb8b3 calc(50% + 1px), transparent calc(50% + 1px)); }
+  .m-news-img::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom left, transparent calc(50% - 1px), #bbb8b3 calc(50% - 1px), #bbb8b3 calc(50% + 1px), transparent calc(50% + 1px)); }
+  .m-news-body { padding: 8px 10px; }
+  .m-news-title { font-size: 12px; font-weight: 700; color: #1a1a1a; margin-bottom: 8px; }
+  .m-carousel-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .m-arrow { width: 18px; height: 18px; border: 2px solid #2a2a2a; border-radius: 50%; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; }
+  .m-btn-dark-full { display: block; border: 2px solid #2a2a2a; border-radius: 5px; padding: 5px; font-family: 'Caveat', cursive; font-size: 10px; font-weight: 700; text-align: center; background: #2a2a2a; color: #fff; }
+  .m-dots { display: flex; justify-content: center; gap: 4px; margin-top: 8px; }
+  .m-dot-ind { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid #2a2a2a; background: #fff; }
+  .m-dot-ind.active { background: #2a2a2a; }
+
+  /* CTA (mobile) */
+  .m-cta { background: #2a2a2a; padding: 16px 12px; text-align: center; }
+  .m-cta-eyebrow { font-size: 8px; color: #888; letter-spacing: 0.8px; margin-bottom: 6px; }
+  .m-cta-title { font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 6px; line-height: 1.3; }
+  .m-cta-sub { font-size: 9px; color: #bbb; margin-bottom: 10px; line-height: 1.4; }
+  .m-cta-btn { display: inline-block; border: 2px solid #fff; border-radius: 6px; padding: 5px 14px; font-family: 'Caveat', cursive; font-size: 11px; font-weight: 700; color: #2a2a2a; background: #fff; }
+
+  /* Footer (mobile) */
+  .m-footer { background: #1a1a1a; padding: 12px; }
+  .m-footer-logo { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; }
+  .m-footer-logo-box { width: 16px; height: 16px; border: 1.5px solid #555; border-radius: 3px; background: #333; }
+  .m-footer-name { font-size: 11px; color: #ccc; font-weight: 700; }
+  .m-footer-tagline { font-size: 8px; color: #666; line-height: 1.4; margin-bottom: 10px; }
+  .m-footer-section { margin-bottom: 8px; }
+  .m-footer-heading { font-size: 8px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 5px; }
+  .m-flink { height: 5px; background: #333; border-radius: 2px; margin-bottom: 4px; }
+  .m-footer-bottom { background: #1a1a1a; border-top: 1px solid #333; padding: 6px 0 0; }
+  .m-footer-copy { font-size: 7px; color: #555; margin-bottom: 2px; }
+
+  /* Bottom nav (mobile) */
+  .m-bottom-nav {
+    border-top: 2px solid #2a2a2a; background: #fff;
+    display: flex; padding: 6px 0 4px;
+  }
+  .m-nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 7px; color: #555; }
+  .m-nav-icon { width: 16px; height: 16px; border: 1.5px solid #2a2a2a; border-radius: 3px; background: #e8e4df; }
+  .m-nav-cam { width: 26px; height: 26px; border: 2px solid #2a2a2a; border-radius: 50%; background: #e8e4df; margin-top: -10px; display: flex; align-items: center; justify-content: center; font-size: 11px; }
+
+  /* Desktop nav */
+  .d-nav { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 2px solid #2a2a2a; background: #fff; }
+  .d-brand { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: #1a1a1a; }
+  .d-brand-icon { width: 22px; height: 22px; border: 2px solid #2a2a2a; border-radius: 5px; background: #d4cfc9; font-size: 11px; display: flex; align-items: center; justify-content: center; }
+  .d-nav-links { display: flex; gap: 14px; font-size: 10px; color: #555; }
+  .d-nav-links .active { font-weight: 700; color: #1a1a1a; border-bottom: 2px solid #2a2a2a; }
+  .d-nav-right { display: flex; align-items: center; gap: 8px; }
+  .d-avatar { width: 20px; height: 20px; border: 2px solid #2a2a2a; border-radius: 50%; background: #d4cfc9; }
+  .d-bell { width: 16px; height: 16px; border: 2px solid #2a2a2a; border-radius: 3px; background: #e8e4df; }
+
+  /* Desktop hero */
+  .d-hero { height: 200px; background: #c8c4be; position: relative; overflow: hidden; display: flex; align-items: center; }
+  .d-hero::before { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom right, transparent calc(50% - 1px), #bbb8b3 calc(50% - 1px), #bbb8b3 calc(50% + 1px), transparent calc(50% + 1px)); }
+  .d-hero::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom left, transparent calc(50% - 1px), #bbb8b3 calc(50% - 1px), #bbb8b3 calc(50% + 1px), transparent calc(50% + 1px)); }
+  .d-hero-overlay { position: absolute; inset: 0; background: rgba(30,30,25,0.48); }
+  .d-hero-content { position: relative; z-index: 2; padding: 0 20px; max-width: 55%; }
+  .d-badge { display: inline-block; border: 1.5px solid #fff; border-radius: 14px; padding: 2px 9px; font-size: 9px; color: #fff; margin-bottom: 8px; }
+  .d-hero-title { font-size: 22px; font-weight: 700; color: #fff; line-height: 1.2; margin-bottom: 7px; }
+  .d-hero-title span { color: #b5e5b0; }
+  .d-hero-sub { font-size: 10px; color: #ddd; margin-bottom: 10px; line-height: 1.4; }
+  .d-hero-btns { display: flex; gap: 7px; }
+  .d-btn { border: 2px solid #fff; border-radius: 5px; padding: 5px 11px; font-family: 'Caveat', cursive; font-size: 10px; font-weight: 700; color: #fff; background: transparent; }
+  .d-hero-stats { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); z-index: 2; display: flex; flex-direction: column; gap: 5px; }
+  .d-stat-card { background: rgba(255,255,255,0.15); border: 1.5px solid rgba(255,255,255,0.5); border-radius: 6px; padding: 5px 10px; display: flex; align-items: center; gap: 6px; min-width: 95px; }
+  .d-stat-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .d-stat-info { font-size: 10px; color: #fff; font-weight: 700; }
+  .d-stat-sub { font-size: 8px; color: #ccc; }
+  .d-hero-bar { position: absolute; bottom: 0; left: 0; right: 0; height: 28px; background: rgba(30,30,25,0.7); border-top: 1.5px solid rgba(255,255,255,0.2); display: flex; z-index: 2; }
+  .d-bar-item { flex: 1; display: flex; align-items: center; justify-content: center; border-right: 1px solid rgba(255,255,255,0.2); font-size: 11px; font-weight: 700; color: #fff; }
+  .d-bar-item:last-child { border-right: none; }
+
+  /* Desktop sections */
+  .d-section { padding: 14px 16px; border-bottom: 1.5px solid #e8e4df; }
+  .d-section-title { font-size: 14px; font-weight: 700; color: #1a1a1a; margin-bottom: 10px; }
+  .d-cards-row { display: flex; gap: 9px; }
+  .d-feature-card { flex: 1; border: 2px solid #2a2a2a; border-radius: 8px; padding: 10px; background: #faf8f5; box-shadow: 2px 2px 0 #c2bdb5; }
+  .d-feature-icon { width: 22px; height: 22px; border: 1.5px solid #2a2a2a; border-radius: 4px; background: #e8e4df; margin-bottom: 6px; font-size: 10px; display: flex; align-items: center; justify-content: center; }
+  .d-feature-name { font-size: 11px; font-weight: 700; color: #1a1a1a; margin-bottom: 4px; }
+  .d-line { height: 5px; background: #d4cfc9; border-radius: 3px; margin-bottom: 3px; }
+
+  .d-two-col { display: flex; gap: 14px; padding: 14px 16px; border-bottom: 1.5px solid #e8e4df; background: #f5f3ef; }
+  .d-col { flex: 1; }
+  .d-eyebrow { display: inline-flex; align-items: center; gap: 3px; font-size: 8px; font-weight: 700; border: 1.5px solid #2a2a2a; border-radius: 12px; padding: 1px 7px; margin-bottom: 6px; color: #1a1a1a; }
+  .d-col-title { font-size: 13px; font-weight: 700; color: #1a1a1a; }
+  .d-col-action { display: inline-block; border: 1.5px solid #2a2a2a; border-radius: 5px; padding: 3px 8px; font-size: 9px; font-weight: 700; color: #1a1a1a; }
+  .d-sched-card { border: 2px solid #2a2a2a; border-radius: 6px; padding: 8px; background: #fff; margin-bottom: 6px; box-shadow: 2px 2px 0 #c2bdb5; }
+  .d-sched-label { font-size: 7px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 3px; }
+  .d-pill { display: inline-block; border: 1.5px solid #2a2a2a; border-radius: 10px; padding: 1px 6px; font-size: 8px; color: #1a1a1a; margin: 2px 2px 2px 0; }
+  .d-week { border: 1.5px solid #d4cfc9; border-radius: 6px; padding: 6px; background: #fff; }
+  .d-week-row { display: flex; justify-content: space-between; font-size: 8px; color: #555; padding: 3px 0; border-bottom: 1px solid #e8e4df; }
+  .d-week-row:last-child { border-bottom: none; }
+  .d-reports-card { background: #2a2a2a; border-radius: 6px; padding: 6px 9px; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; }
+  .d-reports-title { font-size: 10px; font-weight: 700; color: #fff; }
+  .d-reports-sub { font-size: 7px; color: #aaa; }
+  .d-empty { border: 1.5px dashed #c2bdb5; border-radius: 6px; padding: 16px; text-align: center; font-size: 9px; color: #aaa; }
+  .d-empty-icon { width: 18px; height: 18px; border: 1.5px solid #c2bdb5; border-radius: 50%; margin: 0 auto 5px; background: #e8e4df; }
+
+  .d-news-section { padding: 14px 16px; background: #f5f3ef; }
+  .d-news-card { display: flex; border: 2px solid #2a2a2a; border-radius: 8px; overflow: hidden; box-shadow: 3px 3px 0 #c2bdb5; background: #fff; position: relative; }
+  .d-news-img { width: 38%; background: #c8c4be; position: relative; overflow: hidden; min-height: 120px; }
+  .d-news-img::before { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom right, transparent calc(50% - 1px), #bbb8b3 calc(50% - 1px), #bbb8b3 calc(50% + 1px), transparent calc(50% + 1px)); }
+  .d-news-img::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom left, transparent calc(50% - 1px), #bbb8b3 calc(50% - 1px), #bbb8b3 calc(50% + 1px), transparent calc(50% + 1px)); }
+  .d-news-body { flex: 1; padding: 12px 14px; }
+  .d-news-eyebrow { display: inline-flex; align-items: center; gap: 3px; font-size: 9px; border: 1.5px solid #2a2a2a; border-radius: 12px; padding: 1px 7px; margin-bottom: 6px; color: #1a1a1a; }
+  .d-news-title { font-size: 13px; font-weight: 700; color: #1a1a1a; margin-bottom: 8px; }
+  .d-btn-dark { display: block; border: 2px solid #2a2a2a; border-radius: 5px; padding: 5px; font-family: 'Caveat', cursive; font-size: 10px; font-weight: 700; text-align: center; background: #2a2a2a; color: #fff; }
+  .d-arrow { position: absolute; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; border: 2px solid #2a2a2a; border-radius: 50%; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 9px; z-index: 2; }
+  .d-dots { display: flex; justify-content: center; gap: 4px; margin-top: 8px; }
+  .d-dot-ind { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid #2a2a2a; background: #fff; }
+  .d-dot-ind.active { background: #2a2a2a; }
+
+  .d-cta { background: #2a2a2a; padding: 18px 16px; text-align: center; }
+  .d-cta-eyebrow { font-size: 9px; color: #888; letter-spacing: 0.8px; margin-bottom: 6px; }
+  .d-cta-title { font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 5px; }
+  .d-cta-sub { font-size: 9px; color: #bbb; margin-bottom: 10px; }
+  .d-cta-btn { display: inline-block; border: 2px solid #fff; border-radius: 6px; padding: 5px 16px; font-family: 'Caveat', cursive; font-size: 11px; font-weight: 700; color: #2a2a2a; background: #fff; }
+  .d-footer { background: #1a1a1a; padding: 14px 16px; display: flex; gap: 16px; }
+  .d-footer-brand { flex: 1.2; }
+  .d-footer-logo { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; }
+  .d-footer-logo-box { width: 15px; height: 15px; border: 1.5px solid #555; border-radius: 3px; background: #333; }
+  .d-footer-name { font-size: 10px; color: #ccc; font-weight: 700; }
+  .d-footer-tagline { font-size: 8px; color: #666; line-height: 1.4; }
+  .d-footer-col { flex: 1; }
+  .d-footer-heading { font-size: 8px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; font-weight: 700; }
+  .d-flink { height: 5px; background: #333; border-radius: 2px; margin-bottom: 4px; }
+  .d-footer-bottom { background: #1a1a1a; border-top: 1px solid #333; padding: 6px 16px; display: flex; justify-content: space-between; }
+  .d-footer-copy { font-size: 7px; color: #555; }
+</style>
+
+<div class="ww-wrap">
+  <div class="ww-title">WasteWatch · Citizen Landing Page</div>
+  <p class="ww-sub">Low-Fidelity Wireframes · Desktop (left) & Mobile (right) · Side by Side</p>
+
+  <!-- ===== SCREEN 1: HERO ===== -->
+  <div class="pair-label">Screen 1 · Hero / Above the Fold</div>
+  <div class="pair">
+
+    <!-- DESKTOP S1 -->
+    <div class="desktop">
+      <div class="bbar"><div class="bdots"><div class="bdot"></div><div class="bdot"></div><div class="bdot"></div></div><div class="burl">localhost:5173 / wastewatch</div></div>
+      <div class="d-nav">
+        <div class="d-brand"><div class="d-brand-icon">🗑</div>WasteWatch</div>
+        <div class="d-nav-links"><span class="active">Home</span><span>Map</span><span>Schedule</span><span>About</span><span>Dashboard</span></div>
+        <div class="d-nav-right"><div class="d-bell"></div><div class="d-avatar"></div><span style="font-size:10px;color:#555">Aika</span></div>
+      </div>
+      <div class="d-hero">
+        <div class="d-hero-overlay"></div>
+        <div class="d-hero-content">
+          <div class="d-badge">● CITIZEN PORTAL</div>
+          <div class="d-hero-title">Mag-report ng<br>Problema. <span>Madali Lang.</span></div>
+          <div class="d-hero-sub">I-capture ang inyong lokasyon kahit offline,<br>mag-submit anumang oras — i-sync pagbalik ng signal.</div>
+          <div class="d-hero-btns"><div class="d-btn">📋 Mag-report Ngayon</div><div class="d-btn">📅 Tingnan ang Schedule</div></div>
+        </div>
+        <div class="d-hero-stats">
+          <div class="d-stat-card"><div class="d-stat-dot" style="background:#7ee87e"></div><div><div class="d-stat-info">33</div><div class="d-stat-sub">Barangays</div></div></div>
+          <div class="d-stat-card"><div class="d-stat-dot" style="background:#f0a04b"></div><div><div class="d-stat-info">3</div><div class="d-stat-sub">Total Reports</div></div></div>
+          <div class="d-stat-card"><div class="d-stat-dot" style="background:#6ea8e8"></div><div><div class="d-stat-info">PWA</div><div class="d-stat-sub">Works Offline</div></div></div>
+        </div>
+        <div class="d-hero-bar">
+          <div class="d-bar-item">33</div><div class="d-bar-item">6</div><div class="d-bar-item">3</div><div class="d-bar-item">0</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MOBILE S1 -->
+    <div class="mobile-wrap">
+      <div class="mobile">
+        <div class="mobile-notch"><div class="notch-pill"></div></div>
+        <div class="nav">
+          <div style="font-size:18px">☰</div>
+          <div class="brand"><div class="brand-icon">🗑</div>WasteWatch</div>
+          <div class="m-bell"></div>
+        </div>
+        <div class="m-hero">
+          <div class="m-hero-overlay"></div>
+          <div class="m-hero-content">
+            <div class="m-badge">● CITIZEN PORTAL</div>
+            <div class="m-hero-title">Mag-report ng<br>Problema. <span>Madali Lang.</span></div>
+            <div class="m-hero-sub">I-capture ang inyong lokasyon kahit offline, mag-submit anumang oras — i-sync pagbalik ng signal.</div>
+            <div class="m-btns">
+              <div class="m-btn">📋 Mag-report Ngayon</div>
+              <div class="m-btn m-btn-dark">📅 Tingnan ang Schedule</div>
+            </div>
+          </div>
+          <div class="m-hero-bar">
+            <div class="m-bar-item">33</div><div class="m-bar-item">6</div><div class="m-bar-item">3</div><div class="m-bar-item">0</div>
+          </div>
+        </div>
+        <div class="m-bottom-nav">
+          <div class="m-nav-item"><div class="m-nav-icon"></div>Reports</div>
+          <div class="m-nav-item"><div class="m-nav-icon"></div>Schedule</div>
+          <div class="m-nav-item"><div class="m-nav-cam">📷</div>Camera</div>
+          <div class="m-nav-item"><div class="m-nav-icon"></div>Map</div>
+          <div class="m-nav-item"><div class="m-nav-icon"></div>Profile</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SCREEN 2: FEATURES + SCHEDULE ===== -->
+  <div class="pair-label">Screen 2 · Feature Cards + Schedule / Reports</div>
+  <div class="pair">
+
+    <!-- DESKTOP S2 -->
+    <div class="desktop">
+      <div class="bbar"><div class="bdots"><div class="bdot"></div><div class="bdot"></div><div class="bdot"></div></div><div class="burl">localhost:5173 / wastewatch · #features</div></div>
+      <div class="d-nav">
+        <div class="d-brand"><div class="d-brand-icon">🗑</div>WasteWatch</div>
+        <div class="d-nav-links"><span class="active">Home</span><span>Map</span><span>Schedule</span><span>About</span><span>Dashboard</span></div>
+        <div class="d-nav-right"><div class="d-bell"></div><div class="d-avatar"></div><span style="font-size:10px;color:#555">Aika</span></div>
+      </div>
+      <div class="d-section">
+        <div class="d-section-title">Ano ang magagawa mo?</div>
+        <div class="d-cards-row">
+          <div class="d-feature-card"><div class="d-feature-icon">📍</div><div class="d-feature-name">GIS Waste Map</div><div class="d-line" style="width:90%"></div><div class="d-line" style="width:70%"></div><div class="d-line" style="width:55%"></div></div>
+          <div class="d-feature-card"><div class="d-feature-icon">🚛</div><div class="d-feature-name">Collection Schedule</div><div class="d-line" style="width:90%"></div><div class="d-line" style="width:65%"></div><div class="d-line" style="width:50%"></div></div>
+          <div class="d-feature-card"><div class="d-feature-icon">📱</div><div class="d-feature-name">Citizen Portal</div><div class="d-line" style="width:90%"></div><div class="d-line" style="width:72%"></div><div class="d-line" style="width:55%"></div></div>
+        </div>
+      </div>
+      <div class="d-two-col">
+        <div class="d-col">
+          <div class="d-eyebrow">● INYONG ZONE</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div class="d-col-title">Collection Schedule</div><div class="d-col-action">View Schedule →</div></div>
+          <div class="d-sched-card">
+            <div class="d-sched-label">SUSUNOD NA KOLEKSYON</div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <div style="width:20px;height:20px;border:1.5px solid #2a2a2a;border-radius:4px;background:#e8e4df;font-size:10px;display:flex;align-items:center;justify-content:center">📅</div>
+              <div><div style="font-size:12px;font-weight:700;color:#1a1a1a">Saturday <span class="d-pill">06:00 AM</span></div><div class="d-pill" style="font-size:8px">Barangay 1 (Pob.), Mayao Crossing</div></div>
+            </div>
+          </div>
+          <div class="d-week">
+            <div style="font-size:10px;font-weight:700;color:#1a1a1a;margin-bottom:5px">Lingguhang Iskedyul</div>
+            <div class="d-week-row"><span>Saturday · Barangay 1</span><span>06:00 AM – 02:00 PM</span></div>
+            <div class="d-week-row"><span>Tuesday · Barangay 2</span><span>06:00 AM – 02:00 PM</span></div>
+            <div class="d-week-row"><span style="color:#bbb"><div class="d-line" style="width:60%;margin:0;display:inline-block"></div></span><span><div class="d-line" style="width:50px;margin:0;display:inline-block"></div></span></div>
+          </div>
+        </div>
+        <div class="d-col">
+          <div class="d-eyebrow">● INYONG MGA REPORT</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div class="d-col-title">Mga Naipadala</div><div class="d-col-action" style="background:#2a2a2a;color:#fff;border-color:#2a2a2a">+ Bagong Report</div></div>
+          <div class="d-reports-card">
+            <div><div class="d-reports-title">My Reports</div><div class="d-reports-sub">Not synced this session</div></div>
+            <div style="display:flex;align-items:center;gap:3px"><div style="width:6px;height:6px;border-radius:50%;border:1.5px solid #7ee87e"></div><span style="font-size:8px;color:#7ee87e">Online</span></div>
+          </div>
+          <div class="d-empty"><div class="d-empty-icon"></div>No reports yet.<div style="font-size:8px;color:#bbb;margin-top:3px">Submit your first garbage report below.</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MOBILE S2 -->
+    <div class="mobile-wrap">
+      <div class="mobile">
+        <div class="mobile-notch"><div class="notch-pill"></div></div>
+        <div class="nav">
+          <div style="font-size:18px">☰</div>
+          <div class="brand"><div class="brand-icon">🗑</div>WasteWatch</div>
+          <div class="m-bell"></div>
+        </div>
+        <!-- Feature cards stacked -->
+        <div class="m-section">
+          <div class="m-section-title">Ano ang magagawa mo?</div>
+          <div class="m-feat-card"><div class="m-feat-icon">📍</div><div><div class="m-feat-name">GIS Waste Map</div><div class="m-line" style="width:85%"></div><div class="m-line" style="width:65%"></div></div><span style="margin-left:auto;font-size:10px;color:#aaa">↗</span></div>
+          <div class="m-feat-card"><div class="m-feat-icon">🚛</div><div><div class="m-feat-name">Collection Schedule</div><div class="m-line" style="width:85%"></div><div class="m-line" style="width:60%"></div></div><span style="margin-left:auto;font-size:10px;color:#aaa">↗</span></div>
+          <div class="m-feat-card"><div class="m-feat-icon">📱</div><div><div class="m-feat-name">Citizen Portal</div><div class="m-line" style="width:85%"></div><div class="m-line" style="width:70%"></div></div><span style="margin-left:auto;font-size:10px;color:#aaa">↗</span></div>
+        </div>
+        <!-- Schedule -->
+        <div class="m-section">
+          <div class="m-eyebrow">● INYONG ZONE</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px">
+            <div style="font-size:12px;font-weight:700;color:#1a1a1a">Collection Schedule</div>
+            <div style="font-size:8px;border:1.5px solid #2a2a2a;border-radius:5px;padding:2px 6px">View →</div>
+          </div>
+          <div class="m-sched-card">
+            <div class="m-sched-label">SUSUNOD NA KOLEKSYON</div>
+            <div class="m-sched-day">Saturday <span class="m-pill">06:00 AM</span></div>
+            <div class="m-pill">Barangay 1 (Pob.), Mayao Crossing</div>
+          </div>
+          <div class="m-week">
+            <div style="font-size:9px;font-weight:700;color:#1a1a1a;margin-bottom:4px">Lingguhang Iskedyul</div>
+            <div class="m-week-row"><span>Sat · Bgry 1</span><span>06:00–14:00</span></div>
+            <div class="m-week-row"><span>Tue · Bgry 2</span><span>06:00–14:00</span></div>
+            <div class="m-week-row"><span style="color:#ccc"><div class="m-line" style="width:50px;margin:0;display:inline-block"></div></span><span><div class="m-line" style="width:40px;margin:0;display:inline-block"></div></span></div>
+          </div>
+        </div>
+        <div class="m-bottom-nav">
+          <div class="m-nav-item"><div class="m-nav-icon"></div>Reports</div>
+          <div class="m-nav-item"><div class="m-nav-icon"></div>Schedule</div>
+          <div class="m-nav-item"><div class="m-nav-cam">📷</div>Camera</div>
+          <div class="m-nav-item"><div class="m-nav-icon"></div>Map</div>
+          <div class="m-nav-item"><div class="m-nav-icon"></div>Profile</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SCREEN 3: ANNOUNCEMENTS ===== -->
+  <div class="pair-label">Screen 3 · Mga Anunsyo (Announcements Carousel)</div>
+  <div class="pair">
+
+    <!-- DESKTOP S3 -->
+    <div class="desktop">
+      <div class="bbar"><div class="bdots"><div class="bdot"></div><div class="bdot"></div><div class="bdot"></div></div><div class="burl">localhost:5173 / wastewatch · #news</div></div>
+      <div class="d-nav">
+        <div class="d-brand"><div class="d-brand-icon">🗑</div>WasteWatch</div>
+        <div class="d-nav-links"><span class="active">Home</span><span>Map</span><span>Schedule</span><span>About</span><span>Dashboard</span></div>
+        <div class="d-nav-right"><div class="d-bell"></div><div class="d-avatar"></div><span style="font-size:10px;color:#555">Aika</span></div>
+      </div>
+      <div class="d-news-section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div><div class="d-eyebrow">● BALITA</div><div class="d-section-title" style="margin:0">Mga Anunsyo</div></div>
+          <div class="d-col-action">Lahat ng Balita →</div>
+        </div>
+        <div class="d-news-card">
+          <div class="d-arrow" style="left:-10px">‹</div>
+          <div class="d-news-img"></div>
+          <div class="d-news-body">
+            <div style="height:20px"></div>
+            <div class="d-news-eyebrow">🔥 ANUNSYO</div>
+            <div class="d-news-title">[ Announcement Title ]</div>
+            <div class="d-btn-dark">Basahin pa →</div>
+          </div>
+          <div class="d-arrow" style="right:-10px">›</div>
+        </div>
+        <div class="d-dots"><div class="d-dot-ind active"></div><div class="d-dot-ind"></div><div class="d-dot-ind"></div></div>
+      </div>
+    </div>
+
+    <!-- MOBILE S3 -->
+    <div class="mobile-wrap">
+      <div class="mobile">
+        <div class="mobile-notch"><div class="notch-pill"></div></div>
+        <div class="nav">
+          <div style="font-size:18px">☰</div>
+          <div class="brand"><div class="brand-icon">🗑</div>WasteWatch</div>
+          <div class="m-bell"></div>
+        </div>
+        <div class="m-section" style="background:#f5f3ef;border-bottom:none">
+          <div class="m-eyebrow">● BALITA</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div class="m-section-title" style="margin:0">Mga Anunsyo</div>
+            <div style="font-size:8px;border:1.5px solid #2a2a2a;border-radius:5px;padding:2px 6px">Lahat →</div>
+          </div>
+          <!-- Card with stacked image + body -->
+          <div style="border:2px solid #2a2a2a;border-radius:8px;overflow:hidden;box-shadow:2px 2px 0 #c2bdb5;background:#fff">
+            <div class="m-news-img"></div>
+            <div class="m-news-body">
+              <div class="m-carousel-nav">
+                <div class="m-arrow">‹</div>
+                <div class="m-dots"><div class="m-dot-ind active"></div><div class="m-dot-ind"></div><div class="m-dot-ind"></div></div>
+                <div class="m-arrow">›</div>
+              </div>
+              <div class="m-eyebrow">🔥 ANUNSYO</div>
+              <div class="m-news-title">[ Announcement Title ]</div>
+              <div class="m-btn-dark-full">Basahin pa →</div>
+            </div>
+          </div>
+        </div>
+        <div class="m-bottom-nav">
+          <div class="m-nav-item"><div class="m-nav-icon"></div>Reports</div>
+          <div class="m-nav-item"><div class="m-nav-icon"></div>Schedule</div>
+          <div class="m-nav-item"><div class="m-nav-cam">📷</div>Camera</div>
+          <div class="m-nav-item"><div class="m-nav-icon"></div>Map</div>
+          <div class="m-nav-item"><div class="m-nav-icon"></div>Profile</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SCREEN 4: CTA + FOOTER ===== -->
+  <div class="pair-label">Screen 4 · CTA Banner + Footer</div>
+  <div class="pair">
+
+    <!-- DESKTOP S4 -->
+    <div class="desktop">
+      <div class="bbar"><div class="bdots"><div class="bdot"></div><div class="bdot"></div><div class="bdot"></div></div><div class="burl">localhost:5173 / wastewatch · #footer</div></div>
+      <div class="d-nav">
+        <div class="d-brand"><div class="d-brand-icon">🗑</div>WasteWatch</div>
+        <div class="d-nav-links"><span class="active">Home</span><span>Map</span><span>Schedule</span><span>About</span><span>Dashboard</span></div>
+        <div class="d-nav-right"><div class="d-bell"></div><div class="d-avatar"></div><span style="font-size:10px;color:#555">Aika</span></div>
+      </div>
+      <div class="d-cta">
+        <div class="d-cta-eyebrow">I-TRACK · SUBAYBAYAN · MAG-REPORT</div>
+        <div class="d-cta-title">"Isang App para sa Lahat ng Waste Management"</div>
+        <div class="d-cta-sub">Ang kumpletong platform ng solid waste management para sa mga mamamayan, field teams, at administrasyon ng Lucena City.</div>
+        <div class="d-cta-btn">Alamin Kung Paano Gumagana →</div>
+      </div>
+      <div class="d-footer">
+        <div class="d-footer-brand">
+          <div class="d-footer-logo"><div class="d-footer-logo-box"></div><div class="d-footer-name">WasteWatch</div></div>
+          <div class="d-footer-tagline">Smart waste management para sa mas malinis na Lucena City — powered by GIS, ML &amp; PWA.</div>
+        </div>
+        <div class="d-footer-col"><div class="d-footer-heading">Platform</div><div class="d-flink" style="width:55%"></div><div class="d-flink" style="width:40%"></div><div class="d-flink" style="width:65%"></div></div>
+        <div class="d-footer-col"><div class="d-footer-heading">Mapa</div><div class="d-flink" style="width:55%"></div><div class="d-flink" style="width:65%"></div><div class="d-flink" style="width:45%"></div></div>
+        <div class="d-footer-col"><div class="d-footer-heading">Makipag-Ugnayan</div><div class="d-flink" style="width:80%"></div><div class="d-flink" style="width:90%"></div></div>
+      </div>
+      <div class="d-footer-bottom">
+        <div class="d-footer-copy">© 2026 BS Information Technology — CSTC · Para sa thesis lamang · Lucena City</div>
+        <div class="d-footer-copy">WasteWatch · Lucena City CENRO</div>
+      </div>
+    </div>
+
+    <!-- MOBILE S4 -->
+    <div class="mobile-wrap">
+      <div class="mobile">
+        <div class="mobile-notch"><div class="notch-pill"></div></div>
+        <div class="nav">
+          <div style="font-size:18px">☰</div>
+          <div class="brand"><div class="brand-icon">🗑</div>WasteWatch</div>
+          <div class="m-bell"></div>
+        </div>
+        <div class="m-cta">
+          <div class="m-cta-eyebrow">I-TRACK · SUBAYBAYAN · MAG-REPORT</div>
+          <div class="m-cta-title">"Isang App para sa Lahat ng Waste Management"</div>
+          <div class="m-cta-sub">Ang kumpletong platform para sa mga mamamayan, field teams, at administrasyon ng Lucena City.</div>
+          <div class="m-cta-btn">Alamin Kung Paano →</div>
+        </div>
+        <div class="m-footer">
+          <div class="m-footer-logo"><div class="m-footer-logo-box"></div><div class="m-footer-name">WasteWatch</div></div>
+          <div class="m-footer-tagline">Smart waste management para sa mas malinis na Lucena City — powered by GIS, ML &amp; PWA.</div>
+          <div style="display:flex;gap:16px">
+            <div class="m-footer-section" style="flex:1"><div class="m-footer-heading">Platform</div><div class="m-flink" style="width:60%"></div><div class="m-flink" style="width:45%"></div><div class="m-flink" style="width:70%"></div></div>
+            <div class="m-footer-section" style="flex:1"><div class="m-footer-heading">Mapa</div><div class="m-flink" style="width:55%"></div><div class="m-flink" style="width:65%"></div><div class="m-flink" style="width:50%"></div></div>
+          </div>
+          <div class="m-footer-bottom">
+            <div class="m-footer-copy">© 2026 BS Information Technology — CSTC</div>
+            <div class="m-footer-copy">WasteWatch · Lucena City CENRO</div>
+          </div>
+        </div>
+        <div class="m-bottom-nav">
+          <div class="m-nav-item"><div class="m-nav-icon"></div>Reports</div>
+          <div class="m-nav-item"><div class="m-nav-icon"></div>Schedule</div>
+          <div class="m-nav-item"><div class="m-nav-cam">📷</div>Camera</div>
+          <div class="m-nav-item"><div class="m-nav-icon"></div>Map</div>
+          <div class="m-nav-item"><div class="m-nav-icon"></div>Profile</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="border-top:2px solid #c2bdb5;padding-top:12px;font-size:12px;color:#888">
+    WasteWatch · Citizen Landing Page Lo-Fi Wireframes · Dalubhasaan ng Lungsod ng Lucena
+  </div>
+</div>
