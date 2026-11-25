@@ -85,9 +85,10 @@ function decodePolyline(encoded) {
 async function fetchOrsRoute(coordinates) {
   if (!ORS_API_KEY || coordinates.length < 2) return null
   try {
+    const authHeader = ORS_API_KEY.startsWith('Bearer ') ? ORS_API_KEY : `Bearer ${ORS_API_KEY}`
     const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
       method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: ORS_API_KEY },
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: authHeader },
       body: JSON.stringify({ coordinates, instructions: true }),
     })
     const data = await res.json()
