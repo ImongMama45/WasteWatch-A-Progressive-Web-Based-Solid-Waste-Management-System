@@ -86,6 +86,7 @@ from .services import (
     distance_to_route_m,
     WATCHER_SPOT_ROUTE_RADIUS_M,
 )
+from accounts.models import UserRole
 from accounts.permissions import (
     is_admin_user,
     is_viewer_authorized_for_report,
@@ -574,24 +575,38 @@ class GarbageReportViewSet(viewsets.ModelViewSet):
             'user_vote': vote_type,
         }, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=['get'])
+    @action(detail=True, methods=['get', 'post'])
     def community_post(self, request, pk=None):
         """
-        Resolves a GarbageReport to its single associated CommunityPost.
-        Strictly read-only: returns 404 if no CommunityPost exists or if hidden from non-admin viewers.
+        Resolves or creates a GarbageReport's single associated CommunityPost.
+        GET returns 404 if no CommunityPost exists or if hidden from non-admin viewers.
+        POST creates or gets the CommunityPost atomically and returns it.
         """
         clean_pk = parse_positive_id(pk)
         if clean_pk is None:
             return Response({'error': 'Report not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         report = self.get_object()
+        from community.serializers import CommunityPostSerializer
+
+        if request.method == 'POST':
+            if not request.user or not request.user.is_authenticated:
+                return Response({'error': 'Authentication required to create a community post.'}, status=status.HTTP_401_UNAUTHORIZED)
+            with transaction.atomic():
+                post, created = create_or_get_community_post_for_report(report, author=report.user or request.user)
+                if post.is_hidden and not is_admin_user(request.user):
+                    return Response({'error': 'Cannot interact with a hidden post.'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    CommunityPostSerializer(post, context={'request': request}).data,
+                    status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+                )
+
         post = getattr(report, 'community_post', None)
         if not post or (post.is_hidden and not is_admin_user(request.user)):
             return Response(
                 {'error': 'No community post associated with this report.'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        from community.serializers import CommunityPostSerializer
         return Response(CommunityPostSerializer(post, context={'request': request}).data)
 
     @action(detail=True, methods=['get', 'post'])
@@ -1589,8 +1604,8 @@ class GarbageHotspotViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='assign-truck')
     def assign_truck(self, request, pk=None):
-        from driver.models import Truck, TruckStatus
-        if request.user.role not in ('admin', 'brgy_official'):
+        from driver.models import Truck, is_truck_dispatchable
+        if not is_admin_user(request.user) and getattr(request.user, 'role', None) != UserRole.BRGY_OFFICIAL:
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied('Only admins can assign trucks to hotspots.')
         hotspot = self.get_object()
@@ -1601,9 +1616,21 @@ class GarbageHotspotViewSet(viewsets.ModelViewSet):
 
         if truck_id:
             try:
-                truck = Truck.objects.get(id=truck_id, status=TruckStatus.ACTIVE)
+                truck = Truck.objects.get(id=truck_id)
             except Truck.DoesNotExist:
-                return Response({'error': 'Truck not found or not active.'}, status=404)
+                return Response({'error': 'Truck not found.'}, status=404)
+            if not is_truck_dispatchable(truck):
+                return Response(
+                    {
+                        'error': (
+                            f'Truck {truck.plate_number} is not dispatchable '
+                            f'(status={truck.status}, retired={truck.is_retired}, '
+                            f'hold={truck.is_operational_hold}, mechanical_status={truck.mechanical_status}, '
+                            f'maintenance_status={truck.maintenance_status}).'
+                        )
+                    },
+                    status=400,
+                )
             from django.utils import timezone
             cluster_qs.update(
                 assigned_truck=truck,
@@ -1653,7 +1680,7 @@ class GarbageHotspotViewSet(viewsets.ModelViewSet):
         if hotspot.assigned_truck_id is None:
             return Response({'error': 'No active dispatch on this hotspot.'}, status=400)
             
-        if request.user.role != 'admin':
+        if not is_admin_user(request.user):
             from driver.models import DriverShift
             shift = DriverShift.objects.filter(driver=request.user, is_active=True, truck=hotspot.assigned_truck).first()
             if not shift:
@@ -1682,7 +1709,7 @@ class GarbageHotspotViewSet(viewsets.ModelViewSet):
         """
         Notify Barangay officials about a persistent hotspot.
         """
-        if request.user.role not in ('admin', 'brgy_official'):
+        if not is_admin_user(request.user) and getattr(request.user, 'role', None) != UserRole.BRGY_OFFICIAL:
             return Response({'error': 'Not authorized'}, status=403)
 
         hotspot = self.get_object()
@@ -1732,6 +1759,63 @@ class GarbageHotspotViewSet(viewsets.ModelViewSet):
         """Mark that the driver has noted this hotspot. No model changes needed — returns 200."""
         return Response({'status': 'noted', 'id': pk})
 
+class IsStopValidationAuthorized(permissions.BasePermission):
+    """
+    Operational permission for StopValidationViewSet:
+    - Anonymous users: Denied (HTTP 401 Unauthorized via IsAuthenticated check).
+    - Admins (is_admin_user): Full access for all actions.
+    - Watchers: Operational access within scope (list, retrieve, pre_inspect, post_verify).
+    - Drivers: Read-only access (list, retrieve) for their authorized schedules.
+    - Dumpsite, Citizen, Barangay Official: Denied (HTTP 403 Forbidden).
+    """
+    def has_permission(self, request, view):
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated:
+            return False
+        if is_admin_user(user):
+            return True
+        role = getattr(user, 'role', None)
+        if role == UserRole.WATCHER:
+            return True
+        if role == UserRole.DRIVER:
+            if view.action in ('list', 'retrieve') and request.method in permissions.SAFE_METHODS:
+                return True
+            return False
+        return False
+
+    def has_object_permission(self, request, view, obj):
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated:
+            return False
+        if is_admin_user(user):
+            return True
+        role = getattr(user, 'role', None)
+        if role == UserRole.WATCHER:
+            from driver.team_service import can_inspect_collection_stop
+            return can_inspect_collection_stop(
+                user,
+                obj.schedule_id,
+                service_date=obj.collection_date,
+            )
+        if role == UserRole.DRIVER:
+            if request.method in permissions.SAFE_METHODS:
+                today = timezone.localdate()
+                from driver.models import DriverShift, TruckCrewAssignment, CollectionSchedule
+                active_schedules = DriverShift.objects.filter(
+                    driver=user, is_active=True, schedule__isnull=False
+                ).values_list('schedule_id', flat=True)
+                crew_schedules = TruckCrewAssignment.objects.filter(
+                    driver=user, date=today, schedule__isnull=False, is_active=True
+                ).values_list('schedule_id', flat=True)
+                recurring_schedules = CollectionSchedule.objects.filter(
+                    driver=user
+                ).values_list('id', flat=True)
+                authorized_ids = set(active_schedules) | set(crew_schedules) | set(recurring_schedules)
+                return obj.schedule_id in authorized_ids
+            return False
+        return False
+
+
 class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Centralized stop validation workflow API.
@@ -1741,18 +1825,16 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
     """
     queryset = StopValidation.objects.select_related(
         'schedule', 'schedule__truck', 'driver',
-        'pre_validation_watcher', 'post_validation_watcher',
+        'pre_validation_watcher', 'post_validation_watcher', 'barangay',
     ).prefetch_related('schedule__barangays')
     serializer_class = StopValidationSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get_permissions(self):
-        # Allow public read access to the list endpoint for the citizen map
-        if self.action == 'list':
-            return [permissions.AllowAny()]
-        return super().get_permissions()
+    permission_classes = [permissions.IsAuthenticated, IsStopValidationAuthorized]
 
     def get_queryset(self):
+        user = getattr(self.request, 'user', None)
+        if not user or not user.is_authenticated:
+            return StopValidation.objects.none()
+
         ensure_today_stop_validations()
         qs = super().get_queryset()
         
@@ -1773,17 +1855,61 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         else:
             qs = qs.filter(collection_date=timezone.localdate())
 
-        user = self.request.user
-        if user.is_authenticated and getattr(user, 'role', None) == 'watcher' and getattr(user, 'barangay', None):
-            qs = qs.filter(barangay=user.barangay)
-
         status_param = self.request.query_params.get('status')
         if status_param:
             qs = qs.filter(current_status=status_param)
 
         schedule_id = self.request.query_params.get('schedule_id')
-        if schedule_id:
-            qs = qs.filter(schedule_id=schedule_id)
+
+        if is_admin_user(user):
+            if schedule_id:
+                qs = qs.filter(schedule_id=schedule_id)
+            barangay_param = self.request.query_params.get('barangay_id') or self.request.query_params.get('barangay')
+            if barangay_param:
+                qs = qs.filter(barangay_id=barangay_param)
+        elif getattr(user, 'role', None) == UserRole.WATCHER:
+            if schedule_id:
+                sched_id_int = parse_positive_id(schedule_id)
+                if sched_id_int is None:
+                    return StopValidation.objects.none()
+                qs = qs.filter(schedule_id=sched_id_int)
+
+            from driver.team_service import filter_watcher_authorized_schedule_dates
+            pairs = list(qs.values_list('schedule_id', 'collection_date').distinct())
+            authorized_pairs = filter_watcher_authorized_schedule_dates(user, pairs)
+            if not authorized_pairs:
+                return StopValidation.objects.none()
+
+            auth_q = Q()
+            for sid, cdate in authorized_pairs:
+                auth_q |= Q(schedule_id=sid, collection_date=cdate)
+            qs = qs.filter(auth_q)
+        elif getattr(user, 'role', None) == UserRole.DRIVER:
+            today = timezone.localdate()
+            from driver.models import DriverShift, TruckCrewAssignment, CollectionSchedule
+            active_schedules = DriverShift.objects.filter(
+                driver=user, is_active=True, schedule__isnull=False
+            ).values_list('schedule_id', flat=True)
+            crew_schedules = TruckCrewAssignment.objects.filter(
+                driver=user, date=today, schedule__isnull=False, is_active=True
+            ).values_list('schedule_id', flat=True)
+            recurring_schedules = CollectionSchedule.objects.filter(
+                driver=user
+            ).values_list('id', flat=True)
+            driver_schedule_ids = set(active_schedules) | set(crew_schedules) | set(recurring_schedules)
+
+            if schedule_id:
+                try:
+                    sched_id_int = int(schedule_id)
+                except (ValueError, TypeError):
+                    return StopValidation.objects.none()
+                if sched_id_int not in driver_schedule_ids:
+                    return StopValidation.objects.none()
+                qs = qs.filter(schedule_id=sched_id_int)
+            else:
+                qs = qs.filter(schedule_id__in=driver_schedule_ids)
+        else:
+            return StopValidation.objects.none()
 
         visible = [sv.id for sv in qs if is_validation_visible(sv)]
         return qs.filter(id__in=visible)
@@ -1902,7 +2028,7 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         Watcher pre-collection inspection.
         outcome: garbage_present | no_garbage
         """
-        if request.user.role not in ('watcher', 'admin', 'brgy_official'):
+        if not (is_admin_user(request.user) or getattr(request.user, 'role', None) == UserRole.WATCHER):
             return Response({'error': 'Not authorized.'}, status=status.HTTP_403_FORBIDDEN)
 
         schedule_id = request.data.get('schedule_id')
@@ -1925,6 +2051,9 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
 
         if not schedule_id or stop_order is None:
             return Response({'error': 'schedule_id and stop_order are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        schedule_id_int = parse_positive_id(schedule_id)
+        if schedule_id_int is None:
+            return Response({'error': 'schedule_id must be a positive integer.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             stop_order = int(stop_order)
         except (TypeError, ValueError):
@@ -1933,9 +2062,18 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         if outcome not in ('garbage_present', 'no_garbage'):
             return Response({'error': 'outcome must be garbage_present or no_garbage.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        validation = self._get_validation(schedule_id, stop_order)
+        validation = self._get_validation(schedule_id_int, stop_order)
         if not validation:
             return Response({'error': 'Stop validation not found for today.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not is_admin_user(request.user):
+            from driver.team_service import can_inspect_collection_stop
+            if not can_inspect_collection_stop(
+                request.user,
+                validation.schedule_id,
+                service_date=validation.collection_date,
+            ):
+                return Response({'error': 'Not authorized for this stop.'}, status=status.HTTP_403_FORBIDDEN)
             
         if validation.current_status == StopValidationStatus.READY_FOR_COLLECTION:
             return Response(
@@ -1984,7 +2122,7 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         Watcher post-collection verification.
         outcome: success | failed
         """
-        if request.user.role not in ('watcher', 'admin', 'brgy_official'):
+        if not (is_admin_user(request.user) or getattr(request.user, 'role', None) == UserRole.WATCHER):
             return Response({'error': 'Not authorized.'}, status=status.HTTP_403_FORBIDDEN)
 
         schedule_id = request.data.get('schedule_id')
@@ -2000,6 +2138,9 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
 
         if not schedule_id or stop_order is None:
             return Response({'error': 'schedule_id and stop_order are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        schedule_id_int = parse_positive_id(schedule_id)
+        if schedule_id_int is None:
+            return Response({'error': 'schedule_id must be a positive integer.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             stop_order = int(stop_order)
         except (TypeError, ValueError):
@@ -2010,9 +2151,18 @@ class StopValidationViewSet(viewsets.ReadOnlyModelViewSet):
         if outcome == 'failed' and not dispute_reason:
             return Response({'error': 'A reason is required when collection is marked as missed.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        validation = self._get_validation(schedule_id, stop_order)
+        validation = self._get_validation(schedule_id_int, stop_order)
         if not validation:
             return Response({'error': 'Stop validation not found for today.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not is_admin_user(request.user):
+            from driver.team_service import can_inspect_collection_stop
+            if not can_inspect_collection_stop(
+                request.user,
+                validation.schedule_id,
+                service_date=validation.collection_date,
+            ):
+                return Response({'error': 'Not authorized for this stop.'}, status=status.HTTP_403_FORBIDDEN)
             
         if validation.current_status in (StopValidationStatus.VERIFIED_COLLECTED, StopValidationStatus.COLLECTION_DISPUTED):
             return Response(
@@ -2084,7 +2234,7 @@ class EscalationViewSet(viewsets.ModelViewSet):
             def has_permission(self, request, view):
                 if not request.user or not request.user.is_authenticated:
                     return False
-                if request.user.role in ['admin', 'brgy_official'] or request.user.is_staff or request.user.is_superuser:
+                if is_admin_user(request.user) or getattr(request.user, 'role', None) == UserRole.BRGY_OFFICIAL:
                     return True
                 if request.user.role == 'driver':
                     if request.method in permissions.SAFE_METHODS or view.action == 'acknowledge':
@@ -2095,7 +2245,7 @@ class EscalationViewSet(viewsets.ModelViewSet):
     def get_base_accessible_queryset(self):
         user = self.request.user
         qs = Escalation.objects.all().select_related('barangay', 'assignee', 'driver', 'truck').order_by('-created_at')
-        if getattr(user, 'role', None) == 'admin' or getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False):
+        if is_admin_user(user):
             return qs
         if getattr(user, 'role', None) == 'brgy_official' and getattr(user, 'barangay', None):
             return qs.filter(barangay=user.barangay)
@@ -2188,7 +2338,7 @@ class HotspotInterventionViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixi
         user = self.request.user
         from .models import InterventionType
 
-        if user.role == 'admin':
+        if is_admin_user(user):
             pass
         elif user.role == 'brgy_official' and user.barangay_id:
             qs = qs.filter(intervention_type=InterventionType.FLAG, hotspot__barangay_id=user.barangay_id)
@@ -2241,7 +2391,7 @@ class HotspotInterventionViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixi
         from django.utils import timezone
         intervention = self.get_object()
         
-        if request.user.role != 'admin':
+        if not is_admin_user(request.user):
             if intervention.intervention_type == InterventionType.DISPATCH:
                 from driver.models import DriverShift
                 shift = DriverShift.objects.filter(driver=request.user, is_active=True, truck=intervention.truck).first()
@@ -2263,7 +2413,7 @@ class HotspotInterventionViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixi
         from django.utils import timezone
         intervention = self.get_object()
         
-        if request.user.role != 'admin':
+        if not is_admin_user(request.user):
             if intervention.intervention_type == InterventionType.DISPATCH:
                 from driver.models import DriverShift
                 shift = DriverShift.objects.filter(driver=request.user, is_active=True, truck=intervention.truck).first()
@@ -2287,7 +2437,7 @@ class HotspotInterventionViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixi
     @action(detail=True, methods=['post'], url_path='cancel')
     def cancel(self, request, pk=None):
         from .models import InterventionType, InterventionStatus
-        if request.user.role != 'admin':
+        if not is_admin_user(request.user):
             return Response({'error': 'Only admins can cancel'}, status=403)
         intervention = self.get_object()
         intervention.status = InterventionStatus.CANCELLED
@@ -2444,3 +2594,438 @@ class WatcherReportedSpotViewSet(viewsets.ReadOnlyModelViewSet):
         reports = spot.reports.select_related('user', 'barangay').order_by('-created_at')
         serializer = GarbageReportSerializer(reports, many=True, context={'request': request})
         return Response(serializer.data)
+
+
+# ---------------------------------------------------------------------------
+# Watcher Team Leader Crew Attendance Workflow (R2 Case A)
+# ---------------------------------------------------------------------------
+from rest_framework.views import APIView
+
+
+def _parse_attendance_service_date(request):
+    from django.utils.dateparse import parse_date
+    raw = request.query_params.get('date')
+    if not raw and hasattr(request, 'data') and isinstance(request.data, dict):
+        raw = request.data.get('service_date') or request.data.get('date')
+    if not raw:
+        return timezone.localdate(), None
+    parsed = parse_date(str(raw).strip())
+    if not parsed:
+        return None, Response({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+    return parsed, None
+
+
+def _compute_readiness_for_watcher_deployment(schedule, alloc):
+    try:
+        from driver.route_contract import validate_schedule_operational_readiness
+        is_ready, errors = validate_schedule_operational_readiness(schedule)
+        errors = list(errors)
+    except ImportError:
+        errors = []
+        if not getattr(schedule, 'dumpsite_id', None):
+            errors.append('missing_dumpsite')
+        if len(getattr(schedule, 'waypoints', None) or []) < 2:
+            errors.append('missing_stops')
+        is_ready = len(errors) == 0
+
+    if not alloc and 'missing_allocation' not in errors:
+        errors.append('missing_allocation')
+        is_ready = False
+    return is_ready, errors
+
+
+def _build_watcher_deployment_summary(schedule, alloc, service_date, leader_result):
+    from django.db.models import Q
+    from driver.models import CrewShift, DriverShift, CrewAttendanceRecord
+
+    crew_shift = (
+        CrewShift.objects.filter(allocation=alloc)
+        .select_related('attendance_submitted_by', 'driver_shift')
+        .first()
+        if alloc else None
+    )
+    driver_shift = None
+    if crew_shift and crew_shift.driver_shift_id:
+        driver_shift = crew_shift.driver_shift
+    elif alloc:
+        driver_shift = DriverShift.objects.filter(allocation=alloc).first()
+
+    attendance_exists = False
+    if crew_shift is not None:
+        rec_q = Q(crew_shift=crew_shift)
+        if driver_shift is not None:
+            rec_q |= Q(driver_shift=driver_shift)
+        attendance_exists = CrewAttendanceRecord.objects.filter(rec_q).exists()
+
+    is_ready, readiness_errors = _compute_readiness_for_watcher_deployment(schedule, alloc)
+    barangay_names = ', '.join(b.name for b in schedule.barangays.all())
+    schedule_name = (schedule.area or '').strip() or (barangay_names or f"Schedule #{schedule.id}")
+
+    dumpsite_obj = getattr(schedule, 'dumpsite', None)
+    dumpsite_data = (
+        {
+            'id': dumpsite_obj.id,
+            'name': dumpsite_obj.name,
+            'latitude': float(dumpsite_obj.latitude),
+            'longitude': float(dumpsite_obj.longitude),
+        }
+        if dumpsite_obj
+        else None
+    )
+
+    truck_obj = alloc.truck if (alloc and alloc.truck_id) else None
+    truck_data = (
+        {
+            'id': truck_obj.id,
+            'plate_number': truck_obj.plate_number,
+            'truck_code': truck_obj.plate_number,
+            'model': truck_obj.model,
+        }
+        if truck_obj
+        else None
+    )
+
+    return {
+        'schedule_id': schedule.id,
+        'schedule_name': schedule_name,
+        'barangay_name': barangay_names,
+        'service_date': service_date.isoformat(),
+        'start_time': schedule.start_time.strftime('%H:%M:%S') if schedule.start_time else None,
+        'end_time': schedule.end_time.strftime('%H:%M:%S') if schedule.end_time else None,
+        'allocation_id': alloc.id if alloc else None,
+        'team': {
+            'id': leader_result.team.id,
+            'name': leader_result.team.name,
+            'code': leader_result.team.code,
+        },
+        'dumpsite': dumpsite_data,
+        'truck': truck_data,
+        'team_leader': {
+            'id': leader_result.user.id,
+            'full_name': leader_result.worker.full_name,
+            'role': leader_result.leadership_mode,
+        },
+        'attendance_status': 'SUBMITTED' if attendance_exists else 'PENDING',
+        'crew_shift_id': crew_shift.id if crew_shift else None,
+        'driver_shift_id': driver_shift.id if driver_shift else None,
+        'driver_shift_status': driver_shift.status if driver_shift else None,
+        'is_operationally_ready': is_ready,
+        'readiness_errors': readiness_errors,
+    }
+
+
+def _build_watcher_deployment_detail(schedule, alloc, service_date, leader_result):
+    from driver.models import CrewShift, DriverShift, SanitationTeamMembership
+    from driver.shift_service import ShiftService
+
+    deployment = _build_watcher_deployment_summary(schedule, alloc, service_date, leader_result)
+    crew_shift = (
+        CrewShift.objects.filter(allocation=alloc)
+        .select_related('attendance_submitted_by', 'driver_shift')
+        .first()
+        if alloc else None
+    )
+    driver_shift = (
+        crew_shift.driver_shift
+        if (crew_shift and crew_shift.driver_shift_id)
+        else (DriverShift.objects.filter(allocation=alloc).first() if alloc else None)
+    )
+
+    memberships = (
+        SanitationTeamMembership.objects.filter(team=leader_result.team, is_active=True)
+        .select_related('worker__user')
+        .order_by('worker__full_name')
+    )
+    roster = [
+        {
+            'worker_id': m.worker_id,
+            'full_name': m.worker.full_name,
+            'employee_id': m.worker.employee_id,
+            'employee_type': getattr(m.worker.user, 'employee_type', '') if m.worker.user_id else 'crew_member',
+            'role_in_team': m.role_in_team,
+        }
+        for m in memberships
+        if m.role_in_team == 'crew'
+        and m.worker.is_active
+        and (not m.worker.user_id or getattr(m.worker.user, 'is_active', False))
+        and m.worker_id != leader_result.worker.id
+        and (not driver_shift or not m.worker.user_id or m.worker.user_id != driver_shift.driver_id)
+    ]
+
+    records = ShiftService.get_effective_shift_attendance(
+        driver_shift_id=driver_shift.id if driver_shift else None,
+        crew_shift_id=crew_shift.id if crew_shift else None,
+    )
+    for rec in records:
+        rec.setdefault('notes', '')
+
+    submitted_by = None
+    if crew_shift and crew_shift.attendance_submitted_by_id:
+        u = crew_shift.attendance_submitted_by
+        submitted_by = {
+            'id': u.id,
+            'username': u.username,
+            'full_name': (getattr(u, 'full_name', '') or '').strip() or u.username,
+        }
+
+    return {
+        'deployment': deployment,
+        'roster': roster,
+        'attendance_submitted': len(records) > 0,
+        'submitted_by': submitted_by,
+        'submitted_at': crew_shift.attendance_submitted_at if crew_shift else None,
+        'records': records,
+    }
+
+
+def _resolve_watcher_deployment_context(schedule_id, service_date, *, require_dispatchable=False):
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    from driver.models import CollectionSchedule, ScheduleTruckAllocation
+    from driver.team_service import resolve_deployment_team_leader
+
+    schedule = (
+        CollectionSchedule.objects.select_related('dumpsite', 'default_team')
+        .prefetch_related('barangays')
+        .filter(id=schedule_id)
+        .first()
+    )
+    if not schedule:
+        return None, None, None, Response({'error': f'Schedule #{schedule_id} not found.'}, status=status.HTTP_404_NOT_FOUND)
+    if require_dispatchable and (schedule.status in ('CANCELLED', 'COMPLETED') or not schedule.is_available):
+        return None, None, None, Response(
+            {'error': f'Schedule #{schedule.id} is not active or available for dispatch.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        leader_result = resolve_deployment_team_leader(schedule, service_date)
+    except DjangoValidationError as e:
+        return None, None, None, Response(
+            e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    alloc = (
+        ScheduleTruckAllocation.objects.filter(
+            schedule=schedule,
+            allocation_date=service_date,
+            team=leader_result.team,
+        )
+        .select_related('truck', 'team')
+        .order_by('id')
+        .first()
+    )
+    return schedule, alloc, leader_result, None
+
+
+class WatcherCrewAttendanceDeploymentsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        if getattr(request.user, 'role', None) != UserRole.WATCHER:
+            return Response(
+                {'error': 'Only Watcher Team Leaders may access Watcher crew attendance deployments.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        service_date, err = _parse_attendance_service_date(request)
+        if err is not None:
+            return err
+
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from driver.models import ScheduleTruckAllocation
+        from driver.team_service import resolve_deployment_team_leader
+
+        allocations = (
+            ScheduleTruckAllocation.objects.filter(allocation_date=service_date)
+            .exclude(schedule__status='CANCELLED')
+            .select_related('schedule', 'schedule__dumpsite', 'truck', 'team')
+            .prefetch_related('schedule__barangays')
+            .order_by('schedule__start_time', 'id')
+        )
+
+        items = []
+        for alloc in allocations:
+            try:
+                leader_result = resolve_deployment_team_leader(alloc.schedule, service_date)
+            except DjangoValidationError:
+                continue
+            if leader_result.leadership_mode != 'watcher' or leader_result.user.id != request.user.id:
+                continue
+            items.append(_build_watcher_deployment_summary(alloc.schedule, alloc, service_date, leader_result))
+
+        return Response(items, status=status.HTTP_200_OK)
+
+
+class WatcherCrewAttendanceDetailView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, schedule_id):
+        service_date, err = _parse_attendance_service_date(request)
+        if err is not None:
+            return err
+
+        schedule, alloc, leader_result, err_resp = _resolve_watcher_deployment_context(schedule_id, service_date)
+        if err_resp is not None:
+            return err_resp
+
+        is_resolved_watcher_leader = (
+            getattr(request.user, 'role', None) == UserRole.WATCHER
+            and leader_result.leadership_mode == 'watcher'
+            and leader_result.user.id == request.user.id
+        )
+        if not (is_admin_user(request.user) or is_resolved_watcher_leader):
+            return Response(
+                {'error': 'You are not authorized to view crew attendance for this deployment.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        return Response(
+            _build_watcher_deployment_detail(schedule, alloc, service_date, leader_result),
+            status=status.HTTP_200_OK,
+        )
+
+
+class WatcherCrewAttendanceSubmitView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, schedule_id):
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from driver.shift_service import ShiftService, DuplicateAttendanceError
+        from driver.team_service import ActiveShiftConflictError
+
+        if is_admin_user(request.user):
+            return Response(
+                {'error': 'Administrators cannot submit initial crew attendance on behalf of the Team Leader.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if getattr(request.user, 'role', None) != UserRole.WATCHER:
+            return Response(
+                {'error': 'Only the designated Watcher Team Leader may submit Watcher-led crew attendance.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        service_date, err = _parse_attendance_service_date(request)
+        if err is not None:
+            return err
+
+        schedule, alloc, leader_result, err_resp = _resolve_watcher_deployment_context(
+            schedule_id, service_date, require_dispatchable=True
+        )
+        if err_resp is not None:
+            return err_resp
+
+        if leader_result.leadership_mode != 'watcher' or leader_result.user.id != request.user.id:
+            return Response(
+                {'error': 'Only the designated Watcher Team Leader for this deployment may submit initial attendance.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not schedule.dumpsite_id:
+            return Response(
+                {'error': 'Schedule has no assigned dumpsite and is not operationally ready.', 'code': 'missing_dumpsite'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not alloc:
+            return Response(
+                {'error': f'No valid ScheduleTruckAllocation exists for Schedule #{schedule.id} on {service_date}.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        records_payload = request.data.get('records')
+        if records_payload is None:
+            records_payload = request.data.get('attendance')
+
+        try:
+            ShiftService.record_deployment_attendance(
+                schedule_id=schedule.id,
+                service_date=service_date,
+                attendance_list=records_payload,
+                recorded_by=request.user,
+                require_leadership_mode='watcher',
+                allocation_id=alloc.id,
+                reject_duplicate=True,
+            )
+        except DuplicateAttendanceError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except DjangoPermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except DjangoValidationError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            _build_watcher_deployment_detail(schedule, alloc, service_date, leader_result),
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class WatcherCrewAttendanceCorrectView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, schedule_id):
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from driver.models import CrewShift
+        from driver.serializers import CrewAttendanceCorrectionSerializer
+        from driver.shift_service import ShiftService
+
+        service_date, err = _parse_attendance_service_date(request)
+        if err is not None:
+            return err
+
+        schedule, alloc, leader_result, err_resp = _resolve_watcher_deployment_context(schedule_id, service_date)
+        if err_resp is not None:
+            return err_resp
+
+        crew_shift = CrewShift.objects.filter(allocation=alloc).first() if alloc else None
+        if not crew_shift:
+            return Response(
+                {'error': f'No submitted CrewShift attendance found for Schedule #{schedule_id} on {service_date}.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        record_id = request.data.get('attendance_record_id') or request.data.get('record_id')
+        new_status = request.data.get('new_status') or request.data.get('corrected_status')
+        reason = request.data.get('reason', '')
+        if not record_id or not new_status or not str(reason).strip():
+            return Response(
+                {'error': 'attendance_record_id, new_status, and reason are required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            correction = ShiftService.correct_attendance(
+                attendance_record_id=int(record_id),
+                corrected_status=new_status,
+                reason=reason,
+                corrected_by=request.user,
+                crew_shift_id=crew_shift.id,
+            )
+        except DjangoPermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        detail = _build_watcher_deployment_detail(schedule, alloc, service_date, leader_result)
+        return Response(
+            {
+                'correction': CrewAttendanceCorrectionSerializer(correction).data,
+                **detail,
+            },
+            status=status.HTTP_201_CREATED,
+        )

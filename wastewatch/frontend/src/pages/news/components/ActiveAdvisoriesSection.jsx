@@ -140,7 +140,7 @@ export default function ActiveAdvisoriesSection({
               style={{
                 background: theme.bg,
                 border: `1px solid ${theme.border}`,
-                borderLeft: `4px solid ${theme.leftBorderColor}`,
+                borderLeft: `3px solid ${theme.leftBorderColor}`,
               }}
             >
               {/* Thematic Icon Box */}
@@ -151,7 +151,7 @@ export default function ActiveAdvisoriesSection({
                   color: theme.badgeColor,
                 }}
               >
-                <AdvisoryIcon size={18} strokeWidth={2.2} />
+                <AdvisoryIcon size={15} strokeWidth={2.4} />
               </div>
 
               {/* Advisory Content Column */}

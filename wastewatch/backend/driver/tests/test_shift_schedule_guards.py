@@ -5,8 +5,21 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import Barangay, DriverProfile
-from driver.models import CollectionSchedule, DriverShift, MissedStop, PickupStatus, Truck
+from dumpsite.models import Dumpsite
+from driver.allocation_service import AllocationService
+from driver.models import (
+    CollectionSchedule,
+    CommissioningProvenance,
+    DriverShift,
+    MissedStop,
+    PickupStatus,
+    ScheduleTruckAllocation,
+    Truck,
+    TruckRetirementState,
+    Worker,
+)
 from driver.serializers import DriverShiftSerializer
+from driver.team_service import TeamService
 from watcher.models import StopValidation, StopValidationStatus
 
 User = get_user_model()
@@ -17,28 +30,52 @@ DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 class DriverShiftScheduleGuardTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.admin = User.objects.create_user(
+            username='guard_admin',
+            email='guard_admin@example.com',
+            password='testpassword123',
+            role='admin',
+            is_staff=True,
+        )
         self.driver = User.objects.create_user(
             username='driver_guard_test',
             email='driver_guard_test@example.com',
             password='testpassword123',
             role='driver',
         )
+        self.barangay = Barangay.objects.create(name='Guard Brgy')
+        self.dumpsite = Dumpsite.objects.create(
+            name='Guard Dumpsite',
+            barangay=self.barangay,
+            latitude=13.94,
+            longitude=121.62,
+        )
         self.truck = Truck.objects.create(
             plate_number='WW-901',
             model='Compactor',
             status='active',
+            commissioning_provenance=CommissioningProvenance.COMMISSIONED_VERIFIED,
+            commissioned_at=timezone.now(),
+            retirement_state=TruckRetirementState.OPERATIONAL,
         )
         self.truck.drivers.add(self.driver)
+        self.team = TeamService.create_team(name='Guard Team', code='GRD-1')
+        self.driver_worker = Worker.objects.create(
+            employee_id='EMP-GRD-D1', full_name='Guard Driver', user=self.driver
+        )
+        TeamService.assign_member(self.team.id, self.driver_worker.id, 'leader', created_by=self.admin)
         self.client.force_authenticate(user=self.driver)
 
         self.today = timezone.localdate()
         self.today_day = DAY_NAMES[self.today.weekday()]
         self.other_day = DAY_NAMES[(self.today.weekday() + 2) % 7]
 
-    def _create_schedule(self, days_str, status_val='PENDING'):
-        return CollectionSchedule.objects.create(
+    def _create_schedule(self, days_str, status_val='PENDING', allocate_today=True):
+        sched = CollectionSchedule.objects.create(
             truck=self.truck,
             driver=self.driver,
+            dumpsite=self.dumpsite,
+            default_team=self.team,
             area='Isabang Test Route',
             start_time=time(8, 0),
             end_time=time(16, 0),
@@ -49,6 +86,15 @@ class DriverShiftScheduleGuardTests(TestCase):
                 {'lat': 13.9450, 'lng': 121.6260, 'label': 'Stop 1'},
             ],
         )
+        if allocate_today and days_str == self.today_day:
+            AllocationService.allocate_truck_for_schedule(
+                schedule_id=sched.id,
+                allocation_date=self.today,
+                truck_id=self.truck.id,
+                team_id=self.team.id,
+                allocated_by=self.admin,
+            )
+        return sched
 
     def test_unscheduled_day_blocks_pre_start_direct_start_and_flow_current(self):
         off_day_schedule = self._create_schedule(self.other_day)
@@ -182,6 +228,94 @@ class DriverShiftScheduleGuardTests(TestCase):
         self.assertIsInstance(res.data, list)
         self.assertEqual(len(res.data), 1)
 
+    def test_r04_missing_dumpsite_schedule_blocked_even_with_waypoints_and_debug_modes(self):
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from driver.serializers import CollectionScheduleSerializer
+        from driver.shift_service import ShiftService
+
+        # Schedule with dumpsite=None even though waypoints[0] has coordinates
+        no_ds_sched = CollectionSchedule.objects.create(
+            truck=self.truck,
+            driver=self.driver,
+            dumpsite=None,
+            default_team=self.team,
+            area='No Dumpsite Zone',
+            start_time=time(8, 0),
+            end_time=time(16, 0),
+            days=self.today_day,
+            status='PENDING',
+            waypoints=[
+                {'lat': 13.9414, 'lng': 121.6234, 'label': 'Fake Home Base'},
+                {'lat': 13.9450, 'lng': 121.6260, 'label': 'Stop 1'},
+            ],
+        )
+
+        # 1. Service layer staging & attendance reject missing dumpsite
+        with self.assertRaises(DjangoValidationError):
+            ShiftService.stage_and_start_shift(
+                driver_user=self.driver,
+                schedule_id=no_ds_sched.id,
+            )
+        with self.assertRaises(DjangoValidationError):
+            ShiftService.record_deployment_attendance(
+                schedule_id=no_ds_sched.id,
+                service_date=self.today,
+                attendance_list=[],
+                recorded_by=self.driver,
+            )
+
+        # 2. GET /api/driver/shift/current/ reports missing_dumpsite
+        self.client.force_authenticate(user=self.driver)
+        cur_res = self.client.get('/api/driver/shift/current/')
+        self.assertEqual(cur_res.status_code, 200)
+        self.assertFalse(cur_res.data['can_start_shift'])
+        self.assertEqual(cur_res.data['block_reason'], 'missing_dumpsite')
+
+        # 3. POST /api/driver/shift/pre_start/ rejects with 400 missing_dumpsite
+        pre_res = self.client.post(
+            '/api/driver/shift/pre_start/',
+            {'schedule_id': no_ds_sched.id},
+            format='json',
+        )
+        self.assertEqual(pre_res.status_code, 400)
+        self.assertEqual(pre_res.data.get('code'), 'missing_dumpsite')
+
+        # 4. POST /api/driver/shift/start/ rejects under both DEBUG=False and DEBUG=True (no waypoints[0] fallback)
+        for debug_flag in (False, True):
+            with self.subTest(DEBUG=debug_flag):
+                with override_settings(DEBUG=debug_flag):
+                    start_res = self.client.post(
+                        '/api/driver/shift/start/',
+                        {
+                            'schedule_id': no_ds_sched.id,
+                            'latitude': 13.9414,
+                            'longitude': 121.6234,
+                        },
+                        format='json',
+                    )
+                    self.assertEqual(start_res.status_code, 400)
+                    self.assertEqual(start_res.data.get('code'), 'missing_dumpsite')
+
+        # 5. CollectionScheduleSerializer allows draft creation without dumpsite,
+        #    but blocks clearing dumpsite on an allocated schedule
+        draft_ser = CollectionScheduleSerializer(data={
+            'truck': self.truck.id,
+            'driver': self.driver.id,
+            'days': self.other_day,
+            'start_time': '09:00:00',
+            'end_time': '11:00:00',
+        })
+        self.assertTrue(draft_ser.is_valid(), draft_ser.errors)
+
+        alloc_sched = self._create_schedule(self.today_day, allocate_today=True)
+        patch_ser = CollectionScheduleSerializer(
+            alloc_sched,
+            data={'dumpsite': None},
+            partial=True,
+        )
+        self.assertFalse(patch_ser.is_valid())
+        self.assertIn('dumpsite', patch_ser.errors)
+
 
 class DriverShiftAuthorizationSecurityTests(TestCase):
     def setUp(self):
@@ -219,21 +353,43 @@ class DriverShiftAuthorizationSecurityTests(TestCase):
             plate_number='WW-SEC-1',
             model='Compactor',
             status='active',
+            commissioning_provenance=CommissioningProvenance.COMMISSIONED_VERIFIED,
+            commissioned_at=timezone.now(),
+            retirement_state=TruckRetirementState.OPERATIONAL,
         )
         self.truck_2 = Truck.objects.create(
             plate_number='WW-SEC-2',
             model='Mini Dump',
             status='active',
+            commissioning_provenance=CommissioningProvenance.COMMISSIONED_VERIFIED,
+            commissioned_at=timezone.now(),
+            retirement_state=TruckRetirementState.OPERATIONAL,
         )
         self.truck_1.drivers.add(self.driver)
         self.truck_2.drivers.add(self.other_driver)
 
+        self.team_1 = TeamService.create_team(name='Sec Team 1', code='SEC-1')
+        self.driver_worker = Worker.objects.create(
+            employee_id='EMP-SEC-D1', full_name='Sec Driver 1', user=self.driver
+        )
+        TeamService.assign_member(self.team_1.id, self.driver_worker.id, 'leader', created_by=self.role_admin)
+
         self.today = timezone.localdate()
         self.today_day = DAY_NAMES[self.today.weekday()]
+
+        self.barangay = Barangay.objects.create(name='Sec Brgy')
+        self.dumpsite = Dumpsite.objects.create(
+            name='Sec Dumpsite',
+            barangay=self.barangay,
+            latitude=13.94,
+            longitude=121.62,
+        )
 
         self.schedule_1 = CollectionSchedule.objects.create(
             truck=self.truck_1,
             driver=self.driver,
+            dumpsite=self.dumpsite,
+            default_team=self.team_1,
             area='Market View Security Route',
             start_time=time(7, 0),
             end_time=time(15, 0),
@@ -243,6 +399,13 @@ class DriverShiftAuthorizationSecurityTests(TestCase):
                 {'lat': 13.9414, 'lng': 121.6234, 'label': 'Base'},
                 {'lat': 13.9450, 'lng': 121.6260, 'label': 'Stop 1'},
             ],
+        )
+        AllocationService.allocate_truck_for_schedule(
+            schedule_id=self.schedule_1.id,
+            allocation_date=self.today,
+            truck_id=self.truck_1.id,
+            team_id=self.team_1.id,
+            allocated_by=self.role_admin,
         )
         self.schedule_2 = CollectionSchedule.objects.create(
             truck=self.truck_2,
@@ -585,10 +748,14 @@ class DriverShiftScheduleOwnershipAndTransitionSecurityTests(TestCase):
         self.truck_a.drivers.add(self.driver)
         self.truck_b.drivers.add(self.other_driver)
 
+        self.dumpsite = Dumpsite.objects.create(
+            name='Ownership Dumpsite', barangay=self.barangay, latitude=13.93, longitude=121.61
+        )
         today = timezone.localdate()
         self.schedule_a = CollectionSchedule.objects.create(
             truck=self.truck_a,
             driver=self.driver,
+            dumpsite=self.dumpsite,
             date=today,
             days='Mon,Tue,Wed,Thu,Fri,Sat,Sun',
             start_time=time(8, 0),
@@ -949,3 +1116,184 @@ class DriverShiftScheduleOwnershipAndTransitionSecurityTests(TestCase):
             self.assertEqual(res_admin_prod.status_code, 400)
             shift.refresh_from_db()
             self.assertEqual(shift.status, 'navigate_to_base')
+
+    def test_pre_start_and_start_shift_allocation_mismatch_null_alloc_started_at_and_hold_guards(self):
+        from datetime import timedelta
+
+        today = timezone.localdate()
+        self.truck_a.commissioning_provenance = CommissioningProvenance.COMMISSIONED_VERIFIED
+        self.truck_a.commissioned_at = timezone.now()
+        self.truck_a.retirement_state = TruckRetirementState.OPERATIONAL
+        self.truck_a.save(update_fields=['commissioning_provenance', 'commissioned_at', 'retirement_state'])
+
+        team = TeamService.create_team(name='Guard Shift Team', code='GST-1')
+        drv_w = Worker.objects.create(employee_id='EMP-GST-D1', full_name='GST Driver', user=self.driver)
+        crew_w = Worker.objects.create(employee_id='EMP-GST-C1', full_name='GST Crew')
+        TeamService.assign_member(team.id, drv_w.id, 'leader', created_by=self.role_admin)
+        TeamService.assign_member(team.id, crew_w.id, 'crew', created_by=self.role_admin)
+
+        self.schedule_a.default_team = team
+        self.schedule_a.save(update_fields=['default_team'])
+
+        alloc = AllocationService.allocate_truck_for_schedule(
+            schedule_id=self.schedule_a.id,
+            allocation_date=today,
+            truck_id=self.truck_a.id,
+            team_id=team.id,
+            allocated_by=self.role_admin,
+        )
+        other_truck = Truck.objects.create(
+            plate_number='WW-909',
+            model='Elf',
+            status='active',
+            commissioning_provenance=CommissioningProvenance.COMMISSIONED_VERIFIED,
+            commissioned_at=timezone.now(),
+            retirement_state=TruckRetirementState.OPERATIONAL,
+        )
+        other_alloc = ScheduleTruckAllocation.objects.create(
+            schedule=self.schedule_a,
+            allocation_date=today + timedelta(days=1),
+            truck=other_truck,
+            team=team,
+            allocated_by=self.role_admin,
+        )
+
+        self.client.force_authenticate(user=self.driver)
+
+        # 1. Stage shift cleanly via pre_start
+        res_pre = self.client.post('/api/driver/shift/pre_start/', {
+            'schedule_id': self.schedule_a.id,
+            'allocation_id': alloc.id,
+        }, format='json')
+        self.assertEqual(res_pre.status_code, 201)
+        shift = DriverShift.objects.get(pk=res_pre.data['id'])
+
+        # 2. Mismatched allocation_id returns 409 on both pre_start and start
+        res_mismatch_pre = self.client.post('/api/driver/shift/pre_start/', {
+            'schedule_id': self.schedule_a.id,
+            'allocation_id': other_alloc.id,
+        }, format='json')
+        self.assertEqual(res_mismatch_pre.status_code, 409)
+
+        res_mismatch_start = self.client.post('/api/driver/shift/start/', {
+            'schedule_id': self.schedule_a.id,
+            'allocation_id': other_alloc.id,
+        }, format='json')
+        self.assertEqual(res_mismatch_start.status_code, 409)
+
+        # 3. Legacy shift with allocation_id=None still triggers 409 when client sends allocation_id
+        DriverShift.objects.filter(pk=shift.id).update(allocation=None)
+        res_null_alloc_pre = self.client.post('/api/driver/shift/pre_start/', {
+            'schedule_id': self.schedule_a.id,
+            'allocation_id': alloc.id,
+        }, format='json')
+        self.assertEqual(res_null_alloc_pre.status_code, 409)
+        DriverShift.objects.filter(pk=shift.id).update(allocation=alloc)
+
+        # 4. Existing active shift + attendance payload on pre_start succeeds WITHOUT lock-order inversion
+        res_att = self.client.post('/api/driver/shift/pre_start/', {
+            'schedule_id': self.schedule_a.id,
+            'allocation_id': alloc.id,
+            'attendance': [{'worker_id': crew_w.id, 'status': 'PRESENT'}],
+        }, format='json')
+        self.assertEqual(res_att.status_code, 200)
+        self.assertTrue(res_att.data['attendance_submitted'])
+
+        # 5. Start shift, advance to shiftroute, then call start_shift again -> preserves started_at & op_status
+        res_start = self.client.post('/api/driver/shift/start/', {
+            'schedule_id': self.schedule_a.id,
+            'allocation_id': alloc.id,
+        }, format='json')
+        self.assertEqual(res_start.status_code, 200)
+        original_started_at = timezone.now() - timedelta(minutes=30)
+        DriverShift.objects.filter(pk=shift.id).update(
+            status='shiftroute',
+            op_status='on_route',
+            started_at=original_started_at,
+        )
+        res_re_start = self.client.post('/api/driver/shift/start/', {
+            'schedule_id': self.schedule_a.id,
+            'allocation_id': alloc.id,
+        }, format='json')
+        self.assertEqual(res_re_start.status_code, 200)
+        shift.refresh_from_db()
+        self.assertEqual(shift.op_status, 'on_route')
+        self.assertEqual(shift.started_at, original_started_at)
+
+        # 6. Post-stage operational hold on truck blocks pre_start / start
+        self.truck_a.is_operational_hold = True
+        self.truck_a.save(update_fields=['is_operational_hold'])
+        res_hold = self.client.post('/api/driver/shift/start/', {
+            'schedule_id': self.schedule_a.id,
+            'allocation_id': alloc.id,
+        }, format='json')
+        self.assertEqual(res_hold.status_code, 400)
+        self.truck_a.is_operational_hold = False
+        self.truck_a.save(update_fields=['is_operational_hold'])
+
+        # 7. Cancelled schedule blocks pre_start / start
+        self.schedule_a.status = 'CANCELLED'
+        self.schedule_a.save(update_fields=['status'])
+        res_cancel = self.client.post('/api/driver/shift/pre_start/', {
+            'schedule_id': self.schedule_a.id,
+            'allocation_id': alloc.id,
+        }, format='json')
+        self.assertEqual(res_cancel.status_code, 400)
+
+    @override_settings(DEBUG=True)
+    def test_dev_reset_preserves_crew_shift_roster_snapshots(self):
+        from driver.models import CrewShift, ShiftCrewRosterSnapshot
+
+        today = timezone.localdate()
+        team = TeamService.create_team(name='Reset Guard Team', code='RGT-1')
+        ended_shift = DriverShift.objects.create(
+            driver=self.driver,
+            truck=self.truck_a,
+            schedule=self.schedule_a,
+            is_active=False,
+            status='end_shift',
+            started_at=timezone.now(),
+            ended_at=timezone.now(),
+        )
+        cs = CrewShift.objects.create(
+            driver_shift=ended_shift,
+            schedule=self.schedule_a,
+            service_date=today,
+            team=team,
+            is_active=False,
+        )
+        # Snapshot linked via crew_shift only (driver_shift=None)
+        ShiftCrewRosterSnapshot.objects.create(crew_shift=cs, staged_by=self.role_admin)
+
+        self.client.force_authenticate(user=self.role_admin)
+        res = self.client.post('/api/driver/shift/dev-reset/', {
+            'driver_id': self.driver.id,
+            'phase': 'navigate_to_base',
+        }, format='json')
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(DriverShift.objects.filter(pk=ended_shift.id).exists())
+
+    def test_shift_status_heading_to_dumpsite_uses_effective_dumpsite(self):
+        from unittest.mock import patch
+        from dumpsite.models import Dumpsite
+
+        ds_b = Dumpsite.objects.create(
+            name='Assigned Dumpsite B', barangay=self.barangay, latitude=13.99, longitude=121.66
+        )
+        self.schedule_a.dumpsite = ds_b
+        self.schedule_a.save(update_fields=['dumpsite'])
+
+        DriverShift.objects.create(
+            driver=self.driver,
+            truck=self.truck_a,
+            schedule=self.schedule_a,
+            is_active=True,
+            status='shiftroute',
+            op_status='on_route',
+        )
+        self.client.force_authenticate(user=self.driver)
+        with patch('notifications.services.notify_dumpsite_inbound') as mock_notify:
+            res = self.client.post('/api/driver/shift/status/', {'status': 'heading_to_dumpsite'}, format='json')
+            self.assertEqual(res.status_code, 200)
+            mock_notify.assert_called_once()
+            self.assertEqual(mock_notify.call_args[0][1].id, ds_b.id)

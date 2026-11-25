@@ -19,6 +19,7 @@ import TurnArrow, { TURN_COLOR } from './TurnArrow'
 import useGpsTracking from '../../../hooks/useGpsTracking'
 import api from '../../../api/client'
 import { resolveDriverSchedule } from '../../../utils/driverSchedule'
+import { resolveScheduleDumpsiteOrigin } from '../../../utils/routeBaseHelpers'
 import {
   Home,
   X,
@@ -154,14 +155,18 @@ export default function NavigateToBaseModule({ onAdvance, shift }) {
       .then(res => {
         const schedules = Array.isArray(res.data) ? res.data : (res.data?.results || [])
         const match = resolveDriverSchedule(res.data, user.id, shift?.schedule_id ?? shift?.schedule ?? null)
-        if (match?.waypoints?.length > 0) {
+        const origin = resolveScheduleDumpsiteOrigin(match)
+        if (origin) {
+          setBaseLocation(origin)
+          setBaseName(origin.label || match?.dumpsite_detail?.name || 'Assigned Dumpsite')
+        } else if (match?.waypoints?.length > 0) {
           setBaseLocation(match.waypoints[0])
           setBaseName(match.waypoints[0]?.label || 'Home Base')
         }
       })
       .catch(console.error)
       .finally(() => setScheduleLoading(false))
-  }, [user?.id])
+  }, [user?.id, shift?.schedule_id, shift?.schedule])
 
   // ── Auto-skip if already at base ─────────────────────────────────────────
   useEffect(() => {

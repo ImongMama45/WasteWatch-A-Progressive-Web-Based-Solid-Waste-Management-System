@@ -5,6 +5,8 @@
  * and cancellable entry-guard lifecycle for DriverRouteFlow.
  */
 
+import { formatReadinessErrorLabel } from './routeBaseHelpers.js'
+
 export const VALID_FLOW_PHASES = Object.freeze([
   'assignment',
   'navigate_to_base',
@@ -48,10 +50,18 @@ function formatShiftTimeWindow(previousShift) {
  * Only appends `(Last shift: ...)` when `block_reason === 'shift_already_ended'`.
  */
 export function buildShiftBlockedToastMessage(data) {
-  const baseMessage =
+  let baseMessage =
     typeof data?.block_message === 'string' && data.block_message.trim()
       ? data.block_message.trim()
-      : DEFAULT_BLOCK_MESSAGE
+      : null
+
+  if (!baseMessage && Array.isArray(data?.readiness_errors) && data.readiness_errors.length > 0) {
+    baseMessage = data.readiness_errors.map(formatReadinessErrorLabel).join(' ')
+  }
+
+  if (!baseMessage) {
+    baseMessage = DEFAULT_BLOCK_MESSAGE
+  }
 
   if (data?.block_reason === 'shift_already_ended') {
     const windowLabel = formatShiftTimeWindow(data.previous_shift_today)

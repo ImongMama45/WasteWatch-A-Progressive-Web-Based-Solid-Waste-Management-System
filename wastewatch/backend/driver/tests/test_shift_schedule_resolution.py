@@ -13,6 +13,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from accounts.models import Barangay, User, UserRole
+from dumpsite.models import Dumpsite
 from driver.models import CollectionSchedule, DriverShift, Truck, TruckLocation
 from notifications.models import Notification, NotificationType, NotificationDeduplication
 from watcher.models import StopValidation, StopValidationStatus
@@ -37,6 +38,13 @@ class ShiftScheduleResolutionTests(TestCase):
         self.b_a = Barangay.objects.create(name='Barangay Alpha Resolution')
         self.b_b = Barangay.objects.create(name='Barangay Beta Resolution')
 
+        self.dumpsite = Dumpsite.objects.create(
+            name='Central Dumpsite',
+            barangay=self.b_a,
+            latitude=13.9100,
+            longitude=121.6000,
+        )
+
         self.today = timezone.localdate()
 
         # Schedule A: has date=today (would match old fallback query)
@@ -47,6 +55,7 @@ class ShiftScheduleResolutionTests(TestCase):
             date=self.today,
             start_time=datetime.time(8, 0),
             end_time=datetime.time(12, 0),
+            dumpsite=self.dumpsite,
             waypoints=[
                 {'lat': 13.9100, 'lng': 121.6000, 'label': 'Base Depot A'},
                 {'lat': 13.9120, 'lng': 121.6020, 'label': 'Stop 1 - Alpha', 'barangay_id': self.b_a.id},
@@ -72,6 +81,7 @@ class ShiftScheduleResolutionTests(TestCase):
             date=None,
             start_time=datetime.time(13, 0),
             end_time=datetime.time(17, 0),
+            dumpsite=self.dumpsite,
             waypoints=[
                 {'lat': 13.9500, 'lng': 121.6500, 'label': 'Base Depot B'},
                 {'lat': 13.9520, 'lng': 121.6520, 'label': 'Stop 1 - Beta', 'barangay_id': self.b_b.id},
@@ -98,6 +108,8 @@ class ShiftScheduleResolutionTests(TestCase):
             driver=self.driver,
             truck=self.truck,
             schedule=self.schedule_b,
+            status='shiftroute',
+            op_status='on_route',
             is_active=True,
         )
 
@@ -197,6 +209,8 @@ class ShiftScheduleResolutionTests(TestCase):
             driver=self.driver,
             truck=self.truck,
             schedule=self.schedule_b,
+            status='shiftroute',
+            op_status='on_route',
             is_active=True,
         )
 

@@ -6,7 +6,7 @@
  * Zero emojis.
  */
 
-import { FileSearch, WifiOff, AlertCircle } from 'lucide-react'
+import { FileSearch, WifiOff, AlertCircle, Sparkles, ArrowUp, RefreshCw, CheckCircle2 } from 'lucide-react'
 import NewsCard from './NewsCard'
 import './NewsCard.css'
 import {
@@ -29,6 +29,15 @@ export default function NewsFeed({
   error = null,
   isOnline = true,
   onRetry,
+  totalCount = 0,
+  pageSize = 10,
+  onPageSizeChange,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
+  isHeroDisplayed = false,
+  hasNewContent = false,
+  onLoadNewContent,
 }) {
   const filtered = filterNews(items, category, search)
   const sorted = sortNews(filtered)
@@ -349,21 +358,154 @@ export default function NewsFeed({
 
   // 5. Data Ready State (including background refreshing where existing cards remain displayed)
   return (
-    <div
-      className="ww-news-grid"
-      style={{
-        opacity: isRefreshing ? 0.85 : 1,
-        transition: 'opacity .15s ease',
-      }}
-    >
-      {sorted.map((item, i) => (
-        <NewsCard
-          key={item.id}
-          item={item}
-          animDelay={i * 30}
-          onReadMore={onReadMore}
-        />
-      ))}
+    <div>
+      {/* Subtle New Announcements Available Banner */}
+      {hasNewContent && (
+        <div
+          style={{
+            position: 'sticky',
+            top: 72,
+            zIndex: 20,
+            display: 'flex',
+            justifyContent: 'center',
+            marginBottom: 16,
+            animation: 'fadeIn 0.2s ease-in-out',
+          }}
+        >
+          <button
+            type="button"
+            onClick={onLoadNewContent}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '7px 18px',
+              borderRadius: 20,
+              background: '#f0fdf4',
+              border: '1px solid #86efac',
+              color: '#15803d',
+              fontSize: 12.5,
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 3px 8px rgba(22, 163, 74, 0.12)',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <Sparkles size={14} strokeWidth={2.4} />
+            <span>New announcements available · Click to update</span>
+            <ArrowUp size={13} strokeWidth={2.4} />
+          </button>
+        </div>
+      )}
+
+      {/* Grid of editorial cards */}
+      <div
+        className="ww-news-grid"
+        style={{
+          opacity: isRefreshing ? 0.85 : 1,
+          transition: 'opacity .15s ease',
+        }}
+      >
+        {sorted.map((item, i) => (
+          <NewsCard
+            key={item.id}
+            item={item}
+            animDelay={i * 30}
+            onReadMore={onReadMore}
+          />
+        ))}
+      </div>
+
+      {/* Controlled Pagination Footer */}
+      <div
+        style={{
+          marginTop: 24,
+          marginBottom: 32,
+          paddingTop: 16,
+          borderTop: '1px solid #f1f5f9',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 12,
+        }}
+      >
+        {/* Count */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '100%',
+            maxWidth: 680,
+            fontSize: 12.5,
+            color: '#64748b',
+          }}
+        >
+          <div>
+            {category !== 'All' || Boolean(search.trim()) ? (
+              <>
+                Showing <strong style={{ color: '#0f172a' }}>{sorted.length}</strong> of{' '}
+                <strong style={{ color: '#0f172a' }}>{totalCount || sorted.length}</strong> matching announcement{(totalCount || sorted.length) === 1 ? '' : 's'}
+              </>
+            ) : isHeroDisplayed ? (
+              <>
+                Showing <strong style={{ color: '#0f172a' }}>{sorted.length + 1}</strong> of{' '}
+                <strong style={{ color: '#0f172a' }}>{totalCount || (sorted.length + 1)}</strong> announcements{' '}
+                <span style={{ color: '#94a3b8', fontSize: 11.5 }}>(1 featured above)</span>
+              </>
+            ) : (
+              <>
+                Showing <strong style={{ color: '#0f172a' }}>{sorted.length}</strong> of{' '}
+                <strong style={{ color: '#0f172a' }}>{totalCount || sorted.length}</strong> announcements
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Load More Button or End of Feed State */}
+        {hasMore ? (
+          <button
+            type="button"
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '9px 24px',
+              borderRadius: 8,
+              background: '#ffffff',
+              border: '1px solid #cbd5e1',
+              color: '#334155',
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: loadingMore ? 'not-allowed' : 'pointer',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+              transition: 'background 0.15s, border-color 0.15s',
+            }}
+          >
+            {loadingMore && <RefreshCw size={13} className="spin" />}
+            <span>{loadingMore ? 'Loading More Announcements…' : 'Load More Announcements'}</span>
+          </button>
+        ) : (
+          items.length > 0 && (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12,
+                color: '#94a3b8',
+                fontWeight: 500,
+                padding: '6px 12px',
+              }}
+            >
+              <CheckCircle2 size={13} strokeWidth={2} style={{ color: '#16a34a' }} />
+              <span>You've reached the end of the announcements</span>
+            </div>
+          )
+        )}
+      </div>
     </div>
   )
 }

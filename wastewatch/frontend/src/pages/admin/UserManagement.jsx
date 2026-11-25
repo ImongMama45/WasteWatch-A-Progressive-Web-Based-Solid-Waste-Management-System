@@ -733,8 +733,8 @@ export default function UserManagement() {
   }, [location.state, searchParams])
 
   useEffect(() => {
-    api.get('/api/barangays/').then(res => setBarangays(Array.isArray(res.data) ? res.data : [])).catch(() => {})
-    api.get('/api/dumpsite/dumpsites/').then(res => setDumpsites(Array.isArray(res.data) ? res.data : [])).catch(() => {})
+    api.get('/api/barangays/').then(res => setBarangays(Array.isArray(res.data) ? res.data : (res.data?.results || []))).catch(() => {})
+    api.get('/api/dumpsite/dumpsites/?paginate=false').then(res => setDumpsites(Array.isArray(res.data) ? res.data : (res.data?.results || []))).catch(() => {})
   }, [])
 
   async function handleSave(formObj, passwordChanged = false) {

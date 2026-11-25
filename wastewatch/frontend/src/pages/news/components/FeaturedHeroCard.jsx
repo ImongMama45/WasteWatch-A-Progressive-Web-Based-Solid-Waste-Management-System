@@ -111,11 +111,11 @@ export default function FeaturedHeroCard({ item, onReadMore }) {
       aria-label={`Featured: ${item.title}`}
       style={{
         background: '#ffffff',
-        border: '1px solid #cbd5e1',
-        borderRadius: 16,
+        border: '1px solid #e2e8f0',
+        borderRadius: 12,
         overflow: 'hidden',
-        marginBottom: 24,
-        boxShadow: '0 4px 16px -2px rgba(15, 23, 42, 0.06)',
+        marginBottom: 20,
+        boxShadow: '0 1px 3px rgba(15, 23, 42, 0.03)',
         display: 'flex',
         flexDirection: 'column',
       }}
@@ -124,17 +124,17 @@ export default function FeaturedHeroCard({ item, onReadMore }) {
         style={{
           display: 'grid',
           gridTemplateColumns: imageUrl ? 'repeat(auto-fit, minmax(280px, 1fr))' : '1fr',
-          minHeight: 260,
+          minHeight: 220,
         }}
       >
         {/* Main Content Column */}
         <div
           style={{
-            padding: '24px 28px',
+            padding: '18px 22px',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between',
-            gap: 16,
+            gap: 12,
           }}
         >
           <div>
@@ -143,9 +143,9 @@ export default function FeaturedHeroCard({ item, onReadMore }) {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8,
+                gap: 6,
                 flexWrap: 'wrap',
-                marginBottom: 12,
+                marginBottom: 10,
               }}
             >
               {/* Priority / Tier Distinction */}
@@ -153,19 +153,19 @@ export default function FeaturedHeroCard({ item, onReadMore }) {
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: 5,
+                  gap: 4,
                   fontSize: 10,
                   fontWeight: 800,
-                  letterSpacing: '.06em',
+                  letterSpacing: '.05em',
                   textTransform: 'uppercase',
                   color: priorityBadge.color,
                   background: priorityBadge.bg,
                   border: `1px solid ${priorityBadge.border}`,
-                  padding: '3px 9px',
-                  borderRadius: 20,
+                  padding: '2.5px 8px',
+                  borderRadius: 6,
                 }}
               >
-                <PriorityIcon size={12} strokeWidth={2.4} />
+                <PriorityIcon size={11} strokeWidth={2.4} />
                 <span>{priorityBadge.label}</span>
               </span>
 
@@ -182,8 +182,8 @@ export default function FeaturedHeroCard({ item, onReadMore }) {
                   color: catCfg?.color || '#16a34a',
                   background: catCfg?.bg || 'rgba(22,163,74,.08)',
                   border: `1px solid ${catCfg?.border || 'rgba(22,163,74,.2)'}`,
-                  padding: '3px 9px',
-                  borderRadius: 20,
+                  padding: '2.5px 8px',
+                  borderRadius: 6,
                 }}
               >
                 <CategoryIcon size={11} strokeWidth={2.2} />
@@ -201,8 +201,8 @@ export default function FeaturedHeroCard({ item, onReadMore }) {
                   color: '#64748b',
                   background: '#f8fafc',
                   border: '1px solid #e2e8f0',
-                  padding: '3px 8px',
-                  borderRadius: 20,
+                  padding: '2.5px 8px',
+                  borderRadius: 6,
                 }}
               >
                 <MapPin size={11} strokeWidth={2.2} />
@@ -213,11 +213,11 @@ export default function FeaturedHeroCard({ item, onReadMore }) {
             {/* Hero Title */}
             <h2
               style={{
-                fontSize: 20,
+                fontSize: 18,
                 fontWeight: 800,
                 color: '#0f172a',
                 lineHeight: 1.35,
-                margin: '0 0 10px 0',
+                margin: '0 0 8px 0',
                 letterSpacing: '-0.015em',
               }}
             >
@@ -230,7 +230,7 @@ export default function FeaturedHeroCard({ item, onReadMore }) {
                 style={{
                   fontSize: 13,
                   color: '#475569',
-                  lineHeight: 1.6,
+                  lineHeight: 1.55,
                   margin: 0,
                   display: '-webkit-box',
                   WebkitLineClamp: 3,
@@ -250,7 +250,8 @@ export default function FeaturedHeroCard({ item, onReadMore }) {
               alignItems: 'center',
               justifyContent: 'space-between',
               gap: 12,
-              paddingTop: 14,
+              paddingTop: 12,
+              marginTop: 10,
               borderTop: '1px solid #f1f5f9',
               flexWrap: 'wrap',
             }}
@@ -297,9 +298,9 @@ export default function FeaturedHeroCard({ item, onReadMore }) {
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 6,
-                padding: '8px 16px',
-                borderRadius: 9,
+                gap: 5,
+                padding: '7px 14px',
+                borderRadius: 7,
                 background: '#16a34a',
                 color: '#ffffff',
                 border: 'none',
@@ -307,7 +308,7 @@ export default function FeaturedHeroCard({ item, onReadMore }) {
                 fontWeight: 700,
                 cursor: 'pointer',
                 transition: 'background .15s, transform .15s',
-                boxShadow: '0 2px 6px rgba(22,163,74,0.2)',
+                boxShadow: '0 1px 3px rgba(22,163,74,0.18)',
               }}
             >
               <span>Read Full Notice</span>
@@ -322,7 +323,7 @@ export default function FeaturedHeroCard({ item, onReadMore }) {
             style={{
               position: 'relative',
               background: '#0f172a',
-              minHeight: 220,
+              minHeight: 200,
               overflow: 'hidden',
             }}
           >
@@ -341,34 +342,34 @@ export default function FeaturedHeroCard({ item, onReadMore }) {
         ) : (
           <div
             style={{
-              background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 50%, #e0f2fe 100%)',
+              background: '#f8fafc',
               borderLeft: '1px solid #e2e8f0',
-              padding: 24,
+              padding: 20,
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
               textAlign: 'center',
               position: 'relative',
-              minHeight: 180,
+              minHeight: 160,
             }}
           >
             <div
               style={{
-                width: 54,
-                height: 54,
-                borderRadius: 14,
+                width: 44,
+                height: 44,
+                borderRadius: 10,
                 background: '#ffffff',
                 border: '1px solid #bbf7d0',
                 color: '#16a34a',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: '0 4px 12px rgba(22,163,74,0.12)',
-                marginBottom: 12,
+                boxShadow: '0 2px 6px rgba(22,163,74,0.08)',
+                marginBottom: 8,
               }}
             >
-              <Building2 size={28} strokeWidth={2} />
+              <Building2 size={22} strokeWidth={2} />
             </div>
             <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a' }}>
               Lucena City CENRO

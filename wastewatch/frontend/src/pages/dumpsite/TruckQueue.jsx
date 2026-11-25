@@ -1,178 +1,277 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import api from '../../api/client'
+import { Truck, Check, MapPin, ArrowRight, Activity, AlertCircle } from 'lucide-react'
+import { getDumpsiteInboundQueue, unwrapList } from '../../api/dumpsiteApi'
 import TrucksOverlay from './components/TrucksOverlay'
 import ArrivalLogger from './ArrivalLogger'
+import FacilityWorkspaceHeader from './components/FacilityWorkspaceHeader'
+import { useFacilityScope } from './components/useFacilityScope'
+import { useAuth } from '../../context/AuthContext'
 import { LiveTrackerSkeleton } from '../../components/ui/Skeleton'
-
-const Ico = ({ d, size = 14, color = 'currentColor', sw = 1.75, style = {}, className = '' }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={sw}
-    strokeLinecap="round" strokeLinejoin="round" className={className} style={{ flexShrink: 0, display: 'block', ...style }}>
-    {Array.isArray(d) ? d.map((p, i) => <path key={i} d={p} />) : <path d={d} />}
-  </svg>
-);
-const IcoTruck = p => <Ico {...p} d={["M1 3h15v13H1z", "M16 8h4l3 3v5h-7V8z", "M5.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z", "M18.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"]} />;
-const IcoCheck = p => <Ico {...p} d={["M20 6L9 17l-5-5"]} />;
-const IcoPin = p => <Ico {...p} d={["M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1 1 18 0z", "M12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"]} />;
+import { getApiErrorMessage } from '../../utils/notificationHelpers'
 
 export default function TruckQueue() {
-  const navigate       = useNavigate()
-  const [siteId,   setSiteId]   = useState(null)
-  const [queue,    setQueue]    = useState([])
-  const [loading,  setLoading]  = useState(true)
+  const navigate = useNavigate()
+  const { sites, siteId, setSiteId, activeSite, isAdmin, loading: scopeLoading, error: scopeError } = useFacilityScope()
+  const { user } = useAuth()
+  const isOperator = Boolean(user?.role === 'dumpsite' && !isAdmin)
+
+  const [queue, setQueue] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [lastUpdate, setLastUpdate] = useState(null)
   const [overlayOpen, setOverlayOpen] = useState(false)
   const [logOpen, setLogOpen] = useState(false)
   const [logTruckId, setLogTruckId] = useState('')
   const intervalRef = useRef(null)
 
-  useEffect(() => {
-    api.get('/api/dumpsite/dumpsites/')
-      .then(res => {
-        if (res.data?.length > 0) setSiteId(res.data[0].id)
-        else setLoading(false)
+  const fetchQueue = useCallback((id) => {
+    if (!id) return
+    getDumpsiteInboundQueue(id)
+      .then((raw) => {
+        setQueue(unwrapList(raw))
+        setError(null)
+        setLoading(false)
+        setLastUpdate(new Date())
       })
-      .catch(() => setLoading(false))
-    return () => clearInterval(intervalRef.current)
+      .catch((err) => {
+        setError(getApiErrorMessage(err, 'Failed to load inbound queue.'))
+        setLoading(false)
+      })
   }, [])
 
-  const fetchQueue = (id) => {
-    if (!id) return
-    api.get(`/api/dumpsite/dumpsites/${id}/inbound_queue/`)
-      .then(res => { setQueue(res.data); setLoading(false); setLastUpdate(new Date()) })
-      .catch(() => setLoading(false))
-  }
-
   useEffect(() => {
-    if (!siteId) return
+    if (!siteId) {
+      if (!scopeLoading) setLoading(false)
+      return
+    }
+    setLoading(true)
     fetchQueue(siteId)
-    intervalRef.current = setInterval(() => fetchQueue(siteId), 30000)
+    intervalRef.current = setInterval(() => {
+      if (!document.hidden) fetchQueue(siteId)
+    }, 30000)
     return () => clearInterval(intervalRef.current)
-  }, [siteId])
+  }, [siteId, scopeLoading, fetchQueue])
 
   return (
-    <div style={{ padding: '1.5rem', maxWidth: 900, margin: '0 auto' }}>
-      <header style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 900, letterSpacing: '-0.03em', color: 'var(--surface-3)' }}>
-            Truck Queue
-          </h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: 2 }}>
-            Live inbound trucks heading to this dumpsite
-            {lastUpdate && <span style={{ opacity: 0.6 }}> · Updated {lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>}
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button onClick={() => setOverlayOpen(true)} style={{
-            background: 'var(--surface-1)', border: '1px solid var(--border)', color: 'var(--surface-3)',
-            borderRadius: 12, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s'
-          }}>
-            <IcoTruck size={14} /> Assigned Trucks
-          </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', animation: 'pulse 2s infinite', boxShadow: '0 0 8px #22c55e' }} />
-            <span style={{ fontSize: 12, fontWeight: 700, color: '#22c55e' }}>Auto-refresh every 30s</span>
-          </div>
-        </div>
-      </header>
-
-      {loading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <LiveTrackerSkeleton />
-          <LiveTrackerSkeleton />
-        </div>
-      ) : queue.length === 0 ? (
-        <div className="ww-fade-in" style={{ textAlign: 'center', padding: '4rem 2rem', border: '2px dashed var(--border)', borderRadius: 24, color: 'var(--text-muted)' }}>
-          <IcoTruck size={48} style={{ marginBottom: 12, margin: '0 auto', opacity: 0.5 }} />
-          <p style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 4 }}>No trucks inbound right now</p>
-          <p style={{ fontSize: '0.875rem' }}>Trucks will appear here when drivers mark themselves as heading to the dumpsite.</p>
-        </div>
-      ) : (
-        <div className="ww-stagger" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {queue.map(item => (
-            <div key={item.shift_id} className="card-light" style={{ padding: '1.25rem', borderRadius: 22, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-              {/* Left: Truck + Driver */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1 }}>
-                <div style={{
-                  width: 52, height: 52, borderRadius: 16,
-                  background: 'rgba(46,204,113,0.12)', border: '2px solid rgba(46,204,113,0.3)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#22c55e',
-                }}>
-                  <IcoTruck size={24} />
-                </div>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--surface-3)' }}>{item.truck_plate}</div>
-                  <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{item.driver}</div>
-                </div>
-              </div>
-
-              {/* Middle: Barangays + Capacity */}
-              <div style={{ flex: 2 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Barangays Covered</div>
-                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                  {item.barangays.length > 0 ? item.barangays.map(b => (
-                    <span key={b} style={{ background: 'rgba(59,130,246,0.1)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 20, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>{b}</span>
-                  )) : <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>}
-                </div>
-                <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>
-                  Max capacity: <strong style={{ color: 'var(--surface-3)' }}>{Number(item.truck_max_capacity_kg).toLocaleString()} kg</strong>
-                </div>
-              </div>
-
-              {/* Right: Status + CTA */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'flex-end' }}>
-                {item.op_status === 'at_dumpsite' ? (
-                  <span style={{
-                    background: 'rgba(34,197,94,0.12)', color: '#22c55e',
-                    border: '1px solid rgba(34,197,94,0.3)',
-                    borderRadius: 20, padding: '4px 12px', fontSize: 11, fontWeight: 800,
-                    display: 'flex', alignItems: 'center', gap: '6px'
-                  }}>
-                    <IcoCheck size={12} sw={2.5} /> Waiting for Calibration
-                  </span>
-                ) : (
-                  <span style={{
-                    background: 'rgba(59,130,246,0.12)', color: '#3b82f6',
-                    border: '1px solid rgba(59,130,246,0.3)',
-                    borderRadius: 20, padding: '4px 12px', fontSize: 11, fontWeight: 800,
-                    display: 'flex', alignItems: 'center', gap: '6px'
-                  }}>
-                    <IcoPin size={12} /> In Transit
-                  </span>
-                )}
-                
-                <button
-                  disabled={item.op_status !== 'at_dumpsite'}
-                  onClick={() => { setLogTruckId(item.truck_id); setLogOpen(true); }}
-                  style={{
-                    background: item.op_status === 'at_dumpsite' ? 'var(--accent)' : 'rgba(148,163,184,0.15)',
-                    color: item.op_status === 'at_dumpsite' ? '#0d1117' : '#94a3b8',
-                    border: item.op_status === 'at_dumpsite' ? 'none' : '1.5px solid var(--border)',
-                    borderRadius: 12, padding: '0.55rem 1rem',
-                    fontWeight: 700, fontSize: '0.8rem', 
-                    cursor: item.op_status === 'at_dumpsite' ? 'pointer' : 'not-allowed',
-                    whiteSpace: 'nowrap',
-                    opacity: item.op_status === 'at_dumpsite' ? 1 : 0.6
-                  }}
-                >
-                  Log This Arrival →
-                </button>
+    <div style={{ background: '#f0f2f5', minHeight: '100vh', padding: '20px 24px 60px' }}>
+      <div style={{ maxWidth: 1240, margin: '0 auto' }}>
+        <FacilityWorkspaceHeader
+          title="Inbound Truck Queue"
+          subtitle="Live inbound trucks returning to this facility for unloading and arrival confirmation."
+          sites={sites}
+          siteId={siteId}
+          onSiteChange={setSiteId}
+          activeSite={activeSite}
+          isAdmin={isAdmin}
+          rightContent={
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setOverlayOpen(true)}
+                disabled={!siteId}
+                style={{
+                  background: '#ffffff',
+                  border: '1px solid #ced0d4',
+                  color: '#1c1e21',
+                  borderRadius: 6,
+                  height: 36,
+                  padding: '0 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: siteId ? 'pointer' : 'not-allowed',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <Truck size={14} /> Assigned Trucks
+              </button>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 6, background: '#e7f5eb', border: '1px solid #bbf7d0' }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#16a34a' }} />
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#15803d' }}>
+                  {lastUpdate ? `  ${lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+                </span>
               </div>
             </div>
-          ))}
-        </div>
-      )}
+          }
+        />
 
-      <TrucksOverlay open={overlayOpen} onClose={() => setOverlayOpen(false)} siteId={siteId} />
-      <ArrivalLogger 
-        open={logOpen} 
-        onClose={(refresh) => { 
-          setLogOpen(false)
-          if (refresh && siteId) fetchQueue(siteId) 
-        }} 
-        defaultTruckId={logTruckId} 
-      />
+        {(scopeError || error) && (
+          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600 }}>
+            <AlertCircle size={16} />
+            <span>{scopeError || error}</span>
+          </div>
+        )}
+
+        {loading || scopeLoading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <LiveTrackerSkeleton />
+            <LiveTrackerSkeleton />
+          </div>
+        ) : queue.length === 0 ? (
+          <div className="ww-fade-in" style={{ background: '#ffffff', textAlign: 'center', padding: '4rem 2rem', border: '1px dashed #ced0d4', borderRadius: 10, color: '#65676b' }}>
+            <Truck size={42} style={{ margin: '0 auto 12px', opacity: 0.45 }} />
+            <p style={{ fontWeight: 700, fontSize: 15, color: '#1c1e21', margin: '0 0 4px' }}>No trucks inbound right now</p>
+            <p style={{ fontSize: 13, margin: 0 }}>Trucks appear here when drivers mark themselves as heading to this dumpsite.</p>
+          </div>
+        ) : (
+          <div className="ww-stagger" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {queue.map((item) => (
+              <div
+                key={item.shift_id}
+                style={{
+                  background: '#ffffff',
+                  border: '1px solid #e4e6eb',
+                  borderRadius: 10,
+                  padding: '16px 20px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 16,
+                  flexWrap: 'wrap',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: '1 1 220px' }}>
+                  <div
+                    style={{
+                      width: 46,
+                      height: 46,
+                      borderRadius: 8,
+                      background: '#e7f5eb',
+                      border: '1px solid #bbf7d0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#16a34a',
+                    }}
+                  >
+                    <Truck size={22} />
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: '#1c1e21' }}>{item.truck_plate}</div>
+                    <div style={{ fontSize: 13, color: '#65676b' }}>{item.driver}</div>
+                  </div>
+                </div>
+
+                <div style={{ flex: '2 1 260px' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                    Barangays Covered
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {Array.isArray(item.barangays) && item.barangays.length > 0 ? (
+                      item.barangays.map((b) => (
+                        <span
+                          key={b}
+                          style={{
+                            background: '#eff6ff',
+                            color: '#1d4ed8',
+                            border: '1px solid #bfdbfe',
+                            borderRadius: 4,
+                            padding: '2px 8px',
+                            fontSize: 11,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {b}
+                        </span>
+                      ))
+                    ) : (
+                      <span style={{ color: '#65676b', fontSize: 12 }}>--</span>
+                    )}
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: '#65676b' }}>
+                    Max capacity: <strong style={{ color: '#1c1e21' }}>{Number(item.truck_max_capacity_kg || 0).toLocaleString()} kg</strong>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
+                  {item.op_status === 'at_dumpsite' ? (
+                    <span
+                      style={{
+                        background: '#e7f5eb',
+                        color: '#15803d',
+                        border: '1px solid #bbf7d0',
+                        borderRadius: 4,
+                        padding: '3px 10px',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                      }}
+                    >
+                      <Check size={12} strokeWidth={2.5} /> Waiting for Calibration
+                    </span>
+                  ) : (
+                    <span
+                      style={{
+                        background: '#dbeafe',
+                        color: '#1d4ed8',
+                        border: '1px solid #bfdbfe',
+                        borderRadius: 4,
+                        padding: '3px 10px',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                      }}
+                    >
+                      <MapPin size={12} /> In Transit
+                    </span>
+                  )}
+
+                  {isOperator ? (
+                    <button
+                      type="button"
+                      disabled={item.op_status !== 'at_dumpsite'}
+                      onClick={() => {
+                        setLogTruckId(item.truck_id)
+                        setLogOpen(true)
+                      }}
+                      style={{
+                        background: item.op_status === 'at_dumpsite' ? '#16a34a' : '#f0f2f5',
+                        color: item.op_status === 'at_dumpsite' ? '#ffffff' : '#8a8d91',
+                        border: item.op_status === 'at_dumpsite' ? 'none' : '1px solid #ced0d4',
+                        borderRadius: 6,
+                        padding: '8px 14px',
+                        fontWeight: 600,
+                        fontSize: 12,
+                        cursor: item.op_status === 'at_dumpsite' ? 'pointer' : 'not-allowed',
+                        whiteSpace: 'nowrap',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      Log This Arrival <ArrowRight size={13} />
+                    </button>
+                  ) : (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: '#65676b',
+                        padding: '6px 12px',
+                        background: '#f0f2f5',
+                        borderRadius: 6,
+                        border: '1px solid #ced0d4',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Operator Action Only
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+
+      </div>
     </div>
   )
 }

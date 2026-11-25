@@ -1,8 +1,8 @@
 // 1st step <== do not remove this indicator
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Ban, Calendar, CheckCircle2, Clock, Play } from 'lucide-react'
+import { AlertTriangle, Ban, Calendar, CheckCircle2, Clock, Play, Users } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import api from '../../../api/client'
 import {
@@ -12,6 +12,22 @@ import {
   formatTime12h,
 } from '../../../utils/driverSchedule'
 import { MapSkeleton } from '../../../components/ui/Skeleton'
+import CrewAttendanceBoard from '../../../components/CrewAttendanceBoard'
+import {
+  ALLOWED_ATTENDANCE_STATUSES,
+  ATTENDANCE_STATUS_META,
+  normalizeAttendanceDetail,
+} from '../../../utils/crewAttendanceHelpers'
+import {
+  buildClosedLoopWaypoints,
+  formatReadinessErrorLabel,
+  LUCENA_DEFAULT_VIEW_CENTER,
+  resolveScheduleDumpsiteOrigin,
+  resolveScheduleReturnDestination,
+  resolveScheduleStops,
+} from '../../../utils/routeBaseHelpers'
+import { getPreallocatedTruck, getTeamRoster } from '../../../api/driverWorkflowApi'
+import { getApiErrorMessage } from '../../../utils/notificationHelpers'
 
 function decodePolyline(encoded) {
   let pts = [], i = 0, lat = 0, lng = 0
@@ -31,8 +47,14 @@ export default function AssignmentModule({ onAdvance, setActiveShift, truckPrevi
   const { user } = useAuth()
   const [profile, setProfile] = useState(null)
   const [schedule, setSchedule] = useState(null)
+  const [allocation, setAllocation] = useState(null)
+  const [allocationLoading, setAllocationLoading] = useState(false)
+  const [allocationError, setAllocationError] = useState(null)
   const [startError, setStartError] = useState(null)
   const [starting, setStarting] = useState(false)
+  const [teamRoster, setTeamRoster] = useState(null)
+  const [attendanceMap, setAttendanceMap] = useState({})
+  const [attendanceSubmitted, setAttendanceSubmitted] = useState(false)
 
   // ── Leaflet map state ───────────────────────────────────────────────────────
   const mapRef = useRef(null)
@@ -41,10 +63,13 @@ export default function AssignmentModule({ onAdvance, setActiveShift, truckPrevi
   const [mapLoading, setMapLoading] = useState(true)
 
   const firstName = user?.full_name?.split(' ')[0] || 'Driver'
-  const truckLabel = profile?.truck || 'No Truck Assigned'
-  const plateLabel = profile?.plateNumber || '—'
-  const routeLabel = profile?.route || 'No Route Assigned'
-  const barangayLabel = profile?.barangay || '—'
+  const truckLabel = allocation?.truck_model
+    || (allocation?.truck_plate ? `TRUCK ${allocation.truck_plate}` : null)
+    || profile?.truck
+    || 'No Truck Assigned'
+  const plateLabel = allocation?.truck_plate || profile?.plateNumber || '—'
+  const routeLabel = schedule?.area || schedule?.barangay_names || profile?.route || 'No Route Assigned'
+  const barangayLabel = schedule?.barangay_names || profile?.barangay || '—'
 
   // 1. Fetch driver profile ────────────────────────────────────────────────────
   useEffect(() => {
@@ -72,17 +97,151 @@ export default function AssignmentModule({ onAdvance, setActiveShift, truckPrevi
       .finally(() => setMapLoading(false))
   }, [user?.id])
 
+  const loadAllocation = useCallback(() => {
+    if (!user?.id || !schedule?.id) {
+      setAllocation(null)
+      setAllocationError(null)
+      setAllocationLoading(false)
+      return Promise.resolve(null)
+    }
+    setAllocationLoading(true)
+    setAllocationError(null)
+    return getPreallocatedTruck(schedule.id)
+      .then(data => {
+        if (data?.has_allocation && data?.allocation?.id && data.allocation.schedule === schedule.id) {
+          setAllocation(data.allocation)
+          setAllocationError(null)
+          return data.allocation
+        }
+        setAllocation(null)
+        setAllocationError('No truck allocation is assigned for this route today.')
+        return null
+      })
+      .catch(err => {
+        setAllocation(null)
+        setAllocationError(getApiErrorMessage(err, 'Unable to verify truck allocation for this route.'))
+        return null
+      })
+      .finally(() => setAllocationLoading(false))
+  }, [user?.id, schedule?.id])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!user?.id || !schedule?.id) {
+      setAllocation(null)
+      setAllocationError(null)
+      setAllocationLoading(false)
+      return () => { cancelled = true }
+    }
+    setAllocationLoading(true)
+    setAllocationError(null)
+    getPreallocatedTruck(schedule.id)
+      .then(data => {
+        if (cancelled) return
+        if (data?.has_allocation && data?.allocation?.id && data.allocation.schedule === schedule.id) {
+          setAllocation(data.allocation)
+          setAllocationError(null)
+        } else {
+          setAllocation(null)
+          setAllocationError('No truck allocation is assigned for this route today.')
+        }
+      })
+      .catch(err => {
+        if (cancelled) return
+        setAllocation(null)
+        setAllocationError(getApiErrorMessage(err, 'Unable to verify truck allocation for this route.'))
+      })
+      .finally(() => {
+        if (!cancelled) setAllocationLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [user?.id, schedule?.id])
+
+  const loadTeamRoster = useCallback(() => {
+    if (!user?.id) return
+    getTeamRoster({ scheduleId: schedule?.id ?? null })
+      .then(data => {
+        setTeamRoster(data)
+        const normalized = normalizeAttendanceDetail(data, user)
+        if (normalized.attendanceSubmitted) {
+          setAttendanceSubmitted(true)
+          const savedMap = {}
+          normalized.records.forEach(rec => {
+            savedMap[rec.worker_id] = rec.effective_status
+          })
+          setAttendanceMap(savedMap)
+        } else {
+          setAttendanceSubmitted(false)
+        }
+      })
+      .catch(() => setTeamRoster(null))
+  }, [user, schedule?.id])
+
+  useEffect(() => {
+    loadTeamRoster()
+  }, [loadTeamRoster])
+
+  const normalizedAttendance = useMemo(
+    () => normalizeAttendanceDetail(teamRoster, user),
+    [teamRoster, user]
+  )
+  const { ownership } = normalizedAttendance
+  const showDriverAttendanceEditor = Boolean(
+    ownership.hasTeam && ownership.isDriverLed && !ownership.isWatcherLed && ownership.canSubmitInitial
+  )
+  const showAttendanceBoard = Boolean(
+    ownership.hasTeam && (normalizedAttendance.attendanceSubmitted || ownership.isWatcherLed)
+  )
+  const crewMembers = normalizedAttendance.roster
+  const allCrewMarked = crewMembers.every(m => ALLOWED_ATTENDANCE_STATUSES.includes(attendanceMap[m.worker_id]))
+  const needsAttendanceBeforeStart = Boolean(
+    showDriverAttendanceEditor && !attendanceSubmitted && crewMembers.length > 0 && !allCrewMarked
+  )
+
+  const dumpsiteOrigin = useMemo(() => resolveScheduleDumpsiteOrigin(schedule), [schedule])
+  const routeStops = useMemo(() => resolveScheduleStops(schedule), [schedule])
+  const dumpsiteReturn = useMemo(() => resolveScheduleReturnDestination(schedule), [schedule])
+  const readinessErrors = useMemo(() => {
+    const errs = Array.isArray(schedule?.readiness_errors) ? [...schedule.readiness_errors] : []
+    if (schedule && !dumpsiteOrigin && !errs.includes('missing_dumpsite')) {
+      errs.push('missing_dumpsite')
+    }
+    if (schedule && routeStops.length === 0 && !errs.includes('missing_stops')) {
+      errs.push('missing_stops')
+    }
+    if (profile?.truck_detail?.is_operational_hold || profile?.is_operational_hold) {
+      if (!errs.includes('truck_on_hold')) errs.push('truck_on_hold')
+    }
+    if (profile?.truck_detail?.is_retired || profile?.is_retired) {
+      if (!errs.includes('truck_retired')) errs.push('truck_retired')
+    }
+    return errs
+  }, [schedule, dumpsiteOrigin, routeStops.length, profile])
+  const isOperationallyReady = Boolean(
+    schedule &&
+      schedule.is_operationally_ready !== false &&
+      dumpsiteOrigin &&
+      routeStops.length > 0 &&
+      readinessErrors.length === 0
+  )
+
   const todayWeekday = now.toLocaleDateString('en-US', { weekday: 'long' })
   const timing = evaluateScheduleShiftTiming(schedule, now)
   const hasScheduleToday = timing.hasScheduleToday
   const isRouteDone = schedule?.truck_status === 'completed'
   const isShiftEndedIncomplete = schedule?.truck_status === 'returning_unfinished'
   const isShiftDone = isRouteDone || isShiftEndedIncomplete
+  const isAllocationReady = Boolean(
+    allocation?.id && !allocationLoading && !allocationError
+  )
   const isStartBlocked = Boolean(
     mapLoading ||
+    allocationLoading ||
     user?.is_suspended ||
     !schedule ||
     !hasScheduleToday ||
+    !isOperationallyReady ||
+    !isAllocationReady ||
     isShiftDone
   )
 
@@ -105,7 +264,7 @@ export default function AssignmentModule({ onAdvance, setActiveShift, truckPrevi
     if (!leafletReady || !mapRef.current || mapInstance.current || mapLoading) return
 
     const L = window.L
-    const map = L.map(mapRef.current, { center: [13.9373, 121.617], zoom: 14, zoomControl: false })
+    const map = L.map(mapRef.current, { center: LUCENA_DEFAULT_VIEW_CENTER, zoom: 14, zoomControl: false })
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap', maxZoom: 19,
@@ -114,19 +273,25 @@ export default function AssignmentModule({ onAdvance, setActiveShift, truckPrevi
     L.control.zoom({ position: 'bottomright' }).addTo(map)
     mapInstance.current = map
 
-    if (!schedule?.waypoints?.length) return
+    if (!schedule) return
 
-    const wps = schedule.waypoints
+    const origin = resolveScheduleDumpsiteOrigin(schedule)
+    const stops = resolveScheduleStops(schedule)
+    const returnDest = resolveScheduleReturnDestination(schedule) || origin
 
-    // ── Start marker (Base) ───────────────────────────────────────────────
-    const baseIcon = L.divIcon({
-      html: `<div style="background:#fff;border:2.5px solid #16A34A;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(0,0,0,.18);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg></div>`,
-      className: '', iconSize: [32, 32], iconAnchor: [16, 16],
-    })
-    L.marker([wps[0].lat, wps[0].lng], { icon: baseIcon }).addTo(map).bindPopup(`<b>Start Point</b><br>${wps[0].label || 'Home Base'}`)
+    // ── Assigned Dumpsite Marker (Start & Return Base) ────────────────────
+    if (origin) {
+      const dsIcon = L.divIcon({
+        html: `<div style="background:#15803d;border:2.5px solid white;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(21,128,61,.35);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/></svg></div>`,
+        className: '', iconSize: [32, 32], iconAnchor: [16, 16],
+      })
+      L.marker([origin.lat, origin.lng], { icon: dsIcon })
+        .addTo(map)
+        .bindPopup(`<b>${origin.label}</b><br/><span style="font-size:11px;color:#15803d;font-weight:700;">ASSIGNED DUMPSITE (START &amp; RETURN)</span>`)
+    }
 
     // ── Stop markers ──────────────────────────────────────────────────────
-    wps.slice(1).forEach((wp, i) => {
+    stops.forEach((wp, i) => {
       const stopIcon = L.divIcon({
         html: `<div style="background:#5dade2;border:2px solid white;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:white;font-size:9px;font-weight:800;box-shadow:0 2px 6px rgba(0,0,0,.4);">${i + 1}</div>`,
         className: '', iconSize: [20, 20], iconAnchor: [10, 10],
@@ -134,24 +299,23 @@ export default function AssignmentModule({ onAdvance, setActiveShift, truckPrevi
       L.marker([wp.lat, wp.lng], { icon: stopIcon }).addTo(map).bindPopup(`<b>${wp.label || `Stop ${i + 1}`}</b>`)
     })
 
-    // ── Dumpsite Marker ───────────────────────────────────────────────────
-    if (schedule?.dumpsite_detail) {
-      const ds = schedule.dumpsite_detail
-      const dsIcon = L.divIcon({
-        html: `<div style="background:#DC2626;border:2px solid white;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,0,0,.18);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20h20"></path><path d="M5 20V8l7-3v15"></path><path d="M12 20V4l8 4v12"></path></svg></div>`,
-        className: '', iconSize: [30, 30], iconAnchor: [15, 15],
-      })
-      L.marker([+ds.latitude, +ds.longitude], { icon: dsIcon }).addTo(map).bindPopup(`<b>${ds.name}</b>`)
+    // ── Closed-loop route (Assigned Dumpsite -> Stops -> Same Assigned Dumpsite) ──
+    if (schedule.route_geometry) {
+      const pts = decodePolyline(schedule.route_geometry)
+      if (pts.length > 0) {
+        const line = L.polyline(pts, { color: '#16a34a', weight: 5, opacity: 0.85 }).addTo(map)
+        map.fitBounds(line.getBounds(), { padding: [30, 30] })
+        return
+      }
     }
 
-    // ── Full Route Coordinates ────────────────────────────────────────────
-    const allPts = [...wps]
-    if (schedule?.dumpsite_detail) {
-      allPts.push({ lat: +schedule.dumpsite_detail.latitude, lng: +schedule.dumpsite_detail.longitude })
-    }
-    allPts.push(wps[0]) // Return to Base
+    const { closedLoopPoints } = buildClosedLoopWaypoints({
+      dumpsite: origin ? { ...origin, latitude: origin.lat, longitude: origin.lng } : null,
+      stops,
+    })
+    const allPts = returnDest && origin && closedLoopPoints.length > 0 ? closedLoopPoints : stops
+    if (allPts.length === 0) return
 
-    // ── Fallback dashed straight-line while ORS loads ─────────────────────
     const latlngs = allPts.map(w => [w.lat, w.lng])
     const fallbackLine = L.polyline(latlngs, {
       color: '#2ecc71', weight: 3, opacity: 0.35, dashArray: '6, 6',
@@ -160,9 +324,8 @@ export default function AssignmentModule({ onAdvance, setActiveShift, truckPrevi
 
     // ── ORS actual road route ─────────────────────────────────────────────
     const orsApiKey = import.meta.env.VITE_ORS_API_KEY
-    if (!orsApiKey) return
+    if (!orsApiKey || allPts.length < 2) return
 
-    // ORS accepts max 50 coordinates
     const coordinates = allPts.slice(0, 50).map(w => [w.lng, w.lat])
 
     fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
@@ -243,10 +406,11 @@ export default function AssignmentModule({ onAdvance, setActiveShift, truckPrevi
               { label: 'Truck', value: truckLabel },
               { label: 'Plate No.', value: plateLabel },
               { label: 'Barangay', value: barangayLabel },
+              { label: 'Base & Return', value: dumpsiteOrigin?.label || dumpsiteReturn?.label || 'Unassigned Dumpsite' },
             ].map(r => (
               <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
                 <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', fontWeight: 600 }}>{r.label}</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: r.value.startsWith('No') || r.value === '—' ? '#f59e0b' : '#fff' }}>{r.value}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: r.value.startsWith('No') || r.value.startsWith('Unassigned') || r.value === '—' ? '#f59e0b' : '#fff' }}>{r.value}</span>
               </div>
             ))}
           </div>
@@ -300,7 +464,7 @@ export default function AssignmentModule({ onAdvance, setActiveShift, truckPrevi
               <span style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', letterSpacing: '.03em', display: 'flex', alignItems: 'center', gap: 6 }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg> Your Route Map</span>
               {schedule && (
                 <span style={{ fontSize: 11, color: '#64748b' }}>
-                  {schedule.waypoints?.length || 0} waypoints
+                  {routeStops.length} collection stop{routeStops.length !== 1 ? 's' : ''}
                 </span>
               )}
             </div>
@@ -405,25 +569,172 @@ export default function AssignmentModule({ onAdvance, setActiveShift, truckPrevi
             </div>
           )}
 
+          {!mapLoading && !user?.is_suspended && schedule && readinessErrors.length > 0 && (
+            <div style={{
+              marginBottom: 16, borderRadius: 12, padding: '12px 14px',
+              background: '#fef2f2', border: '1px solid #fecaca',
+              display: 'flex', alignItems: 'flex-start', gap: 10, color: '#991b1b',
+            }}>
+              <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 2 }} />
+              <div style={{ fontSize: 12, lineHeight: 1.45 }}>
+                <strong style={{ display: 'block', marginBottom: 2 }}>Deployment Readiness Blocked</strong>
+                {readinessErrors.map(formatReadinessErrorLabel).join(' ')}
+              </div>
+            </div>
+          )}
+
+          {!mapLoading && !allocationLoading && !user?.is_suspended && schedule && hasScheduleToday && !isShiftDone && allocationError && (
+            <div style={{
+              marginBottom: 16, borderRadius: 12, padding: '12px 14px',
+              background: '#fef2f2', border: '1px solid #fecaca',
+              display: 'flex', alignItems: 'flex-start', gap: 10, color: '#991b1b',
+            }}>
+              <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 2 }} />
+              <div style={{ fontSize: 12, lineHeight: 1.45 }}>
+                <strong style={{ display: 'block', marginBottom: 2 }}>Truck Allocation Required</strong>
+                {allocationError}
+              </div>
+            </div>
+          )}
+
+          {/* Crew Attendance: Driver-Led Roll-Call OR Watcher-Led Read-Only / Correction History */}
+          {showAttendanceBoard ? (
+            <div style={{ marginBottom: 16 }}>
+              <CrewAttendanceBoard
+                mode="driver"
+                scheduleId={schedule?.id}
+                initialData={teamRoster}
+                compact
+                onSubmitted={loadTeamRoster}
+                onCorrected={loadTeamRoster}
+              />
+            </div>
+          ) : showDriverAttendanceEditor ? (
+            <div style={{
+              marginBottom: 16,
+              padding: '14px 16px',
+              borderRadius: 14,
+              border: '1px solid #e2e8f0',
+              background: '#ffffff',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Users size={18} color="#0f766e" />
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>
+                      Crew Roll-Call — {teamRoster?.team?.name || 'Assigned Team'}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#64748b' }}>
+                      Driver Team Leader pre-departure roll call (you are excluded from crew roll call)
+                    </div>
+                  </div>
+                </div>
+                {attendanceSubmitted && (
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    padding: '4px 10px', borderRadius: 999,
+                    background: '#dcfce7', color: '#166534', fontSize: 11, fontWeight: 700,
+                  }}>
+                    <CheckCircle2 size={13} /> Submitted
+                  </span>
+                )}
+              </div>
+
+              {crewMembers.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: '#64748b' }}>
+                  No crew members assigned to this team.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {crewMembers.map(member => {
+                    const selected = attendanceMap[member.worker_id]
+                    return (
+                      <div key={member.worker_id} style={{
+                        padding: '10px 12px',
+                        borderRadius: 10,
+                        background: '#f8fafc',
+                        border: '1px solid #e2e8f0',
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <span style={{ fontSize: 13.5, fontWeight: 600, color: '#0f172a' }}>{member.full_name}</span>
+                          <span style={{ fontSize: 11.5, color: '#64748b', fontFamily: 'monospace' }}>{member.employee_id}</span>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+                          {ALLOWED_ATTENDANCE_STATUSES.map(statusKey => {
+                            const opt = ATTENDANCE_STATUS_META[statusKey]
+                            const isActive = selected === statusKey
+                            return (
+                              <button
+                                key={statusKey}
+                                type="button"
+                                disabled={attendanceSubmitted || starting}
+                                onClick={() => setAttendanceMap(prev => ({ ...prev, [member.worker_id]: statusKey }))}
+                                style={{
+                                  padding: '6px 4px',
+                                  borderRadius: 8,
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  border: isActive ? `1px solid ${opt.activeBg}` : '1px solid #cbd5e1',
+                                  background: isActive ? opt.activeBg : '#ffffff',
+                                  color: isActive ? '#ffffff' : '#475569',
+                                  cursor: attendanceSubmitted ? 'default' : 'pointer',
+                                  opacity: attendanceSubmitted && !isActive ? 0.55 : 1,
+                                }}
+                              >
+                                {opt.label}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {needsAttendanceBeforeStart && (
+                <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: '#b45309' }}>
+                  Select an attendance status for every crew member before starting duty.
+                </div>
+              )}
+            </div>
+          ) : null}
+
           {/* Start button */}
           <button
             id="start-duty-btn"
-            disabled={starting || isStartBlocked}
+            disabled={starting || isStartBlocked || needsAttendanceBeforeStart}
             onClick={async () => {
-              if (isStartBlocked) return
+              if (starting || isStartBlocked || needsAttendanceBeforeStart) return
               setStartError(null)
               setStarting(true)
               try {
                 sessionStorage.setItem('ww_duty_type', 'normal')
-                const res = await api.post('/api/driver/shift/pre_start/', {
+                const payload = {
                   duty_type: 'normal',
                   schedule_id: schedule?.id,
-                })
+                  allocation_id: allocation.id,
+                }
+                if (showDriverAttendanceEditor && !attendanceSubmitted && crewMembers.length > 0) {
+                  payload.attendance = crewMembers.map(m => ({
+                    worker_id: m.worker_id,
+                    status: attendanceMap[m.worker_id],
+                  }))
+                }
+                const res = await api.post('/api/driver/shift/pre_start/', payload)
+                if (res.data?.attendance_submitted) {
+                  setAttendanceSubmitted(true)
+                  loadTeamRoster()
+                }
                 if (setActiveShift) setActiveShift(res.data)
+                window.dispatchEvent(new Event('ww_shift_updated'))
                 onAdvance('navigate_to_base')
               } catch (err) {
-                const msg = err.response?.data?.error || 'Failed to start shift. Please try again.'
-                setStartError(msg)
+                setStartError(getApiErrorMessage(err, 'Failed to start shift. Please try again.'))
+                if (err?.response?.status === 400 || err?.response?.status === 409) {
+                  loadAllocation()
+                  loadTeamRoster()
+                }
               } finally {
                 setStarting(false)
               }
@@ -432,19 +743,19 @@ export default function AssignmentModule({ onAdvance, setActiveShift, truckPrevi
               width: '100%',
               padding: '16px 18px',
               borderRadius: 30,
-              background: (starting || isStartBlocked)
+              background: (starting || isStartBlocked || needsAttendanceBeforeStart)
                 ? '#cbd5e1'
                 : timing.isOffSchedule
                   ? '#d97706'
                   : '#10b981',
-              color: (starting || isStartBlocked) ? '#64748b' : '#fff',
+              color: (starting || isStartBlocked || needsAttendanceBeforeStart) ? '#64748b' : '#fff',
               border: 'none',
               fontFamily: 'var(--font-head)',
               fontSize: 15,
               fontWeight: 800,
               letterSpacing: '.04em',
-              cursor: (starting || isStartBlocked) ? 'not-allowed' : 'pointer',
-              boxShadow: (starting || isStartBlocked)
+              cursor: (starting || isStartBlocked || needsAttendanceBeforeStart) ? 'not-allowed' : 'pointer',
+              boxShadow: (starting || isStartBlocked || needsAttendanceBeforeStart)
                 ? 'none'
                 : timing.isOffSchedule
                   ? '0 4px 14px rgba(217,119,6,0.32)'
@@ -461,8 +772,14 @@ export default function AssignmentModule({ onAdvance, setActiveShift, truckPrevi
               <><Ban size={18} /> ACCOUNT SUSPENDED</>
             ) : !schedule ? (
               <><Ban size={18} /> NO ROUTE ASSIGNED</>
+            ) : !isOperationallyReady ? (
+              <><AlertTriangle size={18} /> DEPLOYMENT NOT READY</>
             ) : !hasScheduleToday ? (
               <><Ban size={18} /> NO SCHEDULED DUTY TODAY</>
+            ) : allocationLoading ? (
+              'Checking allocation…'
+            ) : !isAllocationReady ? (
+              <><AlertTriangle size={18} /> ALLOCATION REQUIRED</>
             ) : isRouteDone ? (
               <><CheckCircle2 size={18} /> ROUTE COMPLETED TODAY</>
             ) : isShiftEndedIncomplete ? (

@@ -33,6 +33,150 @@ import {
   FeedCardSkeleton,
   SidebarWidgetSkeleton,
 } from '../../components/ui/Skeleton'
+import { useCalendarEntries } from '../../hooks/useCalendarEntries'
+import { formatToManilaDateString } from '../../api/calendarService'
+
+/**
+ * Formats an ISO datetime string into Asia/Manila date components.
+ */
+export function formatOccurrenceDate(isoString, todayDateStr) {
+  if (!isoString) return { dayName: '', dateDisplay: '', isToday: false, isTomorrow: false, dateStr: '' }
+  const dateStr = isoString.slice(0, 10)
+  const isToday = dateStr === todayDateStr
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dateObj = new Date(y, m - 1, d)
+
+  let isTomorrow = false
+  if (todayDateStr) {
+    const [ty, tm, td] = todayDateStr.split('-').map(Number)
+    const todayObj = new Date(Date.UTC(ty, tm - 1, td, 12, 0, 0))
+    const tomorrowObj = new Date(todayObj.getTime() + 24 * 60 * 60 * 1000)
+    const tomorrowStr = formatToManilaDateString(tomorrowObj)
+    isTomorrow = dateStr === tomorrowStr
+  }
+
+  const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' })
+  const dateDisplay = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return { dateStr, dayName, dateDisplay, isToday, isTomorrow }
+}
+
+/**
+ * Formats start and end ISO timestamps into a 12-hour time window (e.g. '6:00 AM – 10:00 AM').
+ */
+export function formatOccurrenceTime(startIso, endIso) {
+  if (!startIso) return '—'
+  const extractTime = (iso) => {
+    if (!iso) return ''
+    const timePart = iso.slice(11, 16)
+    if (!timePart) return ''
+    const [hStr, mStr] = timePart.split(':')
+    const h = parseInt(hStr, 10), m = mStr || '00'
+    const ampm = h >= 12 ? 'PM' : 'AM'
+    const h12 = h % 12 || 12
+    return `${h12}:${m} ${ampm}`
+  }
+  const s = extractTime(startIso)
+  const e = extractTime(endIso)
+  if (s && e) return `${s} – ${e}`
+  return s || '—'
+}
+
+/**
+ * Returns accessible styling and labels for occurrence completion statuses.
+ * Preserves strict distinction between driver operational completion and watcher-verified collection.
+ */
+export function getOccurrenceStatusBadge(status, isToday) {
+  switch (status) {
+    case 'verified_collected':
+      return {
+        label: 'VERIFIED COLLECTED',
+        color: '#15803d',
+        bg: '#e7f5eb',
+        border: '#bbf7d0',
+      }
+    case 'operationally_completed':
+      return {
+        label: 'REPORTED COMPLETE',
+        color: '#0369a1',
+        bg: '#f0f9ff',
+        border: '#bae6fd',
+      }
+    case 'in_progress':
+      return {
+        label: isToday ? "TODAY'S PICKUP" : 'IN PROGRESS',
+        color: '#b45309',
+        bg: '#fffbeb',
+        border: '#fde68a',
+      }
+    case 'scheduled':
+    default:
+      if (isToday) {
+        return {
+          label: 'TODAY',
+          color: '#16a34a',
+          bg: '#f0fdf4',
+          border: '#bbf7d0',
+        }
+      }
+      return {
+        label: 'SCHEDULED',
+        color: '#475569',
+        bg: '#f1f5f9',
+        border: '#cbd5e1',
+      }
+  }
+}
+
+/**
+ * Selects the nearest relevant collection occurrence for a Citizen from a list of occurrences.
+ * Prioritizes active/scheduled collections today, then the earliest upcoming collection in the future.
+ */
+export function selectNextPickupOccurrence(entries = [], todayDateStr) {
+  if (!Array.isArray(entries) || entries.length === 0) return null
+
+  // 1. Look for today's active/upcoming collection first (scheduled or in_progress)
+  const todayActive = entries.find(e => {
+    const dStr = (e.start_datetime || e.start || '').slice(0, 10)
+    return dStr === todayDateStr && (e.status === 'scheduled' || e.status === 'in_progress')
+  })
+  if (todayActive) return todayActive
+
+  // 2. If no active collection today, look for earliest upcoming occurrence in the future (date > today)
+  const futureUpcoming = entries.find(e => {
+    const dStr = (e.start_datetime || e.start || '').slice(0, 10)
+    return dStr > todayDateStr && e.status !== 'cancelled'
+  })
+  if (futureUpcoming) return futureUpcoming
+
+  // 3. If today had a collection that was already completed/verified, and no future occurrence in window
+  const todayFinished = entries.find(e => {
+    const dStr = (e.start_datetime || e.start || '').slice(0, 10)
+    return dStr === todayDateStr
+  })
+  if (todayFinished) return todayFinished
+
+  // 4. Fallback to first entry in chronological list
+  return entries[0] || null
+}
+
+/**
+ * Calculates a bounded 14-day upcoming collection schedule window
+ * anchored to Asia/Manila (today + 13 following calendar dates = exactly 14 inclusive days).
+ * Provides a robust horizon for weekly and bi-weekly residential routes while remaining <= 31 days.
+ */
+export function calculateCitizenNextPickupDateRange(referenceDate = new Date()) {
+  const now = referenceDate instanceof Date ? referenceDate : new Date(referenceDate)
+  const todayFormatted = formatToManilaDateString(now)
+  const [y, m, d] = todayFormatted.split('-').map(Number)
+  const anchorDate = new Date(Date.UTC(y, m - 1, d, 12, 0, 0))
+  const future = new Date(anchorDate.getTime() + 13 * 24 * 60 * 60 * 1000)
+  const futureFormatted = formatToManilaDateString(future)
+  return {
+    startDateStr: todayFormatted,
+    endDateStr: futureFormatted,
+    todayStr: todayFormatted,
+  }
+}
 
 // ─── STATUS & SEVERITY CONSTANTS ──────────────────────────────────────────────
 
@@ -171,21 +315,45 @@ export default function CitizenDashboard() {
   const [rankOpen, setRankOpen] = useState(false)
 
   const userBrgy = user?.barangay_name || user?.barangay?.name || ''
-  const userBrgyId = user?.barangay || user?.barangay_id
+  const userBrgyId = user?.barangay_id ?? (typeof user?.barangay === 'object' ? user?.barangay?.id : user?.barangay) ?? null
   const tracker = useBarangayTracker(userBrgyId)
   const [activeDispatch, setActiveDispatch] = useState(null)
 
-  // Filter schedule for user's barangay
+  // 14-day upcoming collection schedule window anchored to Asia/Manila (today through today + 13 days)
+  const { startDateStr, endDateStr, todayStr } = useMemo(() => {
+    return calculateCitizenNextPickupDateRange()
+  }, [])
+
+  // Authoritative Calendar Service integration for Citizen Next Pickup
+  const {
+    entries: calendarEntries,
+    loading: calendarLoading,
+    error: calendarError,
+    refresh: refreshCalendar,
+    isRefreshing: isCalendarRefreshing,
+    isStale: isCalendarStale,
+    isCapacityError: isCalendarCapacityError,
+    isNetworkError: isCalendarNetworkError,
+  } = useCalendarEntries({
+    startDate: startDateStr,
+    endDate: endDateStr,
+    barangayId: userBrgyId,
+    source: 'collection_schedule',
+    paginate: false,
+    autoFetch: Boolean(userBrgyId),
+  })
+
+  // Select the nearest relevant collection occurrence
+  const nextPickup = useMemo(() => {
+    return selectNextPickupOccurrence(calendarEntries, todayStr)
+  }, [calendarEntries, todayStr])
+
+  // Filter schedule templates from /api/public/schedule/ for user's barangay weekly timetable
   const filteredSchedule = useMemo(() => {
     if (!schedule.length) return []
     if (!userBrgy) return schedule
     return schedule.filter(s => s.zone && s.zone.toLowerCase().includes(userBrgy.toLowerCase()))
   }, [schedule, userBrgy])
-
-  const nextDay = useMemo(() => {
-    if (!filteredSchedule.length) return schedule.find(s => s.isNext) || schedule[0] || null
-    return filteredSchedule.find(s => s.isNext) || filteredSchedule[0] || null
-  }, [filteredSchedule, schedule])
 
   // Data loading
   useEffect(() => {
@@ -231,10 +399,10 @@ export default function CitizenDashboard() {
         if (!cancelled) setLoading(false)
       })
 
-    // Fetch crew assignment only if user is a crew member
+    // Fetch persisted personal attendance history only if user is a crew member
     if (user?.employee_type === 'crew_member') {
       api
-        .get('/api/driver/crew-assignments/my-assignment/')
+        .get('/api/driver/shift/my-attendance-history/')
         .then(res => {
           if (!cancelled) setCrewAssignment(res.data)
         })
@@ -1008,61 +1176,67 @@ export default function CitizenDashboard() {
                 <div>
                   <h3 className="cd-card-title">
                     <span style={{ color: '#d97706', display: 'inline-flex' }}><SvgTruck size={18} color="#d97706" /></span>
-                    My Assigned Crew Shift
+                    My Sanitation Crew Standing & Attendance
                   </h3>
-                  <p className="cd-card-subtitle">Collection team assignment and shift schedule</p>
+                  <p className="cd-card-subtitle">Verified municipal sanitation team assignment and personal attendance record</p>
                 </div>
-                <span className="cd-crew-badge">ACTIVE DUTY</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {crewAssignment?.active_membership && (
+                    <span className="cd-crew-badge">
+                      {crewAssignment.active_membership.team_code}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="cd-btn cd-btn-secondary"
+                    onClick={() => navigate('/profile')}
+                    style={{ fontSize: 12, padding: '6px 12px' }}
+                  >
+                    View Full Attendance History
+                  </button>
+                </div>
               </div>
 
               <div style={{ padding: 20 }}>
                 {crewAssignment ? (
                   <div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 16 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
                       <div style={{ background: '#f8fafc', border: '1px solid #e4e6eb', borderRadius: 8, padding: 14 }}>
-                        <div style={{ fontSize: 10, fontWeight: 800, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Assigned Truck</div>
-                        <div style={{ fontSize: 18, fontWeight: 800, color: '#1c1e21' }}>{crewAssignment.truck_plate}</div>
-                        <div style={{ fontSize: 12, color: '#65676b' }}>{crewAssignment.truck_model || 'Compactor Truck'}</div>
-                      </div>
-
-                      <div style={{ background: '#f8fafc', border: '1px solid #e4e6eb', borderRadius: 8, padding: 14 }}>
-                        <div style={{ fontSize: 10, fontWeight: 800, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Lead Driver</div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: '#1c1e21' }}>{crewAssignment.driver_name || 'Assigned Driver'}</div>
-                        <div style={{ fontSize: 12, color: '#65676b' }}>Operator in charge</div>
-                      </div>
-
-                      <div style={{ background: '#f8fafc', border: '1px solid #e4e6eb', borderRadius: 8, padding: 14 }}>
-                        <div style={{ fontSize: 10, fontWeight: 800, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Shift Window</div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: '#1c1e21' }}>
-                          {crewAssignment.schedule_start || '06:00 AM'} - {crewAssignment.schedule_end || '02:00 PM'}
+                        <div style={{ fontSize: 10, fontWeight: 800, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Sanitation Team</div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: '#1c1e21' }}>
+                          {crewAssignment.active_membership?.team_name || 'Unassigned'}
                         </div>
-                        <div style={{ fontSize: 12, color: '#65676b' }}>{crewAssignment.schedule_days || 'Mon-Sat'}</div>
+                        <div style={{ fontSize: 12, color: '#65676b' }}>
+                          {crewAssignment.worker?.employee_id ? `Employee ID: ${crewAssignment.worker.employee_id}` : 'Sanitation Crew Member'}
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#f8fafc', border: '1px solid #e4e6eb', borderRadius: 8, padding: 14 }}>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Latest Recorded Attendance</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: '#1c1e21' }}>
+                          {crewAssignment.personal_attendance?.[0]?.effective_status || 'No Roll-Call Yet'}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#65676b' }}>
+                          {crewAssignment.personal_attendance?.[0]
+                            ? `${crewAssignment.personal_attendance[0].service_date || ''} · ${crewAssignment.personal_attendance[0].schedule_area || 'Deployment'}`
+                            : 'Submitted by designated Team Leader'}
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#f8fafc', border: '1px solid #e4e6eb', borderRadius: 8, padding: 14 }}>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Attendance Summary</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: '#1c1e21' }}>
+                          Present: {crewAssignment.attendance_summary?.present ?? 0} · Late: {crewAssignment.attendance_summary?.late ?? 0}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#65676b' }}>
+                          Excused: {crewAssignment.attendance_summary?.excused ?? 0} · Absent: {crewAssignment.attendance_summary?.absent ?? 0}
+                        </div>
                       </div>
                     </div>
-
-                    {crewAssignment.crew_names?.length > 0 && (
-                      <div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', marginBottom: 8 }}>Crew Members on this Shift</div>
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          {crewAssignment.crew_names.map(m => (
-                            <span key={m.id} style={{
-                              fontSize: 12, fontWeight: 600, padding: '4px 10px', borderRadius: 4,
-                              background: m.id === user?.id ? '#fef3c7' : '#f0f2f5',
-                              color: m.id === user?.id ? '#b45309' : '#1c1e21',
-                              border: m.id === user?.id ? '1px solid #fde68a' : '1px solid #e4e6eb',
-                              display: 'inline-flex', alignItems: 'center', gap: 6,
-                            }}>
-                              {m.id === user?.id && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b' }} />}
-                              {m.full_name} {m.id === user?.id ? '(You)' : ''}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 ) : (
                   <div style={{ textAlign: 'center', padding: '16px 0', color: '#65676b', fontSize: 13 }}>
-                    No specific truck assignment registered for today's shift. Contact dispatch for assignment.
+                    No persisted crew attendance records found. View your profile for assignment details.
                   </div>
                 )}
               </div>
@@ -1143,12 +1317,51 @@ export default function CitizenDashboard() {
             >
               <div>
                 <div className="cd-stat-label">Next Collection</div>
-                <div className="cd-stat-val" style={{ fontSize: 20, color: '#16a34a' }}>
-                  {nextDay ? nextDay.day : 'Check Schedule'}
-                </div>
-                <div className="cd-stat-sub">
-                  {nextDay ? nextDay.time : 'Weekly pickup times'}
-                </div>
+                {!userBrgyId ? (
+                  <>
+                    <div className="cd-stat-val" style={{ fontSize: 16, color: '#65676b' }}>
+                      Set Barangay
+                    </div>
+                    <div className="cd-stat-sub">Update profile location</div>
+                  </>
+                ) : calendarLoading && !nextPickup ? (
+                  <>
+                    <div className="cd-stat-val" style={{ fontSize: 16, color: '#65676b' }}>
+                      Checking...
+                    </div>
+                    <div className="cd-stat-sub">Loading next pickup</div>
+                  </>
+                ) : calendarError && !nextPickup ? (
+                  <>
+                    <div className="cd-stat-val" style={{ fontSize: 16, color: '#dc2626' }}>
+                      Unavailable
+                    </div>
+                    <div className="cd-stat-sub">Schedule offline</div>
+                  </>
+                ) : nextPickup ? (
+                  (() => {
+                    const { dayName, dateDisplay, isToday, isTomorrow } = formatOccurrenceDate(nextPickup.start_datetime || nextPickup.start, todayStr)
+                    const timeRange = formatOccurrenceTime(nextPickup.start_datetime || nextPickup.start, nextPickup.end_datetime || nextPickup.end)
+                    const label = isToday ? 'Today' : isTomorrow ? 'Tomorrow' : `${dayName.slice(0, 3)}, ${dateDisplay}`
+                    return (
+                      <>
+                        <div className="cd-stat-val" style={{ fontSize: 20, color: '#16a34a' }}>
+                          {label}
+                        </div>
+                        <div className="cd-stat-sub">
+                          {timeRange}
+                        </div>
+                      </>
+                    )
+                  })()
+                ) : (
+                  <>
+                    <div className="cd-stat-val" style={{ fontSize: 16, color: '#65676b' }}>
+                      No Upcoming
+                    </div>
+                    <div className="cd-stat-sub">No pickup scheduled</div>
+                  </>
+                )}
               </div>
               <div className="cd-stat-icon-wrap" style={{ background: '#e7f5eb', color: '#16a34a' }}>
                 <SvgCalendar />
@@ -1378,37 +1591,85 @@ export default function CitizenDashboard() {
                   </button>
                 </div>
 
-                {/* Highlight Next Pickup */}
-                {!loading && nextDay && (
-                  <div className="cd-next-pickup-banner ww-fade-in">
-                    <div className="cd-pickup-icon">
-                      <SvgTruck size={22} color="#16a34a" />
+                {/* Highlight Next Pickup from Authoritative Calendar Service */}
+                {!userBrgyId ? (
+                  <div className="ww-fade-in" style={{ padding: '16px 20px', background: '#f8fafc', borderBottom: '1px solid #e4e6eb', fontSize: 13, color: '#65676b' }}>
+                    No barangay assigned to your account. Please update your profile to view your neighborhood collection schedule.
+                  </div>
+                ) : calendarLoading && !nextPickup ? (
+                  <div style={{ padding: '16px 20px', borderBottom: '1px solid #e4e6eb' }}>
+                    <SidebarWidgetSkeleton rows={1} />
+                  </div>
+                ) : calendarError && !nextPickup ? (
+                  <div className="ww-fade-in" style={{ padding: '14px 20px', background: '#fef2f2', borderBottom: '1px solid #fecaca', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#dc2626' }}>
+                        {isCalendarCapacityError ? 'Calendar Service Busy' : isCalendarNetworkError ? 'Network Connection Issue' : 'Schedule Unavailable'}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#7f1d1d' }}>
+                        {calendarError?.message || 'Unable to retrieve upcoming collection schedule.'}
+                      </div>
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 10, fontWeight: 800, color: '#15803d', letterSpacing: '.07em', textTransform: 'uppercase', marginBottom: 2 }}>
-                        Upcoming Scheduled Collection
-                      </div>
-                      <div style={{ fontSize: 17, fontWeight: 800, color: '#1c1e21', marginBottom: 2 }}>
-                        {nextDay.day}
-                      </div>
-                      <div style={{ fontSize: 12, color: '#4b5563' }}>
-                        Window: <strong>{nextDay.time}</strong> · Zone: {nextDay.zone}
-                      </div>
-                    </div>
-                    <span
-                      style={{
-                        background: '#ffffff',
-                        color: '#15803d',
-                        border: '1px solid #bbf7d0',
-                        fontSize: 10,
-                        fontWeight: 800,
-                        padding: '4px 10px',
-                        borderRadius: 4,
-                        letterSpacing: '.04em',
-                      }}
+                    <button
+                      onClick={() => refreshCalendar()}
+                      className="cd-btn-secondary"
+                      style={{ padding: '4px 10px', fontSize: 11, borderColor: '#fca5a5', color: '#dc2626' }}
                     >
-                      NEXT
-                    </span>
+                      Retry
+                    </button>
+                  </div>
+                ) : nextPickup ? (
+                  (() => {
+                    const { dayName, dateDisplay, isToday, isTomorrow } = formatOccurrenceDate(nextPickup.start_datetime || nextPickup.start, todayStr)
+                    const timeRange = formatOccurrenceTime(nextPickup.start_datetime || nextPickup.start, nextPickup.end_datetime || nextPickup.end)
+                    const badge = getOccurrenceStatusBadge(nextPickup.status, isToday)
+
+                    return (
+                      <div key={nextPickup.id} className="cd-next-pickup-banner ww-fade-in" style={{ background: isToday ? '#f0fdf4' : '#f8fafc', borderColor: isToday ? '#bbf7d0' : '#e4e6eb' }}>
+                        <div className="cd-pickup-icon" style={{ background: isToday ? '#dcfce7' : '#e7f5eb' }}>
+                          <SvgTruck size={22} color="#16a34a" />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2, flexWrap: 'wrap' }}>
+                            <div style={{ fontSize: 10, fontWeight: 800, color: '#15803d', letterSpacing: '.07em', textTransform: 'uppercase' }}>
+                              {isToday ? "Today's Collection" : isTomorrow ? "Tomorrow's Collection" : "Upcoming Scheduled Collection"}
+                            </div>
+                            {isCalendarStale && (
+                              <span style={{ fontSize: 9, fontWeight: 800, color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', padding: '1px 5px', borderRadius: 3 }}>
+                                CACHED
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 17, fontWeight: 800, color: '#1c1e21', marginBottom: 2 }}>
+                            {isToday ? `Today (${dayName})` : `${dayName}, ${dateDisplay}`}
+                          </div>
+                          <div style={{ fontSize: 12, color: '#4b5563' }}>
+                            Window: <strong>{timeRange}</strong> · Zone: {nextPickup.location || userBrgy}
+                            {nextPickup.metadata?.frequency ? ` · ${nextPickup.metadata.frequency}` : ''}
+                          </div>
+                        </div>
+                        <span
+                          style={{
+                            background: badge.bg,
+                            color: badge.color,
+                            border: `1px solid ${badge.border}`,
+                            fontSize: 10,
+                            fontWeight: 800,
+                            padding: '4px 10px',
+                            borderRadius: 4,
+                            letterSpacing: '.04em',
+                            textTransform: 'uppercase',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {badge.label}
+                        </span>
+                      </div>
+                    )
+                  })()
+                ) : (
+                  <div className="ww-fade-in" style={{ padding: '16px 20px', background: '#f8fafc', borderBottom: '1px solid #e4e6eb', fontSize: 13, color: '#65676b' }}>
+                    No upcoming collections scheduled for {userBrgy || 'your barangay'} in the next 14 days.
                   </div>
                 )}
 
@@ -1424,57 +1685,63 @@ export default function CitizenDashboard() {
                     </div>
                   ) : (
                     <div className="ww-stagger">
-                    {filteredSchedule.map((s, i) => (
-                      <div
-                        key={i}
-                        className="cd-meta-row"
-                        style={{
-                          background: s.isNext ? '#f8fafc' : 'transparent',
-                          cursor: 'default',
-                        }}
-                      >
+                    {filteredSchedule.map((s, i) => {
+                      const isScheduleNext = Boolean(
+                        nextPickup && nextPickup.source_id === s.id
+                      )
+
+                      return (
                         <div
+                          key={s.id || i}
+                          className="cd-meta-row"
                           style={{
-                            width: 36,
-                            height: 36,
-                            borderRadius: 6,
-                            background: s.isNext ? '#e7f5eb' : '#f0f2f5',
-                            color: s.isNext ? '#16a34a' : '#65676b',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            flexShrink: 0,
+                            background: isScheduleNext ? '#f8fafc' : 'transparent',
+                            cursor: 'default',
                           }}
                         >
-                          <SvgCalendar />
-                        </div>
+                          <div
+                            style={{
+                              width: 36,
+                              height: 36,
+                              borderRadius: 6,
+                              background: isScheduleNext ? '#e7f5eb' : '#f0f2f5',
+                              color: isScheduleNext ? '#16a34a' : '#65676b',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0,
+                            }}
+                          >
+                            <SvgCalendar />
+                          </div>
 
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ fontWeight: s.isNext ? 700 : 600, fontSize: 14, color: '#1c1e21' }}>
-                              {s.day}
-                            </span>
-                            {s.isNext && (
-                              <span style={{ background: '#e7f5eb', color: '#15803d', fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 3 }}>
-                                NEXT PICKUP
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontWeight: isScheduleNext ? 700 : 600, fontSize: 14, color: '#1c1e21' }}>
+                                {s.day}
                               </span>
-                            )}
+                              {isScheduleNext && (
+                                <span style={{ background: '#e7f5eb', color: '#15803d', fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 3 }}>
+                                  NEXT PICKUP
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 12, color: '#65676b', marginTop: 1 }}>
+                              {s.zone}
+                            </div>
                           </div>
-                          <div style={{ fontSize: 12, color: '#65676b', marginTop: 1 }}>
-                            {s.zone}
-                          </div>
-                        </div>
 
-                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: s.time === 'N/A' ? '#8a8d91' : '#1c1e21' }}>
-                            {s.time}
-                          </div>
-                          <div style={{ fontSize: 10, color: '#8a8d91', textTransform: 'uppercase', letterSpacing: '.04em' }}>
-                            Collection Window
+                          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: s.time === 'N/A' ? '#8a8d91' : '#1c1e21' }}>
+                              {s.time}
+                            </div>
+                            <div style={{ fontSize: 10, color: '#8a8d91', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                              Collection Window
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                     </div>
                   )}
                 </div>

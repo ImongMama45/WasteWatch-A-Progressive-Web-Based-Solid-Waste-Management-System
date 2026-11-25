@@ -774,6 +774,65 @@ class CommunityBackendTests(TestCase):
         res_created = self.client.get('/api/community/posts/?ordering=-created_at')
         self.assertEqual(res_created.status_code, status.HTTP_200_OK)
 
+    def test_community_feed_pagination_and_latest_check(self):
+        """
+        Verify Community feed server-side pagination, page size bounds,
+        deterministic ranking priority, and lightweight update-check endpoint.
+        """
+        CommunityPost.objects.all().delete()
+
+        # Create 35 community posts
+        posts = []
+        for i in range(35):
+            posts.append(CommunityPost.objects.create(
+                author=self.citizen,
+                barangay=self.brgy_isabang,
+                content=f"Discussion {i}",
+                post_type=PostType.DISCUSSION,
+                category=PostCategory.GENERAL
+            ))
+
+        # 1. Default page size is 10
+        res = self.client.get('/api/community/posts/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['count'], 35)
+        self.assertEqual(len(res.data['results']), 10)
+
+        # 2. Configurable page sizes: 20, 30
+        res20 = self.client.get('/api/community/posts/?page_size=20')
+        self.assertEqual(len(res20.data['results']), 20)
+
+        res30 = self.client.get('/api/community/posts/?page_size=30')
+        self.assertEqual(len(res30.data['results']), 30)
+
+        # 3. Maximum page size enforcement: capped at 30
+        res50 = self.client.get('/api/community/posts/?page_size=50')
+        self.assertEqual(len(res50.data['results']), 30)
+
+        # 4. Page 2 without duplicates
+        page1_ids = {p['id'] for p in res.data['results']}
+        res_p2 = self.client.get('/api/community/posts/?page=2')
+        page2_ids = {p['id'] for p in res_p2.data['results']}
+        self.assertEqual(len(page1_ids.intersection(page2_ids)), 0)
+
+        # 5. Lightweight latest-check endpoint
+        res_check = self.client.get('/api/community/posts/latest-check/')
+        self.assertEqual(res_check.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_check.data['count'], 35)
+        self.assertIsNotNone(res_check.data['latest_id'])
+        self.assertIsNotNone(res_check.data['latest_timestamp'])
+
+        # 6. Priority ranking: advisory and verified reports outrank general discussions
+        advisory_post = CommunityPost.objects.create(
+            author=self.admin_user,
+            barangay=self.brgy_isabang,
+            content="Urgent cleanup advisory",
+            post_type=PostType.DISCUSSION,
+            category=PostCategory.ADVISORY
+        )
+        res_ranked = self.client.get('/api/community/posts/')
+        # Advisory post should appear first due to feed_priority
+        self.assertEqual(res_ranked.data['results'][0]['id'], advisory_post.id)
 
 
 class CommunityConcurrencyTests(TransactionTestCase):

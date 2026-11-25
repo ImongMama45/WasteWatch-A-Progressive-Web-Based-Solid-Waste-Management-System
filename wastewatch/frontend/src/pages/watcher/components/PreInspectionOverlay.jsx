@@ -46,6 +46,7 @@ import { useOnline } from '../../../hooks/useOnline'
 import { getQueue } from '../../../hooks/useOfflineQueue'
 import { useAuth } from '../../../context/AuthContext'
 import { blobToBase64, estimateQueueStorageMB, isNearStorageLimit } from '../../../utils/photoStorage'
+import { extractStopActionError } from '../watcherRouteHelpers'
 
 export default function PreInspectionOverlay({
   visible,
@@ -113,13 +114,17 @@ export default function PreInspectionOverlay({
         return
       } catch (err) {
         if (err.response?.status === 400) {
-          setError(err.response?.data?.error || 'Stop already submitted')
+          setError(extractStopActionError(err, 'Stop already submitted'))
           setTimeout(() => onComplete(), 2500)
+          return
+        } else if (err.response?.status === 403) {
+          setError(extractStopActionError(err, 'Not authorized for this stop.'))
+          setSubmitting(false)
           return
         } else if (!err.response) {
           // Network blip → fall through to queue
         } else {
-          setError('Server error. Please try again.')
+          setError(extractStopActionError(err, 'Server error. Please try again.'))
           setSubmitting(false)
           return
         }

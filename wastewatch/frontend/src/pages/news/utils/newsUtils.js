@@ -52,7 +52,24 @@ export function createScopeSignature(options) {
         : ''
     const isCityWide =
       options.cityWide === true || options.cityWide === 'true' || bId === 'city_wide'
-    return isCityWide ? 'city_wide' : bId && bId !== 'all' ? `brgy_${bId}` : 'all'
+    const baseScope = isCityWide ? 'city_wide' : bId && bId !== 'all' ? `brgy_${bId}` : 'all'
+
+    const cat =
+      options.category &&
+      String(options.category).trim() !== '' &&
+      String(options.category).trim().toLowerCase() !== 'all' &&
+      String(options.category).trim().toLowerCase() !== 'all notices'
+        ? String(options.category).trim().toLowerCase()
+        : ''
+    const search =
+      options.search && String(options.search).trim() !== ''
+        ? String(options.search).trim().toLowerCase()
+        : ''
+
+    let sig = baseScope
+    if (cat) sig += `_cat_${cat}`
+    if (search) sig += `_q_${search}`
+    return sig
   }
   if (typeof options === 'string' || typeof options === 'number') {
     const s = String(options).trim()
@@ -335,19 +352,49 @@ export function resolveAdvisoryUrgencyTheme(advisory) {
  */
 export function resolveScopeParams(options) {
   if (typeof options === 'object' && options !== null) {
-    const { barangayId, cityWide } = options
+    const { barangayId, cityWide, category, search, priority, type } = options
+    const params = {}
+    let scopeKey = 'all'
+
     if (cityWide === true || cityWide === 'true' || barangayId === 'city_wide') {
-      return { params: { city_wide: 'true' }, scopeKey: 'city_wide' }
-    }
-    if (
+      params.city_wide = 'true'
+      scopeKey = 'city_wide'
+    } else if (
       barangayId !== undefined &&
       barangayId !== null &&
       barangayId !== '' &&
       barangayId !== 'all'
     ) {
-      return { params: { barangay_id: String(barangayId) }, scopeKey: `brgy_${barangayId}` }
+      params.barangay_id = String(barangayId)
+      scopeKey = `brgy_${barangayId}`
     }
-    return { params: {}, scopeKey: 'all' }
+
+    if (
+      category &&
+      String(category).trim() !== '' &&
+      String(category).trim().toLowerCase() !== 'all' &&
+      String(category).trim().toLowerCase() !== 'all notices'
+    ) {
+      params.category = String(category).trim()
+      scopeKey += `_cat_${String(category).trim().toLowerCase()}`
+    }
+
+    if (search && String(search).trim() !== '') {
+      params.search = String(search).trim()
+      scopeKey += `_q_${String(search).trim().toLowerCase()}`
+    }
+
+    if (priority && String(priority).trim() !== '') {
+      params.priority = String(priority).trim()
+      scopeKey += `_pr_${String(priority).trim().toLowerCase()}`
+    }
+
+    if (type && String(type).trim() !== '') {
+      params.type = String(type).trim()
+      scopeKey += `_t_${String(type).trim().toLowerCase()}`
+    }
+
+    return { params, scopeKey }
   }
 
   if (typeof options === 'string' || typeof options === 'number') {
@@ -446,8 +493,11 @@ export async function executeScopedFetch({
         ? raw.results
         : []
 
-      onCommit?.(normalized)
-      return { committed: true, items: normalized }
+      const total = typeof raw?.count === 'number' ? raw.count : normalized.length
+      const hasNext = Boolean(raw?.next)
+
+      onCommit?.(normalized, { total, hasNext, raw })
+      return { committed: true, items: normalized, total, hasNext }
     }
 
     return { committed: false }

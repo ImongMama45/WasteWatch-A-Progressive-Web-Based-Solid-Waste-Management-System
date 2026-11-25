@@ -8,7 +8,7 @@
  * - 15-second automatic reroute cooldown with 3-second manual anti-spam gate.
  * - Exponential backoff with jitter and browser-readable rate limit inspection.
  * - Controlled, 10s-paced, 60-request session-capped background pre-caching.
- * - Failed pre-cache leg suppression with 60s backoff.
+ * - Failed pre-cache leg suppression with 300000 ms (5 minutes) backoff.
  * - Clean destruction and teardown.
  */
 
@@ -116,7 +116,10 @@ export class RouteRequestManager {
 
     // Pre-cache state
     this.precacheQueue = []
+    this.authoritativePrecacheLegs = null
     this.precacheTimer = null
+    this.precacheTimerTargetTime = null
+    this.lastPrecacheCompletedAt = -Infinity
     this.precacheSessionCount = 0
     this.failedLegs = new Map() // legKey -> { attempts, nextEligibleAt }
     this.legCache = new Map() // legKey -> { geometry }
@@ -162,7 +165,7 @@ export class RouteRequestManager {
         }
       }
       if (!this.precacheTimer && !this.precacheAbortController) {
-        this._scheduleNextPrecache(500)
+        this._scheduleNextPrecache(this.config.PRECACHE_QUEUE_START_DELAY_MS)
       }
     } else {
       // Offline: cancel pending retries
@@ -170,7 +173,6 @@ export class RouteRequestManager {
       this._clearPrecacheTimer()
       if (this.precacheAbortController) {
         this.precacheAbortController.abort()
-        this.precacheAbortController = null
       }
     }
   }
@@ -200,7 +202,6 @@ export class RouteRequestManager {
       }
       if (this.precacheAbortController) {
         this.precacheAbortController.abort()
-        this.precacheAbortController = null
       }
       this._clearRetryTimer()
 
@@ -404,7 +405,6 @@ export class RouteRequestManager {
     // Active navigation requests take priority over background pre-cache
     if (this.precacheAbortController) {
       this.precacheAbortController.abort()
-      this.precacheAbortController = null
     }
 
     // Cancel any previous in-flight request
@@ -462,7 +462,7 @@ export class RouteRequestManager {
         this._applyRoute(route, target, false)
 
         // Finding 6: Resume pre-cache queue processing after active navigation finishes
-        this._scheduleNextPrecache(1000)
+        this._scheduleNextPrecache(this.config.PRECACHE_QUEUE_START_DELAY_MS)
       })
       .catch((err) => {
         if (this.isDestroyed || controller.signal.aborted) return
@@ -474,7 +474,7 @@ export class RouteRequestManager {
         if (this.currentTarget?.targetId !== requestTargetId) return
 
         // Finding 6: Resume pre-cache queue processing after active navigation finishes/fails
-        this._scheduleNextPrecache(1000)
+        this._scheduleNextPrecache(this.config.PRECACHE_QUEUE_START_DELAY_MS)
 
         this.onRouteError({ error: err, target, attempt })
 
@@ -616,6 +616,27 @@ export class RouteRequestManager {
 
   // ── Pre-Cache Queue Management ─────────────────────────────────────────────
 
+  _makeLegSignature(legKey, fromWp, toWp) {
+    const fLat = Number(fromWp?.lat ?? 0).toFixed(6)
+    const fLng = Number(fromWp?.lng ?? 0).toFixed(6)
+    const tLat = Number(toWp?.lat ?? 0).toFixed(6)
+    const tLng = Number(toWp?.lng ?? 0).toFixed(6)
+    return `${legKey}|${fLat},${fLng}|${tLat},${tLng}`
+  }
+
+  _isLegItemValid(legItem) {
+    if (!legItem) return false
+    if (!this.authoritativePrecacheLegs) return true
+    return this.authoritativePrecacheLegs.get(legItem.legKey) === legItem.signature
+  }
+
+  _isLegAlreadyQueued(legItem) {
+    if (!legItem || !Array.isArray(this.precacheQueue)) return false
+    return this.precacheQueue.some(
+      (item) => item.legKey === legItem.legKey || (legItem.signature && item.signature === legItem.signature)
+    )
+  }
+
   /**
    * Enqueues upcoming stop-to-stop waypoint pairs for background pre-caching.
    *
@@ -627,18 +648,22 @@ export class RouteRequestManager {
 
     const wps = waypoints
     const queue = []
+    const authoritative = new Map()
 
     for (let i = currentStopIndex; i < wps.length - 1; i++) {
       const fromWp = wps[i]
       const toWp = wps[i + 1]
       if (fromWp?.lat != null && fromWp?.lng != null && toWp?.lat != null && toWp?.lng != null) {
         const legKey = `${i}-${i + 1}`
+        const signature = this._makeLegSignature(legKey, fromWp, toWp)
+        authoritative.set(legKey, signature)
         if (!this.legCache.has(legKey)) {
-          queue.push({ fromIdx: i, toIdx: i + 1, fromWp, toWp, legKey })
+          queue.push({ fromIdx: i, toIdx: i + 1, fromWp, toWp, legKey, signature })
         }
       }
     }
 
+    this.authoritativePrecacheLegs = authoritative
     this.precacheQueue = queue
     if (!this.precacheTimer && !this.precacheAbortController) {
       this._scheduleNextPrecache(this.config.PRECACHE_QUEUE_START_DELAY_MS)
@@ -646,16 +671,38 @@ export class RouteRequestManager {
   }
 
   _scheduleNextPrecache(delayMs = this.config.PRECACHE_PACING_MS) {
-    this._clearPrecacheTimer()
     if (this.isDestroyed || !this.isOnline) return
 
+    const now = this.clock()
+    let effectiveDelay = delayMs
+
+    // If a pre-cache request has previously completed, enforce pacing interval from completion
+    if (this.lastPrecacheCompletedAt > -Infinity) {
+      const elapsed = now - this.lastPrecacheCompletedAt
+      const pacingRemaining = Math.max(0, this.config.PRECACHE_PACING_MS - elapsed)
+      effectiveDelay = Math.max(effectiveDelay, pacingRemaining)
+    }
+
+    const newTargetTime = now + effectiveDelay
+
+    // If a pacing timer is already pending, do not replace it with an earlier timer
+    if (this.precacheTimer && this.precacheTimerTargetTime != null) {
+      // Never shorten an existing pre-cache pacing delay
+      return
+    }
+
+    this._clearPrecacheTimer()
+    this.precacheTimerTargetTime = newTargetTime
     this.precacheTimer = setTimeout(() => {
+      this.precacheTimer = null
+      this.precacheTimerTargetTime = null
       this._processNextPrecacheLeg()
-    }, delayMs)
+    }, effectiveDelay)
   }
 
   async _processNextPrecacheLeg() {
     this.precacheTimer = null
+    this.precacheTimerTargetTime = null
     if (this.isDestroyed || !this.isOnline) return
 
     // Single-flight pre-cache protection: at most one pre-cache request in flight at a time
@@ -698,6 +745,10 @@ export class RouteRequestManager {
 
     if (!legItem) return
 
+    if (!legItem.signature) {
+      legItem.signature = this._makeLegSignature(legItem.legKey, legItem.fromWp, legItem.toWp)
+    }
+
     const { fromWp, toWp, legKey } = legItem
     const body = {
       coordinates: [
@@ -709,7 +760,9 @@ export class RouteRequestManager {
 
     // Pre-cache must not run concurrently with an active navigation request or another pre-cache request
     if (this.activeAbortController || this.precacheAbortController) {
-      this.precacheQueue.unshift(legItem)
+      if (this._isLegItemValid(legItem) && !this._isLegAlreadyQueued(legItem)) {
+        this.precacheQueue.unshift(legItem)
+      }
       if (this.activeAbortController) {
         this._scheduleNextPrecache(2000)
       }
@@ -723,15 +776,17 @@ export class RouteRequestManager {
       this.precacheSessionCount += 1
       const data = await this._executeFetch(body, controller.signal)
 
-      if (this.isDestroyed || controller.signal.aborted) {
-        if (controller.signal.aborted) {
-          // Reinsert leg at front of queue on active navigation pre-emption
+      if (this.isDestroyed) return
+      if (controller.signal.aborted) {
+        this.precacheSessionCount = Math.max(0, this.precacheSessionCount - 1)
+        if (this._isLegItemValid(legItem) && !this._isLegAlreadyQueued(legItem)) {
           this.precacheQueue.unshift(legItem)
         }
         return
       }
 
-      if (data.routes && data.routes.length > 0) {
+      const isValid = this._isLegItemValid(legItem)
+      if (isValid && data.routes && data.routes.length > 0) {
         const route = data.routes[0]
         this.legCache.set(legKey, { geometry: route.geometry })
         this._saveLegCache()
@@ -739,26 +794,39 @@ export class RouteRequestManager {
           this.onPrecacheSuccess({ legKey, route })
         }
       }
+      this.lastPrecacheCompletedAt = this.clock()
     } catch {
-      if (this.isDestroyed || controller.signal.aborted) {
-        if (controller.signal.aborted) {
+      if (this.isDestroyed) return
+      if (controller.signal.aborted) {
+        this.precacheSessionCount = Math.max(0, this.precacheSessionCount - 1)
+        if (this._isLegItemValid(legItem) && !this._isLegAlreadyQueued(legItem)) {
           this.precacheQueue.unshift(legItem)
         }
         return
       }
-      // Record failure with 5-minute backoff
-      const prevFailures = this.failedLegs.get(legKey)?.attempts || 0
-      this.failedLegs.set(legKey, {
-        attempts: prevFailures + 1,
-        nextEligibleAt: now + this.config.FAILED_LEG_BACKOFF_MS,
-      })
+      if (this._isLegItemValid(legItem)) {
+        // Record failure with 5-minute backoff
+        const prevFailures = this.failedLegs.get(legKey)?.attempts || 0
+        this.failedLegs.set(legKey, {
+          attempts: prevFailures + 1,
+          nextEligibleAt: now + this.config.FAILED_LEG_BACKOFF_MS,
+        })
+      }
+      this.lastPrecacheCompletedAt = this.clock()
     } finally {
+      const wasAborted = controller.signal.aborted
       if (this.precacheAbortController === controller) {
         this.precacheAbortController = null
       }
+
+      if (!this.isDestroyed && wasAborted) {
+        if (this.isOnline && this.precacheQueue.length > 0 && !this.activeAbortController) {
+          this._scheduleNextPrecache(this.config.PRECACHE_QUEUE_START_DELAY_MS)
+        }
+      }
     }
 
-    // Schedule next leg with 10s pacing
+    // Schedule next leg with pacing (only reached if request completed without abort)
     this._scheduleNextPrecache(this.config.PRECACHE_PACING_MS)
   }
 
@@ -827,6 +895,7 @@ export class RouteRequestManager {
       clearTimeout(this.precacheTimer)
       this.precacheTimer = null
     }
+    this.precacheTimerTargetTime = null
   }
 
   /**
@@ -844,6 +913,7 @@ export class RouteRequestManager {
     }
     this._clearRetryTimer()
     this._clearPrecacheTimer()
+    this.authoritativePrecacheLegs = null
     this.precacheQueue = []
     this.activeRoute = null
     this.progressTracker = null

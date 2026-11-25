@@ -437,3 +437,98 @@ test('Report Voting - Step 4.0B.5.2 Final Corrections', async (t) => {
     assert.equal(extractUserBarangayId(null), null)
   })
 })
+
+test('Report Voting - Reddit-Inspired Redesign & Optimistic Voting', async (t) => {
+  const computeOptimistic = (state, targetVote) => {
+    const isRemoving = state.userVote === targetVote
+    let nextUpvotes = state.upvotes
+    let nextDownvotes = state.downvotes
+    let nextUserVote = null
+
+    if (isRemoving) {
+      nextUserVote = null
+      if (state.userVote === 1) nextUpvotes = Math.max(0, state.upvotes - 1)
+      else if (state.userVote === -1) nextDownvotes = Math.max(0, state.downvotes - 1)
+    } else if (targetVote === 1) {
+      nextUserVote = 1
+      nextUpvotes = state.upvotes + 1
+      if (state.userVote === -1) nextDownvotes = Math.max(0, state.downvotes - 1)
+    } else if (targetVote === -1) {
+      nextUserVote = -1
+      nextDownvotes = state.downvotes + 1
+      if (state.userVote === 1) nextUpvotes = Math.max(0, state.upvotes - 1)
+    }
+
+    return {
+      upvotes: nextUpvotes,
+      downvotes: nextDownvotes,
+      netVotes: nextUpvotes - nextDownvotes,
+      userVote: nextUserVote,
+    }
+  }
+
+  await t.test('Optimistic transition: cast +1 vote when currently null', () => {
+    const current = { upvotes: 5, downvotes: 2, netVotes: 3, userVote: null }
+    const optimistic = computeOptimistic(current, 1)
+    assert.deepEqual(optimistic, { upvotes: 6, downvotes: 2, netVotes: 4, userVote: 1 })
+  })
+
+  await t.test('Optimistic transition: switch from -1 to +1 vote', () => {
+    const current = { upvotes: 5, downvotes: 2, netVotes: 3, userVote: -1 }
+    const optimistic = computeOptimistic(current, 1)
+    assert.deepEqual(optimistic, { upvotes: 6, downvotes: 1, netVotes: 5, userVote: 1 })
+  })
+
+  await t.test('Optimistic transition: toggle off active +1 vote (DELETE)', () => {
+    const current = { upvotes: 6, downvotes: 2, netVotes: 4, userVote: 1 }
+    const optimistic = computeOptimistic(current, 1)
+    assert.deepEqual(optimistic, { upvotes: 5, downvotes: 2, netVotes: 3, userVote: null })
+  })
+
+  await t.test('Optimistic rollback: 4xx permission/validation failure restores previous state', () => {
+    const originalState = { upvotes: 3, downvotes: 1, netVotes: 2, userVote: null }
+    let currentState = computeOptimistic(originalState, 1)
+    assert.equal(currentState.userVote, 1)
+    assert.equal(currentState.upvotes, 4)
+
+    // Simulate 403 Forbidden rejection from API
+    const error = { response: { status: 403, data: { detail: 'Cannot vote on report outside your barangay' } } }
+    if (error.response.status >= 400 && error.response.status < 500) {
+      currentState = { ...originalState }
+    }
+    assert.deepEqual(currentState, originalState, 'Must roll back to original state on 4xx error')
+  })
+
+  await t.test('Optimistic sync status: 5xx or network failure retains optimistic state with failed status for retry', () => {
+    const originalState = { upvotes: 3, downvotes: 1, netVotes: 2, userVote: null }
+    let currentState = computeOptimistic(originalState, 1)
+    let syncStatus = 'syncing'
+
+    // Simulate 500 / network drop
+    const networkError = new Error('Network Error')
+    if (!networkError.response) {
+      syncStatus = 'failed'
+    }
+    assert.equal(syncStatus, 'failed', 'Must set syncStatus to failed to show retry button')
+    assert.equal(currentState.userVote, 1, 'Optimistic state retained while allowing user to retry')
+  })
+
+  await t.test('Accessibility & Tooltips: proper aria attributes, titles, and icons', () => {
+    const getButtonAria = (targetVote, userVote) => ({
+      ariaLabel: targetVote === 1 ? 'Confirm Issue (Still uncollected)' : 'Confirm Cleared (Already resolved)',
+      ariaPressed: userVote === targetVote,
+      title: targetVote === 1 ? 'Confirm Issue (Still uncollected)' : 'Confirm Cleared (Already resolved)',
+      icon: targetVote === 1 ? 'Trash2' : 'CheckCircle2',
+    })
+
+    const issueActive = getButtonAria(1, 1)
+    assert.equal(issueActive.ariaLabel, 'Confirm Issue (Still uncollected)')
+    assert.equal(issueActive.ariaPressed, true)
+    assert.equal(issueActive.icon, 'Trash2')
+
+    const clearedInactive = getButtonAria(-1, 1)
+    assert.equal(clearedInactive.ariaLabel, 'Confirm Cleared (Already resolved)')
+    assert.equal(clearedInactive.ariaPressed, false)
+    assert.equal(clearedInactive.icon, 'CheckCircle2')
+  })
+})

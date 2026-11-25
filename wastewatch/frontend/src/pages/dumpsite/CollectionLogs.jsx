@@ -23,7 +23,6 @@ import {
   ChevronDown,
   ChevronUp,
   Download,
-  RefreshCw,
   X,
   Eye,
   FileText,
@@ -34,7 +33,11 @@ import {
   Maximize2
 } from 'lucide-react'
 import api from '../../api/client'
+import { getDumpsiteDeliveries } from '../../api/dumpsiteApi'
 import ArrivalLogger from './ArrivalLogger'
+import FacilityWorkspaceHeader from './components/FacilityWorkspaceHeader'
+import { useFacilityScope } from './components/useFacilityScope'
+import { useAuth } from '../../context/AuthContext'
 import { StatCardSkeleton, TableSkeleton } from '../../components/ui/Skeleton'
 import Pagination from '../../components/ui/Pagination'
 
@@ -84,8 +87,10 @@ function FillLevelBadge({ level }) {
 
 export default function CollectionLogs() {
   const navigate = useNavigate()
-  const [siteId, setSiteId] = useState(null)
-  const [siteName, setSiteName] = useState('Dumpsite Facility')
+  const { sites, siteId, setSiteId, activeSite, isAdmin, loading: scopeLoading } = useFacilityScope()
+  const { user } = useAuth()
+  const isOperator = Boolean(user?.role === 'dumpsite' && !isAdmin)
+  const siteName = activeSite?.name || 'Dumpsite Facility'
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState(null)
@@ -105,22 +110,17 @@ export default function CollectionLogs() {
   const [totalPages, setTotalPages] = useState(1)
 
   useEffect(() => {
-    api.get('/api/dumpsite/dumpsites/').then(res => {
-      if (res.data?.length > 0) {
-        setSiteId(res.data[0].id)
-        if (res.data[0].name) setSiteName(res.data[0].name)
-      } else {
-        setLoading(false)
-      }
-    }).catch(() => { setLoading(false) })
-  }, [])
+    if (!siteId && !scopeLoading) {
+      setLoading(false)
+    }
+  }, [siteId, scopeLoading])
 
   const fetchLogs = (targetPage) => {
     if (!siteId) return
     setLoading(true)
-    const params = new URLSearchParams()
-    params.set('page', typeof targetPage === 'number' ? targetPage : page)
-    params.set('page_size', '10')
+    const params = {}
+    params.page = typeof targetPage === 'number' ? targetPage : page
+    params.page_size = 10
 
     // Date quick filter resolution
     let resolvedFrom = dateFrom
@@ -144,22 +144,22 @@ export default function CollectionLogs() {
       resolvedTo = now.toISOString().split('T')[0]
     }
 
-    if (resolvedFrom) params.set('date_from', resolvedFrom)
-    if (resolvedTo) params.set('date_to', resolvedTo)
-    if (truckFilter) params.set('truck', truckFilter)
-    if (barangayFilter) params.set('barangay', barangayFilter)
-    if (fillFilter) params.set('fill_level', fillFilter)
+    if (resolvedFrom) params.date_from = resolvedFrom
+    if (resolvedTo) params.date_to = resolvedTo
+    if (truckFilter) params.truck = truckFilter
+    if (barangayFilter) params.barangay = barangayFilter
+    if (fillFilter) params.fill_level = fillFilter
 
-    api.get(`/api/dumpsite/dumpsites/${siteId}/deliveries/?${params}`)
-      .then(res => {
-        if (Array.isArray(res.data)) {
-          setLogs(res.data)
-          setTotalCount(res.data.length)
+    getDumpsiteDeliveries(siteId, params)
+      .then((resData) => {
+        if (Array.isArray(resData)) {
+          setLogs(resData)
+          setTotalCount(resData.length)
           setTotalPages(1)
         } else {
-          setLogs(res.data?.results || [])
-          setTotalCount(res.data?.count || 0)
-          setTotalPages(res.data?.total_pages || 1)
+          setLogs(resData?.results || [])
+          setTotalCount(resData?.count || 0)
+          setTotalPages(resData?.total_pages || 1)
         }
         setLoading(false)
       })
@@ -252,8 +252,20 @@ export default function CollectionLogs() {
     setFillFilter('')
     if (siteId) {
       setLoading(true)
-      api.get(`/api/dumpsite/dumpsites/${siteId}/deliveries/`)
-        .then(res => { setLogs(res.data || []); setLoading(false) })
+      setPage(1)
+      getDumpsiteDeliveries(siteId, { page: 1, page_size: 10 })
+        .then((resData) => {
+          if (Array.isArray(resData)) {
+            setLogs(resData)
+            setTotalCount(resData.length)
+            setTotalPages(1)
+          } else {
+            setLogs(resData?.results || [])
+            setTotalCount(resData?.count || 0)
+            setTotalPages(resData?.total_pages || 1)
+          }
+          setLoading(false)
+        })
         .catch(() => setLoading(false))
     }
   }
@@ -298,191 +310,154 @@ export default function CollectionLogs() {
       `}</style>
 
       <div className="cl-container">
-        {/* ── TOP HEADER ── */}
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          flexWrap: 'wrap',
-          gap: 16,
-          marginBottom: 20,
-        }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0, color: 'var(--text)' }}>
-                Collection Logs
-              </h1>
-              <span style={{
-                background: 'rgba(16, 185, 129, 0.1)',
-                color: '#10b981',
-                border: '1px solid rgba(16, 185, 129, 0.25)',
-                fontSize: 11,
-                fontWeight: 700,
-                padding: '3px 10px',
-                borderRadius: 20,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-              }}>
-                <MapPin size={11} /> {siteName}
-              </span>
+        <FacilityWorkspaceHeader
+          title="Collection Logs"
+          subtitle="Real-time audit log of truck arrivals, waste volume measurements, and disposal verification."
+          sites={sites}
+          siteId={siteId}
+          onSiteChange={(next) => { setSiteId(next); setPage(1) }}
+          activeSite={activeSite}
+          isAdmin={isAdmin}
+          rightContent={
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+
+
+              <button
+                type="button"
+                onClick={handleExportCSV}
+                disabled={!filteredLogs.length}
+                style={{
+                  background: '#ffffff',
+                  border: '1px solid #ced0d4',
+                  borderRadius: 6,
+                  height: 36,
+                  padding: '0 12px',
+                  color: '#1c1e21',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: filteredLogs.length ? 'pointer' : 'not-allowed',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  opacity: filteredLogs.length ? 1 : 0.5,
+                }}
+              >
+                <Download size={14} /> Export CSV
+              </button>
+
+              {isOperator && (
+                <button
+                  type="button"
+                  onClick={() => setLogOpen(true)}
+                  style={{
+                    background: '#16a34a',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: 6,
+                    height: 36,
+                    padding: '0 14px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Plus size={15} strokeWidth={2.5} /> Log Truck Arrival
+                </button>
+              )}
             </div>
-            <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>
-              Real-time audit log of truck arrivals, waste volume measurements, and disposal verification
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button
-              onClick={fetchLogs}
-              title="Refresh Logs"
-              style={{
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
-                borderRadius: 12,
-                padding: '10px 14px',
-                color: 'var(--text-muted)',
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
-            >
-              <RefreshCw size={15} /> Refresh
-            </button>
-
-            <button
-              onClick={handleExportCSV}
-              disabled={!filteredLogs.length}
-              style={{
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
-                borderRadius: 12,
-                padding: '10px 14px',
-                color: 'var(--text)',
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: filteredLogs.length ? 'pointer' : 'not-allowed',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                opacity: filteredLogs.length ? 1 : 0.5,
-              }}
-            >
-              <Download size={15} /> Export CSV
-            </button>
-
-            <button
-              onClick={() => setLogOpen(true)}
-              style={{
-                background: 'linear-gradient(135deg, #10b981, #059669)',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: 12,
-                padding: '10px 18px',
-                fontSize: 13,
-                fontWeight: 800,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                boxShadow: '0 4px 14px rgba(16, 185, 129, 0.3)',
-              }}
-            >
-              <Plus size={16} strokeWidth={2.5} /> Log Truck Arrival
-            </button>
-          </div>
-        </div>
+          }
+        />
 
         {/* ── KPI METRICS STRIP ── */}
         {loading && logs.length === 0 ? (
           <StatCardSkeleton count={4} style={{ marginBottom: 20 }} />
         ) : (
-        <div className="ww-fade-in" style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: 14,
-          marginBottom: 20,
-        }}>
-          {/* Deliveries */}
-          <div className="cl-card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
-            <div style={{
-              width: 44, height: 44, borderRadius: 12,
-              background: 'rgba(37, 99, 235, 0.1)', color: '#2563eb',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <Truck size={22} />
-            </div>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                Total Deliveries
+          <div className="ww-fade-in" style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            gap: 14,
+            marginBottom: 20,
+          }}>
+            {/* Deliveries */}
+            <div className="cl-card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{
+                width: 44, height: 44, borderRadius: 12,
+                background: 'rgba(37, 99, 235, 0.1)', color: '#2563eb',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Truck size={22} />
               </div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)', marginTop: 1 }}>
-                {stats.totalDeliveries}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                  Total Deliveries
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)', marginTop: 1 }}>
+                  {stats.totalDeliveries}
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Waste Received */}
-          <div className="cl-card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
-            <div style={{
-              width: 44, height: 44, borderRadius: 12,
-              background: 'rgba(16, 185, 129, 0.1)', color: '#10b981',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <Scale size={22} />
-            </div>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                Total Waste Inflow
+            {/* Waste Received */}
+            <div className="cl-card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{
+                width: 44, height: 44, borderRadius: 12,
+                background: 'rgba(16, 185, 129, 0.1)', color: '#10b981',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Scale size={22} />
               </div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: '#10b981', marginTop: 1 }}>
-                {stats.totalTons} <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>Tons ({stats.totalKg.toLocaleString()} kg)</span>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                  Total Waste Inflow
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#10b981', marginTop: 1 }}>
+                  {stats.totalTons} <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>Tons ({stats.totalKg.toLocaleString()} kg)</span>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Verification Rate */}
-          <div className="cl-card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
-            <div style={{
-              width: 44, height: 44, borderRadius: 12,
-              background: 'rgba(147, 51, 234, 0.1)', color: '#9333ea',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <ShieldCheck size={22} />
-            </div>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                Verification Rate
+            {/* Verification Rate */}
+            <div className="cl-card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{
+                width: 44, height: 44, borderRadius: 12,
+                background: 'rgba(147, 51, 234, 0.1)', color: '#9333ea',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <ShieldCheck size={22} />
               </div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: '#9333ea', marginTop: 1 }}>
-                {stats.verifiedRate}%
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                  Verification Rate
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#9333ea', marginTop: 1 }}>
+                  {stats.verifiedRate}%
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Incidents Flagged */}
-          <div className="cl-card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
-            <div style={{
-              width: 44, height: 44, borderRadius: 12,
-              background: stats.incidentCount > 0 ? 'rgba(239, 68, 68, 0.1)' : 'rgba(100, 116, 139, 0.1)',
-              color: stats.incidentCount > 0 ? '#ef4444' : '#64748b',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <AlertTriangle size={22} />
-            </div>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                Flagged Incidents
+            {/* Incidents Flagged */}
+            <div className="cl-card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{
+                width: 44, height: 44, borderRadius: 12,
+                background: stats.incidentCount > 0 ? 'rgba(239, 68, 68, 0.1)' : 'rgba(100, 116, 139, 0.1)',
+                color: stats.incidentCount > 0 ? '#ef4444' : '#64748b',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <AlertTriangle size={22} />
               </div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: stats.incidentCount > 0 ? '#ef4444' : 'var(--text)', marginTop: 1 }}>
-                {stats.incidentCount}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                  Flagged Incidents
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: stats.incidentCount > 0 ? '#ef4444' : 'var(--text)', marginTop: 1 }}>
+                  {stats.incidentCount}
+                </div>
               </div>
             </div>
           </div>
-        </div>
         )}
 
         {/* ── ADVANCED FILTERS BAR ── */}
@@ -1010,6 +985,7 @@ export default function CollectionLogs() {
       {/* ── LOG ARRIVAL MODAL ── */}
       <ArrivalLogger
         open={logOpen}
+        siteId={siteId}
         onClose={(refresh) => {
           setLogOpen(false)
           if (refresh) fetchLogs()

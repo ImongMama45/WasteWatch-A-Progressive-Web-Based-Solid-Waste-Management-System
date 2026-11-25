@@ -2009,3 +2009,17 @@ svg.spinner {
     transform: none !important;
   }
 }
+
+/* Operator Workspace responsive overrides */
+@media (max-width: 960px) {
+  .dd-cmd-top-grid,
+  .dd-dual-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .ww-op-header {
+    padding: 14px !important;
+  }
+}

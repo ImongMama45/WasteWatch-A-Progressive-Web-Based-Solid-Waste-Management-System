@@ -1,139 +1,195 @@
 import { useState, useEffect } from 'react'
-import api from '../../api/client'
+import { BarChart3, Truck, AlertCircle } from 'lucide-react'
+import { getDumpsiteBarangayBreakdown, unwrapList } from '../../api/dumpsiteApi'
 import TrucksOverlay from './components/TrucksOverlay'
+import FacilityWorkspaceHeader from './components/FacilityWorkspaceHeader'
+import { useFacilityScope } from './components/useFacilityScope'
 import { ChartSkeleton, TableSkeleton } from '../../components/ui/Skeleton'
-
-const Ico = ({ d, size = 14, color = 'currentColor', sw = 1.75, style = {}, className = '' }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={sw}
-    strokeLinecap="round" strokeLinejoin="round" className={className} style={{ flexShrink: 0, display: 'block', ...style }}>
-    {Array.isArray(d) ? d.map((p, i) => <path key={i} d={p} />) : <path d={d} />}
-  </svg>
-);
-const IcoChartBar = p => <Ico {...p} d={["M18 20V10", "M12 20V4", "M6 20v-6"]} />;
-const IcoTruck = p => <Ico {...p} d={["M1 3h15v13H1z", "M16 8h4l3 3v5h-7V8z", "M5.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z", "M18.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"]} />;
+import { getApiErrorMessage } from '../../utils/notificationHelpers'
 
 const PERIOD_OPTS = [
-  { value: 'day',   label: 'Today' },
-  { value: 'week',  label: 'This Week' },
+  { value: 'day', label: 'Today' },
+  { value: 'week', label: 'This Week' },
   { value: 'month', label: 'This Month' },
 ]
 
 export default function BarangayBreakdown() {
-  const [siteId,  setSiteId]  = useState(null)
-  const [period,  setPeriod]  = useState('day')
-  const [data,    setData]    = useState([])
+  const { sites, siteId, setSiteId, activeSite, isAdmin, loading: scopeLoading, error: scopeError } = useFacilityScope()
+  const [period, setPeriod] = useState('day')
+  const [data, setData] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [overlayOpen, setOverlayOpen] = useState(false)
 
   useEffect(() => {
-    api.get('/api/dumpsite/dumpsites/')
-      .then(res => {
-        if (res.data?.length > 0) setSiteId(res.data[0].id)
-        else setLoading(false)
-      })
-      .catch(() => setLoading(false))
-  }, [])
-
-  useEffect(() => {
-    if (!siteId) return
+    if (!siteId) {
+      if (!scopeLoading) setLoading(false)
+      return
+    }
     setLoading(true)
-    api.get(`/api/dumpsite/dumpsites/${siteId}/barangay_breakdown/?period=${period}`)
-      .then(res => { setData(res.data); setLoading(false) })
-      .catch(() => setLoading(false))
-  }, [siteId, period])
+    setError(null)
+    getDumpsiteBarangayBreakdown(siteId, { period })
+      .then((raw) => {
+        setData(unwrapList(raw))
+        setLoading(false)
+      })
+      .catch((err) => {
+        setError(getApiErrorMessage(err, 'Failed to load barangay breakdown.'))
+        setData([])
+        setLoading(false)
+      })
+  }, [siteId, period, scopeLoading])
 
-  const maxKg = data.reduce((m, d) => Math.max(m, d.total_kg), 0)
+  const maxKg = data.reduce((m, d) => Math.max(m, Number(d.total_kg) || 0), 0)
 
   return (
-    <div style={{ padding: '1.5rem', maxWidth: 900, margin: '0 auto' }}>
-      <header style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 900, letterSpacing: '-0.03em', color: 'var(--surface-3)' }}>Barangay Breakdown</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: 2 }}>Waste collected by barangay, sorted by volume</p>
-        </div>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-          <button onClick={() => setOverlayOpen(true)} style={{
-            background: 'var(--surface-1)', border: '1px solid var(--border)', color: 'var(--surface-3)',
-            borderRadius: 12, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s'
-          }}>
-            <IcoTruck size={14} /> Assigned Trucks
-          </button>
-          
-          <div style={{ display: 'flex', gap: '0.4rem', background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: 14, padding: '4px' }}>
-            {PERIOD_OPTS.map(o => (
-            <button key={o.value} onClick={() => setPeriod(o.value)}
-              style={{
-                padding: '6px 16px', borderRadius: 10, fontSize: 12, fontWeight: 700,
-                border: 'none', cursor: 'pointer',
-                background: period === o.value ? 'var(--accent)' : 'transparent',
-                color: period === o.value ? '#0d1117' : 'var(--text-muted)',
-                transition: 'all 0.15s',
-              }}>
-              {o.label}
-            </button>
-          ))}
-          </div>
-        </div>
-      </header>
+    <div style={{ background: '#f0f2f5', minHeight: '100vh', padding: '20px 24px 60px' }}>
+      <div style={{ maxWidth: 1240, margin: '0 auto' }}>
+        <FacilityWorkspaceHeader
+          title="Barangay Breakdown"
+          subtitle="Waste collected and received by barangay for this facility, sorted by volume."
+          sites={sites}
+          siteId={siteId}
+          onSiteChange={setSiteId}
+          activeSite={activeSite}
+          isAdmin={isAdmin}
+          rightContent={
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setOverlayOpen(true)}
+                disabled={!siteId}
+                style={{
+                  background: '#ffffff',
+                  border: '1px solid #ced0d4',
+                  color: '#1c1e21',
+                  borderRadius: 6,
+                  height: 36,
+                  padding: '0 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: siteId ? 'pointer' : 'not-allowed',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <Truck size={14} /> Assigned Trucks
+              </button>
 
-      {loading ? (
-        <div>
-          <ChartSkeleton height={220} variant="bar" style={{ marginBottom: 20 }} />
-          <TableSkeleton rows={5} cols={3} />
-        </div>
-      ) : data.length === 0 ? (
-        <div className="ww-fade-in" style={{ textAlign: 'center', padding: '3rem', border: '2px dashed var(--border)', borderRadius: 20, color: 'var(--text-muted)' }}>
-          <IcoChartBar size={36} style={{ marginBottom: 8, margin: '0 auto', opacity: 0.5 }} />
-          <p style={{ fontWeight: 600 }}>No data for this period.</p>
-        </div>
-      ) : (
-        <div className="ww-fade-in">
-          {/* Bar Chart */}
-          <div className="card-light" style={{ padding: '1.5rem', borderRadius: 24, marginBottom: '1.25rem' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
-              {data.map((row, i) => {
-                const pct = maxKg > 0 ? (row.total_kg / maxKg) * 100 : 0
-                const barColor = i === 0 ? '#22c55e' : i === 1 ? '#3b82f6' : i === 2 ? '#a855f7' : '#64748b'
-                return (
-                  <div key={row.barangay}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 13, fontWeight: 700 }}>
-                      <span style={{ color: 'var(--surface-3)' }}>{row.barangay}</span>
-                      <span style={{ color: barColor }}>{row.total_kg.toLocaleString()} kg</span>
-                    </div>
-                    <div style={{ height: 10, background: 'rgba(148,163,184,0.1)', borderRadius: 8, overflow: 'hidden' }}>
-                      <div style={{
-                        height: '100%', width: `${pct}%`, background: barColor,
-                        borderRadius: 8, transition: 'width 0.5s ease',
-                        boxShadow: `0 0 8px ${barColor}44`,
-                      }} />
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* Table */}
-          <div className="card-light" style={{ borderRadius: 20, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', padding: '0.6rem 1rem', background: 'var(--surface-1)', fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, borderBottom: '1px solid var(--border)' }}>
-              <span>Barangay</span><span>Total KG</span><span>Truck Trips</span>
-            </div>
-            {data.map((row, i) => (
-              <div key={row.barangay} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', padding: '0.85rem 1rem', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ width: 22, height: 22, borderRadius: 8, background: 'rgba(59,130,246,0.12)', color: '#3b82f6', fontSize: 11, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
-                  <span style={{ fontWeight: 700, fontSize: '0.875rem' }}>{row.barangay}</span>
-                </div>
-                <div style={{ fontWeight: 800, color: 'var(--accent)', fontSize: '0.9rem' }}>{row.total_kg.toLocaleString()} kg</div>
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: 6 }}><IcoTruck size={14} /> {row.truck_count}</div>
+              <div style={{ display: 'inline-flex', gap: 4, background: '#f0f2f5', border: '1px solid #e4e6eb', borderRadius: 8, padding: 3 }}>
+                {PERIOD_OPTS.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => setPeriod(o.value)}
+                    style={{
+                      padding: '5px 12px',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      border: 'none',
+                      cursor: 'pointer',
+                      background: period === o.value ? '#16a34a' : 'transparent',
+                      color: period === o.value ? '#ffffff' : '#65676b',
+                    }}
+                  >
+                    {o.label}
+                  </button>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+            </div>
+          }
+        />
 
-      <TrucksOverlay open={overlayOpen} onClose={() => setOverlayOpen(false)} siteId={siteId} />
+        {(scopeError || error) && (
+          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600 }}>
+            <AlertCircle size={16} />
+            <span>{scopeError || error}</span>
+          </div>
+        )}
+
+        {loading || scopeLoading ? (
+          <div>
+            <ChartSkeleton height={220} variant="bar" style={{ marginBottom: 16 }} />
+            <TableSkeleton rows={5} cols={3} />
+          </div>
+        ) : data.length === 0 ? (
+          <div className="ww-fade-in" style={{ background: '#ffffff', textAlign: 'center', padding: '3rem', border: '1px dashed #ced0d4', borderRadius: 10, color: '#65676b' }}>
+            <BarChart3 size={36} style={{ margin: '0 auto 8px', opacity: 0.45 }} />
+            <p style={{ fontWeight: 600, margin: 0, color: '#1c1e21' }}>No barangay delivery data for this period.</p>
+          </div>
+        ) : (
+          <div className="ww-fade-in">
+            <div style={{ background: '#ffffff', border: '1px solid #e4e6eb', borderRadius: 10, padding: '18px 20px', marginBottom: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {data.map((row, i) => {
+                  const totalKg = Number(row.total_kg) || 0
+                  const pct = maxKg > 0 ? (totalKg / maxKg) * 100 : 0
+                  const barColor = i === 0 ? '#16a34a' : i === 1 ? '#2563eb' : i === 2 ? '#7c3aed' : '#64748b'
+                  return (
+                    <div key={row.barangay}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 13, fontWeight: 600 }}>
+                        <span style={{ color: '#1c1e21' }}>{row.barangay}</span>
+                        <span style={{ color: barColor }}>{totalKg.toLocaleString()} kg</span>
+                      </div>
+                      <div style={{ height: 10, background: '#f0f2f5', borderRadius: 6, overflow: 'hidden' }}>
+                        <div
+                          style={{
+                            height: '100%',
+                            width: `${pct}%`,
+                            background: barColor,
+                            borderRadius: 6,
+                            transition: 'width 0.5s ease',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div style={{ background: '#ffffff', border: '1px solid #e4e6eb', borderRadius: 10, overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e4e6eb', textAlign: 'left', color: '#65676b', fontSize: 11, textTransform: 'uppercase' }}>
+                      <th style={{ padding: '10px 16px' }}>Barangay</th>
+                      <th style={{ padding: '10px 16px' }}>Total KG</th>
+                      <th style={{ padding: '10px 16px' }}>Truck Trips</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.map((row, i) => (
+                      <tr key={row.barangay} style={{ borderBottom: '1px solid #f0f2f5' }}>
+                        <td style={{ padding: '12px 16px', fontWeight: 600, color: '#1c1e21' }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+                            <span style={{ width: 22, height: 22, borderRadius: 6, background: '#eff6ff', color: '#1d4ed8', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {i + 1}
+                            </span>
+                            {row.barangay}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px 16px', fontWeight: 700, color: '#16a34a' }}>
+                          {Number(row.total_kg || 0).toLocaleString()} kg
+                        </td>
+                        <td style={{ padding: '12px 16px', color: '#65676b' }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            <Truck size={14} /> {row.truck_count}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <TrucksOverlay open={overlayOpen} onClose={() => setOverlayOpen(false)} siteId={siteId} />
+      </div>
     </div>
   )
 }

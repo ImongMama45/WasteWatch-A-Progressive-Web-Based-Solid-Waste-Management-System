@@ -8,6 +8,7 @@ Endpoints:
   GET /api/public/announcements/  — city announcements
   GET /api/public/stats/          — community-level counts
   GET /api/public/schedule/       — general collection schedule
+  GET /api/public/map/pins/       — sanitized collection-stop map pins
 """
 
 from django.http import JsonResponse
@@ -272,3 +273,346 @@ def public_live_view(request):
         
         
     return JsonResponse(data, safe=False)
+
+
+def get_eligible_public_schedules_queryset(barangay_id=None):
+    """
+    Authoritative query logic shared by public map pins and public stop statuses:
+    1. Excludes CANCELLED schedules.
+    2. Citywide schedules: barangays is null and area in ('citywide', 'city-wide') case-insensitively.
+    3. Excludes blank/unassigned schedules and schedules with meaningful non-citywide area but no assigned barangays.
+    4. If barangay_id is supplied: includes matching barangay OR recognized citywide.
+       If barangay_id is not supplied: includes assigned-barangay schedules OR recognized citywide.
+    5. Returns schedules ordered by 'id'.
+    """
+    from driver.models import CollectionSchedule
+    from django.db.models import Q
+
+    schedules = CollectionSchedule.objects.exclude(status='CANCELLED').prefetch_related('barangays')
+    citywide_q = Q(barangays__isnull=True) & (Q(area__iexact='citywide') | Q(area__iexact='city-wide'))
+
+    if barangay_id is not None:
+        schedules = schedules.filter(Q(barangays__id=barangay_id) | citywide_q).distinct()
+    else:
+        schedules = schedules.filter(Q(barangays__isnull=False) | citywide_q).distinct()
+
+    return schedules.order_by('id')
+
+
+@require_http_methods(['GET'])
+def public_map_pins_view(request):
+    """
+    Returns sanitized public collection route geometry and collection-stop coordinates.
+    Safe for unauthenticated public consumption:
+    - Excludes cancelled schedules.
+    - Excludes driver identities, IDs, and assignments.
+    - Excludes truck plates, IDs, and telemetry.
+    - Excludes dumpsite coordinates, depot origin objects, and internal IDs.
+    - Excludes watcher names and validation statuses.
+    - Validates numeric coordinate ranges for each collection stop.
+    - Omits malformed stops safely.
+    - Adheres to Stage 0 citywide vs unassigned scope rules.
+    - Bounded to 100 schedules.
+    """
+    # Optional barangay filtering
+    barangay_id = request.GET.get('barangay_id')
+    bid = None
+    if barangay_id is not None:
+        try:
+            bid = int(barangay_id)
+            if bid <= 0:
+                return JsonResponse({'detail': 'Invalid barangay_id. Must be a positive integer.'}, status=400)
+        except (ValueError, TypeError):
+            return JsonResponse({'detail': 'Invalid barangay_id. Must be a positive integer.'}, status=400)
+
+    schedules = get_eligible_public_schedules_queryset(bid)[:100]
+
+    data = []
+    for s in schedules:
+        time_window = ""
+        if s.start_time and s.end_time:
+            time_window = f"{s.start_time.strftime('%I:%M %p')} – {s.end_time.strftime('%I:%M %p')}"
+        elif s.start_time:
+            time_window = s.start_time.strftime('%I:%M %p')
+
+        brgy_list = list(s.barangays.all())
+        brgy_names = ", ".join([b.name for b in brgy_list]) if brgy_list else (s.area or "City-Wide")
+        brgy_ids = [b.id for b in brgy_list]
+
+        # Extract and sanitize collection stops starting at index 1 (omitting index 0 depot)
+        wps = s.waypoints if isinstance(s.waypoints, list) else []
+        safe_stops = []
+        for stop_idx, wp in enumerate(wps[1:], start=1):
+            if not isinstance(wp, dict):
+                continue
+            lat = wp.get('lat')
+            lng = wp.get('lng')
+            if lat is None or lng is None:
+                continue
+            try:
+                lat_f = float(lat)
+                lng_f = float(lng)
+            except (ValueError, TypeError):
+                continue
+
+            # Validate standard coordinate ranges (-90 to 90 lat, -180 to 180 lng)
+            if not (-90.0 <= lat_f <= 90.0 and -180.0 <= lng_f <= 180.0):
+                continue
+
+            wp_bid = wp.get('barangay_id')
+            if wp_bid is not None:
+                try:
+                    wp_bid = int(wp_bid)
+                except (ValueError, TypeError):
+                    wp_bid = None
+
+            label = str(wp.get('label') or wp.get('address') or f"Stop {stop_idx}").strip()
+
+            safe_stops.append({
+                'order': stop_idx,
+                'label': label,
+                'lat': lat_f,
+                'lng': lng_f,
+                'barangay_id': wp_bid,
+            })
+
+        data.append({
+            'id': s.id,
+            'area': s.area or brgy_names,
+            'days': s.days or '',
+            'time_window': time_window,
+            'color': getattr(s, 'color', None) or '#16a34a',
+            'barangays': brgy_ids,
+            'barangay_names': brgy_names,
+            'total_stops': len(safe_stops),
+            'stops': safe_stops,
+        })
+
+    return JsonResponse(data, safe=False)
+
+
+@require_http_methods(['GET'])
+def public_stop_statuses_view(request):
+    """
+    Returns sanitized public stop validation statuses for collection route stops.
+    Safe for unauthenticated public consumption:
+    - Bounded strictly to eligible public schedules (excludes CANCELLED, unassigned).
+    - Validates stop_order against existing, valid coordinate waypoints.
+    - Validates schedule occurrence:
+        * One-time schedule: matches schedule.date
+        * Recurring schedule: matches normalized weekday using calendar_service.normalizers.normalize_days
+    - Visibility rules:
+        * Today's non-terminal statuses (PENDING_INSPECTION, READY_FOR_COLLECTION, COLLECTION_REPORTED)
+          are visible for today.
+        * Terminal statuses (EMPTY_STOP, VERIFIED_COLLECTED, COLLECTION_DISPUTED) require authoritative
+          transition timestamp within the last 24 hours (pre_validation_timestamp for EMPTY_STOP,
+          post_validation_timestamp for VERIFIED_COLLECTED and COLLECTION_DISPUTED).
+        * Fail closed: missing authoritative terminal timestamp excludes the record.
+        * Never substitute collection_timestamp for post_validation_timestamp.
+    - Date semantics:
+        * Default: today and yesterday considered. At most one record per physical stop (schedule_id, stop_order).
+          Today's record takes precedence. Yesterday carryover only if no today record exists and
+          yesterday terminal record is within 24h.
+        * Explicit ?date=YYYY-MM-DD: accepts today or yesterday only; exact date matching (no carryover).
+          Invalid, future, or dates older than yesterday return HTTP 400.
+    - Minimal 7-field payload:
+        {schedule_id, stop_order, status, collected_at, collection_date, is_today, occurrence_key}
+    """
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    from django.utils import timezone
+    from calendar_service.normalizers import normalize_days, VALID_WEEKDAYS
+    from watcher.models import StopValidation, StopValidationStatus
+
+    # 1. Parse and validate barangay_id
+    barangay_id = request.GET.get('barangay_id')
+    bid = None
+    if barangay_id is not None:
+        try:
+            bid = int(barangay_id)
+            if bid <= 0:
+                return JsonResponse({'detail': 'Invalid barangay_id. Must be a positive integer.'}, status=400)
+        except (ValueError, TypeError):
+            return JsonResponse({'detail': 'Invalid barangay_id. Must be a positive integer.'}, status=400)
+
+    # 2. Parse and validate date parameter
+    today = timezone.localdate()
+    yesterday = today - timedelta(days=1)
+    date_param = request.GET.get('date')
+    explicit_date = None
+
+    if date_param is not None:
+        try:
+            explicit_date = datetime.strptime(date_param, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            return JsonResponse({'detail': 'Invalid date format. Expected YYYY-MM-DD.'}, status=400)
+
+        if explicit_date > today:
+            return JsonResponse({'detail': 'Date cannot be in the future.'}, status=400)
+        if explicit_date < yesterday:
+            return JsonResponse({'detail': 'Date query out of range. Public stop status is restricted to current active cycles.'}, status=400)
+
+    # 3. Retrieve eligible schedules and map valid stops
+    schedules_qs = get_eligible_public_schedules_queryset(bid)[:100]
+    schedules = list(schedules_qs)
+    schedule_map = {}
+    valid_stops_by_schedule = {}
+
+    for s in schedules:
+        schedule_map[s.id] = s
+        wps = s.waypoints if isinstance(s.waypoints, list) else []
+        valid_orders = set()
+        for idx in range(1, len(wps)):
+            wp = wps[idx]
+            if not isinstance(wp, dict):
+                continue
+            lat = wp.get('lat')
+            lng = wp.get('lng')
+            if lat is None or lng is None:
+                continue
+            try:
+                lat_f = float(lat)
+                lng_f = float(lng)
+            except (ValueError, TypeError):
+                continue
+            if -90.0 <= lat_f <= 90.0 and -180.0 <= lng_f <= 180.0:
+                valid_orders.add(idx)
+        if valid_orders:
+            valid_stops_by_schedule[s.id] = valid_orders
+
+    if not valid_stops_by_schedule:
+        return JsonResponse([], safe=False)
+
+    eligible_schedule_ids = list(valid_stops_by_schedule.keys())
+
+    # 4. Determine dates to query
+    if explicit_date is not None:
+        query_dates = [explicit_date]
+    else:
+        query_dates = [today, yesterday]
+
+    # 5. Fetch candidate validations
+    validations = (
+        StopValidation.objects
+        .filter(
+            schedule_id__in=eligible_schedule_ids,
+            collection_date__in=query_dates
+        )
+        .select_related('schedule')
+        .order_by('collection_date', 'schedule_id', 'stop_order')
+    )
+
+    now = timezone.now()
+    cutoff_24h = now - timedelta(hours=24)
+    manila_tz = ZoneInfo('Asia/Manila')
+
+    def is_valid_occurrence(schedule, c_date):
+        if schedule.date is not None:
+            return schedule.date == c_date
+        normalized = normalize_days(schedule.days)
+        valid_days = normalized.intersection(VALID_WEEKDAYS)
+        if not valid_days:
+            return False
+        weekday_code = c_date.strftime('%a').lower()
+        return weekday_code in valid_days
+
+    # Group validations by physical stop: (schedule_id, stop_order) -> {date: record}
+    validations_by_stop = {}
+    for sv in validations:
+        key = (sv.schedule_id, sv.stop_order)
+        if key not in validations_by_stop:
+            validations_by_stop[key] = {}
+        validations_by_stop[key][sv.collection_date] = sv
+
+    def evaluate_record(sv, is_today_flag):
+        schedule = schedule_map.get(sv.schedule_id)
+        if not schedule:
+            return None
+
+        # Waypoint check
+        allowed_orders = valid_stops_by_schedule.get(sv.schedule_id, set())
+        if sv.stop_order not in allowed_orders:
+            return None
+
+        # Occurrence check
+        if not is_valid_occurrence(schedule, sv.collection_date):
+            return None
+
+        st = sv.current_status
+        collected_at_str = None
+
+        if st == StopValidationStatus.PENDING_INSPECTION:
+            if not is_today_flag:
+                return None
+        elif st == StopValidationStatus.READY_FOR_COLLECTION:
+            if not is_today_flag:
+                return None
+        elif st == StopValidationStatus.COLLECTION_REPORTED:
+            if not is_today_flag:
+                return None
+            if sv.collection_timestamp:
+                collected_at_str = timezone.localtime(sv.collection_timestamp, manila_tz).strftime('%H:%M')
+        elif st == StopValidationStatus.EMPTY_STOP:
+            # Authoritative timestamp: pre_validation_timestamp
+            if not sv.pre_validation_timestamp:
+                return None
+            if sv.pre_validation_timestamp < cutoff_24h or sv.pre_validation_timestamp > now:
+                return None
+        elif st == StopValidationStatus.VERIFIED_COLLECTED:
+            # Authoritative timestamp: post_validation_timestamp strictly
+            if not sv.post_validation_timestamp:
+                return None
+            if sv.post_validation_timestamp < cutoff_24h or sv.post_validation_timestamp > now:
+                return None
+            if sv.collection_timestamp:
+                collected_at_str = timezone.localtime(sv.collection_timestamp, manila_tz).strftime('%H:%M')
+        elif st == StopValidationStatus.COLLECTION_DISPUTED:
+            # Authoritative timestamp: post_validation_timestamp strictly
+            if not sv.post_validation_timestamp:
+                return None
+            if sv.post_validation_timestamp < cutoff_24h or sv.post_validation_timestamp > now:
+                return None
+        else:
+            return None
+
+        return {
+            'schedule_id': sv.schedule_id,
+            'stop_order': sv.stop_order,
+            'status': st,
+            'collected_at': collected_at_str,
+            'collection_date': sv.collection_date.isoformat(),
+            'is_today': is_today_flag,
+            'occurrence_key': f"{sv.schedule_id}:{sv.stop_order}:{sv.collection_date.isoformat()}",
+        }
+
+    results = []
+
+    if explicit_date is not None:
+        # Explicit date: return valid records for explicit_date only
+        is_today_flag = (explicit_date == today)
+        for key, dates_dict in validations_by_stop.items():
+            sv = dates_dict.get(explicit_date)
+            if sv:
+                evaluated = evaluate_record(sv, is_today_flag)
+                if evaluated:
+                    results.append(evaluated)
+    else:
+        # Default request: today takes precedence over yesterday
+        for key, dates_dict in validations_by_stop.items():
+            if today in dates_dict:
+                # Today's record exists: evaluate today's record.
+                # If valid, emit it. If invalid, discard it (do NOT fall back to yesterday).
+                today_record = dates_dict[today]
+                evaluated = evaluate_record(today_record, is_today_flag=True)
+                if evaluated:
+                    results.append(evaluated)
+            elif yesterday in dates_dict:
+                # No today record exists: evaluate yesterday's record for carryover
+                yesterday_record = dates_dict[yesterday]
+                evaluated = evaluate_record(yesterday_record, is_today_flag=False)
+                if evaluated:
+                    results.append(evaluated)
+
+    results.sort(key=lambda r: (r['schedule_id'], r['stop_order']))
+    return JsonResponse(results, safe=False)
+

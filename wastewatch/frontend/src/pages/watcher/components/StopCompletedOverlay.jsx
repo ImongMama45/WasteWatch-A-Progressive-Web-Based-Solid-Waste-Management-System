@@ -1,4 +1,5 @@
 import React from 'react'
+import { CheckCircle2 } from 'lucide-react'
 
 export default function StopCompletedOverlay({ task, onNext, totalStops, pendingCount, type }) {
   if (!task) return null;
@@ -27,7 +28,11 @@ export default function StopCompletedOverlay({ task, onNext, totalStops, pending
         borderBottomLeftRadius: 30, borderBottomRightRadius: 30,
         boxShadow: '0 10px 30px rgba(0,0,0,0.15)'
       }}>
-        <div style={{ fontSize: 64, marginBottom: 16 }}>🎉</div>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+          <div style={{ width: 72, height: 72, borderRadius: '50%', background: 'rgba(34,197,94,0.18)', border: '2px solid rgba(34,197,94,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CheckCircle2 size={38} color="#22c55e" />
+          </div>
+        </div>
         <h1 style={{ fontFamily: 'var(--font-head)', fontSize: 28, fontWeight: 900, margin: '0 0 10px', letterSpacing: '.02em' }}>
           Well done!
         </h1>

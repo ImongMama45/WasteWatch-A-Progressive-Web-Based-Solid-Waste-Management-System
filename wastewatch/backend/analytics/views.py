@@ -38,6 +38,7 @@ from watcher.models import GarbageReport, ReportStatus, IssueType, GarbageHotspo
 from driver.models import CollectionSchedule, PickupStatus, Truck, DriverShift
 from dumpsite.models import WasteDelivery
 from accounts.models import Barangay
+from accounts.permissions import is_admin_user
 
 from django.http import HttpResponse
 import csv
@@ -54,7 +55,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'], url_path='system-overview')
     def system_overview(self, request):
-        if request.user.role != 'admin':
+        if not is_admin_user(request.user):
             return response.Response({'detail': 'Forbidden'}, status=403)
         User = get_user_model()
         rep = GarbageReport.objects.aggregate(
@@ -73,7 +74,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'], url_path='export')
     def export_csv(self, request):
         # Only admins and barangay officials may export PII
-        if request.user.role not in ('admin', 'brgy_official'):
+        if not is_admin_user(request.user) and request.user.role != 'brgy_official':
             return response.Response({'detail': 'Forbidden'}, status=403)
 
         date_from, date_to = self._get_date_range(request)
@@ -156,7 +157,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 return None, response.Response({'detail': 'Invalid barangay_id.'}, status=400)
             requested = int(bid)
 
-        if request.user.role in CITYWIDE_ROLES:
+        if is_admin_user(request.user) or request.user.role in CITYWIDE_ROLES:
             return requested, None
 
         own = getattr(request.user, 'barangay_id', None)
@@ -182,9 +183,9 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
         payload = build_live_payload(
             date_from, date_to, brgy_obj,
-            include_peers=request.user.role in CITYWIDE_ROLES,
+            include_peers=is_admin_user(request.user) or request.user.role in CITYWIDE_ROLES,
         )
-        if request.user.role in REDACT_DRIVER_ROLES:
+        if not is_admin_user(request.user) and request.user.role in REDACT_DRIVER_ROLES:
             for row in payload['fleet']:
                 row['driver_name'] = None
         return response.Response(payload)
@@ -193,7 +194,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'], url_path='driver-summary')
     def driver_summary(self, request):
-        if request.user.role not in ('driver', 'admin'):
+        if not is_admin_user(request.user) and request.user.role != 'driver':
             return response.Response({'detail': 'Forbidden'}, status=403)
 
         period = request.query_params.get('period', 'week')
@@ -263,7 +264,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
     def barangay_tracker(self, request):
         brgy_id = request.query_params.get('brgy_id')
         
-        if request.user.role not in CITYWIDE_ROLES:
+        if not is_admin_user(request.user) and request.user.role not in CITYWIDE_ROLES:
             # Force to own barangay, or 403 if they try to look at others
             if brgy_id and str(brgy_id) != str(request.user.barangay_id):
                 return response.Response({'error': 'Forbidden'}, status=403)
@@ -296,7 +297,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
         # Redaction
         from copy import deepcopy
         ret = deepcopy(payload)
-        is_full_access = request.user.role in ('admin', 'brgy_official')
+        is_full_access = is_admin_user(request.user) or request.user.role == 'brgy_official'
         
         for t in ret.get('trucks', []):
             if not is_full_access:
@@ -313,8 +314,79 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
     pagination_class = StandardResultsSetPagination
     permission_classes = [permissions.IsAuthenticated]
 
-    def get_queryset(self):
+    def _get_role_scoped_queryset(self):
+        import json
+        from driver.truck_service import TruckService
+
         qs = ActivityLog.objects.all().select_related('admin').order_by('-timestamp')
+        user = getattr(self.request, 'user', None)
+        if not user or not user.is_authenticated:
+            return qs.none()
+
+        if is_admin_user(user):
+            return qs
+
+        if getattr(user, 'role', None) == 'dumpsite':
+            facility_id = TruckService.get_operator_dumpsite_id(user)
+            if not facility_id:
+                return qs.none()
+
+            facility_truck_ids = {
+                str(tid)
+                for tid in Truck.objects.filter(TruckService.facility_trucks_q(facility_id)).values_list('id', flat=True)
+            }
+            facility_schedule_ids = {
+                str(sid)
+                for sid in CollectionSchedule.objects.filter(dumpsite_id=facility_id).values_list('id', flat=True)
+            }
+            facility_delivery_ids = {
+                str(did)
+                for did in WasteDelivery.objects.filter(dumpsite_id=facility_id).values_list('id', flat=True)
+            }
+
+            matched_ids = []
+            candidate_logs = ActivityLog.objects.filter(
+                module__in=['Dumpsite', 'Trucks', 'CollectionSchedule', 'WasteDelivery']
+            )
+            for log in candidate_logs.only('id', 'module', 'details'):
+                try:
+                    parsed = json.loads(log.details) if log.details else {}
+                except Exception:
+                    parsed = {}
+                if not isinstance(parsed, dict):
+                    continue
+
+                explicit_ds = parsed.get('dumpsite_id')
+                prev_ds = parsed.get('previous_hold_dumpsite_id')
+                if explicit_ds is not None or prev_ds is not None:
+                    if str(explicit_ds) == str(facility_id) or str(prev_ds) == str(facility_id):
+                        matched_ids.append(log.id)
+                    continue
+
+                sched_id = parsed.get('schedule_id')
+                if sched_id is not None and str(sched_id) in facility_schedule_ids:
+                    matched_ids.append(log.id)
+                    continue
+
+                deliv_id = parsed.get('delivery_id')
+                if deliv_id is not None and str(deliv_id) in facility_delivery_ids:
+                    matched_ids.append(log.id)
+                    continue
+
+                if log.module == 'Trucks':
+                    if (
+                        str(parsed.get('target_object_id')) in facility_truck_ids
+                        or str(parsed.get('replacement_truck_id')) in facility_truck_ids
+                        or str(parsed.get('old_truck_id')) in facility_truck_ids
+                    ):
+                        matched_ids.append(log.id)
+
+            return qs.filter(pk__in=matched_ids)
+
+        return qs.filter(admin=user)
+
+    def get_queryset(self):
+        qs = self._get_role_scoped_queryset()
         action_param = self.request.query_params.get('action')
         if action_param and action_param.lower() != 'all':
             qs = qs.filter(action=action_param.lower())
@@ -335,10 +407,11 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
         return qs
 
     def list(self, request, *args, **kwargs):
+        base_qs = self._get_role_scoped_queryset()
         queryset = self.filter_queryset(self.get_queryset())
 
         if getattr(self, 'paginator', None) is not None:
-            summary_agg = ActivityLog.objects.aggregate(
+            summary_agg = base_qs.aggregate(
                 all=Count('id'),
                 create=Count('id', filter=Q(action='create')),
                 update=Count('id', filter=Q(action='update')),

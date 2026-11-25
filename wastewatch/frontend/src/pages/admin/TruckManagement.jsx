@@ -7,7 +7,7 @@
  * - Assign driver and crew members
  */
 
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useTrucks } from '../../hooks/useTrucks'
@@ -174,42 +174,28 @@ function TruckEntityModal({ truck, onSave, onClose }) {
   )
 }
 
-function AssignTruckModal({ truck, trucks, onSave, onClose, drivers, crewPool }) {
+function AssignTruckModal({ truck, trucks, onSave, onClose, drivers }) {
   const { notify } = useNotification()
   const [selectedTruckId, setSelectedTruckId] = useState(truck?.id || '')
   const [assignedDrivers, setAssignedDrivers] = useState(truck?.drivers || [])
-  const [assignedCrew, setAssignedCrew] = useState(truck?.crew || [])
-  const [crewInput, setCrewInput] = useState('')
   const [driverInput, setDriverInput] = useState('')
 
-  // If user picks a different truck from the dropdown mid-flow, load its current assignment
   useEffect(() => {
     const t = trucks.find(t => String(t.id) === String(selectedTruckId))
     if (t) {
       setAssignedDrivers(t.drivers || [])
-      setAssignedCrew(t.crew || [])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTruckId])
 
-  const getMemberName = (id) => {
-    const u = crewPool.find(x => x.id === id) || drivers.find(x => x.id === id)
-    return u ? u.full_name : 'Unknown'
-  }
-
-  const availableCrew = crewPool.filter(c => !assignedCrew.includes(c.id))
-
-  function addCrew(id) {
-    if (!id) return
-    const member = crewPool.find(c => String(c.id) === String(id))
-    if (!member || assignedCrew.includes(member.id)) return
-    setAssignedCrew(prev => [...prev, member.id])
-    setCrewInput('')
+  const getDriverName = (id) => {
+    const u = drivers.find(x => x.id === id)
+    return u ? (u.full_name || u.username) : 'Unknown'
   }
 
   function handleSubmit() {
     if (!selectedTruckId) return notify({ variant: 'error-solid', message: 'Please select a truck.' })
-    onSave({ drivers: assignedDrivers, crew: assignedCrew }, selectedTruckId)
+    onSave({ drivers: assignedDrivers }, selectedTruckId)
   }
 
   return (
@@ -226,7 +212,7 @@ function AssignTruckModal({ truck, trucks, onSave, onClose, drivers, crewPool })
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, borderBottom: '1px solid #e4e6eb', paddingBottom: 14 }}>
           <h3 style={{ fontFamily: 'var(--font-head, inherit)', fontSize: 17, fontWeight: 700, margin: 0, color: '#1c1e21' }}>
-            Assign Truck to a Driver
+            Assign Driver to Truck
           </h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#65676b', padding: '0 4px', lineHeight: 1 }}>×</button>
         </div>
@@ -237,18 +223,17 @@ function AssignTruckModal({ truck, trucks, onSave, onClose, drivers, crewPool })
             className="form-input meta-input"
             value={selectedTruckId}
             onChange={e => setSelectedTruckId(e.target.value)}
-            disabled={!!truck}   // locked if opened from a specific row
+            disabled={!!truck}
             style={{ width: '100%', height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }}
           >
             <option value="">— Select truck —</option>
-            {trucks.map(t => (
+            {trucks.filter(t => !t.is_retired).map(t => (
               <option key={t.id} value={t.id}>{t.plate_number} — {t.model}</option>
             ))}
           </select>
         </div>
 
-        {/* Drivers */}
-        <div style={{ marginBottom: 14 }}>
+        <div style={{ marginBottom: 18 }}>
           <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Assigned Drivers (Max 2)</label>
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
             <select
@@ -278,39 +263,20 @@ function AssignTruckModal({ truck, trucks, onSave, onClose, drivers, crewPool })
             {assignedDrivers.length === 0 && <span style={{ fontSize: 12, color: '#8a8d91' }}>No driver assigned.</span>}
             {assignedDrivers.map(id => (
               <span key={id} style={{ background: '#f0f2f5', border: '1px solid #e4e6eb', borderRadius: 4, padding: '3px 8px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, color: '#1c1e21', fontWeight: 500 }}>
-                {getMemberName(id)}
+                {getDriverName(id)}
                 <button type="button" onClick={() => setAssignedDrivers(prev => prev.filter(d => d !== id))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
               </span>
             ))}
           </div>
         </div>
 
-        {/* Crew */}
-        <div style={{ marginBottom: 20 }}>
-          <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 5 }}>Crew Members</label>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <select className="form-input meta-input" value={crewInput} onChange={e => setCrewInput(e.target.value)} style={{ flex: 1, height: 36, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 10px', fontSize: 13, background: '#ffffff', color: '#1c1e21' }}>
-              <option value="">— Select crew member —</option>
-              {availableCrew.map(c => <option key={c.id} value={c.id}>{c.full_name || c.username || c.email}</option>)}
-            </select>
-            <button type="button" onClick={() => addCrew(crewInput)}
-              style={{ background: '#16a34a', color: '#ffffff', border: 'none', borderRadius: 6, padding: '0 14px', fontWeight: 600, fontSize: 13, cursor: 'pointer', height: 36 }}
-            >Add</button>
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {assignedCrew.length === 0 && <span style={{ fontSize: 12, color: '#8a8d91' }}>No crew assigned yet.</span>}
-            {assignedCrew.map(id => (
-              <span key={id} style={{ background: '#f0f2f5', border: '1px solid #e4e6eb', borderRadius: 4, padding: '3px 8px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, color: '#1c1e21', fontWeight: 500 }}>
-                {getMemberName(id)}
-                <button type="button" onClick={() => setAssignedCrew(prev => prev.filter(c => c !== id))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
-              </span>
-            ))}
-          </div>
+        <div style={{ fontSize: 12, color: '#64748b', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '8px 10px', marginBottom: 16 }}>
+          Crew rosters are managed in Sanitation Team Operations, separate from fleet assignments.
         </div>
 
         <div style={{ display: 'flex', gap: 10, paddingTop: 12, borderTop: '1px solid #e4e6eb' }}>
           <button className="btn btn-outline" style={{ flex: 1, height: 36, borderRadius: 6, border: '1px solid #ccd0d5', background: '#ffffff', color: '#1c1e21', fontWeight: 600, fontSize: 13, cursor: 'pointer' }} onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" style={{ flex: 1, height: 36, borderRadius: 6, border: 'none', background: '#16a34a', color: '#ffffff', fontWeight: 600, fontSize: 13, cursor: 'pointer' }} onClick={handleSubmit}>Save Assignment</button>
+          <button className="btn btn-primary" style={{ flex: 1, height: 36, borderRadius: 6, border: 'none', background: '#16a34a', color: '#ffffff', fontWeight: 600, fontSize: 13, cursor: 'pointer' }} onClick={handleSubmit}>Save Driver Assignment</button>
         </div>
       </div>
     </div>
@@ -564,31 +530,353 @@ function RouteModal({ truckId, driverId, driverName, onClose }) {
   )
 }
 
+function TruckHistoryModal({ truck, onClose }) {
+  const [shifts, setShifts] = useState([])
+  const [allocations, setAllocations] = useState([])
+  const [auditLogs, setAuditLogs] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!truck?.id) return
+    setLoading(true)
+    Promise.all([
+      api.get(`/api/driver/shift/?truck=${truck.id}&page_size=20`).catch(() => ({ data: [] })),
+      api.get(`/api/driver/schedule-truck-allocations/?truck_id=${truck.id}`).catch(() => ({ data: [] })),
+      api.get(`/api/driver/trucks/${truck.id}/audit-history/`).catch(() => ({ data: [] })),
+    ])
+      .then(([shiftRes, allocRes, auditRes]) => {
+        const sList = shiftRes.data?.results || shiftRes.data || []
+        setShifts(Array.isArray(sList) ? sList.filter(s => String(s.truck) === String(truck.id) || String(s.truck_id) === String(truck.id)) : [])
+        setAllocations(allocRes.data?.results || allocRes.data || [])
+        setAuditLogs(Array.isArray(auditRes.data) ? auditRes.data : [])
+      })
+      .finally(() => setLoading(false))
+  }, [truck?.id])
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+      zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+      backdropFilter: 'blur(3px)',
+    }} onClick={onClose}>
+      <div style={{
+        background: '#ffffff', borderRadius: 8, padding: '20px 24px',
+        width: '100%', maxWidth: 680, maxHeight: '85vh', overflowY: 'auto',
+        boxShadow: '0 8px 30px rgba(0,0,0,0.12)', border: '1px solid #e4e6eb',
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, borderBottom: '1px solid #e4e6eb', paddingBottom: 12 }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1c1e21' }}>
+              Usage & Driver Attribution — {truck.plate_number}
+            </h3>
+            <div style={{ fontSize: 12, color: '#65676b' }}>{truck.model} · Lifecycle: {truck.retirement_state || 'operational'}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#65676b' }}>×</button>
+        </div>
+
+        {loading ? (
+          <div style={{ padding: 24, textAlign: 'center', color: '#65676b', fontSize: 13 }}>Loading truck history...</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#65676b', marginBottom: 8 }}>
+                Schedule Allocations ({allocations.length})
+              </div>
+              {allocations.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: '#8a8d91' }}>No date-specific schedule allocations recorded.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {allocations.slice(0, 8).map(al => (
+                    <div key={al.id} style={{ padding: '8px 10px', borderRadius: 6, background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: 12.5, display: 'flex', justifyContent: 'space-between' }}>
+                      <span><strong>{al.allocation_date}</strong> · {al.schedule_area || `Schedule #${al.schedule}`}</span>
+                      <span style={{ color: '#475569' }}>Team: {al.team_code || '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#65676b', marginBottom: 8 }}>
+                Driver Shift & Usage History ({shifts.length})
+              </div>
+              {shifts.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: '#8a8d91' }}>No shift usage records found for this truck.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {shifts.map(sh => (
+                    <div key={sh.id} style={{ padding: '8px 10px', borderRadius: 6, background: '#ffffff', border: '1px solid #e2e8f0', fontSize: 12.5 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, color: '#0f172a' }}>
+                        <span>Shift #{sh.id} · Driver: {sh.driver_name || '—'}</span>
+                        <span style={{ color: sh.is_active ? '#15803d' : '#64748b' }}>
+                          {sh.is_active ? 'Active' : (sh.end_reason || 'Completed')}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 2 }}>
+                        Started: {sh.started_at ? new Date(sh.started_at).toLocaleString() : '—'}
+                        {sh.ended_at ? ` · Ended: ${new Date(sh.ended_at).toLocaleString()}` : ''}
+                        {sh.team_code ? ` · Team ${sh.team_code}` : ''}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#65676b', marginBottom: 8 }}>
+                Lifecycle, Hold, Maintenance & Replacement Audit ({auditLogs.length})
+              </div>
+              {auditLogs.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: '#8a8d91' }}>No lifecycle or replacement audit events recorded yet.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {auditLogs.slice(0, 10).map(log => (
+                    <div key={log.id} style={{ padding: '8px 10px', borderRadius: 6, background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#0f172a' }}>
+                        <span>{log.event}</span>
+                        <span style={{ color: '#64748b', fontWeight: 500 }}>{log.actor} · {log.created_at ? new Date(log.created_at).toLocaleString() : ''}</span>
+                      </div>
+                      {(log.details?.reason || log.details?.resolution_notes) && (
+                        <div style={{ color: '#475569', marginTop: 2 }}>
+                          {log.details.reason || log.details.resolution_notes}
+                        </div>
+                      )}
+                      {log.details?.replacement_plate_number && (
+                        <div style={{ color: '#0369a1', marginTop: 2, fontWeight: 600 }}>
+                          Switched {log.details.old_plate_number} → {log.details.replacement_plate_number} ({log.details.schedule_area}, {log.details.effective_date})
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function TruckActionModal({ actionModal, trucks, onClose, onSuccess }) {
+  const { notify } = useNotification()
+  const { truck, mode } = actionModal
+  const [reason, setReason] = useState('')
+  const [maintType, setMaintType] = useState(truck.status === 'maintenance' ? 'complete' : 'start')
+  const [maintStatus, setMaintStatus] = useState('under_repair')
+  const [inspState, setInspState] = useState(truck.inspection_state || 'PASSED')
+  const [mechCond, setMechCond] = useState(truck.mechanical_condition || 'OPERATIONAL')
+  const [schedules, setSchedules] = useState([])
+  const [scheduleId, setScheduleId] = useState('')
+  const [replacementTruckId, setReplacementTruckId] = useState('')
+  const [effectiveDate, setEffectiveDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [transferDrivers, setTransferDrivers] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (mode !== 'replace') return
+    api.get('/api/driver/collection-schedules/?paginate=false')
+      .then(res => {
+        const list = res.data?.results || res.data || []
+        setSchedules(Array.isArray(list) ? list : [])
+        const matched = list.find(s => String(s.truck) === String(truck.id))
+        if (matched) setScheduleId(String(matched.id))
+      })
+      .catch(() => {})
+  }, [mode, truck.id])
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    setSubmitting(true)
+    try {
+      if (mode === 'clear_hold') {
+        await api.post(`/api/driver/trucks/${truck.id}/clear-hold/`, { resolution_notes: reason })
+        onSuccess(`Operational hold cleared for ${truck.plate_number}.`)
+      } else if (mode === 'maintenance') {
+        await api.post(`/api/driver/trucks/${truck.id}/record-maintenance/`, {
+          action_type: maintType,
+          maintenance_status: maintStatus,
+          reason,
+        })
+        onSuccess(`Maintenance updated for ${truck.plate_number}.`)
+      } else if (mode === 'inspection') {
+        await api.post(`/api/driver/trucks/${truck.id}/update-inspection/`, {
+          inspection_state: inspState,
+          mechanical_condition: mechCond,
+          reason,
+        })
+        onSuccess(`Inspection state updated for ${truck.plate_number}.`)
+      } else if (mode === 'replace') {
+        await api.post(`/api/driver/trucks/${truck.id}/replace-truck/`, {
+          replacement_truck_id: Number(replacementTruckId),
+          schedule_id: Number(scheduleId),
+          effective_date: effectiveDate,
+          reason,
+          transfer_drivers: transferDrivers,
+        })
+        onSuccess(`Truck replacement executed for ${truck.plate_number}.`)
+      }
+    } catch (err) {
+      notify({ variant: 'error-outline', message: getApiErrorMessage(err, 'Action failed.') })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+      zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+      backdropFilter: 'blur(3px)',
+    }} onClick={onClose}>
+      <div style={{
+        background: '#ffffff', borderRadius: 8, padding: '20px 24px',
+        width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto',
+        boxShadow: '0 8px 30px rgba(0,0,0,0.12)', border: '1px solid #e4e6eb',
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e4e6eb', paddingBottom: 12, marginBottom: 14 }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#1c1e21' }}>
+            {mode === 'clear_hold' ? `Clear Operational Hold — ${truck.plate_number}`
+              : mode === 'maintenance' ? `Maintenance Workflow — ${truck.plate_number}`
+              : mode === 'inspection' ? `Inspection & Condition — ${truck.plate_number}`
+              : `Replace / Switch Truck — ${truck.plate_number}`}
+          </h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#65676b' }}>×</button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {mode === 'maintenance' && (
+            <>
+              <div>
+                <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Maintenance Action</label>
+                <select className="form-input meta-input" value={maintType} onChange={e => setMaintType(e.target.value)} style={{ width: '100%', height: 36 }}>
+                  <option value="schedule">Schedule Maintenance</option>
+                  <option value="start">Start Maintenance / Repair</option>
+                  <option value="complete">Complete Maintenance (Return to Service)</option>
+                </select>
+              </div>
+              {maintType === 'start' && (
+                <div>
+                  <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Maintenance Status</label>
+                  <select className="form-input meta-input" value={maintStatus} onChange={e => setMaintStatus(e.target.value)} style={{ width: '100%', height: 36 }}>
+                    <option value="under_repair">Under Repair</option>
+                    <option value="scheduled_maintenance">Scheduled Maintenance</option>
+                  </select>
+                </div>
+              )}
+            </>
+          )}
+
+          {mode === 'inspection' && (
+            <>
+              <div>
+                <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Inspection Result</label>
+                <select className="form-input meta-input" value={inspState} onChange={e => setInspState(e.target.value)} style={{ width: '100%', height: 36 }}>
+                  <option value="PASSED">PASSED</option>
+                  <option value="FAILED">FAILED (Places Operational Hold Only)</option>
+                  <option value="PENDING">PENDING</option>
+                </select>
+              </div>
+              <div>
+                <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Mechanical Condition</label>
+                <select className="form-input meta-input" value={mechCond} onChange={e => setMechCond(e.target.value)} style={{ width: '100%', height: 36 }}>
+                  <option value="OPERATIONAL">OPERATIONAL</option>
+                  <option value="MINOR_DEFECT">MINOR_DEFECT</option>
+                  <option value="NON_OPERATIONAL">NON_OPERATIONAL</option>
+                </select>
+              </div>
+            </>
+          )}
+
+          {mode === 'replace' && (
+            <>
+              <div>
+                <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Collection Schedule *</label>
+                <select required className="form-input meta-input" value={scheduleId} onChange={e => setScheduleId(e.target.value)} style={{ width: '100%', height: 36 }}>
+                  <option value="">— Select schedule —</option>
+                  {schedules.map(s => (
+                    <option key={s.id} value={s.id}>{s.area} ({s.dumpsite_name || 'No Dumpsite'})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Replacement Truck *</label>
+                <select required className="form-input meta-input" value={replacementTruckId} onChange={e => setReplacementTruckId(e.target.value)} style={{ width: '100%', height: 36 }}>
+                  <option value="">— Select available operational truck —</option>
+                  {trucks
+                    .filter(t => t.id !== truck.id && t.status === 'active' && !t.is_retired && !t.is_operational_hold)
+                    .map(t => (
+                      <option key={t.id} value={t.id}>{t.plate_number} — {t.model}</option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Effective Date *</label>
+                <input type="date" required className="form-input meta-input" value={effectiveDate} onChange={e => setEffectiveDate(e.target.value)} style={{ width: '100%', height: 36 }} />
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: '#334155', cursor: 'pointer' }}>
+                <input type="checkbox" checked={transferDrivers} onChange={e => setTransferDrivers(e.target.checked)} />
+                Transfer currently assigned drivers to the replacement truck (preserves historical shift attribution)
+              </label>
+            </>
+          )}
+
+          <div>
+            <label className="form-label" style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>
+              {mode === 'clear_hold' ? 'Resolution Notes *' : 'Reason / Audit Notes *'}
+            </label>
+            <textarea
+              required={mode === 'clear_hold' || mode === 'replace' || (mode === 'maintenance' && maintType !== 'complete') || inspState === 'FAILED'}
+              rows={3}
+              className="form-input meta-input"
+              value={reason}
+              onChange={e => setReason(e.target.value)}
+              placeholder="Provide operational details for the audit log..."
+              style={{ width: '100%', padding: '8px 10px', height: 'auto' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, paddingTop: 10, borderTop: '1px solid #e4e6eb' }}>
+            <button type="button" className="meta-btn-secondary" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
+            <button type="submit" disabled={submitting} className="meta-btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
+              {submitting ? 'Saving...' : 'Confirm'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function TruckManagement() {
   const navigate = useNavigate()
   const { trucks, pagination, loading, refresh: refreshTrucks, saveTruck, deleteTruck: apiDeleteTruck } = useTrucks()
-  const { drivers, crew: crewPool } = useUsers()
+  const { drivers } = useUsers()
   const { notify } = useNotification()
 
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
-  const [modal, setModal] = useState(null)   // null | { type: 'add_truck'|'edit_truck'|'assign_truck', truck: obj|null }
+  const [modal, setModal] = useState(null)
   const [expanded, setExpanded] = useState(null)
   const [toast, setToast] = useState(null)
   const [viewRouteTruck, setViewRouteTruck] = useState(null)
+  const [historyTruck, setHistoryTruck] = useState(null)
+  const [actionModal, setActionModal] = useState(null)
   const [warningModal, setWarningModal] = useState(null)
 
+  const buildQueryParams = useCallback((f = filter, p = page, s = search) => {
+    const params = { page: p, page_size: 10, search: s.trim() }
+    if (f === 'maintenance') params.status = 'maintenance'
+    else if (f !== 'all') params.lifecycle = f
+    return params
+  }, [filter, page, search])
+
   useEffect(() => {
-    refreshTrucks({
-      page,
-      page_size: 10,
-      status: filter === 'all' ? '' : filter,
-      search: search.trim(),
-    })
-  }, [page, filter, search, refreshTrucks])
+    refreshTrucks(buildQueryParams())
+  }, [page, filter, search, refreshTrucks, buildQueryParams])
 
   function showToast(msg) {
     setToast(msg)
@@ -619,12 +907,7 @@ export default function TruckManagement() {
     if (res.ok) {
       showToast(id ? 'Truck updated successfully.' : 'Truck added successfully.')
       setModal(null)
-      refreshTrucks({
-        page,
-        page_size: 10,
-        status: filter === 'all' ? '' : filter,
-        search: search.trim(),
-      })
+      refreshTrucks(buildQueryParams())
     } else {
       notify({ variant: 'error-outline', message: getApiErrorMessage({ response: { data: res.error } }, 'Failed to save truck.') })
     }
@@ -639,13 +922,39 @@ export default function TruckManagement() {
     if (res.ok) {
       setExpanded(null)
       setWarningModal(null)
-      notify({ message: 'Truck deleted permanently.', variant: 'error-dark', position: 'bottom-left' })
-      refreshTrucks({
-        page,
-        page_size: 10,
-        status: filter === 'all' ? '' : filter,
-        search: search.trim(),
+      notify({ message: 'Uncommissioned truck deleted.', variant: 'error-dark', position: 'bottom-left' })
+      refreshTrucks(buildQueryParams())
+    } else {
+      setWarningModal(null)
+      notify({ variant: 'error-outline', message: getApiErrorMessage({ response: { data: res.error } }, 'Cannot delete commissioned truck; retire it instead.') })
+    }
+  }
+
+  async function handleCommissionTruck(truck) {
+    const confirmed = window.confirm(
+      `Commission truck ${truck.plate_number}? It will become eligible for scheduling and allocation.`
+    )
+    if (!confirmed) return
+    try {
+      await api.post(`/api/driver/trucks/${truck.id}/commission/`, {
+        notes: 'Commissioned from Truck Management',
       })
+      showToast(`Truck ${truck.plate_number} commissioned.`)
+      refreshTrucks(buildQueryParams())
+    } catch (err) {
+      notify({ variant: 'error-outline', message: getApiErrorMessage(err, 'Failed to commission truck.') })
+    }
+  }
+
+  async function handleRetireTruck(truck) {
+    const reason = window.prompt(`Retire truck ${truck.plate_number}? Enter retirement reason (historical records remain intact):`, 'Decommissioned from active service')
+    if (reason === null) return
+    try {
+      await api.post(`/api/driver/trucks/${truck.id}/retire/`, { reason: reason.trim() || 'Retired by Admin' })
+      showToast(`Truck ${truck.plate_number} permanently retired.`)
+      refreshTrucks(buildQueryParams())
+    } catch (err) {
+      notify({ variant: 'error-outline', message: getApiErrorMessage(err, 'Failed to retire truck.') })
     }
   }
 
@@ -704,9 +1013,28 @@ export default function TruckManagement() {
           onSave={handleSave}
           onClose={() => setModal(null)}
           drivers={drivers}
-          crewPool={crewPool}
         />
       ) : null}
+
+      {historyTruck && (
+        <TruckHistoryModal
+          truck={historyTruck}
+          onClose={() => setHistoryTruck(null)}
+        />
+      )}
+
+      {actionModal && (
+        <TruckActionModal
+          actionModal={actionModal}
+          trucks={trucks}
+          onClose={() => setActionModal(null)}
+          onSuccess={(msg) => {
+            setActionModal(null)
+            showToast(msg)
+            refreshTrucks(buildQueryParams())
+          }}
+        />
+      )}
 
       {/* Route Map Modal */}
       {viewRouteTruck && (
@@ -762,14 +1090,14 @@ export default function TruckManagement() {
                 textTransform: 'uppercase', letterSpacing: '0.04em'
               }}>ADMIN</span>
             </div>
-            <p style={{ margin: 0, fontSize: 13, color: '#65676b' }}>Manage fleet status, driver assignments, crew personnel, and collection routes.</p>
+            <p style={{ margin: 0, fontSize: 13, color: '#65676b' }}>Manage fleet operations, driver assignments, operational holds, maintenance, and collection schedule allocations.</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               className="meta-btn-secondary"
               onClick={() => setModal({ type: 'assign_truck', truck: null })}
             >
-              Assign Truck
+              Assign Driver
             </button>
             <button
               className="meta-btn-primary"
@@ -782,14 +1110,17 @@ export default function TruckManagement() {
 
         {/* ── Flat Stat Cards ── */}
         {loading && trucks.length === 0 ? (
-          <StatCardSkeleton count={4} style={{ marginBottom: 20 }} />
+          <StatCardSkeleton count={6} style={{ marginBottom: 20 }} />
         ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: 12, marginBottom: 20 }}>
           {[
-            { label: 'Total Trucks', value: counts.all, color: '#1c1e21' },
-            { label: 'Active', value: counts.active, color: '#15803d' },
-            { label: 'Maintenance', value: counts.maintenance, color: '#b45309' },
-            { label: 'Inactive', value: counts.inactive, color: '#b91c1c' },
+            { label: 'Total Fleet', value: counts.all ?? 0, color: '#1c1e21' },
+            { label: 'Available', value: counts.available ?? 0, color: '#15803d' },
+            { label: 'Assigned', value: counts.assigned ?? 0, color: '#0284c7' },
+            { label: 'In Use', value: counts.in_use ?? 0, color: '#0d9488' },
+            { label: 'Maintenance', value: counts.maintenance ?? 0, color: '#b45309' },
+            { label: 'Operational Hold', value: counts.operational_hold ?? 0, color: '#dc2626' },
+            { label: 'Retired', value: counts.retired ?? 0, color: '#64748b' },
           ].map(s => (
             <div key={s.label} className="meta-stat-card">
               <div className="meta-stat-label">{s.label}</div>
@@ -802,16 +1133,24 @@ export default function TruckManagement() {
         {/* ── Filters + Search ── */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
           <div className="meta-tabs-wrapper">
-            {['all', 'active', 'maintenance', 'inactive'].map(f => (
+            {[
+              { key: 'all', label: 'All' },
+              { key: 'available', label: 'Available' },
+              { key: 'assigned', label: 'Assigned' },
+              { key: 'in_use', label: 'In Use' },
+              { key: 'maintenance', label: 'Maintenance' },
+              { key: 'operational_hold', label: 'Hold' },
+              { key: 'retired', label: 'Retired' },
+            ].map(f => (
               <button
-                key={f}
-                className={`meta-tab-btn ${filter === f ? 'active' : ''}`}
+                key={f.key}
+                className={`meta-tab-btn ${filter === f.key ? 'active' : ''}`}
                 onClick={() => {
-                  setFilter(f)
+                  setFilter(f.key)
                   setPage(1)
                 }}
               >
-                {f.charAt(0).toUpperCase() + f.slice(1)} ({counts[f]})
+                {f.label} ({counts[f.key] ?? 0})
               </button>
             ))}
           </div>
@@ -912,13 +1251,17 @@ export default function TruckManagement() {
                       {truck.status === 'active' && <CapacityBar pct={truck.current_capacity} />}
                     </div>
 
-                    {/* Crew count */}
+                    {/* Operational / Lifecycle state */}
                     <div style={{ textAlign: 'right', flexShrink: 0, paddingRight: 6 }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#65676b', marginBottom: 2 }}>Crew</div>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#65676b', marginBottom: 2 }}>
+                        {truck.is_retired ? 'Retired' : truck.is_operational_hold ? 'Hold' : 'Dispatch'}
+                      </div>
                       <div style={{
-                        fontWeight: 700, fontSize: 18,
-                        color: truck.crew.length === 0 ? '#b91c1c' : '#1c1e21',
-                      }}>{truck.crew.length}</div>
+                        fontWeight: 700, fontSize: 12,
+                        color: truck.is_operational_hold ? '#dc2626' : truck.is_retired ? '#64748b' : '#15803d',
+                      }}>
+                        {truck.is_retired ? 'Retired' : truck.is_operational_hold ? 'Op. Hold' : (truck.op_status || 'AVAILABLE')}
+                      </div>
                     </div>
 
                     {/* Chevron */}
@@ -1005,42 +1348,40 @@ export default function TruckManagement() {
                         </div>
                       )}
 
-                      {/* Crew list */}
-                      <div style={{ marginBottom: 16 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: '#65676b', letterSpacing: '.05em', textTransform: 'uppercase', marginBottom: 6 }}>
-                          {truck.status === 'inactive'
-                            ? 'PAST CREW MEMBERS'
-                            : `CREW MEMBERS (${truck.crew?.length || 0})`}
+                      {truck.is_operational_hold && (
+                        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, padding: '10px 14px', marginBottom: 14 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#dc2626', letterSpacing: '.05em', textTransform: 'uppercase', marginBottom: 4 }}>OPERATIONAL HOLD</div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: '#991b1b' }}>
+                            {truck.hold_reason || 'Placed on operational hold after post-shift inspection.'}
+                          </div>
+                          <div style={{ fontSize: 11.5, color: '#7f1d1d', marginTop: 3 }}>
+                            Operational holds do not automatically schedule maintenance; Admin or assigned Operator must resolve or record maintenance separately.
+                          </div>
                         </div>
+                      )}
 
-                        {truck.status === 'inactive' ? (
-                          <div style={{ fontSize: 12, color: '#65676b', fontStyle: 'italic', background: '#ffffff', border: '1px solid #e4e6eb', padding: '6px 12px', borderRadius: 6 }}>
-                            {truck.past_crew_names ? truck.past_crew_names : 'No past crew recorded.'}
-                          </div>
-                        ) : truck.crew?.length === 0 ? (
-                          <div style={{ fontSize: 12, color: '#b91c1c' }}>No crew assigned to this truck.</div>
-                        ) : (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                            {truck.crew_names?.map(c => (
-                              <span key={c} style={{
-                                background: '#ffffff', border: '1px solid #ced0d4',
-                                borderRadius: 4, padding: '3px 8px', fontSize: 12, fontWeight: 500,
-                                display: 'flex', alignItems: 'center', gap: 6, color: '#1c1e21'
-                              }}>
-                                <span style={{
-                                  width: 16, height: 16, borderRadius: '50%', background: '#e7f5eb',
-                                  color: '#15803d', fontSize: 9, fontWeight: 700,
-                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                }}>{c[0]}</span>
-                                {c}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                      {/* Mechanical & Inspection Profile */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginBottom: 14 }}>
+                        <div style={{ background: '#ffffff', border: '1px solid #e4e6eb', borderRadius: 6, padding: '8px 12px' }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#65676b', textTransform: 'uppercase' }}>Condition</div>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#1c1e21' }}>{truck.mechanical_condition || truck.mechanical_status || '—'}</div>
+                        </div>
+                        <div style={{ background: '#ffffff', border: '1px solid #e4e6eb', borderRadius: 6, padding: '8px 12px' }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#65676b', textTransform: 'uppercase' }}>Inspection</div>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#1c1e21' }}>{truck.inspection_state || '—'}</div>
+                        </div>
+                        <div style={{ background: '#ffffff', border: '1px solid #e4e6eb', borderRadius: 6, padding: '8px 12px' }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#65676b', textTransform: 'uppercase' }}>Lifecycle</div>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#1c1e21' }}>{truck.retirement_state || 'operational'}</div>
+                        </div>
+                        <div style={{ background: '#ffffff', border: '1px solid #e4e6eb', borderRadius: 6, padding: '8px 12px' }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#65676b', textTransform: 'uppercase' }}>Provenance</div>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#1c1e21' }}>{truck.commissioning_provenance || '—'}</div>
+                        </div>
                       </div>
 
                       {/* Action buttons */}
-                      <div style={{ display: 'flex', gap: 8 }}>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <button
                           className="meta-btn-secondary"
                           style={{ flex: 1, height: 32, fontSize: 12, justifyContent: 'center' }}
@@ -1050,24 +1391,86 @@ export default function TruckManagement() {
                             <div style={{ width: 13, height: 13 }}>{ICONS.edit}</div> Edit
                           </div>
                         </button>
+                        {!truck.is_retired && (
+                          <button
+                            className="meta-btn-secondary"
+                            style={{ flex: 1, height: 32, fontSize: 12, justifyContent: 'center' }}
+                            onClick={() => setModal({ type: 'assign_truck', truck })}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                              <div style={{ width: 13, height: 13 }}>{ICONS.profile}</div> Assign Driver
+                            </div>
+                          </button>
+                        )}
                         <button
                           className="meta-btn-secondary"
                           style={{ flex: 1, height: 32, fontSize: 12, justifyContent: 'center' }}
-                          onClick={() => setModal({ type: 'assign_truck', truck })}
+                          onClick={() => setHistoryTruck(truck)}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
-                            <div style={{ width: 13, height: 13 }}>{ICONS.profile}</div> Assign
-                          </div>
+                          Usage History
                         </button>
-                        <button
-                          className="meta-btn-secondary"
-                          style={{ flex: 1, height: 32, fontSize: 12, justifyContent: 'center', color: '#b91c1c', borderColor: '#fca5a5', background: '#fff' }}
-                          onClick={() => handleDeleteTruck(truck)}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
-                            <div style={{ width: 13, height: 13 }}>{ICONS.trash}</div> Delete
-                          </div>
-                        </button>
+                        {!truck.is_retired && (
+                          <>
+                            {truck.is_operational_hold && (
+                              <button
+                                className="meta-btn-secondary"
+                                style={{ flex: 1, height: 32, fontSize: 12, justifyContent: 'center', color: '#15803d', borderColor: '#bbf7d0', background: '#f0fdf4' }}
+                                onClick={() => setActionModal({ truck, mode: 'clear_hold' })}
+                              >
+                                Clear Hold
+                              </button>
+                            )}
+                            <button
+                              className="meta-btn-secondary"
+                              style={{ flex: 1, height: 32, fontSize: 12, justifyContent: 'center' }}
+                              onClick={() => setActionModal({ truck, mode: 'maintenance' })}
+                            >
+                              Maintenance
+                            </button>
+                            <button
+                              className="meta-btn-secondary"
+                              style={{ flex: 1, height: 32, fontSize: 12, justifyContent: 'center' }}
+                              onClick={() => setActionModal({ truck, mode: 'inspection' })}
+                            >
+                              Inspection
+                            </button>
+                            <button
+                              className="meta-btn-secondary"
+                              style={{ flex: 1, height: 32, fontSize: 12, justifyContent: 'center' }}
+                              onClick={() => setActionModal({ truck, mode: 'replace' })}
+                            >
+                              Replace Truck
+                            </button>
+                          </>
+                        )}
+                        {truck.commissioning_provenance === 'uncommissioned' && truck.retirement_state === 'uncommissioned' && (
+                          <button
+                            className="meta-btn-secondary"
+                            style={{ flex: 1, height: 32, fontSize: 12, justifyContent: 'center', color: '#15803d', borderColor: '#86efac', background: '#f0fdf4' }}
+                            onClick={() => handleCommissionTruck(truck)}
+                          >
+                            Commission Truck
+                          </button>
+                        )}
+                        {truck.commissioning_provenance === 'uncommissioned' && truck.retirement_state === 'uncommissioned' ? (
+                          <button
+                            className="meta-btn-secondary"
+                            style={{ flex: 1, height: 32, fontSize: 12, justifyContent: 'center', color: '#b91c1c', borderColor: '#fca5a5', background: '#fff' }}
+                            onClick={() => handleDeleteTruck(truck)}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                              <div style={{ width: 13, height: 13 }}>{ICONS.trash}</div> Delete
+                            </div>
+                          </button>
+                        ) : !truck.is_retired ? (
+                          <button
+                            className="meta-btn-secondary"
+                            style={{ flex: 1, height: 32, fontSize: 12, justifyContent: 'center', color: '#b45309', borderColor: '#fde68a', background: '#fffbeb' }}
+                            onClick={() => handleRetireTruck(truck)}
+                          >
+                            Retire Truck
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                   )}
@@ -1126,7 +1529,7 @@ export default function TruckManagement() {
                     </div>
                     <p style={{ fontSize: 13, color: '#65676b', marginBottom: 14, lineHeight: 1.5 }}>
                       You are changing this truck's status to <strong style={{ color: '#1c1e21' }}>{pendingStatus}</strong>.
-                      {pendingStatus === 'inactive' && ' This will unassign the truck, driver, and crew from all active routes.'}
+                      {pendingStatus === 'inactive' && ' This will unassign the truck and driver from all active routes.'}
                     </p>
                     <div style={{ marginBottom: 20 }}>
                       <label style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: '#65676b', marginBottom: 6 }}>Reason for {pendingStatus}</label>

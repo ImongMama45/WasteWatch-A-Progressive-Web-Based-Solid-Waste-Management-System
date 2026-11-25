@@ -36,12 +36,12 @@ import { MobileFlowSkeleton } from '../../components/ui/Skeleton'
 // ─── PHASE METADATA (STRICTLY SVG - ZERO EMOJIS) ─────────────────────────────
 const PHASES = [
   { key: 'assignment', label: 'Assignment', icon: ClipboardList, color: '#6366f1', desc: 'Select truck & schedule' },
-  { key: 'navigate_to_base', label: 'Navigate to Base', icon: Home, color: '#0ea5e9', desc: 'Head to collection base' },
-  { key: 'confirm_start', label: 'Confirm Start', icon: CheckCircle2, color: '#16a34a', desc: 'Confirm shift start' },
-  { key: 'checkin', label: 'Check-in', icon: MapPin, color: '#f59e0b', desc: 'Driver check-in & briefing' },
+  { key: 'navigate_to_base', label: 'Navigate to Dumpsite', icon: Home, color: '#0ea5e9', desc: 'Head to assigned dumpsite start' },
+  { key: 'confirm_start', label: 'Confirm Start', icon: CheckCircle2, color: '#16a34a', desc: 'Confirm dumpsite departure' },
+  { key: 'checkin', label: 'Check-in', icon: MapPin, color: '#f59e0b', desc: 'GPS check-in & shift start' },
   { key: 'shiftroute', label: 'On Route', icon: Truck, color: '#2563eb', desc: 'Collecting waste stops' },
   { key: 'truck_not_full', label: 'Truck Not Full', icon: Package, color: '#ea580c', desc: 'Route done — missed stops review', devOnly: true },
-  { key: 'end_shift', label: 'End Shift', icon: Flag, color: '#dc2626', desc: 'Return to dumpsite / end' },
+  { key: 'end_shift', label: 'Return & Inspect', icon: Flag, color: '#dc2626', desc: 'Return to assigned dumpsite & inspect' },
 ]
 
 // ─── DEV PHASE SWITCHER ───────────────────────────────────────────────────────
@@ -250,7 +250,7 @@ function DevPhaseSwitcher({ currentPhase, activeShift, user, canDevReset, onJump
           {/* Warning */}
           <div style={{ padding: '6px 16px 2px', borderTop: '1px solid #e4e6eb' }}>
             <div style={{ fontSize: 10, color: '#65676b', lineHeight: 1.4, display: 'flex', alignItems: 'center', gap: 4 }}>
-              <AlertTriangle size={11} color="#b45309" /> DEV only — skips GPS &amp; API guards.
+              <AlertTriangle size={11} color="#b45309" /> DEV phase switcher — server GPS &amp; readiness guards remain enforced.
             </div>
           </div>
         </div>

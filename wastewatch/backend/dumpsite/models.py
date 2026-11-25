@@ -162,6 +162,74 @@ class DumpsiteIncident(models.Model):
     def __str__(self):
         return f"Incident on delivery {self.delivery_id}: {self.reason}"
 
+
+class InspectionType(models.TextChoices):
+    POST_SHIFT = 'POST_SHIFT', 'Post-Shift Inspection'
+    FACILITY = 'FACILITY', 'Facility Inspection'
+    PRE_DISPATCH = 'PRE_DISPATCH', 'Pre-Dispatch Inspection'
+
+
+class DumpsiteTruckInspection(models.Model):
+    truck = models.ForeignKey(
+        'driver.Truck',
+        on_delete=models.PROTECT,
+        related_name='dumpsite_inspections',
+    )
+    dumpsite = models.ForeignKey(
+        Dumpsite,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='truck_inspections',
+    )
+    driver_shift = models.ForeignKey(
+        'driver.DriverShift',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='truck_inspections',
+    )
+    submitted_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name='submitted_truck_inspections',
+    )
+    inspection_type = models.CharField(
+        max_length=20,
+        choices=InspectionType.choices,
+        default=InspectionType.POST_SHIFT,
+        db_index=True,
+    )
+    inspection_state = models.CharField(
+        max_length=25,
+        choices=[
+            ('PASSED', 'Passed Inspection'),
+            ('PENDING_INSPECTION', 'Pending Inspection'),
+            ('FAILED', 'Failed Inspection'),
+        ],
+        db_index=True,
+    )
+    mechanical_condition = models.CharField(
+        max_length=25,
+        choices=[
+            ('OPERATIONAL', 'Operational'),
+            ('NEEDS_REPAIR', 'Needs Repair'),
+            ('CRITICAL', 'Critical'),
+        ],
+        default='OPERATIONAL',
+    )
+    notes = models.TextField(blank=True, default='')
+    checklist_data = models.JSONField(default=dict, blank=True)
+    hold_created = models.BooleanField(default=False)
+    inspected_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'dumpsite_dumpsitetruckinspection'
+        ordering = ['-inspected_at', '-id']
+
+    def __str__(self):
+        return f"Inspection #{self.id} for Truck #{self.truck_id} ({self.inspection_state})"
+
 FILL_LEVEL_MULTIPLIERS = {
     'nearly_empty':   0.12,
     'quarter':        0.35,
@@ -174,6 +242,11 @@ FILL_LEVEL_MULTIPLIERS = {
 @receiver(post_save, sender='driver.Truck')
 def sync_fill_estimates(sender, instance, created, **kwargs):
     if kwargs.get('raw', False):
+        return
+    if getattr(instance, 'commissioning_provenance', None) not in (
+        'commissioned_verified',
+        'commissioned_date_unknown',
+    ):
         return
         
     for level, multiplier in FILL_LEVEL_MULTIPLIERS.items():

@@ -436,37 +436,24 @@ export default function MiniMap({ height = 260, focusCoordinate = null, layers =
 
       // Schedules + stop validations — only for roles that show stops
       if (!isDriver) {
-        api.get('/api/driver/collection-schedules/?paginate=false')
+        const userBarangayId = !isAdmin && user
+          ? (user.barangay_id ?? (typeof user.barangay === 'object' ? user.barangay?.id : (typeof user.barangay === 'number' || (typeof user.barangay === 'string' && /^\d+$/.test(user.barangay)) ? Number(user.barangay) : null)))
+          : null
+        const params = userBarangayId ? { barangay_id: userBarangayId } : {}
+
+        api.get('/api/public/map/pins/', { params })
           .then(res => {
             const raw = Array.isArray(res.data) ? res.data : (res.data?.results || [])
-            setSchedules(filterBarangayItems(raw, user))
+            setSchedules(raw)
           })
           .catch(() => { })
 
-        api.get('/api/watcher/stop-validations/')
+        api.get('/api/public/map/stop-statuses/', { params })
           .then(res => {
-            const rows = res.data?.results ?? res.data ?? []
+            const rows = Array.isArray(res.data) ? res.data : (res.data?.results || [])
             const snap = buildStopValidationSnapshot(rows)
             setStopStatusMap(snap.statusMap)
-
-            const details = new Map()
-            rows.forEach(ps => {
-              const scheduleId = ps.schedule_id ?? ps.schedule?.id ?? ps.schedule?.pk
-              const stopOrder = Number(ps.stop_order ?? ps.stopOrder ?? ps.stop_id)
-              if (scheduleId == null || Number.isNaN(stopOrder)) return
-              let collectedAt = ''
-              try {
-                if (ps.collected_at) {
-                  const d = new Date(ps.collected_at)
-                  if (!isNaN(d)) collectedAt = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                }
-              } catch { }
-              details.set(`${scheduleId}:${stopOrder}`, {
-                collectedAt,
-                truck: ps.truck_plate || ps.truck || '',
-              })
-            })
-            setStopDetailsMap(details)
+            setStopDetailsMap(snap.detailsMap)
           })
           .catch(() => { })
       }
@@ -566,10 +553,16 @@ export default function MiniMap({ height = 260, focusCoordinate = null, layers =
       })
 
       pending.forEach(schedule => {
-        const wps = schedule.waypoints || []
-        wps.slice(1).forEach((wp, i) => {
-          if (!wp.lat || !wp.lng) return
-          const stopOrder = i + 1
+        const stops = Array.isArray(schedule.stops)
+          ? schedule.stops
+          : (Array.isArray(schedule.waypoints) ? schedule.waypoints.slice(1) : [])
+
+        stops.forEach((wp, i) => {
+          if (!wp || wp.lat == null || wp.lng == null) return
+          const lat = Number(wp.lat)
+          const lng = Number(wp.lng)
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+          const stopOrder = wp.order ?? (i + 1)
           const statusKey = `${schedule.id}:${stopOrder}`
           // Fall back to PENDING_INSPECTION if no record exists yet
           const rawStatus = stopStatusMapRef.current.get(statusKey)
@@ -577,7 +570,7 @@ export default function MiniMap({ height = 260, focusCoordinate = null, layers =
           const details = stopDetailsMapRef.current.get(statusKey)
 
           const color = STOP_COLORS_MAP[stopStatus]
-          const marker = L.marker([Number(wp.lat), Number(wp.lng)], {
+          const marker = L.marker([lat, lng], {
             icon: L.divIcon({
               html: buildStopMarkerHtml(stopOrder, stopStatus, details),
               className: '',
@@ -591,7 +584,16 @@ export default function MiniMap({ height = 260, focusCoordinate = null, layers =
               <span style="font-size:10px;color:${color};font-weight:700;text-transform:uppercase;">
                 ${STOP_STATUS_LABELS[stopStatus] || stopStatus}
               </span><br/>
-              ${details?.collectedAt ? `<div style="font-size:10px;color:#10b981;margin-top:4px;">✓ ${details.collectedAt}</div>` : ''}
+              ${details?.collectedAt
+                ? (details.isToday === false
+                    ? `<div style="font-size:10px;color:#0ea5e9;margin-top:4px;">✓ Yesterday ${details.collectedAt}</div>`
+                    : `<div style="font-size:10px;color:#10b981;margin-top:4px;">✓ ${details.collectedAt}</div>`
+                  )
+                : (details?.isToday === false
+                    ? `<div style="font-size:10px;color:#0ea5e9;margin-top:4px;">Yesterday</div>`
+                    : ''
+                  )
+              }
               ${!rawStatus ? `<div style="font-size:10px;color:#94a3b8;margin-top:4px;">No watcher data yet</div>` : ''}
             </div>`)
 

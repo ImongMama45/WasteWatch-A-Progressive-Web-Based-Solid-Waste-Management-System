@@ -19,6 +19,7 @@ import { useOnline } from '../../../hooks/useOnline'
 import { getQueue } from '../../../hooks/useOfflineQueue'
 import { useAuth } from '../../../context/AuthContext'
 import { blobToBase64, estimateQueueStorageMB, isNearStorageLimit } from '../../../utils/photoStorage'
+import { extractStopActionError } from '../watcherRouteHelpers'
 
 export default function PostCollectionOverlay({
   visible,
@@ -51,6 +52,10 @@ export default function PostCollectionOverlay({
       return
     }
     if (!outcome) { setError('Please select an inspection outcome.'); return }
+    if (outcome === 'failed' && !notes.trim()) {
+      setError('A reason is required when collection is marked as missed.')
+      return
+    }
     if (photos.length === 0) { setError('At least one photo is required.'); return }
     if (!gpsPos) { setError('GPS location required.'); return }
 
@@ -84,13 +89,22 @@ export default function PostCollectionOverlay({
         return
       } catch (err) {
         if (err.response?.status === 400) {
-          setError(err.response?.data?.error || 'Stop already verified')
+          const msg = extractStopActionError(err, 'Stop already verified')
+          setError(msg)
+          if (msg.toLowerCase().includes('reason')) {
+            setSubmitting(false)
+            return
+          }
           setTimeout(() => onComplete(), 2500)
+          return
+        } else if (err.response?.status === 403) {
+          setError(extractStopActionError(err, 'Not authorized for this stop.'))
+          setSubmitting(false)
           return
         } else if (!err.response) {
           // Network blip → fall through to queue
         } else {
-          setError('Server error. Please try again.')
+          setError(extractStopActionError(err, 'Server error. Please try again.'))
           setSubmitting(false)
           return
         }
@@ -128,7 +142,8 @@ export default function PostCollectionOverlay({
   if (!visible) return null
 
   const stopLabel = task?.label || `Stop ${task?.stop_order}`
-  const canSubmit = outcome && gpsPos && photos.length > 0 && !submitting
+  const requiresReason = outcome === 'failed'
+  const canSubmit = outcome && gpsPos && photos.length > 0 && (!requiresReason || notes.trim().length > 0) && !submitting
 
   return (
     <div style={{
@@ -350,9 +365,16 @@ export default function PostCollectionOverlay({
 
           {/* Notes */}
           <div style={{ marginBottom: 16 }}>
-            <label style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: '.07em', display: 'block', marginBottom: 7 }}>NOTES (OPTIONAL)</label>
+            <label style={{ fontSize: 10, fontWeight: 800, color: requiresReason ? '#ef4444' : '#94a3b8', letterSpacing: '.07em', display: 'block', marginBottom: 7 }}>
+              {requiresReason ? 'REASON / NOTES *' : 'NOTES (OPTIONAL)'}
+            </label>
             <textarea className="form-input" rows={2} value={notes} onChange={e => setNotes(e.target.value)}
-              placeholder="Describe the condition of the stop…" style={{ resize: 'vertical' }} />
+              placeholder={requiresReason ? 'Explain why collection was missed…' : 'Describe the condition of the stop…'} style={{ resize: 'vertical' }} />
+            {requiresReason && !notes.trim() && (
+              <p style={{ fontSize: 11, color: '#ef4444', marginTop: 6, fontWeight: 600 }}>
+                A reason is required when collection is marked as missed.
+              </p>
+            )}
           </div>
 
           {/* Multi-photo (mandatory) */}

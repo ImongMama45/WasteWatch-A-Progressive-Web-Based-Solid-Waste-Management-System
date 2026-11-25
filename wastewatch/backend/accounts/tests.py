@@ -122,7 +122,16 @@ class SelfServiceEndpointsStillWorkTests(APITestCase):
     def test_me_patch_cannot_change_role(self):
         citizen = make_user('me2@test.com')
         self.client.force_authenticate(citizen)
-        self.client.patch('/api/auth/me/', {'role': 'admin', 'full_name': 'Renamed'}, format='json')
+        res_forbidden = self.client.patch(
+            '/api/auth/me/', {'role': 'admin', 'full_name': 'Renamed'}, format='json'
+        )
+        self.assertEqual(res_forbidden.status_code, 403)
+        citizen.refresh_from_db()
+        self.assertEqual(citizen.role, UserRole.CITIZEN)
+        self.assertEqual(citizen.full_name, 'me2')
+
+        res_ok = self.client.patch('/api/auth/me/', {'full_name': 'Renamed'}, format='json')
+        self.assertEqual(res_ok.status_code, 200)
         citizen.refresh_from_db()
         self.assertEqual(citizen.role, UserRole.CITIZEN)
         self.assertEqual(citizen.full_name, 'Renamed')
@@ -328,4 +337,79 @@ class BarangayHotspotFilteringTests(APITestCase):
         self.assertTrue(GarbageHotspot.objects.filter(id=self.h6_inactive.id, is_active=False).exists())
         self.assertEqual(self.brgy1.hotspots.count(), 3)
         self.assertEqual(self.brgy2.hotspots.count(), 3)
+
+
+class UserWorkerTeamBoundaryTests(APITestCase):
+    """Round 5B.2 B1-08 & OD-1 regression tests for UserViewSet / AdminUserSerializer."""
+
+    def setUp(self):
+        self.admin = make_user('uwt_admin@test.com', role=UserRole.ADMIN)
+        self.driver = make_user('uwt_driver@test.com', role=UserRole.DRIVER)
+        self.client.force_authenticate(self.admin)
+
+    def test_active_shift_od1_fail_closed_and_protected_delete_return_409(self):
+        from datetime import time
+        from driver.models import CollectionSchedule, DriverShift, Truck, Worker
+        from driver.team_service import TeamService
+
+        team = TeamService.create_team(name='UWT Team', code='UWT-1')
+        worker = Worker.objects.create(employee_id='EMP-UWT-1', full_name='UWT Driver', user=self.driver)
+        membership = TeamService.assign_member(team.id, worker.id, 'driver', created_by=self.admin)
+
+        truck = Truck.objects.create(plate_number='UWT-101', status='active')
+        sched = CollectionSchedule.objects.create(
+            truck=truck,
+            driver=self.driver,
+            default_team=team,
+            start_time=time(8, 0),
+            end_time=time(16, 0),
+        )
+        shift = DriverShift.objects.create(driver=self.driver, truck=truck, schedule=sched, is_active=True)
+
+        # 1. Active shift blocks deactivating user, changing role, and deleting user -> 409
+        res_deact_shift = self.client.patch(
+            f'/api/accounts/users/{self.driver.id}/', {'is_active': False}, format='json'
+        )
+        self.assertEqual(res_deact_shift.status_code, 409)
+
+        res_role_shift = self.client.patch(
+            f'/api/accounts/users/{self.driver.id}/', {'role': UserRole.CITIZEN}, format='json'
+        )
+        self.assertEqual(res_role_shift.status_code, 409)
+
+        res_del_shift = self.client.delete(f'/api/accounts/users/{self.driver.id}/')
+        self.assertEqual(res_del_shift.status_code, 409)
+
+        # 2. Outside active shift, OD-1 fail-closed rejects deactivating/role change while active membership exists -> 409
+        shift.is_active = False
+        shift.save(update_fields=['is_active'])
+
+        res_od1 = self.client.patch(
+            f'/api/accounts/users/{self.driver.id}/', {'is_active': False}, format='json'
+        )
+        self.assertEqual(res_od1.status_code, 409)
+        self.driver.refresh_from_db()
+        self.assertTrue(self.driver.is_active)
+
+        # 3. After deactivating team membership, ProtectedError from Worker(user=PROTECT) returns 409 (not 500)
+        TeamService.deactivate_member(membership.id, authorized_by=self.admin)
+        res_del_prot = self.client.delete(f'/api/accounts/users/{self.driver.id}/')
+        self.assertEqual(res_del_prot.status_code, 409)
+        self.assertTrue(User.objects.filter(pk=self.driver.id).exists())
+
+    def test_admin_user_serializer_update_uses_select_for_update_of_self(self):
+        import inspect
+        from accounts.serializers import AdminUserSerializer
+        from driver.models import SanitationTeamMembership
+
+        src = inspect.getsource(AdminUserSerializer.update)
+        self.assertIn("select_for_update(of=('self',))", src)
+        qs = (
+            SanitationTeamMembership.objects
+            .select_related('team')
+            .filter(is_active=True)
+            .select_for_update(of=('self',))
+        )
+        self.assertEqual(qs.query.select_for_update_of, ('self',))
+
 

@@ -3,14 +3,19 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
-from django.db.models import Count, Q, Subquery, OuterRef, IntegerField
+from django.db.models import Count, Q, Subquery, OuterRef, IntegerField, Case, When, Value, Max
 from django.db.models.functions import Coalesce
 from django.db import transaction
 from django.shortcuts import get_object_or_404
+from django.core.cache import cache
 
 from django.contrib.auth import get_user_model
 from accounts.permissions import is_admin_user, IsAdminRole
 from .models import CommunityPost, PostLike, PostComment, PostReport
+
+from django.db.models.signals import post_save, post_delete
+from django.dispatch import receiver
+from watcher.models import GarbageReport
 
 User = get_user_model()
 from .serializers import (
@@ -20,10 +25,39 @@ from .serializers import (
 )
 
 
+class PaginatedDict(dict):
+    """
+    Paginated dictionary supporting both direct iteration (for backwards compatibility)
+    and standard DRF paginated structure ('count', 'next', 'previous', 'results').
+    """
+    def __iter__(self):
+        return iter(self.get('results', []))
+
+
 class CommunityPagination(PageNumberPagination):
-    page_size = 15
+    page_size = 10
     page_size_query_param = 'page_size'
-    max_page_size = 50
+    max_page_size = 30
+
+    def get_page_size(self, request):
+        if self.page_size_query_param:
+            try:
+                val = int(request.query_params[self.page_size_query_param])
+                if val in (10, 20, 30):
+                    return val
+                elif val > 0:
+                    return min(val, self.max_page_size)
+            except (KeyError, ValueError, TypeError):
+                pass
+        return self.page_size
+
+    def get_paginated_response(self, data):
+        return Response(PaginatedDict({
+            'count': self.page.paginator.count,
+            'next': self.get_next_link(),
+            'previous': self.get_previous_link(),
+            'results': data,
+        }))
 
 
 class CommunityOrderingFilter(filters.OrderingFilter):
@@ -51,7 +85,26 @@ class CommunityOrderingFilter(filters.OrderingFilter):
                 if '-id' not in ordering and 'id' not in ordering:
                     ordering.append('-id')
                 return ordering
-        return ['-created_at', '-id']
+        return ['feed_priority', '-created_at', '-id']
+
+
+def get_community_cache_version():
+    return cache.get('comm_cache_ver', 1)
+
+
+def bump_community_cache_version():
+    try:
+        cache.incr('comm_cache_ver')
+    except (ValueError, Exception):
+        cache.set('comm_cache_ver', 2)
+
+
+@receiver(post_save, sender=CommunityPost)
+@receiver(post_delete, sender=CommunityPost)
+@receiver(post_save, sender=GarbageReport)
+@receiver(post_delete, sender=GarbageReport)
+def on_community_content_change(sender, **kwargs):
+    bump_community_cache_version()
 
 
 class CommunityPostViewSet(viewsets.ModelViewSet):
@@ -157,9 +210,45 @@ class CommunityPostViewSet(viewsets.ModelViewSet):
         if report_id and str(report_id).isdigit():
             qs = qs.filter(report_id=int(report_id))
 
-        return qs.order_by('-created_at')
+        # Deterministic feed priority ranking:
+        # 1. Active emergency-related content requiring public attention (advisories or critical/high-severity reports)
+        # 2. Verified official waste reports (approved/resolved)
+        # 3. Pinned or featured content
+        # 4. Regular community discussions and reports
+        qs = qs.annotate(
+            feed_priority=Case(
+                When(
+                    Q(category='advisory') |
+                    (Q(report__isnull=False) & Q(report__status='approved') & (Q(report__severity='high') | Q(report__issue_type='hazardous'))),
+                    then=Value(1)
+                ),
+                When(
+                    Q(report__isnull=False) & Q(report__status__in=['approved', 'resolved']),
+                    then=Value(2)
+                ),
+                default=Value(4),
+                output_field=IntegerField()
+            )
+        )
+
+        return qs
 
     def list(self, request, *args, **kwargs):
+        # Short-lived caching for anonymous public requests to optimize feed performance
+        is_anon = not request.user.is_authenticated
+        cache_key = None
+        if is_anon:
+            ver = get_community_cache_version()
+            cache_key = (
+                f"comm_feed_v{ver}_b{request.query_params.get('barangay_id')}_"
+                f"t{request.query_params.get('post_type')}_c{request.query_params.get('category')}_"
+                f"p{request.query_params.get('page', '1')}_ps{request.query_params.get('page_size', '10')}_"
+                f"o{request.query_params.get('ordering', '')}"
+            )
+            cached_data = cache.get(cache_key)
+            if cached_data is not None:
+                return Response(cached_data)
+
         queryset = self.filter_queryset(self.get_queryset())
         page = self.paginate_queryset(queryset)
         posts = page if page is not None else queryset
@@ -207,8 +296,32 @@ class CommunityPostViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(posts, many=True)
         if page is not None:
-            return self.get_paginated_response(serializer.data)
+            resp = self.get_paginated_response(serializer.data)
+            if is_anon and cache_key:
+                cache.set(cache_key, resp.data, timeout=30)
+            return resp
+
+        if is_anon and cache_key:
+            cache.set(cache_key, serializer.data, timeout=30)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='latest-check', permission_classes=[permissions.AllowAny])
+    def latest_check(self, request):
+        """
+        Lightweight check endpoint for background polling without downloading full items.
+        Returns latest post ID, latest creation timestamp, and total count matching current filters.
+        """
+        qs = self.get_queryset()
+        agg = qs.aggregate(
+            latest_id=Max('id'),
+            latest_timestamp=Max('created_at'),
+            total_count=Count('id')
+        )
+        return Response({
+            'latest_id': agg['latest_id'],
+            'latest_timestamp': agg['latest_timestamp'],
+            'count': agg['total_count'] or 0,
+        })
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -245,6 +358,7 @@ class CommunityPostViewSet(viewsets.ModelViewSet):
         # Default to user's assigned barangay if not explicitly passed
         barangay = serializer.validated_data.get('barangay') or getattr(user, 'barangay', None)
         serializer.save(author=user, barangay=barangay, post_type='discussion')
+        bump_community_cache_version()
 
     def perform_update(self, serializer):
         post = self.get_object()
@@ -255,6 +369,7 @@ class CommunityPostViewSet(viewsets.ModelViewSet):
         elif post.author_id != user.id and not is_admin_user(user):
             raise PermissionDenied("You can only edit your own posts.")
         serializer.save()
+        bump_community_cache_version()
 
     def perform_destroy(self, instance):
         user = self.request.user
@@ -264,6 +379,7 @@ class CommunityPostViewSet(viewsets.ModelViewSet):
         elif instance.author_id != user.id and not is_admin_user(user):
             raise PermissionDenied("You can only delete your own posts.")
         instance.delete()
+        bump_community_cache_version()
 
     @action(detail=True, methods=['post', 'delete'])
     def like(self, request, pk=None):
@@ -388,6 +504,7 @@ class CommunityPostViewSet(viewsets.ModelViewSet):
 
         post.is_hidden = is_hidden
         post.save(update_fields=['is_hidden', 'updated_at'])
+        bump_community_cache_version()
 
         # Update any pending reports on this post
         if post.is_hidden:

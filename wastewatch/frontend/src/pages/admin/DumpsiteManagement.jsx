@@ -9,11 +9,14 @@
  * Uses same Leaflet CDN approach as MapView.jsx
  */
 
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
+import { UserPlus, UserCheck, UserMinus, Shield } from 'lucide-react'
 import DashboardLayout from '../../components/DashboardLayout'
 import { useDumpsites } from '../../hooks/useDumpsites'
 import { useNotification } from '../../context/NotificationContext'
 import api from '../../api/client'
+import { assignDumpsiteOperator, removeDumpsiteOperator } from '../../api/dumpsiteApi'
+import ConfirmActionDialog from '../dumpsite/components/ConfirmActionDialog'
 import { getApiErrorMessage } from '../../utils/notificationHelpers'
 import { FeedCardSkeleton, MapSkeleton } from '../../components/ui/Skeleton'
 
@@ -533,11 +536,27 @@ export default function DumpsiteManagement() {
   const markersRef = useRef({})       // id → leaflet marker
   const pendingRef = useRef(null)     // temp marker while modal is open
 
-  const { sites, loading, saveSite, deleteSite: apiDeleteSite, createAccount } = useDumpsites()
+  const { sites, loading, refresh, saveSite, deleteSite: apiDeleteSite, createAccount } = useDumpsites()
   const { notify } = useNotification()
   const [barangays, setBarangays] = useState([])
   const [barangayGeo, setBarangayGeo] = useState(null)
   const barangayGeoRef = useRef(null)
+
+  const [operatorUsers, setOperatorUsers] = useState([])
+  const [assignUserId, setAssignUserId] = useState('')
+  const [assignMakePrimary, setAssignMakePrimary] = useState(true)
+  const [operatorConfirm, setOperatorConfirm] = useState(null) // { mode: 'assign'|'primary'|'remove', site, userId, userName, makePrimary, currentSiteName }
+  const [operatorSubmitting, setOperatorSubmitting] = useState(false)
+
+  const loadOperatorUsers = useCallback(async () => {
+    try {
+      const res = await api.get('/api/accounts/users/?role=dumpsite&paginate=false')
+      const list = Array.isArray(res.data) ? res.data : (res.data?.results || [])
+      setOperatorUsers(list.filter((u) => (u.role || '').toLowerCase() === 'dumpsite'))
+    } catch {
+      // ignore if unavailable
+    }
+  }, [])
 
   const [mapReady, setMapReady] = useState(false)
   const [modal, setModal] = useState(null)  // null | 'add' | site obj
@@ -557,6 +576,7 @@ export default function DumpsiteManagement() {
   // ── Load Leaflet CDN & Data ────────────────────────────────────────────────
   useEffect(() => {
     api.get('/api/barangays/').then(res => setBarangays(res.data))
+    loadOperatorUsers()
     fetch('/data/lucena_barangays.geojson')
       .then(r => r.json())
       .then(data => { setBarangayGeo(data); barangayGeoRef.current = data })
@@ -677,6 +697,38 @@ export default function DumpsiteManagement() {
   }, [addMode])
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
+
+  async function handleConfirmOperatorAction() {
+    if (!operatorConfirm) return
+    setOperatorSubmitting(true)
+    try {
+      if (operatorConfirm.mode === 'remove') {
+        const updated = await removeDumpsiteOperator(operatorConfirm.site.id, {
+          user_id: Number(operatorConfirm.userId),
+        })
+        setSelected(updated)
+        showToast(`Removed operator ${operatorConfirm.userName} from ${operatorConfirm.site.name}.`)
+      } else {
+        const updated = await assignDumpsiteOperator(operatorConfirm.site.id, {
+          user_id: Number(operatorConfirm.userId),
+          make_primary: Boolean(operatorConfirm.makePrimary),
+        })
+        setSelected(updated)
+        if (operatorConfirm.mode === 'assign') setAssignUserId('')
+        showToast(
+          operatorConfirm.mode === 'primary'
+            ? `${operatorConfirm.userName} set as primary operator for ${operatorConfirm.site.name}.`
+            : `Assigned ${operatorConfirm.userName} to ${operatorConfirm.site.name}.`
+        )
+      }
+      setOperatorConfirm(null)
+      await Promise.all([refresh(), loadOperatorUsers()])
+    } catch (err) {
+      notify({ variant: 'error-outline', message: getApiErrorMessage(err, 'Failed to update operator assignment.') })
+    } finally {
+      setOperatorSubmitting(false)
+    }
+  }
 
   async function handleSave(form, accountData) {
     let res
@@ -910,6 +962,36 @@ export default function DumpsiteManagement() {
           onClose={() => setOutOfBoundsWarning(null)} 
         />
       )}
+
+      <ConfirmActionDialog
+        open={Boolean(operatorConfirm)}
+        title={
+          operatorConfirm?.mode === 'remove'
+            ? `Remove Operator — ${operatorConfirm?.userName || ''}`
+            : operatorConfirm?.mode === 'primary'
+            ? `Set Primary Operator — ${operatorConfirm?.userName || ''}`
+            : `Assign Operator to ${operatorConfirm?.site?.name || ''}`
+        }
+        description={
+          operatorConfirm?.mode === 'remove'
+            ? `Remove ${operatorConfirm?.userName} from ${operatorConfirm?.site?.name}? They will lose facility operator access to this dumpsite until reassigned.`
+            : operatorConfirm?.currentSiteName && operatorConfirm?.currentSiteName !== operatorConfirm?.site?.name
+            ? `${operatorConfirm?.userName} is currently assigned to ${operatorConfirm?.currentSiteName}. Confirming will reassign them to ${operatorConfirm?.site?.name}.`
+            : `Assign ${operatorConfirm?.userName} to ${operatorConfirm?.site?.name}${operatorConfirm?.makePrimary ? ' as the primary operator' : ''}?`
+        }
+        confirmLabel={
+          operatorConfirm?.mode === 'remove'
+            ? 'Remove Operator'
+            : operatorConfirm?.mode === 'primary'
+            ? 'Set Primary'
+            : 'Confirm Assignment'
+        }
+        variant={operatorConfirm?.mode === 'remove' ? 'danger' : 'primary'}
+        requireNotes={false}
+        submitting={operatorSubmitting}
+        onConfirm={handleConfirmOperatorAction}
+        onCancel={() => setOperatorConfirm(null)}
+      />
 
       <div className="dm-workbench">
 
@@ -1317,30 +1399,143 @@ export default function DumpsiteManagement() {
                         </div>
                       </div>
 
-                      {/* Operational Staff */}
+                      {/* Operational Staff & Operator Assignment (Admin Only) */}
                       <div style={{ background: '#ffffff', borderRadius: 8, border: '1px solid #e4e6eb', padding: '14px 16px' }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 8 }}>
-                          Assigned Staff ({staff.length})
-                        </span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.04em', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                            <Shield size={13} color="#16a34a" /> Assigned Operators ({staff.length})
+                          </span>
+                          {curSite.operator_name && (
+                            <span style={{ fontSize: 10.5, fontWeight: 700, color: '#15803d', background: '#e7f5eb', border: '1px solid #bbf7d0', borderRadius: 4, padding: '2px 6px' }}>
+                              Primary: {curSite.operator_name}
+                            </span>
+                          )}
+                        </div>
+
                         {staff.length === 0 ? (
-                          <div style={{ fontSize: 12, color: '#8a8d91', fontStyle: 'italic' }}>
-                            No dedicated facility operator accounts registered.
+                          <div style={{ fontSize: 12, color: '#8a8d91', fontStyle: 'italic', marginBottom: 12 }}>
+                            No dedicated facility operator accounts assigned yet.
                           </div>
                         ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {staff.map((ac, idx) => (
-                              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '4px 0' }}>
-                                <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: '#65676b' }}>
-                                  {ac.full_name?.[0]?.toUpperCase() || 'S'}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                            {staff.map((ac) => {
+                              const isPrimary = String(curSite.operator) === String(ac.id)
+                              return (
+                                <div key={ac.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 10px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                    <div style={{ width: 26, height: 26, borderRadius: '50%', background: isPrimary ? '#e7f5eb' : '#f0f2f5', color: isPrimary ? '#15803d' : '#65676b', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+                                      {ac.full_name?.[0]?.toUpperCase() || 'S'}
+                                    </div>
+                                    <div style={{ minWidth: 0 }}>
+                                      <div style={{ fontWeight: 600, fontSize: 12.5, color: '#1c1e21', display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                                        <span>{ac.full_name || 'Operator'}</span>
+                                        {isPrimary && (
+                                          <span style={{ fontSize: 9.5, fontWeight: 700, color: '#15803d', background: '#e7f5eb', border: '1px solid #bbf7d0', borderRadius: 4, padding: '1px 5px' }}>
+                                            PRIMARY
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div style={{ fontSize: 11, color: '#65676b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ac.email}</div>
+                                    </div>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                                    {!isPrimary && (
+                                      <button
+                                        type="button"
+                                        title="Set as primary operator"
+                                        onClick={() => setOperatorConfirm({
+                                          mode: 'primary',
+                                          site: curSite,
+                                          userId: ac.id,
+                                          userName: ac.full_name || ac.email,
+                                          makePrimary: true,
+                                        })}
+                                        style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1d4ed8', borderRadius: 4, padding: '4px 7px', fontSize: 10.5, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                                      >
+                                        <UserCheck size={11} /> Primary
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      title="Remove operator from facility"
+                                      onClick={() => setOperatorConfirm({
+                                        mode: 'remove',
+                                        site: curSite,
+                                        userId: ac.id,
+                                        userName: ac.full_name || ac.email,
+                                      })}
+                                      style={{ background: '#fee2e2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: 4, padding: '4px 7px', fontSize: 10.5, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                                    >
+                                      <UserMinus size={11} /> Remove
+                                    </button>
+                                  </div>
                                 </div>
-                                <div>
-                                  <div style={{ fontWeight: 600, color: '#1c1e21' }}>{ac.full_name || 'Staff Member'}</div>
-                                  <div style={{ fontSize: 11, color: '#65676b' }}>{ac.email}</div>
-                                </div>
-                              </div>
-                            ))}
+                              )
+                            })}
                           </div>
                         )}
+
+                        {/* Assign / Reassign Operator Form */}
+                        <div style={{ paddingTop: 10, borderTop: '1px solid #e4e6eb', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#1c1e21', display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <UserPlus size={13} color="#16a34a" /> Assign or Reassign Operator
+                          </div>
+                          <select
+                            value={assignUserId}
+                            onChange={(e) => setAssignUserId(e.target.value)}
+                            style={{ width: '100%', height: 34, borderRadius: 6, border: '1px solid #ced0d4', padding: '0 8px', fontSize: 12, background: '#ffffff', color: '#1c1e21' }}
+                          >
+                            <option value="">-- Select dumpsite operator user --</option>
+                            {operatorUsers.map((u) => {
+                              const currentSite = u.dumpsite_name || (u.dumpsite ? `Site #${u.dumpsite}` : 'Unassigned')
+                              return (
+                                <option key={u.id} value={u.id}>
+                                  {u.full_name || u.username} ({currentSite})
+                                </option>
+                              )
+                            })}
+                          </select>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#4b5563', cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={assignMakePrimary}
+                              onChange={(e) => setAssignMakePrimary(e.target.checked)}
+                            />
+                            Make primary operator for this facility
+                          </label>
+                          <button
+                            type="button"
+                            disabled={!assignUserId}
+                            onClick={() => {
+                              const targetUser = operatorUsers.find((u) => String(u.id) === String(assignUserId))
+                              if (!targetUser) return
+                              setOperatorConfirm({
+                                mode: 'assign',
+                                site: curSite,
+                                userId: targetUser.id,
+                                userName: targetUser.full_name || targetUser.email || targetUser.username,
+                                makePrimary: assignMakePrimary,
+                                currentSiteName: targetUser.dumpsite_name || null,
+                              })
+                            }}
+                            style={{
+                              height: 32,
+                              borderRadius: 6,
+                              border: 'none',
+                              background: assignUserId ? '#16a34a' : '#e4e6eb',
+                              color: assignUserId ? '#ffffff' : '#8a8d91',
+                              fontSize: 12,
+                              fontWeight: 600,
+                              cursor: assignUserId ? 'pointer' : 'not-allowed',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 5,
+                            }}
+                          >
+                            <UserPlus size={13} /> Assign Operator to Facility
+                          </button>
+                        </div>
                       </div>
 
                       {/* Site Notes */}

@@ -7,13 +7,11 @@
  * Zero emojis. Material / Lucide SVG icons only.
  */
 
-import { Building2, Calendar, RefreshCw, PlusCircle } from 'lucide-react'
+import { Building2, Calendar, PlusCircle } from 'lucide-react'
 
 export default function NewsHeader({
   isAdmin = false,
   onCreateNotice,
-  onRefresh,
-  isRefreshing = false,
 }) {
   const currentDateStr = new Date().toLocaleDateString('en-PH', {
     timeZone: 'Asia/Manila',
@@ -29,10 +27,10 @@ export default function NewsHeader({
       style={{
         background: '#ffffff',
         border: '1px solid #e2e8f0',
-        borderRadius: 16,
-        padding: '24px 28px',
-        marginBottom: 24,
-        boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+        borderRadius: 12,
+        padding: '16px 20px',
+        marginBottom: 20,
+        boxShadow: '0 1px 3px rgba(15, 23, 42, 0.03)',
       }}
     >
       <div
@@ -40,54 +38,48 @@ export default function NewsHeader({
           display: 'flex',
           alignItems: 'flex-start',
           justifyContent: 'space-between',
-          gap: 20,
+          gap: 16,
           flexWrap: 'wrap',
         }}
       >
-        <div style={{ flex: '1 1 500px', minWidth: 0 }}>
-          {/* Municipal Eyebrow / Badges */}
+        <div style={{ flex: '1 1 480px', minWidth: 0 }}>
+          {/* Municipal Agency & Date Eyebrow */}
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: 8,
               flexWrap: 'wrap',
-              marginBottom: 10,
+              marginBottom: 6,
             }}
           >
             <div
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 6,
+                gap: 5,
                 fontSize: 11,
                 fontWeight: 800,
-                letterSpacing: '.08em',
+                letterSpacing: '.06em',
                 textTransform: 'uppercase',
-                color: '#16a34a',
-                background: '#f0fdf4',
-                border: '1px solid #bbf7d0',
-                padding: '3px 10px',
-                borderRadius: 20,
+                color: '#15803d',
               }}
             >
-              <Building2 size={13} strokeWidth={2.2} />
+              <Building2 size={13} strokeWidth={2.4} />
               <span>Lucena City CENRO</span>
             </div>
 
-            {/* Localized Date Badge */}
+            <span style={{ color: '#cbd5e1', fontSize: 12 }}>·</span>
+
+            {/* Localized Date */}
             <div
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 5,
-                fontSize: 11,
+                gap: 4,
+                fontSize: 11.5,
                 fontWeight: 600,
                 color: '#64748b',
-                background: '#f8fafc',
-                border: '1px solid #e2e8f0',
-                padding: '3px 10px',
-                borderRadius: 20,
               }}
             >
               <Calendar size={12} strokeWidth={2.2} style={{ color: '#059669' }} />
@@ -98,12 +90,12 @@ export default function NewsHeader({
           {/* Main Title */}
           <h1
             style={{
-              fontSize: 24,
+              fontSize: 20,
               fontWeight: 800,
               color: '#0f172a',
-              margin: '0 0 6px 0',
+              margin: '0 0 4px 0',
               letterSpacing: '-0.02em',
-              lineHeight: 1.25,
+              lineHeight: 1.28,
             }}
           >
             Lucena City CENRO Public Information Hub
@@ -116,7 +108,7 @@ export default function NewsHeader({
               color: '#64748b',
               margin: 0,
               maxWidth: 720,
-              lineHeight: 1.55,
+              lineHeight: 1.5,
             }}
           >
             The official municipal information portal for solid waste management advisories,
@@ -129,43 +121,10 @@ export default function NewsHeader({
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
+            gap: 8,
             flexWrap: 'wrap',
           }}
         >
-          {/* Refresh Action */}
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={isRefreshing}
-            aria-label="Refresh notices"
-            title="Refresh announcements and active advisories"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '9px 14px',
-              borderRadius: 10,
-              background: '#f8fafc',
-              border: '1px solid #cbd5e1',
-              color: '#475569',
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: isRefreshing ? 'default' : 'pointer',
-              transition: 'background .15s, border-color .15s',
-              minHeight: 40,
-            }}
-          >
-            <RefreshCw
-              size={14}
-              strokeWidth={2.2}
-              style={{
-                animation: isRefreshing ? 'spin 1s linear infinite' : 'none',
-              }}
-            />
-            <span>{isRefreshing ? 'Updating…' : 'Refresh'}</span>
-          </button>
-
           {/* Admin Create Notice Action */}
           {isAdmin && (
             <button
@@ -175,21 +134,21 @@ export default function NewsHeader({
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 6,
-                padding: '9px 16px',
-                borderRadius: 10,
+                gap: 5,
+                padding: '7px 14px',
+                borderRadius: 8,
                 background: '#16a34a',
                 color: '#ffffff',
                 border: '1px solid #15803d',
-                fontWeight: 800,
+                fontWeight: 700,
                 fontSize: 12,
                 cursor: 'pointer',
-                boxShadow: '0 2px 8px rgba(22,163,74,0.25)',
+                boxShadow: '0 1px 3px rgba(22,163,74,0.2)',
                 transition: 'background .15s, transform .15s',
-                minHeight: 40,
+                minHeight: 36,
               }}
             >
-              <PlusCircle size={15} strokeWidth={2.5} />
+              <PlusCircle size={14} strokeWidth={2.4} />
               <span>Create Notice</span>
             </button>
           )}

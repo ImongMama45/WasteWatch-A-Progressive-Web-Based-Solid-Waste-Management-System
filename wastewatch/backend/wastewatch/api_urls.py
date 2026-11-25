@@ -30,6 +30,8 @@ urlpatterns = [
     path('public/announcements/', public_api.announcements_view,  name='api-announcements'),
     path('public/stats/',         public_api.public_stats_view,   name='api-public-stats'),
     path('public/schedule/',      public_api.public_schedule_view, name='api-public-schedule'),
+    path('public/map/pins/',      public_api.public_map_pins_view, name='api-public-map-pins'),
+    path('public/map/stop-statuses/', public_api.public_stop_statuses_view, name='api-public-stop-statuses'),
     path('public/live/',          public_api.public_live_view,     name='api-public-live'),
 
     # ── Auth (Manual) ────────────────────────────────────────────────────────

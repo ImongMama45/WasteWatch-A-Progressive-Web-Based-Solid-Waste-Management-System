@@ -33,6 +33,7 @@ const AnalyticsTabs = lazy(() => import('./pages/analytics/AnalyticsTabs'))
 const NewsPage = lazy(() => import('./pages/news/NewsPage'))
 const CommunityPage = lazy(() => import('./pages/community/CommunityPage'))
 const WatcherTasksHub = lazy(() => import('./pages/watcher/WatcherTasksHub'))
+const WatcherAttendance = lazy(() => import('./pages/watcher/WatcherAttendance'))
 const WatcherMapTaskModule = lazy(() => import('./pages/watcher/WatcherMapTaskModule'))
 const NotificationsPage = lazy(() => import('./pages/NotificationsPage'))
 const AboutPage = lazy(() => import('./pages/AboutPage'))
@@ -40,6 +41,8 @@ const AboutPage = lazy(() => import('./pages/AboutPage'))
 // Admin pages
 const TruckManagement = lazy(() => import('./pages/admin/TruckManagement'))
 const UserManagement = lazy(() => import('./pages/admin/UserManagement'))
+const WorkerManagement = lazy(() => import('./pages/admin/WorkerManagement'))
+const TeamManagement = lazy(() => import('./pages/admin/TeamManagement'))
 const DumpsiteManagement = lazy(() => import('./pages/admin/DumpsiteManagement'))
 const RouteBuilder = lazy(() => import('./pages/admin/RouteBuilder'))
 const EscalationManagement = lazy(() => import('./pages/admin/EscalationManagement'))
@@ -63,10 +66,18 @@ const DriverStatusPanel = lazy(() => import('./pages/driver/DriverStatusPanel'))
 const DriverRouteFlow = lazy(() => import('./pages/driver/DriverRouteFlow'))
 
 // Dumpsite pages
+const DumpsiteDashboard = lazy(() => import('./pages/dashboard/DumpsiteDashboard'))
 const ArrivalLogger = lazy(() => import('./pages/dumpsite/ArrivalLogger'))
 const CollectionLogs = lazy(() => import('./pages/dumpsite/CollectionLogs'))
 const TruckQueue = lazy(() => import('./pages/dumpsite/TruckQueue'))
 const BarangayBreakdown = lazy(() => import('./pages/dumpsite/BarangayBreakdown'))
+const ShiftMonitoring = lazy(() => import('./pages/dumpsite/ShiftMonitoring'))
+const TruckInspections = lazy(() => import('./pages/dumpsite/TruckInspections'))
+const OperationalHolds = lazy(() => import('./pages/dumpsite/OperationalHolds'))
+const FacilityMaintenance = lazy(() => import('./pages/dumpsite/FacilityMaintenance'))
+const TruckAllocations = lazy(() => import('./pages/dumpsite/TruckAllocations'))
+const FuelManagement = lazy(() => import('./pages/dumpsite/FuelManagement'))
+const FacilityActivity = lazy(() => import('./pages/dumpsite/FacilityActivity'))
 
 function LogArrivalRoute() {
   const [searchParams] = useSearchParams()
@@ -115,7 +126,7 @@ export default function App() {
             <Route path="/verify-email" element={<AuthOverlay mode="verify-email" />} />
             <Route path="/about" element={<AboutPage />} />
             <Route path="/public-map" element={
-              <Suspense fallback={<MapSkeleton height="100vh" dark label="Loading Lucena Public Map..." />}>
+              <Suspense fallback={<MapSkeleton height="100vh" label="Loading Lucena Public Map..." />}>
                 <PublicMap />
               </Suspense>
             } />
@@ -138,6 +149,10 @@ export default function App() {
             {/* New hub route — watcher landing page */}
             <Route path="/watcher-tasks" element={
               <PrivateRoute roles={['watcher', 'admin']}><WatcherTasksHub /></PrivateRoute>
+            } />
+
+            <Route path="/watcher/attendance" element={
+              <PrivateRoute roles={['watcher', 'admin']}><WatcherAttendance /></PrivateRoute>
             } />
 
             {/* New map-based post-collection module */}
@@ -204,6 +219,14 @@ export default function App() {
 
             <Route path="/admin/users" element={
               <PrivateRoute roles={['admin']}><UserManagement /></PrivateRoute>
+            } />
+
+            <Route path="/admin/workers" element={
+              <PrivateRoute roles={['admin']}><WorkerManagement /></PrivateRoute>
+            } />
+
+            <Route path="/admin/teams" element={
+              <PrivateRoute roles={['admin']}><TeamManagement /></PrivateRoute>
             } />
 
             <Route path="/admin/dumpsites" element={
@@ -303,6 +326,54 @@ export default function App() {
             } />
 
             {/* ── DUMPSITE MODULE ── */}
+            <Route path="/dumpsite/workspace" element={
+              <PrivateRoute roles={['dumpsite', 'admin']}>
+                <DashboardLayout><DumpsiteDashboard /></DashboardLayout>
+              </PrivateRoute>
+            } />
+
+            <Route path="/dumpsite/monitoring" element={
+              <PrivateRoute roles={['dumpsite', 'admin']}>
+                <DashboardLayout><ShiftMonitoring /></DashboardLayout>
+              </PrivateRoute>
+            } />
+
+            <Route path="/dumpsite/inspections" element={
+              <PrivateRoute roles={['dumpsite', 'admin']}>
+                <DashboardLayout><TruckInspections /></DashboardLayout>
+              </PrivateRoute>
+            } />
+
+            <Route path="/dumpsite/holds" element={
+              <PrivateRoute roles={['dumpsite', 'admin']}>
+                <DashboardLayout><OperationalHolds /></DashboardLayout>
+              </PrivateRoute>
+            } />
+
+            <Route path="/dumpsite/maintenance" element={
+              <PrivateRoute roles={['dumpsite', 'admin']}>
+                <DashboardLayout><FacilityMaintenance /></DashboardLayout>
+              </PrivateRoute>
+            } />
+
+            <Route path="/dumpsite/allocations" element={
+              <PrivateRoute roles={['dumpsite', 'admin']}>
+                <DashboardLayout><TruckAllocations /></DashboardLayout>
+              </PrivateRoute>
+            } />
+
+            <Route path="/dumpsite/fuel" element={
+              <PrivateRoute roles={['dumpsite', 'admin']}>
+                <DashboardLayout><FuelManagement /></DashboardLayout>
+              </PrivateRoute>
+            } />
+
+            <Route path="/dumpsite/activity" element={
+              <PrivateRoute roles={['dumpsite', 'admin']}>
+                <DashboardLayout><FacilityActivity /></DashboardLayout>
+              </PrivateRoute>
+            } />
+
             <Route path="/dumpsite/queue" element={
               <PrivateRoute roles={['dumpsite', 'admin']}>
                 <DashboardLayout><TruckQueue /></DashboardLayout>
@@ -322,7 +393,7 @@ export default function App() {
             } />
 
             <Route path="/dumpsite/log-arrival" element={
-              <PrivateRoute roles={['dumpsite', 'admin']}>
+              <PrivateRoute roles={['dumpsite']}>
                 <LogArrivalRoute />
               </PrivateRoute>
             } />

@@ -61,6 +61,11 @@ def trigger_hotspot_automation(sender, instance, **kwargs):
                         status='PENDING'
                     )
                     schedule.barangays.add(instance.barangay)
+                    try:
+                        from notifications.services import process_schedule_lifecycle_change
+                        process_schedule_lifecycle_change(before_snapshot=None, after_schedule=schedule)
+                    except Exception:
+                        pass
                     print(f"[Automation] Created CollectionSchedule {schedule.id} for {instance.barangay.name}")
 
 

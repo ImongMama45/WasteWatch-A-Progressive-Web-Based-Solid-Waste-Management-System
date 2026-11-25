@@ -380,6 +380,38 @@ class NotificationDeduplicationTests(TestCase):
 
 
 class PostgreSQLIntegrationTests(TransactionTestCase):
+    _SCOPED_DEDUP_KEYS = ('pg_savepoint_recovery_key', 'concurrent_expired_key')
+    _SCOPED_BARANGAY_NAMES = ('Barangay PG Savepoint', 'Barangay PG Savepoint Renamed')
+
+    def setUp(self):
+        super().setUp()
+        _reset_prune_throttle_for_testing()
+        self._worker_threads = []
+
+    def tearDown(self):
+        try:
+            for t in getattr(self, '_worker_threads', []):
+                if t.ident is not None and t.is_alive():
+                    t.join(timeout=10)
+        finally:
+            _reset_prune_throttle_for_testing()
+            super().tearDown()
+
+    def _fixture_teardown(self):
+        if connection.vendor != 'postgresql':
+            super()._fixture_teardown()
+            return
+
+        # Trigger-safe scoped teardown: avoid `call_command('flush')` (TRUNCATE),
+        # which hits PostgreSQL BEFORE TRUNCATE immutability triggers on attendance
+        # and roster tables, and delete only rows created by this test class.
+        NotificationDeduplication.objects.filter(
+            key__in=self._SCOPED_DEDUP_KEYS
+        ).delete()
+        Barangay.objects.filter(
+            name__in=self._SCOPED_BARANGAY_NAMES
+        ).delete()
+
     @unittest.skipUnless(connection.vendor == 'postgresql', 'Requires PostgreSQL test database for transaction abort recovery test')
     def test_pruning_savepoint_recovery_aborted_transaction_postgresql(self):
         """
@@ -451,11 +483,18 @@ class PostgreSQLIntegrationTests(TransactionTestCase):
 
         t1 = threading.Thread(target=worker)
         t2 = threading.Thread(target=worker)
+        self._worker_threads = [t1, t2]
 
-        t1.start()
-        t2.start()
-        t1.join(timeout=10)
-        t2.join(timeout=10)
+        try:
+            t1.start()
+            t2.start()
+        finally:
+            for t in (t1, t2):
+                if t.ident is not None:
+                    t.join(timeout=10)
+
+        self.assertFalse(t1.is_alive(), "Worker thread 1 timed out and is still alive")
+        self.assertFalse(t2.is_alive(), "Worker thread 2 timed out and is still alive")
 
         # Propagate actual worker exceptions if any
         if worker_errors:

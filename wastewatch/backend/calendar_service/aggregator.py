@@ -118,6 +118,7 @@ def aggregate_calendar_entries(
         sched_entries = get_normalized_collection_schedules(
             start_date=start_date,
             end_date=end_date,
+            user=user,
             barangay_id=barangay_id,
             include_admin_scopes=False,
             include_cancelled=False,

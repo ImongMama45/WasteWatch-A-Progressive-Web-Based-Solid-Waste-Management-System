@@ -12,13 +12,16 @@
 
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Clock } from 'lucide-react'
+import { Clock, CheckCircle2 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import Navbar from '../../components/Navbar'
 import BottomNav from '../../components/BottomNav'
 import api from '../../api/client'
 import { ICONS } from '../../api/navConfig'
 import { SkeletonPill, FeedCardSkeleton } from '../../components/ui/Skeleton'
+import { getWatcherAttendanceDeployments } from '../../api/watcherAttendanceApi'
+import { formatToManilaDateString } from '../../api/calendarService'
+import { getRouteCoverageLabel } from './watcherRouteHelpers'
 
 // ─── STATUS COLOURS (mirrors pickupStatusSync palette) ───────────────────────
 const STATUS_META = {
@@ -151,7 +154,12 @@ function WorkflowCard({
                 }}
                 onClick={e => { e.stopPropagation(); if (!disabled) onClick() }}
             >
-                {disabled ? '✓ All Done' : actionLabel} {!disabled && <span style={{ fontSize: 16 }}>›</span>}
+                {disabled ? (
+                    <>
+                        <CheckCircle2 size={16} />
+                        <span>All Done</span>
+                    </>
+                ) : actionLabel} {!disabled && <span style={{ fontSize: 16 }}>›</span>}
             </button>
         </div>
     )
@@ -202,14 +210,24 @@ export default function WatcherTasksHub() {
 
     const [stops, setStops] = useState([])
     const [loading, setLoading] = useState(true)
+    const [watcherShift, setWatcherShift] = useState(null)
+    const [attendancePending, setAttendancePending] = useState(0)
 
     useEffect(() => {
         async function load() {
             setLoading(true)
             try {
-                const res = await api.get('/api/watcher/stop-validations/')
-                const rows = res.data?.results ?? res.data ?? []
+                const todayStr = formatToManilaDateString(new Date())
+                const [stopsRes, shiftRes, attRes] = await Promise.all([
+                    api.get('/api/watcher/stop-validations/').catch(() => ({ data: [] })),
+                    api.get('/api/driver/watcher-shifts/current/').catch(() => ({ data: null })),
+                    getWatcherAttendanceDeployments(todayStr).catch(() => []),
+                ])
+                const rows = stopsRes.data?.results ?? stopsRes.data ?? []
                 setStops(rows)
+                setWatcherShift(shiftRes.data)
+                const attList = Array.isArray(attRes) ? attRes : (attRes?.results || attRes?.deployments || [])
+                setAttendancePending(attList.filter(d => d.attendance_status !== 'SUBMITTED').length)
             } catch {
                 setStops([])
             } finally {
@@ -235,6 +253,7 @@ export default function WatcherTasksHub() {
     const totalToday = stops.length
     const allInspected = pendingInspection === 0
     const allVerified = collectionReported === 0
+    const routeCoverageLabel = getRouteCoverageLabel(stops, '')
 
     return (
         <>
@@ -268,10 +287,19 @@ export default function WatcherTasksHub() {
                                 {totalToday} STOPS TODAY
                             </span>
                         )}
+                        {!loading && watcherShift && (
+                            <span className="ww-fade-in" style={{
+                                background: 'rgba(22,163,74,0.12)', color: '#16a34a',
+                                border: '1px solid rgba(22,163,74,0.3)',
+                                fontSize: 10, fontWeight: 800, padding: '3px 10px', borderRadius: 20,
+                            }}>
+                                ON DUTY
+                            </span>
+                        )}
                     </div>
                     <p className="text-muted text-sm">
-                        {user?.barangay_name
-                            ? `Covering ${user.barangay_name} · Choose a task below`
+                        {totalToday > 0
+                            ? `Covering ${routeCoverageLabel || 'Assigned Route'} · Choose a task below`
                             : 'Choose which task to perform'}
                     </p>
                 </div>
@@ -335,6 +363,23 @@ export default function WatcherTasksHub() {
                                 badgeLabel="to verify"
                                 disabled={allVerified}
                                 onClick={() => navigate('/watcher/confirm')}
+                            />
+                        </div>
+
+                        {/* Card 3 — Team Leader Crew Attendance */}
+                        <div className="hub-card">
+                            <WorkflowCard
+                                icon={ICONS.users}
+                                title="Crew Attendance"
+                                subtitle="Team Leader pre-departure roll call"
+                                description="Submit initial crew attendance and audit corrections for deployments where you are the resolved Team Leader."
+                                timing="Before route departure"
+                                actionLabel="Open Crew Attendance"
+                                accent="#059669"
+                                badgeCount={attendancePending}
+                                badgeLabel="pending"
+                                disabled={false}
+                                onClick={() => navigate('/watcher/attendance')}
                             />
                         </div>
                     </div>

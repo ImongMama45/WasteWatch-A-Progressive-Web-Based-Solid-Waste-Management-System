@@ -14,13 +14,16 @@ from datetime import date, datetime, time, timedelta
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
+from rest_framework.test import APITestCase
 from zoneinfo import ZoneInfo
 
-from accounts.models import Barangay
+from accounts.models import Barangay, UserRole
+from django.contrib.auth.models import AnonymousUser
 from driver.models import CollectionSchedule, DriverShift, Truck
 from dumpsite.models import Dumpsite
 from watcher.models import StopValidation, StopValidationStatus
 
+from calendar_service.aggregator import aggregate_calendar_entries
 from calendar_service.exceptions import CalendarCapacityError, CalendarDateRangeError
 from calendar_service.normalizers import (
     classify_schedule_scope,
@@ -792,3 +795,284 @@ class CollectionScheduleLifecycleSemanticsTests(TestCase):
             sched, self.past_date, stop_dict=stops, reference_date=self.ref_date
         )
         self.assertEqual(status_verified, 'verified_collected')
+
+
+class CollectionScheduleAuthorizationTests(APITestCase):
+    """
+    Stage 2C.3: Verification of Barangay Official, Admin, Citizen, and Anonymous
+    role authorization boundaries for CollectionSchedule calendar entries,
+    exercised at both the Aggregator and authenticated API Endpoint (/api/calendar/entries/) levels.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.url = '/api/calendar/entries/'
+        cls.brgy_a = Barangay.objects.create(name='Barangay A (Isabang)')
+        cls.brgy_b = Barangay.objects.create(name='Barangay B (Gulang-Gulang)')
+
+        cls.start_date = date(2026, 11, 16)  # Monday
+        cls.end_date = date(2026, 11, 22)    # Sunday
+
+        # Schedule A: Recurring for Barangay A only
+        cls.sched_a = CollectionSchedule.objects.create(
+            days='Mon',
+            start_time=time(7, 0),
+            end_time=time(11, 0),
+            area='Isabang Zone 1',
+            status='PENDING',
+        )
+        cls.sched_a.barangays.add(cls.brgy_a)
+
+        # Schedule B: Recurring for Barangay B only
+        cls.sched_b = CollectionSchedule.objects.create(
+            days='Mon',
+            start_time=time(8, 0),
+            end_time=time(12, 0),
+            area='Gulang-Gulang Zone 1',
+            status='PENDING',
+        )
+        cls.sched_b.barangays.add(cls.brgy_b)
+
+        # Schedule C: Confirmed Citywide schedule (no barangays assigned, area='Citywide')
+        cls.sched_c = CollectionSchedule.objects.create(
+            days='Mon',
+            start_time=time(6, 0),
+            end_time=time(10, 0),
+            area='Citywide',
+            status='PENDING',
+        )
+
+        # Users
+        cls.official_a = User.objects.create_user(
+            username='official_a',
+            email='official_a@lucena.gov.ph',
+            password='testpassword123',
+            role=UserRole.BRGY_OFFICIAL,
+            barangay=cls.brgy_a,
+        )
+        cls.official_unassigned = User.objects.create_user(
+            username='official_unassigned',
+            email='official_unassigned@lucena.gov.ph',
+            password='testpassword123',
+            role=UserRole.BRGY_OFFICIAL,
+            barangay=None,
+        )
+        cls.admin_user = User.objects.create_user(
+            username='admin_user',
+            email='admin@lucena.gov.ph',
+            password='testpassword123',
+            role=UserRole.ADMIN,
+            is_staff=True,
+        )
+        cls.citizen_user = User.objects.create_user(
+            username='citizen_user',
+            email='citizen@lucena.gov.ph',
+            password='testpassword123',
+            role=UserRole.CITIZEN,
+            barangay=cls.brgy_a,
+        )
+
+    def test_1_assigned_brgy_official_receives_assigned_barangay_and_citywide_only(self):
+        """1. Assigned Barangay Official receives assigned barangay and citywide occurrences only."""
+        # 1A. Aggregator verification
+        entries = aggregate_calendar_entries(
+            start_date=self.start_date,
+            end_date=self.end_date,
+            user=self.official_a,
+            source='collection_schedule',
+            reference_date=self.start_date,
+        )
+        source_ids = {e['source_id'] for e in entries}
+
+        self.assertIn(self.sched_a.id, source_ids, 'Assigned barangay schedule must be included')
+        self.assertIn(self.sched_c.id, source_ids, 'Citywide schedule must be included')
+        self.assertNotIn(self.sched_b.id, source_ids, 'Other barangay schedule must be excluded')
+
+        # 1B. Authenticated API Endpoint verification
+        self.client.force_authenticate(user=self.official_a)
+        res = self.client.get(self.url, {
+            'start_date': self.start_date.isoformat(),
+            'end_date': self.end_date.isoformat(),
+            'source': 'collection_schedule',
+            'paginate': 'false',
+        })
+        self.assertEqual(res.status_code, 200)
+        api_source_ids = {e['source_id'] for e in res.data['results']}
+        self.assertIn(self.sched_a.id, api_source_ids, 'API must deliver assigned barangay schedule')
+        self.assertIn(self.sched_c.id, api_source_ids, 'API must deliver citywide schedule')
+        self.assertNotIn(self.sched_b.id, api_source_ids, 'API must exclude other barangay schedule')
+
+    def test_2_manipulated_barangay_id_cannot_expose_other_barangays(self):
+        """2. Client-supplied barangay_id cannot override assigned scope for Barangay Official."""
+        # 2A. Aggregator verification
+        entries = aggregate_calendar_entries(
+            start_date=self.start_date,
+            end_date=self.end_date,
+            user=self.official_a,
+            barangay_id=self.brgy_b.id,  # Attacker attempts to query Barangay B
+            source='collection_schedule',
+            reference_date=self.start_date,
+        )
+        source_ids = {e['source_id'] for e in entries}
+
+        self.assertIn(self.sched_a.id, source_ids, 'Official must remain locked to their assigned barangay')
+        self.assertIn(self.sched_c.id, source_ids, 'Citywide schedule must remain included')
+        self.assertNotIn(self.sched_b.id, source_ids, 'Manipulated barangay_id must NOT expose other barangay')
+
+        # 2B. Authenticated API Endpoint verification
+        self.client.force_authenticate(user=self.official_a)
+        res = self.client.get(self.url, {
+            'start_date': self.start_date.isoformat(),
+            'end_date': self.end_date.isoformat(),
+            'barangay_id': self.brgy_b.id,  # Attacker attempts cross-barangay override
+            'source': 'collection_schedule',
+            'paginate': 'false',
+        })
+        self.assertEqual(res.status_code, 200)
+        api_source_ids = {e['source_id'] for e in res.data['results']}
+        self.assertIn(self.sched_a.id, api_source_ids, 'API must lock official to their assigned barangay')
+        self.assertIn(self.sched_c.id, api_source_ids, 'API must deliver citywide schedule')
+        self.assertNotIn(self.sched_b.id, api_source_ids, 'API must NOT expose other barangay')
+
+    def test_3_unassigned_brgy_official_receives_citywide_only(self):
+        """3. Unassigned Barangay Official receives citywide-only results at backend boundary."""
+        # 3A. Aggregator verification
+        entries = aggregate_calendar_entries(
+            start_date=self.start_date,
+            end_date=self.end_date,
+            user=self.official_unassigned,
+            source='collection_schedule',
+            reference_date=self.start_date,
+        )
+        source_ids = {e['source_id'] for e in entries}
+
+        self.assertIn(self.sched_c.id, source_ids, 'Citywide schedule must be included')
+        self.assertNotIn(self.sched_a.id, source_ids, 'No barangay schedules may be leaked to unassigned official')
+        self.assertNotIn(self.sched_b.id, source_ids, 'No barangay schedules may be leaked to unassigned official')
+
+        # 3B. Authenticated API Endpoint verification
+        self.client.force_authenticate(user=self.official_unassigned)
+        res = self.client.get(self.url, {
+            'start_date': self.start_date.isoformat(),
+            'end_date': self.end_date.isoformat(),
+            'source': 'collection_schedule',
+            'paginate': 'false',
+        })
+        self.assertEqual(res.status_code, 200)
+        api_source_ids = {e['source_id'] for e in res.data['results']}
+        self.assertIn(self.sched_c.id, api_source_ids, 'API must include citywide schedule for unassigned official')
+        self.assertNotIn(self.sched_a.id, api_source_ids, 'API must not leak any barangay schedules')
+        self.assertNotIn(self.sched_b.id, api_source_ids, 'API must not leak any barangay schedules')
+
+    def test_4_admin_can_query_all_or_specific_barangay(self):
+        """4. Admin can query all or a specific barangay without regression."""
+        # 4A. Aggregator verification
+        admin_all = aggregate_calendar_entries(
+            start_date=self.start_date,
+            end_date=self.end_date,
+            user=self.admin_user,
+            source='collection_schedule',
+            reference_date=self.start_date,
+        )
+        all_ids = {e['source_id'] for e in admin_all}
+        self.assertIn(self.sched_a.id, all_ids)
+        self.assertIn(self.sched_b.id, all_ids)
+        self.assertIn(self.sched_c.id, all_ids)
+
+        admin_filtered = aggregate_calendar_entries(
+            start_date=self.start_date,
+            end_date=self.end_date,
+            user=self.admin_user,
+            barangay_id=self.brgy_b.id,
+            source='collection_schedule',
+            reference_date=self.start_date,
+        )
+        filtered_ids = {e['source_id'] for e in admin_filtered}
+        self.assertNotIn(self.sched_a.id, filtered_ids)
+        self.assertIn(self.sched_b.id, filtered_ids)
+        self.assertIn(self.sched_c.id, filtered_ids)
+
+        # 4B. Authenticated API Endpoint verification
+        self.client.force_authenticate(user=self.admin_user)
+        res_all = self.client.get(self.url, {
+            'start_date': self.start_date.isoformat(),
+            'end_date': self.end_date.isoformat(),
+            'source': 'collection_schedule',
+            'paginate': 'false',
+        })
+        self.assertEqual(res_all.status_code, 200)
+        api_all_ids = {e['source_id'] for e in res_all.data['results']}
+        self.assertIn(self.sched_a.id, api_all_ids)
+        self.assertIn(self.sched_b.id, api_all_ids)
+        self.assertIn(self.sched_c.id, api_all_ids)
+
+        res_filtered = self.client.get(self.url, {
+            'start_date': self.start_date.isoformat(),
+            'end_date': self.end_date.isoformat(),
+            'barangay_id': self.brgy_b.id,
+            'source': 'collection_schedule',
+            'paginate': 'false',
+        })
+        self.assertEqual(res_filtered.status_code, 200)
+        api_filtered_ids = {e['source_id'] for e in res_filtered.data['results']}
+        self.assertNotIn(self.sched_a.id, api_filtered_ids)
+        self.assertIn(self.sched_b.id, api_filtered_ids)
+        self.assertIn(self.sched_c.id, api_filtered_ids)
+
+    def test_5_anonymous_and_citizen_public_scoping_preserved(self):
+        """5. Anonymous and Citizen public scoping remains unchanged."""
+        # 5A. Aggregator verification
+        anon_all = aggregate_calendar_entries(
+            start_date=self.start_date,
+            end_date=self.end_date,
+            user=AnonymousUser(),
+            source='collection_schedule',
+            reference_date=self.start_date,
+        )
+        anon_ids = {e['source_id'] for e in anon_all}
+        self.assertIn(self.sched_a.id, anon_ids)
+        self.assertIn(self.sched_b.id, anon_ids)
+        self.assertIn(self.sched_c.id, anon_ids)
+
+        citizen_filtered = aggregate_calendar_entries(
+            start_date=self.start_date,
+            end_date=self.end_date,
+            user=self.citizen_user,
+            barangay_id=self.brgy_a.id,
+            source='collection_schedule',
+            reference_date=self.start_date,
+        )
+        citizen_ids = {e['source_id'] for e in citizen_filtered}
+        self.assertIn(self.sched_a.id, citizen_ids)
+        self.assertIn(self.sched_c.id, citizen_ids)
+        self.assertNotIn(self.sched_b.id, citizen_ids)
+
+        # 5B. API Endpoint verification
+        # Anonymous caller
+        self.client.logout()
+        res_anon = self.client.get(self.url, {
+            'start_date': self.start_date.isoformat(),
+            'end_date': self.end_date.isoformat(),
+            'source': 'collection_schedule',
+            'paginate': 'false',
+        })
+        self.assertEqual(res_anon.status_code, 200)
+        api_anon_ids = {e['source_id'] for e in res_anon.data['results']}
+        self.assertIn(self.sched_a.id, api_anon_ids)
+        self.assertIn(self.sched_b.id, api_anon_ids)
+        self.assertIn(self.sched_c.id, api_anon_ids)
+
+        # Authenticated Citizen with explicit barangay_id filter
+        self.client.force_authenticate(user=self.citizen_user)
+        res_cit = self.client.get(self.url, {
+            'start_date': self.start_date.isoformat(),
+            'end_date': self.end_date.isoformat(),
+            'barangay_id': self.brgy_a.id,
+            'source': 'collection_schedule',
+            'paginate': 'false',
+        })
+        self.assertEqual(res_cit.status_code, 200)
+        api_cit_ids = {e['source_id'] for e in res_cit.data['results']}
+        self.assertIn(self.sched_a.id, api_cit_ids)
+        self.assertIn(self.sched_c.id, api_cit_ids)
+        self.assertNotIn(self.sched_b.id, api_cit_ids)

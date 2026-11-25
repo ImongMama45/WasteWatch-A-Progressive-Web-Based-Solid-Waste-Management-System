@@ -64,21 +64,44 @@ export default function NewsPage() {
 
   // Barangay scope state: 'all' (default), 'city_wide', or barangay ID string
   const [scope, setScope] = useState('all')
+  const [category, setCategory] = useState('All')
+  const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
 
-  // Scope-aware news items hook: manages scope key resolution, caching, and fetch cancellation
+  // 350ms debounce on search input to prevent query churn while typing
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search.trim())
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  const hookOptions = useMemo(() => ({
+    barangayId: scope,
+    category,
+    search: debouncedSearch,
+  }), [scope, category, debouncedSearch])
+
+  // Scope-aware news items hook: manages scope key resolution, server-side search & filtering, caching, pagination, and fetch cancellation
   const {
     items: newsItems,
     loading: itemsLoading,
     isRefreshing: itemsRefreshing,
     error: itemsError,
+    totalCount,
+    pageSize,
+    setPageSize,
+    hasMore,
+    loadingMore,
+    hasNewContent,
+    loadNewContent,
+    loadMore,
     refresh: refreshNews,
-  } = useNewsItems(scope)
+  } = useNewsItems(hookOptions)
 
   const { alerts, isRefreshing: alertsLoading, refresh: refreshAlerts, isOfflineCached: alertsOfflineCached } = useEmergencyAlerts()
   const { spotlights } = useBarangaySpotlights()
 
-  const [category, setCategory] = useState('All')
-  const [search, setSearch] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const articleRequestIdRef = useRef(0)
   const [articleLoading, setArticleLoading] = useState(false)
@@ -416,20 +439,14 @@ export default function NewsPage() {
     return counts
   }, [newsItems])
 
-  // Filtered items count for the visible feed
-  const filteredItemsCount = useMemo(() => {
-    return filterNews(feedItems, category, search).length
-  }, [feedItems, category, search])
-
   // Explicit count breakdown explaining hero inclusion vs feed count
   const countBreakdown = useMemo(() => {
-    const totalScoped = categoryCounts[category] ?? 0
     return calculateFeedCountBreakdown({
-      totalScopedCount: totalScoped,
-      feedCount: filteredItemsCount,
+      totalScopedCount: totalCount || (newsItems || []).length,
+      feedCount: feedItems.length,
       showHero,
     })
-  }, [categoryCounts, category, filteredItemsCount, showHero])
+  }, [totalCount, newsItems, feedItems.length, showHero])
 
   // Resolved readable name for active scope
   const activeScopeName = useMemo(() => {
@@ -453,7 +470,7 @@ export default function NewsPage() {
       <main
         className="page ww-page-enter"
         style={{
-          maxWidth: 1140,
+          maxWidth: 1100,
           margin: '0 auto',
           paddingTop: 80,
           paddingLeft: 16,
@@ -464,8 +481,6 @@ export default function NewsPage() {
         <NewsHeader
           isAdmin={isAdmin}
           onCreateNotice={openCreateModal}
-          onRefresh={handleRefreshAll}
-          isRefreshing={itemsLoading || alertsLoading}
         />
 
         {/* 2. Important Active Advisories (Urgent, Pinned, Emergency) */}
@@ -747,7 +762,7 @@ export default function NewsPage() {
           <NewsFeed
             items={feedItems}
             category={category}
-            search={search}
+            search={debouncedSearch}
             onReadMore={handleReadMore}
             onResetFilters={handleResetAllFilters}
             scope={scope}
@@ -757,6 +772,15 @@ export default function NewsPage() {
             error={itemsError}
             isOnline={isOnline}
             onRetry={refreshNews}
+            totalCount={totalCount}
+            pageSize={pageSize}
+            onPageSizeChange={setPageSize}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onLoadMore={loadMore}
+            isHeroDisplayed={showHero}
+            hasNewContent={hasNewContent}
+            onLoadNewContent={loadNewContent}
           />
         </section>
 

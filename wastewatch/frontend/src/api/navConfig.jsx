@@ -268,29 +268,37 @@ export const ICONS = {
       <path d="M14 6l4 8" />
     </svg>
   ),
+  wrench: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+    </svg>
+  ),
+  fuel: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <line x1="3" y1="22" x2="15" y2="22" />
+      <line x1="4" y1="9" x2="14" y2="9" />
+      <path d="M14 22V4a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v18" />
+      <path d="M14 13h2a2 2 0 0 1 2 2v2a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V9.83a2 2 0 0 0-.59-1.42L18 5" />
+    </svg>
+  ),
+  swap: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <polyline points="17 1 21 5 17 9" />
+      <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+      <polyline points="7 23 3 19 7 15" />
+      <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+    </svg>
+  ),
+  history: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M12 7v5l4 2" />
+    </svg>
+  ),
 }
 
-export const NAV_ICONS = {
-  '📊': ICONS.dashboard,
-  '🗺️': ICONS.map,
-  '📋': ICONS.report,
-  '📨': ICONS.escalation,
-  '✅': ICONS.check,
-  '🚛': ICONS.truck,
-  '🏠': ICONS.barangay,
-  '📅': ICONS.schedule,
-  '👥': ICONS.users,
-  '🏔️': ICONS.dumpsite,
-  '⚠️': ICONS.escalation,
-  '📈': ICONS.waste,
-  '🔥': ICONS.hotspot,
-  '🔔': ICONS.bell,
-  '📝': ICONS.report,
-  '📍': ICONS.pin,
-  '👤': ICONS.profile,
-  '🔑': ICONS.logout,
-  '📰': ICONS.news,
-}
+export const NAV_ICONS = ICONS
 
 export const ROLE_NAV_CONFIG = {
   admin: [
@@ -302,6 +310,7 @@ export const ROLE_NAV_CONFIG = {
         { path: '/admin/trucks', label: 'Trucks & Drivers', icon: 'truck' },
         { path: '/admin/routes', label: 'Routes', icon: 'route' },
         { path: '/admin/dumpsites', label: 'Dumpsites', icon: 'dumpsite' },
+        { path: '/dumpsite/workspace', label: 'Operator Workspace', icon: 'activity' },
       ],
     },
     {
@@ -325,6 +334,8 @@ export const ROLE_NAV_CONFIG = {
         { path: '/admin/content', label: 'Content Management', icon: 'news' },
         { path: '/admin/events', label: 'Event Management', icon: 'schedule' },
         { path: '/admin/users', label: 'User Management', icon: 'users' },
+        { path: '/admin/workers', label: 'Personnel & Workers', icon: 'users' },
+        { path: '/admin/teams', label: 'Sanitation Teams', icon: 'truck' },
         { path: '/admin/barangays', label: 'Barangay Management', icon: 'map' },
       ],
     },
@@ -363,6 +374,7 @@ export const ROLE_NAV_CONFIG = {
       items: [
         { path: '/map', label: 'Live Map', icon: 'map' },
         { path: '/watcher-tasks', label: 'Watcher Tasks', icon: 'check' },
+        { path: '/watcher/attendance', label: 'Crew Attendance', icon: 'users' },
         { path: '/schedule', label: 'Collection Schedule', icon: 'schedule' },
       ],
     },
@@ -424,12 +436,24 @@ export const ROLE_NAV_CONFIG = {
     {
       type: 'group', label: 'Operations', icon: 'truck',
       items: [
+        { path: '/dumpsite/monitoring', label: 'Shift Monitoring', icon: 'activity' },
         { path: '/dumpsite/queue', label: 'Truck Queue', icon: 'route' },
+        { path: '/dumpsite/allocations', label: 'Allocations & Swaps', icon: 'swap' },
+      ],
+    },
+    {
+      type: 'group', label: 'Fleet & Compliance', icon: 'check',
+      items: [
+        { path: '/dumpsite/inspections', label: 'Inspections', icon: 'check' },
+        { path: '/dumpsite/holds', label: 'Operational Holds', icon: 'warning' },
+        { path: '/dumpsite/maintenance', label: 'Maintenance', icon: 'wrench' },
+        { path: '/dumpsite/fuel', label: 'Fuel Logs', icon: 'fuel' },
       ],
     },
     {
       type: 'group', label: 'Records', icon: 'report',
       items: [
+        { path: '/dumpsite/activity', label: 'Facility Activity', icon: 'history' },
         { path: '/dumpsite/logs', label: 'Collection Logs', icon: 'report' },
         { path: '/dumpsite/barangay', label: 'Barangay Breakdown', icon: 'analytics' },
       ],
@@ -440,73 +464,83 @@ export const ROLE_NAV_CONFIG = {
 
 export const SIDEBAR_NAV = {
   admin: [
-    { path: '/', label: 'Home', icon: '🏠' },
-    { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-    { path: '/analytics', label: 'Brgy Analytics', icon: '📈' },
-    { path: '/announcements', label: 'News & Alerts', icon: '📰' },
-    { path: '/schedule', label: 'Schedule', icon: '📅' },
-    { path: '/map', label: 'Live Map', icon: '🗺️' },
+    { path: '/', label: 'Home', icon: 'barangay' },
+    { path: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
+    { path: '/analytics', label: 'Brgy Analytics', icon: 'waste' },
+    { path: '/announcements', label: 'News & Alerts', icon: 'news' },
+    { path: '/schedule', label: 'Schedule', icon: 'schedule' },
+    { path: '/map', label: 'Live Map', icon: 'map' },
 
-    { path: '/admin/content', label: 'Content Management', icon: '📰' },
-    { path: '/admin/events', label: 'Event Management', icon: '📅' },
-    { path: '/admin/trucks', label: 'Trucks & Drivers', icon: '🚛' },
-    { path: '/admin/users', label: 'User Management', icon: '👥' },
-    { path: '/admin/barangays', label: 'Barangay Management', icon: '🗺️' },
-    { path: '/admin/dumpsites', label: 'Dumpsites', icon: '🏔️' },
-    { path: '/admin/routes', label: 'Routes', icon: '🗺️' },
-    { path: '/admin/validate-reports', label: 'Validate Reports', icon: '📋' },
-    { path: '/admin/escalations', label: 'Escalations', icon: '⚠️' },
-    { path: '/admin/analytics', label: 'Analytics', icon: '📈' },
-    { path: '/admin/hotspots', label: 'Hotspots', icon: '🔥' },
-    { path: '/admin/activity-log', label: 'Activity Log', icon: '📝' },
+    { path: '/admin/content', label: 'Content Management', icon: 'news' },
+    { path: '/admin/events', label: 'Event Management', icon: 'schedule' },
+    { path: '/admin/trucks', label: 'Trucks & Drivers', icon: 'truck' },
+    { path: '/admin/users', label: 'User Management', icon: 'users' },
+    { path: '/admin/workers', label: 'Personnel & Workers', icon: 'users' },
+    { path: '/admin/barangays', label: 'Barangay Management', icon: 'map' },
+    { path: '/admin/dumpsites', label: 'Dumpsites', icon: 'dumpsite' },
+    { path: '/dumpsite/workspace', label: 'Operator Workspace', icon: 'activity' },
+    { path: '/admin/routes', label: 'Routes', icon: 'route' },
+    { path: '/admin/validate-reports', label: 'Validate Reports', icon: 'report' },
+    { path: '/admin/escalations', label: 'Escalations', icon: 'escalation' },
+    { path: '/admin/analytics', label: 'Analytics', icon: 'waste' },
+    { path: '/admin/hotspots', label: 'Hotspots', icon: 'hotspot' },
+    { path: '/admin/activity-log', label: 'Activity Log', icon: 'activity' },
   ],
   brgy_official: [
-    { path: '/', label: 'Home', icon: '🏠' },
-    { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-    { path: '/analytics', label: 'Brgy Analytics', icon: '📈' },
-    { path: '/announcements', label: 'News & Alerts', icon: '📰' },
-    { path: '/schedule', label: 'Schedule', icon: '📅' },
-    { path: '/map', label: 'Live Map', icon: '🗺️' },
-    { path: '/brgy/validate-reports', label: 'Reports', icon: '📋' },
-    { path: '/brgy/escalate', label: 'Escalations', icon: '📨' },
+    { path: '/', label: 'Home', icon: 'barangay' },
+    { path: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
+    { path: '/analytics', label: 'Brgy Analytics', icon: 'waste' },
+    { path: '/announcements', label: 'News & Alerts', icon: 'news' },
+    { path: '/schedule', label: 'Schedule', icon: 'schedule' },
+    { path: '/map', label: 'Live Map', icon: 'map' },
+    { path: '/brgy/validate-reports', label: 'Reports', icon: 'report' },
+    { path: '/brgy/escalate', label: 'Escalations', icon: 'escalation' },
   ],
   watcher: [
-    { path: '/', label: 'Home', icon: '🏠' },
-    { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-    { path: '/analytics', label: 'Brgy Analytics', icon: '📈' },
-    { path: '/announcements', label: 'News & Alerts', icon: '📰' },
-    { path: '/schedule', label: 'Schedule', icon: '📅' },
-    { path: '/map', label: 'Live Map', icon: '🗺️' },
-    { path: '/verification-tasks', label: 'Verifications', icon: '✅' },
+    { path: '/', label: 'Home', icon: 'barangay' },
+    { path: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
+    { path: '/analytics', label: 'Brgy Analytics', icon: 'waste' },
+    { path: '/announcements', label: 'News & Alerts', icon: 'news' },
+    { path: '/schedule', label: 'Schedule', icon: 'schedule' },
+    { path: '/map', label: 'Live Map', icon: 'map' },
+    { path: '/watcher/attendance', label: 'Crew Attendance', icon: 'users' },
+    { path: '/verification-tasks', label: 'Verifications', icon: 'check' },
   ],
   citizen: [
-    { path: '/', label: 'Home', icon: '🏠' },
-    { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-    { path: '/analytics', label: 'Brgy Analytics', icon: '📈' },
-    { path: '/announcements', label: 'News & Alerts', icon: '📰' },
-    { path: '/schedule', label: 'Schedule', icon: '📅' },
-    { path: '/public-map', label: 'Live Map', icon: '🗺️' },
+    { path: '/', label: 'Home', icon: 'barangay' },
+    { path: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
+    { path: '/analytics', label: 'Brgy Analytics', icon: 'waste' },
+    { path: '/announcements', label: 'News & Alerts', icon: 'news' },
+    { path: '/schedule', label: 'Schedule', icon: 'schedule' },
+    { path: '/public-map', label: 'Live Map', icon: 'map' },
   ],
   driver: [
-    { path: '/', label: 'Home', icon: '🏠' },
-    { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-    { path: '/analytics', label: 'Brgy Analytics', icon: '📈' },
-    { path: '/announcements', label: 'News & Alerts', icon: '📰' },
-    { path: '/driver/route', label: 'My Route', icon: '🗺️' },
-    { path: '/driver/log', label: 'Collection Log', icon: '📋' },
-    { path: '/driver/analytics', label: 'Analytics', icon: '📈' },
-    { path: '/driver/hotspots', label: 'Hotspot Alerts', icon: '🔥' },
-    { path: '/driver/status', label: 'Shift & Truck', icon: '🚛' },
-    { path: '/profile', label: 'Profile', icon: '👤' },
+    { path: '/', label: 'Home', icon: 'barangay' },
+    { path: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
+    { path: '/analytics', label: 'Brgy Analytics', icon: 'waste' },
+    { path: '/announcements', label: 'News & Alerts', icon: 'news' },
+    { path: '/driver/route', label: 'My Route', icon: 'route' },
+    { path: '/driver/log', label: 'Collection Log', icon: 'report' },
+    { path: '/driver/analytics', label: 'Analytics', icon: 'analytics' },
+    { path: '/driver/hotspots', label: 'Hotspot Alerts', icon: 'hotspot' },
+    { path: '/driver/status', label: 'Shift & Truck', icon: 'truck' },
+    { path: '/profile', label: 'Profile', icon: 'profile' },
   ],
   dumpsite: [
-    { path: '/', label: 'Home', icon: '🏠' },
-    { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-    { path: '/dumpsite/log-arrival', label: 'Log Arrival', icon: '🚛' },
-    { path: '/dumpsite/queue', label: 'Truck Queue', icon: '📡' },
-    { path: '/dumpsite/logs', label: 'Collection Logs', icon: '📋' },
-    { path: '/dumpsite/barangay', label: 'Barangay Breakdown', icon: '📊' },
-    { path: '/announcements', label: 'News & Alerts', icon: '📰' },
+    { path: '/', label: 'Home', icon: 'barangay' },
+    { path: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
+    { path: '/dumpsite/monitoring', label: 'Shift Monitoring', icon: 'activity' },
+    { path: '/dumpsite/queue', label: 'Truck Queue', icon: 'route' },
+    { path: '/dumpsite/inspections', label: 'Inspections', icon: 'check' },
+    { path: '/dumpsite/holds', label: 'Operational Holds', icon: 'warning' },
+    { path: '/dumpsite/maintenance', label: 'Maintenance', icon: 'wrench' },
+    { path: '/dumpsite/allocations', label: 'Allocations & Swaps', icon: 'swap' },
+    { path: '/dumpsite/fuel', label: 'Fuel Logs', icon: 'fuel' },
+    { path: '/dumpsite/activity', label: 'Facility Activity', icon: 'history' },
+    { path: '/dumpsite/log-arrival', label: 'Log Arrival', icon: 'truck' },
+    { path: '/dumpsite/logs', label: 'Collection Logs', icon: 'report' },
+    { path: '/dumpsite/barangay', label: 'Barangay Breakdown', icon: 'analytics' },
+    { path: '/announcements', label: 'News & Alerts', icon: 'news' },
   ],
 }
 
