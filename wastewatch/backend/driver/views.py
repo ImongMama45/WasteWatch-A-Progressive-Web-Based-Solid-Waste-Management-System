@@ -1109,6 +1109,122 @@ class CollectionScheduleViewSet(viewsets.ModelViewSet):
 
         return response
 
+    # ── Route Optimisation (closed-loop: Dumpsite → Stops → Dumpsite) ────────
+    @action(detail=False, methods=['post'], url_path='optimize-route',
+            permission_classes=[permissions.IsAuthenticated])
+    def optimize_route(self, request):
+        """
+        Accepts { dumpsite_id, stops: [{stop_id, lat, lng, label, barangay_id, is_hotspot}] }
+        Returns reordered stops + ORS route geometry via a server-side ORS call.
+        Falls back to nearest-neighbour order with no geometry if ORS is unavailable.
+        """
+        import os, math, urllib.request, urllib.error, json as _json
+
+        dumpsite_id = request.data.get('dumpsite_id')
+        raw_stops = request.data.get('stops', [])
+
+        if not dumpsite_id:
+            return Response({'error': 'dumpsite_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(raw_stops, list) or len(raw_stops) == 0:
+            return Response({'error': 'stops must be a non-empty list'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from driver.models import Dumpsite
+            dumpsite = Dumpsite.objects.get(pk=dumpsite_id)
+        except Exception:
+            return Response({'error': 'Dumpsite not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        origin_lat = float(dumpsite.latitude)
+        origin_lng = float(dumpsite.longitude)
+
+        # Validate stops
+        stops = []
+        for s in raw_stops:
+            try:
+                stops.append({
+                    'stop_id': s.get('stop_id', ''),
+                    'lat': float(s['lat']),
+                    'lng': float(s['lng']),
+                    'label': s.get('label', ''),
+                    'barangay_id': s.get('barangay_id'),
+                    'is_hotspot': bool(s.get('is_hotspot', False)),
+                })
+            except (KeyError, TypeError, ValueError):
+                return Response({'error': 'Each stop must have numeric lat and lng'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── Nearest-neighbour TSP (closed loop from origin) ──────────────────
+        def haversine(lat1, lng1, lat2, lng2):
+            R = 6371008.8
+            dlat = math.radians(lat2 - lat1)
+            dlng = math.radians(lng2 - lng1)
+            a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng / 2) ** 2
+            return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+        unvisited = list(range(len(stops)))
+        ordered = []
+        cur_lat, cur_lng = origin_lat, origin_lng
+        while unvisited:
+            nearest = min(unvisited, key=lambda i: haversine(cur_lat, cur_lng, stops[i]['lat'], stops[i]['lng']))
+            unvisited.remove(nearest)
+            ordered.append(nearest)
+            cur_lat, cur_lng = stops[nearest]['lat'], stops[nearest]['lng']
+
+        ordered_stops = [
+            {**stops[i], 'stop_order': idx + 1}
+            for idx, i in enumerate(ordered)
+        ]
+
+        # ── ORS route fetch (server-side) ─────────────────────────────────────
+        ors_api_key = os.environ.get('ORS_API_KEY', '')
+        route_geometry = ''
+        route_distance_m = None
+        route_duration_s = None
+
+        if ors_api_key and len(ordered_stops) >= 1:
+            # Build closed-loop waypoints: origin → stops → origin
+            waypoints = [[origin_lng, origin_lat]]
+            for s in ordered_stops:
+                waypoints.append([s['lng'], s['lat']])
+            waypoints.append([origin_lng, origin_lat])
+
+            ors_url = 'https://api.openrouteservice.org/v2/directions/driving-car'
+            auth_header = ors_api_key if ors_api_key.startswith('Bearer ') else f'Bearer {ors_api_key}'
+            ors_body = _json.dumps({'coordinates': waypoints, 'instructions': False}).encode('utf-8')
+            ors_req = urllib.request.Request(
+                ors_url,
+                data=ors_body,
+                headers={
+                    'Authorization': auth_header,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                },
+                method='POST',
+            )
+            try:
+                with urllib.request.urlopen(ors_req, timeout=10) as resp:
+                    ors_data = _json.loads(resp.read())
+                    if ors_data.get('routes'):
+                        r = ors_data['routes'][0]
+                        route_geometry = r.get('geometry', '')
+                        summary = r.get('summary', {})
+                        route_distance_m = round(summary.get('distance', 0))
+                        route_duration_s = round(summary.get('duration', 0))
+            except Exception:
+                pass  # ORS unavailable — return ordered stops without geometry
+
+        import hashlib, datetime
+        sig_parts = f"{dumpsite_id}|" + '|'.join(f"{s['lat']:.5f},{s['lng']:.5f}" for s in ordered_stops)
+        route_signature = hashlib.sha256(sig_parts.encode()).hexdigest()[:16]
+
+        return Response({
+            'stops': ordered_stops,
+            'route_geometry': route_geometry,
+            'route_distance_m': route_distance_m,
+            'route_duration_s': route_duration_s,
+            'route_signature': route_signature,
+            'route_optimized_at': datetime.datetime.utcnow().isoformat() + 'Z',
+        })
+
     @action(detail=True, methods=['get'], url_path='resolve-team')
     def resolve_team(self, request, pk=None):
         from .allocation_service import AllocationService

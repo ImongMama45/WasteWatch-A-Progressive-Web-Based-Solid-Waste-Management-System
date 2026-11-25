@@ -513,7 +513,7 @@ export class RouteRequestManager {
       headers: {
         Accept: 'application/json, application/geo+json',
         'Content-Type': 'application/json',
-        Authorization: this.apiKey,
+        Authorization: this.apiKey.startsWith('Bearer ') ? this.apiKey : `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify(body),
       signal,
