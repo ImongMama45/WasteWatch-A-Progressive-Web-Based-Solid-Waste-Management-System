@@ -2,17 +2,11 @@
  * CivicDiscussionCard.jsx
  * -----------------------
  * Dedicated Civic Discussion Card for the WasteWatch Community Feed.
- * Represents citizen neighborhood discussions, cleanup initiatives,
- * collection inquiries, and civic advisories.
- *
- * Characteristics:
- * - Strictly text-only (no photo attachments)
- * - Required civic category badge (Collection Schedule, Cleanup Initiative, General Inquiry, Civic Advisory)
- * - Real author credentials & barangay attribution
- * - Like toggle with persisted count
- * - Expandable CommentThread
- * - Native share with clipboard copy fallback
- * - Citizen reporting and admin moderation
+ * Redesigned to follow Reddit-inspired flat social discussion feed principles:
+ * - Content-first layout with subtle separators and standard border styling.
+ * - Same visual skeleton as official reports, with category indicator and clean author attribution.
+ * - Text-first focus with high readability and consistent spacing.
+ * - Compact Reddit-style interaction actions (Like, Comments, Share, Report).
  *
  * Strict Iconography Rule: Zero emojis. Lucide SVG icons only.
  */
@@ -43,30 +37,18 @@ export const CIVIC_CATEGORY_META = {
   schedule: {
     label: 'Collection Schedule',
     icon: Calendar,
-    bg: '#f0f9ff',
-    color: '#0369a1',
-    border: '#bae6fd',
   },
   cleanup: {
     label: 'Cleanup Initiative',
     icon: Sparkles,
-    bg: '#f0fdf4',
-    color: '#15803d',
-    border: '#bbf7d0',
   },
   general: {
     label: 'General Inquiry',
     icon: HelpCircle,
-    bg: '#f5f3ff',
-    color: '#6d28d9',
-    border: '#ddd6fe',
   },
   advisory: {
     label: 'Civic Advisory',
     icon: Info,
-    bg: '#fffbeb',
-    color: '#b45309',
-    border: '#fde68a',
   },
 }
 
@@ -88,12 +70,10 @@ export default function CivicDiscussionCard({
   const [copiedLink, setCopiedLink] = useState(false)
   const [localCommentCount, setLocalCommentCount] = useState(post.comment_count || 0)
 
-  // Category Configuration
   const categoryKey = (post.category || 'general').toLowerCase()
   const categoryMeta = CIVIC_CATEGORY_META[categoryKey] || CIVIC_CATEGORY_META.general
   const CategoryIcon = categoryMeta.icon
 
-  // Handle Like
   const handleLikeClick = () => {
     if (!user) {
       if (onAuthRequired) onAuthRequired()
@@ -102,7 +82,6 @@ export default function CivicDiscussionCard({
     onLike(post.id)
   }
 
-  // Handle Share (Native Share or Clipboard Copy)
   const handleShareClick = async () => {
     const shareUrl = `${window.location.origin}/community?post=${post.id}`
     const shareTitle = `WasteWatch Lucena Community: Post by ${post.author_name}`
@@ -132,13 +111,11 @@ export default function CivicDiscussionCard({
     }
   }
 
-  // Handle Delete
   const handleDeleteClick = () => {
     if (!window.confirm('Are you sure you want to delete this community discussion?')) return
     onDelete(post.id)
   }
 
-  // Handle Admin Moderate
   const handleToggleHide = () => {
     const actionName = post.is_hidden ? 'unhide and restore' : 'hide'
     if (!window.confirm(`Are you sure you want to ${actionName} this post?`)) return
@@ -150,34 +127,41 @@ export default function CivicDiscussionCard({
       id={`post-${post.id}`}
       style={{
         background: '#ffffff',
-        borderRadius: 14,
-        padding: '20px 22px',
-        marginBottom: 16,
-        border: isHighlighted ? '2px solid #16a34a' : '1px solid #e2e8f0',
-        boxShadow: isHighlighted
-          ? '0 4px 12px rgba(22, 163, 74, 0.15)'
-          : '0 1px 3px rgba(0, 0, 0, 0.02)',
-        transition: 'border 0.2s, box-shadow 0.2s',
+        borderRadius: 8,
+        marginBottom: 10,
+        border: isHighlighted ? '1.5px solid #16a34a' : '1px solid #e2e8f0',
+        padding: '12px 16px',
+        boxShadow: '0 1px 2px rgba(15, 23, 42, 0.02)',
+        transition: 'border-color 0.15s',
       }}
     >
-      {/* Post Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {/* Author Avatar */}
+      {/* 1. Header Metadata Row */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          marginBottom: 8,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+          {/* Author avatar */}
           <div
             style={{
-              width: 40,
-              height: 40,
+              width: 26,
+              height: 26,
               borderRadius: '50%',
               background: '#16a34a',
               color: '#ffffff',
-              fontSize: 15,
-              fontWeight: 800,
+              fontSize: 11.5,
+              fontWeight: 700,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              flexShrink: 0,
               overflow: 'hidden',
+              flexShrink: 0,
             }}
           >
             {post.author_avatar ? (
@@ -187,117 +171,96 @@ export default function CivicDiscussionCard({
             )}
           </div>
 
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>
-                {post.author_name || 'Lucena Citizen'}
-              </span>
-              {post.author_role && post.author_role !== 'citizen' && (
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    padding: '2px 7px',
-                    borderRadius: 4,
-                    background: '#e0f2fe',
-                    color: '#0369a1',
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  {post.author_role.replace('_', ' ')}
-                </span>
-              )}
-              {post.is_hidden && (
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    padding: '2px 7px',
-                    borderRadius: 4,
-                    background: '#fee2e2',
-                    color: '#dc2626',
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  Hidden by Admin
-                </span>
-              )}
-            </div>
+          {/* Author Name */}
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+            {post.author_name || 'Lucena Resident'}
+          </span>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2, flexWrap: 'wrap' }}>
-              {/* Category Badge */}
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  padding: '2px 8px',
-                  borderRadius: 6,
-                  background: categoryMeta.bg,
-                  color: categoryMeta.color,
-                  border: `1px solid ${categoryMeta.border}`,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                }}
-              >
-                <CategoryIcon size={12} />
-                <span>{categoryMeta.label}</span>
-              </span>
+          {post.author_role && post.author_role !== 'citizen' && (
+            <span
+              style={{
+                fontSize: 9.5,
+                fontWeight: 700,
+                padding: '1px 5px',
+                borderRadius: 3,
+                background: '#f1f5f9',
+                color: '#475569',
+                textTransform: 'uppercase',
+              }}
+            >
+              {post.author_role.replace('_', ' ')}
+            </span>
+          )}
 
-              {/* Barangay Tag */}
-              {post.barangay_name && (
-                <span style={{ fontSize: 12, color: '#16a34a', display: 'flex', alignItems: 'center', gap: 3, fontWeight: 600 }}>
-                  <MapPin size={12} />
-                  {post.barangay_name}
-                </span>
-              )}
+          <span style={{ color: '#cbd5e1', fontSize: 11 }}>·</span>
 
-              {/* Publication Date */}
-              <span style={{ fontSize: 12, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 3 }}>
-                <Clock size={11} />
-                {formatRelativeTime(post.created_at)}
+          {/* Category Tag */}
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3.5,
+              fontSize: 11.5,
+              fontWeight: 600,
+              color: '#15803d',
+            }}
+          >
+            <CategoryIcon size={12} />
+            <span>{categoryMeta.label}</span>
+          </span>
+
+          {/* Barangay location */}
+          {post.barangay_name && (
+            <>
+              <span style={{ color: '#cbd5e1', fontSize: 11 }}>·</span>
+              <span style={{ fontSize: 12, color: '#64748b', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                <MapPin size={11} />
+                <span>{post.barangay_name}</span>
               </span>
-            </div>
-          </div>
+            </>
+          )}
+
+          <span style={{ color: '#cbd5e1', fontSize: 11 }}>·</span>
+
+          {/* Relative publication time */}
+          <span style={{ fontSize: 11.5, color: '#94a3b8', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+            <Clock size={11} />
+            <span>{formatRelativeTime(post.created_at)}</span>
+          </span>
         </div>
 
-        {/* Action Menu (Delete / Report / Moderate) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {/* Admin Moderate Hide / Unhide */}
+        {/* Right Actions: Admin Moderate / Delete / Flag */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           {isAdmin && (
             <button
               onClick={handleToggleHide}
-              title={post.is_hidden ? 'Unhide Post' : 'Hide Inappropriate Post'}
+              title={post.is_hidden ? 'Restore Post' : 'Hide Post'}
               style={{
-                background: post.is_hidden ? '#fef2f2' : '#f8fafc',
-                border: '1px solid #e2e8f0',
-                color: post.is_hidden ? '#dc2626' : '#64748b',
-                padding: '5px 8px',
-                borderRadius: 6,
-                fontSize: 11,
-                fontWeight: 600,
+                background: 'transparent',
+                border: 'none',
+                color: post.is_hidden ? '#dc2626' : '#94a3b8',
+                padding: '3px 6px',
+                cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 4,
-                cursor: 'pointer',
+                gap: 3,
+                fontSize: 11,
               }}
             >
               {post.is_hidden ? <Eye size={13} /> : <EyeOff size={13} />}
-              <span className="ww-hide-mobile">{post.is_hidden ? 'Restore' : 'Hide'}</span>
+              <span>{post.is_hidden ? 'Restore' : 'Hide'}</span>
             </button>
           )}
 
-          {/* Delete (Author or Admin) */}
           {(isAuthor || isAdmin) && (
             <button
               onClick={handleDeleteClick}
               title="Delete Post"
               style={{
-                background: '#f8fafc',
-                border: '1px solid #e2e8f0',
-                color: '#64748b',
-                padding: '5px 8px',
-                borderRadius: 6,
+                background: 'transparent',
+                border: 'none',
+                color: '#94a3b8',
+                padding: '3px 6px',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
@@ -307,7 +270,6 @@ export default function CivicDiscussionCard({
             </button>
           )}
 
-          {/* Report (Non-author) */}
           {!isAuthor && (
             <button
               onClick={() => {
@@ -317,131 +279,130 @@ export default function CivicDiscussionCard({
                 }
                 setReportModalOpen(true)
               }}
-              title="Report Inappropriate Content"
+              title="Report Concern"
               style={{
                 background: 'transparent',
                 border: 'none',
                 color: '#94a3b8',
-                padding: '5px 6px',
+                padding: '3px 6px',
                 cursor: 'pointer',
-                borderRadius: 6,
                 display: 'flex',
                 alignItems: 'center',
               }}
             >
-              <ShieldAlert size={14} />
+              <ShieldAlert size={13} />
             </button>
           )}
         </div>
       </div>
 
-      {/* Discussion Text Content (Strictly Text-Only) */}
+      {/* 2. Content */}
       <div
         style={{
-          fontSize: 14.5,
+          fontSize: 14,
           color: '#1e293b',
-          lineHeight: 1.6,
+          lineHeight: 1.55,
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
-          marginBottom: 16,
+          margin: '0 0 10px',
         }}
       >
         {post.content}
       </div>
 
-      {/* Interaction Footer Bar */}
+      {/* 3. Reddit-Style Interaction Footer Bar */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           borderTop: '1px solid #f1f5f9',
-          paddingTop: 12,
+          paddingTop: 6,
+          marginTop: 6,
           flexWrap: 'wrap',
-          gap: 10,
+          gap: 6,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          {/* Like Button */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          {/* Like */}
           <button
             onClick={handleLikeClick}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 6,
+              gap: 4,
               background: post.has_liked ? '#fef2f2' : 'transparent',
-              border: post.has_liked ? '1px solid #fecaca' : '1px solid transparent',
-              color: post.has_liked ? '#e11d48' : '#64748b',
-              padding: '6px 12px',
-              borderRadius: 8,
-              fontSize: 13,
+              border: 'none',
+              color: post.has_liked ? '#dc2626' : '#64748b',
+              padding: '4px 8px',
+              borderRadius: 4,
+              fontSize: 12,
               fontWeight: 600,
               cursor: 'pointer',
-              transition: 'all 0.15s ease',
             }}
           >
             <Heart
-              size={16}
-              fill={post.has_liked ? '#e11d48' : 'none'}
-              stroke={post.has_liked ? '#e11d48' : 'currentColor'}
+              size={13}
+              fill={post.has_liked ? '#dc2626' : 'none'}
+              stroke={post.has_liked ? '#dc2626' : 'currentColor'}
             />
             <span>{post.like_count || 0}</span>
           </button>
 
-          {/* Comment Toggle Button */}
+          {/* Comments */}
           <button
             onClick={() => setCommentsOpen(o => !o)}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 6,
+              gap: 4,
               background: commentsOpen ? '#f0fdf4' : 'transparent',
-              border: commentsOpen ? '1px solid #bbf7d0' : '1px solid transparent',
+              border: 'none',
               color: commentsOpen ? '#16a34a' : '#64748b',
-              padding: '6px 12px',
-              borderRadius: 8,
-              fontSize: 13,
+              padding: '4px 8px',
+              borderRadius: 4,
+              fontSize: 12,
               fontWeight: 600,
               cursor: 'pointer',
-              transition: 'all 0.15s ease',
             }}
           >
-            <MessageSquare size={16} />
+            <MessageSquare size={13} />
             <span>{localCommentCount} {localCommentCount === 1 ? 'Comment' : 'Comments'}</span>
           </button>
         </div>
 
-        {/* Share Button */}
+        {/* Share */}
         <button
           onClick={handleShareClick}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: 6,
-            background: copiedLink ? '#f0fdf4' : 'transparent',
-            border: copiedLink ? '1px solid #bbf7d0' : '1px solid #e2e8f0',
-            color: copiedLink ? '#15803d' : '#64748b',
-            padding: '6px 12px',
-            borderRadius: 8,
-            fontSize: 12,
+            gap: 4,
+            background: 'transparent',
+            border: 'none',
+            color: copiedLink ? '#16a34a' : '#64748b',
+            padding: '4px 8px',
+            borderRadius: 4,
+            fontSize: 11.5,
             fontWeight: 600,
             cursor: 'pointer',
-            transition: 'all 0.15s ease',
           }}
         >
-          {copiedLink ? <Check size={14} /> : <Share2 size={14} />}
-          <span>{copiedLink ? 'Link Copied!' : 'Share'}</span>
+          {copiedLink ? <Check size={12} /> : <Share2 size={12} />}
+          <span>{copiedLink ? 'Copied' : 'Share'}</span>
         </button>
       </div>
 
-      {/* Expandable Comments Thread */}
+      {/* Expandable Comment Thread */}
       {commentsOpen && (
-        <CommentThread
-          key={`discussion-post-${post.id}`}
-          postId={post.id}
-          onCommentCountChange={setLocalCommentCount}
-          onAuthRequired={onAuthRequired}
-        />
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #f1f5f9' }}>
+          <CommentThread
+            key={`discussion-post-${post.id}`}
+            postId={post.id}
+            onCommentCountChange={setLocalCommentCount}
+            onAuthRequired={onAuthRequired}
+          />
+        </div>
       )}
 
       {/* Report Modal */}

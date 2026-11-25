@@ -16,9 +16,21 @@ import { detectBarangayFromCoords } from '../../utils/barangayGeofence'
 import api from '../../api/client'
 import { detectConflicts, formatTime12h } from '../../utils/scheduleConflicts'
 import { MapSkeleton, FeedCardSkeleton, CalendarSkeleton } from '../../components/ui/Skeleton'
+import {
+  optimizeScheduleRoute,
+  createCollectionSchedule,
+  updateCollectionSchedule,
+} from '../../api/driverWorkflowApi'
+import {
+  buildClosedLoopWaypoints,
+  computeRouteInputSignature,
+  dumpsiteToOriginPoint,
+  optimizeStopsClosedLoop,
+  resolveScheduleStops,
+  validateScheduleReadinessForSave,
+} from '../../utils/routeBaseHelpers'
 
 const LUCENA_CENTER = [13.9373, 121.617]
-const HOME_BASE = { lat: 13.9373, lng: 121.617, label: 'City Hall — Home Base' }
 const ORS_API_KEY = import.meta.env.VITE_ORS_API_KEY || ''
 
 // ── Truck palette (matches index.css vars) ─────────────────────────────────
@@ -110,19 +122,8 @@ function generateUUID() {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
 }
 
-function optimizeStopOrder(origin, stops) {
-  if (stops.length <= 2) return stops
-  const remaining = [...stops]; const ordered = []; let current = origin
-  while (remaining.length > 0) {
-    let ni = 0, nd = Infinity
-    remaining.forEach((s, i) => { const d = Math.hypot(s.lat - current.lat, s.lng - current.lng); if (d < nd) { nd = d; ni = i } })
-    ordered.push(remaining[ni]); current = remaining[ni]; remaining.splice(ni, 1)
-  }
-  return ordered
-}
-
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-const STEP_LABELS = ['Config', 'Schedule', 'Stops', 'Dumpsite', 'Review']
+const STEP_LABELS = ['Config', 'Schedule', 'Dumpsite', 'Stops', 'Review']
 
 // ── Minimal SVG icons ──────────────────────────────────────────────────────
 const Ico = ({ d, size = 14, color = 'currentColor', sw = 1.75, fill = 'none' }) => (
@@ -223,9 +224,6 @@ export default function RouteBuilder() {
   const safeCalendarEvents = useMemo(() => (Array.isArray(calendarEvents) ? calendarEvents : (calendarEvents?.results || [])), [calendarEvents])
 
   const [editId, setEditId] = useState(null)
-  const [homeBase, setHomeBase] = useState(HOME_BASE)
-  const [confirmUniversal, setConfirmUniversal] = useState(false)
-  const [pendingHomeBase, setPendingHomeBase] = useState(null)
   const [truckFirst, setTruckFirst] = useState(true)
   const [truck, setTruck] = useState('')
   const [driver, setDriver] = useState('')
@@ -233,12 +231,10 @@ export default function RouteBuilder() {
   const [days, setDays] = useState([])
   const [time, setTime] = useState('06:00')
   const [endTime, setEndTime] = useState('14:00')
-  const [startPoint, setStartPoint] = useState(HOME_BASE)
-  const [universalStart, setUniversalStart] = useState(false)
-  const [manualCoords, setManualCoords] = useState({ lat: '', lng: '' })
-  const [showManualCoords, setShowManualCoords] = useState(false)
   const [stops, setStops] = useState([])
   const [dumpsite, setDumpsite] = useState('')
+  const [routeContract, setRouteContract] = useState(null)
+  const [optimizingRoute, setOptimizingRoute] = useState(false)
   const [addMode, setAddMode] = useState(false)
   const [barangaySearch, setBarangaySearch] = useState('')
   const [barangayDropOpen, setBarangayDropOpen] = useState(false)
@@ -251,16 +247,23 @@ export default function RouteBuilder() {
   const barangayGeoRef = useRef(barangayGeo)
   const pendingDeletesRef = useRef({})
   const prevGeometryRef = useRef(null)
+  const lastInputSignatureRef = useRef('')
 
   useEffect(() => { addModeRef.current = addMode }, [addMode])
   useEffect(() => { stopsRef.current = stops }, [stops])
 
-  useEffect(() => {
-    api.get('/api/driver/home-base/').then(r => {
-      setHomeBase(r.data)
-      setStartPoint(prev => (prev === HOME_BASE ? r.data : prev))
-    }).catch(console.error)
-  }, [])
+  const selectedDumpsite = useMemo(
+    () => dumpsites.find(d => String(d.id) === String(dumpsite)) || null,
+    [dumpsites, dumpsite]
+  )
+  const dumpsiteOrigin = useMemo(
+    () => dumpsiteToOriginPoint(selectedDumpsite),
+    [selectedDumpsite]
+  )
+  const currentInputSignature = useMemo(
+    () => computeRouteInputSignature({ dumpsite: selectedDumpsite, stops }),
+    [selectedDumpsite, stops]
+  )
 
   // ── Handle incoming waypoint from HotspotDetection ──────────────────────
   useEffect(() => {
@@ -270,7 +273,7 @@ export default function RouteBuilder() {
       const lng = parseFloat(incoming.lng)
       if (!isNaN(lat) && !isNaN(lng)) {
         setActiveTab('builder')
-        setStep(2)
+        setStep(dumpsite ? 3 : 2)
         setShowMap(true)
         setStops(prev => [...prev, {
           stop_id: `waypoint-${Date.now()}`,
@@ -296,7 +299,7 @@ export default function RouteBuilder() {
       }
       navigate(location.pathname, { replace: true, state: {} })
     }
-  }, [location, navigate])
+  }, [location, navigate, dumpsite])
 
   // ── Intertwined Truck & Driver Selection ─────────────────────────────────
   const handleTruckChange = useCallback((truckId) => {
@@ -324,16 +327,100 @@ export default function RouteBuilder() {
     }
   }, [trucks, truck])
 
-  // ── Auto-optimize stops by proximity ─────────────────────────────────────
-  const prevStopsRef = useRef([])
+  // ── Invalidate stale route geometry whenever dumpsite or stops change ────
   useEffect(() => {
-    if (stops.length < 3) { prevStopsRef.current = stops; return }
-    const posChanged = stops.some((s, i) => { const p = prevStopsRef.current[i]; return !p || p.lat !== s.lat || p.lng !== s.lng }) || stops.length !== prevStopsRef.current.length
-    if (!posChanged) return
-    const optimized = optimizeStopOrder(startPoint, stops)
-    prevStopsRef.current = optimized
-    setStops(optimized)
-  }, [stops.map(s => `${s.lat},${s.lng}`).join('|'), startPoint.lat, startPoint.lng])
+    if (lastInputSignatureRef.current && lastInputSignatureRef.current !== currentInputSignature) {
+      setRouteContract(null)
+    }
+    lastInputSignatureRef.current = currentInputSignature
+  }, [currentInputSignature])
+
+  // ── Closed-loop route optimization (Assigned Dumpsite -> Stops -> Same Dumpsite) ──
+  const runRouteOptimization = useCallback(async ({ applyOrder = true } = {}) => {
+    if (!selectedDumpsite || !dumpsiteOrigin || stops.length === 0) {
+      setRouteContract(null)
+      setOrsData(null)
+      return null
+    }
+    setOptimizingRoute(true)
+    try {
+      const serverRes = await optimizeScheduleRoute({
+        dumpsite_id: Number(selectedDumpsite.id),
+        stops: stops.map((s, idx) => ({
+          stop_id: s.stop_id || `stop-${idx + 1}`,
+          lat: Number(s.lat),
+          lng: Number(s.lng),
+          label: s.label || '',
+          barangay_id: s.barangay_id ?? null,
+          is_hotspot: Boolean(s.is_hotspot),
+        })),
+      })
+      const reorderedStops = applyOrder && Array.isArray(serverRes?.stops) && serverRes.stops.length > 0
+        ? serverRes.stops.map((s, idx) => ({
+            ...stops.find(orig => orig.stop_id && orig.stop_id === s.stop_id),
+            ...s,
+            stop_order: s.stop_order ?? idx + 1,
+          }))
+        : stops
+      if (applyOrder && Array.isArray(serverRes?.stops) && serverRes.stops.length > 0) {
+        setStops(reorderedStops)
+      }
+      const nextSig = serverRes?.route_signature || computeRouteInputSignature({ dumpsite: selectedDumpsite, stops: reorderedStops })
+      const contract = {
+        route_geometry: serverRes?.route_geometry || '',
+        route_distance_m: serverRes?.route_distance_m ?? null,
+        route_duration_s: serverRes?.route_duration_s ?? null,
+        route_signature: nextSig,
+        route_optimized_at: serverRes?.route_optimized_at || new Date().toISOString(),
+      }
+      setRouteContract(contract)
+      if (contract.route_geometry) {
+        setOrsData({
+          geometry: contract.route_geometry,
+          summary: {
+            distance: contract.route_distance_m ?? 0,
+            duration: contract.route_duration_s ?? 0,
+          },
+        })
+      }
+      return contract
+    } catch {
+      // Safe client-side closed-loop fallback preserving Dumpsite origin and Dumpsite return
+      const ordered = applyOrder ? optimizeStopsClosedLoop(dumpsiteOrigin, stops) : stops
+      if (applyOrder) setStops(ordered)
+      const loopCoords = buildClosedLoopWaypoints({ dumpsite: selectedDumpsite, stops: ordered })
+        .closedLoopPoints.map(p => [Number(p.lng), Number(p.lat)])
+      const orsRoute = loopCoords.length >= 2 ? await fetchOrsRoute(loopCoords) : null
+      const contract = {
+        route_geometry: orsRoute?.geometry || '',
+        route_distance_m: orsRoute?.summary?.distance != null ? Math.round(orsRoute.summary.distance) : null,
+        route_duration_s: orsRoute?.summary?.duration != null ? Math.round(orsRoute.summary.duration) : null,
+        route_signature: computeRouteInputSignature({ dumpsite: selectedDumpsite, stops: ordered }),
+        route_optimized_at: new Date().toISOString(),
+      }
+      setRouteContract(contract)
+      if (orsRoute) setOrsData(orsRoute)
+      return contract
+    } finally {
+      setOptimizingRoute(false)
+    }
+  }, [selectedDumpsite, dumpsiteOrigin, stops])
+
+  // Auto-optimize stops on addition using closed-loop Dumpsite -> Stops -> Dumpsite heuristic
+  const prevStopsCountRef = useRef(0)
+  useEffect(() => {
+    if (!dumpsiteOrigin || stops.length < 3) {
+      prevStopsCountRef.current = stops.length
+      return
+    }
+    if (stops.length > prevStopsCountRef.current) {
+      const optimized = optimizeStopsClosedLoop(dumpsiteOrigin, stops)
+      prevStopsCountRef.current = optimized.length
+      setStops(optimized)
+    } else {
+      prevStopsCountRef.current = stops.length
+    }
+  }, [stops, dumpsiteOrigin])
 
   useEffect(() => { barangaysRef.current = barangays }, [barangays])
   useEffect(() => { selectedBarangaysRef.current = selectedBarangays }, [selectedBarangays])
@@ -344,11 +431,6 @@ export default function RouteBuilder() {
     function handleKey(e) {
       if (e.key === 'Escape') {
         setBarangayDropOpen(false)
-        if (confirmUniversal) setConfirmUniversal(false)
-        if (pendingHomeBase) {
-          try { pendingHomeBase.marker.setLatLng([pendingHomeBase.oldLat, pendingHomeBase.oldLng]) } catch (err) { }
-          setPendingHomeBase(null)
-        }
       }
     }
     document.addEventListener('mousedown', handleOutside)
@@ -357,7 +439,7 @@ export default function RouteBuilder() {
       document.removeEventListener('mousedown', handleOutside)
       document.removeEventListener('keydown', handleKey)
     }
-  }, [confirmUniversal, pendingHomeBase])
+  }, [])
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 3500) }
 
@@ -472,20 +554,34 @@ export default function RouteBuilder() {
   }, [])
 
   const buildOrsCoords = () => {
-    const ds = dumpsites.find(d => String(d.id) === String(dumpsite))
-    return [startPoint, ...stops, ...(ds ? [{ lat: +ds.latitude, lng: +ds.longitude }] : []), startPoint].map(p => [Number(p.lng), Number(p.lat)])
+    if (!selectedDumpsite || stops.length === 0) return []
+    const { closedLoopPoints } = buildClosedLoopWaypoints({ dumpsite: selectedDumpsite, stops })
+    return closedLoopPoints.map(p => [Number(p.lng), Number(p.lat)])
   }
 
   useEffect(() => {
     if (!mapReady || activeTab !== 'builder') return
-    const coords = buildOrsCoords(); if (coords.length < 2) { setOrsData(null); return }
+    const coords = buildOrsCoords()
+    if (coords.length < 2) { setOrsData(null); return }
     if (orsAbortRef.current) orsAbortRef.current = false
     const token = {}; orsAbortRef.current = token; setOrsFetching(true)
-    fetchOrsRoute(coords).then(route => { if (token !== orsAbortRef.current) return; setOrsData(route); setOrsFetching(false) })
+    fetchOrsRoute(coords).then(route => {
+      if (token !== orsAbortRef.current) return
+      setOrsData(route)
+      setOrsFetching(false)
+      if (route?.geometry) {
+        setRouteContract({
+          route_geometry: route.geometry,
+          route_distance_m: route.summary?.distance != null ? Math.round(route.summary.distance) : null,
+          route_duration_s: route.summary?.duration != null ? Math.round(route.summary.duration) : null,
+          route_signature: currentInputSignature,
+          route_optimized_at: new Date().toISOString(),
+        })
+      }
+    })
     return () => { orsAbortRef.current = false }
-  }, [stops, dumpsite, startPoint, mapReady, activeTab])
+  }, [stops, dumpsite, mapReady, activeTab, currentInputSignature])
 
-  const selectedDumpsite = dumpsites.find(d => String(d.id) === String(dumpsite))
   const selectedTruck = trucks.find(t => String(t.id) === String(truck))
   const selectedDriverObj = drivers.find(d => String(d.id) === String(driver))
 
@@ -549,18 +645,16 @@ export default function RouteBuilder() {
       })
     }
 
-    // ── HOME BASE marker ──────────────────────────────────────────────────
-    const homeIcon = L.divIcon({
-      html: `<div style="background:#fff;border:2.5px solid #16A34A;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;color:#16A34A;box-shadow:0 3px 10px rgba(0,0,0,.18);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-4a2 2 0 0 1 4 0v4M9 7h6M9 11h6" /></svg></div>`,
-      className: '', iconSize: [32, 32], iconAnchor: [16, 16],
-    })
-    const hm = L.marker([startPoint.lat, startPoint.lng], { icon: homeIcon, draggable: true }).addTo(map)
-    hm.bindPopup(`<b>Start</b><br>${startPoint.label}`)
-    hm.on('dragend', e => {
-      const { lat, lng } = e.target.getLatLng()
-      setPendingHomeBase({ marker: e.target, lat, lng, oldLat: startPoint.lat, oldLng: startPoint.lng })
-    })
-    layersRef.current.push(hm)
+    // ── ASSIGNED DUMPSITE (Authoritative Origin & Final Return Base) ─────
+    if (ds) {
+      const dsIcon = L.divIcon({
+        html: `<div style="position:relative;width:36px;height:36px;"><div style="background:#15803d;border:2.5px solid #ffffff;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;color:#ffffff;box-shadow:0 3px 10px rgba(21,128,61,.35);"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/></svg></div></div>`,
+        className: '', iconSize: [36, 36], iconAnchor: [18, 18],
+      })
+      const dm = L.marker([+ds.latitude, +ds.longitude], { icon: dsIcon }).addTo(map)
+      dm.bindPopup(`<b>${ds.name}</b><br><span style="font-size:11px;color:#15803d;font-weight:700;">ASSIGNED DUMPSITE (START &amp; RETURN)</span>`)
+      layersRef.current.push(dm)
+    }
 
     // ── STOP markers ─────────────────────────────────────────────────────
     stops.forEach((stop, i) => {
@@ -663,17 +757,7 @@ export default function RouteBuilder() {
       })
     }
 
-    // ── DUMPSITE marker ──────────────────────────────────────────────────
-    if (ds) {
-      const dsIcon = L.divIcon({
-        html: `<div style="background:#DC2626;border:2px solid white;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;color:#ffffff;box-shadow:0 3px 8px rgba(0,0,0,.18);"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/></svg></div>`,
-        className: '', iconSize: [30, 30], iconAnchor: [15, 15],
-      })
-      const dm = L.marker([+ds.latitude, +ds.longitude], { icon: dsIcon }).addTo(map)
-      dm.bindPopup(`<b>${ds.name}</b>`); layersRef.current.push(dm)
-    }
-
-    // ── ROUTE polyline ───────────────────────────────────────────────────
+    // ── ROUTE polyline (Closed loop: Assigned Dumpsite -> Stops -> Same Assigned Dumpsite) ──
     if (orsData?.geometry) {
       const pts = decodePolyline(orsData.geometry)
       const tc = selectedTruck ? getTruckColor(selectedTruck.id) : { color: '#16A34A' }
@@ -687,9 +771,6 @@ export default function RouteBuilder() {
         const endIdx = waypoints[i + 1]
         const segmentPts = pts.slice(startIdx, endIdx + 1)
 
-        // Draw each segment sequentially in the default pane so they overlap visually.
-        // This ensures later segments perfectly stack on top of earlier ones (casing & fill together),
-        // showing the route hierarchy and sequence.
         layers.push(L.polyline(segmentPts, { color: shade(tc.color), weight: w.casing, opacity: 1, lineCap: 'butt', lineJoin: 'round', interactive: false }))
         layers.push(L.polyline(segmentPts, { color: tc.color, weight: w.fill, opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false }))
       }
@@ -700,17 +781,17 @@ export default function RouteBuilder() {
         map.fitBounds(fg.getBounds(), { padding: [48, 48] })
         prevGeometryRef.current = orsData.geometry
       }
-    } else if (stops.length > 0) {
-      const allPts = [startPoint, ...stops, ...(ds ? [{ lat: +ds.latitude, lng: +ds.longitude }] : []), startPoint]
-      const ptsKey = allPts.map(p => `${p.lat},${p.lng}`).join('|')
-      const line = L.polyline(allPts.map(p => [p.lat, p.lng]), { color: '#16A34A', weight: 3, opacity: 0.3, dashArray: '8,6' }).addTo(map)
+    } else if (stops.length > 0 && ds) {
+      const { closedLoopPoints } = buildClosedLoopWaypoints({ dumpsite: ds, stops })
+      const ptsKey = closedLoopPoints.map(p => `${p.lat},${p.lng}`).join('|')
+      const line = L.polyline(closedLoopPoints.map(p => [p.lat, p.lng]), { color: '#16A34A', weight: 3, opacity: 0.35, dashArray: '8,6' }).addTo(map)
       layersRef.current.push(line)
       if (step >= 2 && prevGeometryRef.current !== ptsKey) {
         map.fitBounds(line.getBounds(), { padding: [48, 48] })
         prevGeometryRef.current = ptsKey
       }
     }
-  }, [stops, dumpsite, mapReady, step, startPoint, activeTab, orsData, selectedBarangays, barangayGeo, barangays, selectedTruck, hotspots, watcherSpots])
+  }, [stops, dumpsite, mapReady, step, activeTab, orsData, selectedBarangays, barangayGeo, barangays, selectedTruck, hotspots, watcherSpots])
 
   useEffect(() => { if (!mapInst.current) return; mapInst.current.getContainer().style.cursor = addMode ? 'crosshair' : '' }, [addMode])
 
@@ -726,54 +807,73 @@ export default function RouteBuilder() {
   }, [step, truck, driver, days, time, endTime, editId, safeSchedules])
 
   function canNext() {
-    if (step === 0) return truck && driver && selectedBarangays.length > 0
-    if (step === 1) return days.length > 0 && time && endTime && time < endTime && scheduleConflicts.length === 0
-    if (step === 2) return stops.length > 0
-    if (step === 3) return !!dumpsite
+    if (step === 0) return Boolean(truck && driver && selectedBarangays.length > 0)
+    if (step === 1) return Boolean(days.length > 0 && time && endTime && time < endTime && scheduleConflicts.length === 0)
+    if (step === 2) return Boolean(dumpsite && selectedDumpsite)
+    if (step === 3) return Boolean(dumpsite && selectedDumpsite && stops.length > 0)
     return true
   }
   function handleCancel() {
-    if (pendingHomeBase) { try { pendingHomeBase.marker.setLatLng([pendingHomeBase.oldLat, pendingHomeBase.oldLng]) } catch (e) { } }
-    setPendingHomeBase(null)
     prevGeometryRef.current = null
     setStep(0); setEditId(null); setTruck(''); setDriver(''); setSelectedBarangays([]); setDays([])
-    setStops([]); setDumpsite(''); setSaved(false); setStartPoint(homeBase); setOrsData(null)
-    setUniversalStart(false); setManualCoords({ lat: '', lng: '' }); setShowManualCoords(false); setActiveTab('list')
+    setStops([]); setDumpsite(''); setSaved(false); setOrsData(null); setRouteContract(null); setAddMode(false)
+    setActiveTab('list')
   }
   async function handleSave() {
-    let baseChanged = false
+    const readiness = validateScheduleReadinessForSave({
+      truck,
+      driver,
+      selectedBarangays,
+      days,
+      startTime: time,
+      endTime,
+      dumpsite: selectedDumpsite,
+      stops,
+    })
+    if (!readiness.isValid) {
+      if (readiness.errors.includes('missing_dumpsite')) {
+        showToast('Select an Assigned Dumpsite before saving this route.')
+      } else if (readiness.errors.includes('missing_stops')) {
+        showToast('Add at least one collection stop before saving this route.')
+      } else {
+        showToast('Complete all required route fields before saving.')
+      }
+      return
+    }
+
     try {
+      let activeContract = routeContract
+      if (!activeContract || activeContract.route_signature !== currentInputSignature) {
+        activeContract = await runRouteOptimization({ applyOrder: false })
+      }
+      const { waypoints } = buildClosedLoopWaypoints({
+        dumpsite: selectedDumpsite,
+        stops,
+      })
+
       const payload = {
         truck: truck || null,
         driver: driver || null,
-        dumpsite: dumpsite || null,
+        dumpsite: Number(dumpsite),
         barangays: selectedBarangays,
         days: [...new Set(days.map(d => String(d).trim().slice(0, 3)))].join(', '),
         start_time: time,
         end_time: endTime,
-        waypoints: [startPoint, ...stops],  // now writes to the real JSONField
+        waypoints,
+        route_geometry: activeContract?.route_geometry || orsData?.geometry || '',
+        route_distance_m:
+          activeContract?.route_distance_m ??
+          (orsData?.summary?.distance != null ? Math.round(orsData.summary.distance) : null),
+        route_duration_s:
+          activeContract?.route_duration_s ??
+          (orsData?.summary?.duration != null ? Math.round(orsData.summary.duration) : null),
+        route_signature: activeContract?.route_signature || currentInputSignature,
+        route_optimized_at: activeContract?.route_optimized_at || new Date().toISOString(),
       }
-      let baseAfterSave = homeBase
-      let msg = `Route ${editId ? 'updated' : 'saved'}!`
+      const msg = `Route ${editId ? 'updated' : 'saved'}!`
 
-      if (universalStart) {
-        try {
-          const r = await api.put('/api/driver/home-base/', {
-            lat: startPoint.lat, lng: startPoint.lng,
-            label: startPoint.label, apply_to_existing: true,
-          })
-          baseAfterSave = { lat: r.data.lat, lng: r.data.lng, label: r.data.label }
-          setHomeBase(baseAfterSave)
-          baseChanged = true
-          msg += ` Base updated on ${r.data.updated_routes} routes.`
-        } catch (e) {
-          showToast(`❌ ${e.response?.data?.error || 'Could not update the base for all routes.'} Route not saved.`)
-          return
-        }
-      }
-
-      if (editId) await api.patch(`/api/driver/collection-schedules/${editId}/`, payload)
-      else await api.post('/api/driver/collection-schedules/', payload)
+      if (editId) await updateCollectionSchedule(editId, payload)
+      else await createCollectionSchedule(payload)
 
       await refreshTrucks()
       await refreshDrivers()
@@ -783,8 +883,8 @@ export default function RouteBuilder() {
       setTimeout(() => {
         setStep(0); setEditId(null); setTruck(''); setDriver('')
         setSelectedBarangays([]); setDays([]); setStops([])
-        setDumpsite(''); setSaved(false); setStartPoint(baseAfterSave)
-        setOrsData(null); setActiveTab('list'); setUniversalStart(false)
+        setDumpsite(''); setSaved(false); setRouteContract(null)
+        setOrsData(null); setActiveTab('list')
       }, 2000)
     } catch (err) {
       const detail = err.response?.data
@@ -793,14 +893,15 @@ export default function RouteBuilder() {
           .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
           .join(' | ')
         : String(detail || 'Unknown error')
-      showToast(`❌ ${errorMsg}${baseChanged ? ' (Base was already updated on all routes.)' : ''}`)
+      showToast(`Save failed: ${errorMsg}`)
       console.error('Save error:', err.response?.status, detail)
     }
   }
 
   function handleEdit(s) {
-    setActiveTab('builder'); setStep(2); setEditId(s.id)
-    setUniversalStart(false)
+    setActiveTab('builder')
+    setStep(2) // Confirm Dumpsite first before editing stops
+    setEditId(s.id)
     prevGeometryRef.current = null
     setTruck(s.truck ? String(s.truck) : '')
     setDriver(s.driver ? String(s.driver) : '')
@@ -815,16 +916,26 @@ export default function RouteBuilder() {
     setEndTime(s.end_time ? s.end_time.slice(0, 5) : '14:00')
     setDumpsite(s.dumpsite ? String(s.dumpsite) : '')
 
-    // Use raw waypoints (JSONField), fall back to waypoints_display
-    const raw = s.waypoints?.length ? s.waypoints : (s.waypoints_display || [])
-    if (raw.length > 0) {
-      const wps = raw.map(w => ({ ...w, lat: +w.lat, lng: +w.lng }))
-      const sp = wps.shift()
-      setStartPoint(sp)
-      setStops(wps)
+    const parsedStops = resolveScheduleStops(s)
+    setStops(parsedStops)
+    if (s.route_geometry) {
+      setRouteContract({
+        route_geometry: s.route_geometry,
+        route_distance_m: s.route_distance_m ?? null,
+        route_duration_s: s.route_duration_s ?? null,
+        route_signature: s.route_signature || '',
+        route_optimized_at: s.route_optimized_at || null,
+      })
+      setOrsData({
+        geometry: s.route_geometry,
+        summary: {
+          distance: s.route_distance_m ?? 0,
+          duration: s.route_duration_s ?? 0,
+        },
+      })
     } else {
-      setStartPoint(homeBase)
-      setStops([])
+      setRouteContract(null)
+      setOrsData(null)
     }
     setTimeout(() => { try { mapInst.current?.invalidateSize() } catch { } }, 300)
   }
@@ -1287,8 +1398,6 @@ export default function RouteBuilder() {
           <div className="rb-tabs">
             {[{ key: 'builder', label: 'Build Route' }, { key: 'list', label: 'Scheduled Routes' }, { key: 'calendar', label: 'Calendar' }].map(t => (
               <button key={t.key} className={`rb-tab${activeTab === t.key ? ' active' : ''}`} onClick={() => {
-                if (pendingHomeBase) { try { pendingHomeBase.marker.setLatLng([pendingHomeBase.oldLat, pendingHomeBase.oldLng]) } catch (e) { } setPendingHomeBase(null) }
-                setUniversalStart(false)
                 setActiveTab(t.key)
               }}>{t.label}</button>
             ))}
@@ -1451,7 +1560,7 @@ export default function RouteBuilder() {
                             return (
                               <div key={b.id} className={`rb-dropdown-item${on ? ' on' : ''}`} onClick={() => { setSelectedBarangays(p => on ? p.filter(x => x !== b.id) : [...p, b.id]); setBarangaySearch('') }}>
                                 <div style={{ width: 15, height: 15, borderRadius: 4, border: `2px solid ${on ? 'var(--accent)' : 'var(--border)'}`, background: on ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                  {on && <span style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}>✓</span>}
+                                  {on && <IcoCheck size={9} color="#fff" sw={3} />}
                                 </div>
                                 {b.name}
                               </div>
@@ -1524,55 +1633,143 @@ export default function RouteBuilder() {
                   </div>
                 )}
 
-                {/* Step 2 — Stops */}
-                {step === 2 && (
+                {/* Step 2 — Assigned Dumpsite (Origin & Return Destination) */}
+                {step === 2 && (() => {
+                  const activeDumpsites = dumpsites.filter(d => (d.fill_percent || 0) < 100)
+                  const recommended = activeDumpsites[0] || null
+                  const otherDumpsites = dumpsites.filter(d => String(d.id) !== String(recommended?.id))
+
+                  return (
+                    <div className="rb-panel">
+                      <p className="rb-panel-title">Select Assigned Dumpsite</p>
+                      <p className="rb-panel-sub">
+                        Authoritative operational base: the truck departs from and returns to this exact dumpsite.
+                      </p>
+
+                      {!dumpsite && (
+                        <div style={{ marginBottom: 12, padding: '9px 12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, fontSize: 11.5, color: '#92400e', display: 'flex', alignItems: 'center', gap: 7 }}>
+                          <IcoAlertTriangle size={14} color="#d97706" />
+                          <span>Select a dumpsite before placing or optimizing stops.</span>
+                        </div>
+                      )}
+
+                      {dumpsites.length === 0 && (
+                        <div style={{ padding: '16px 12px', textAlign: 'center', fontSize: 12, color: '#65676b', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                          No dumpsites configured yet. Create a dumpsite in Dumpsite Management first.
+                        </div>
+                      )}
+
+                      {recommended && (
+                        <div style={{ marginBottom: 16 }}>
+                          <p style={{ fontSize: 11, fontWeight: 700, color: '#16a34a', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <IcoStar size={13} color="#d97706" /> Available Dumpsite
+                          </p>
+                          <div className={`rb-ds-card${String(dumpsite) === String(recommended.id) ? ' sel' : ''}`} onClick={() => setDumpsite(String(recommended.id))} style={{ marginBottom: 0, borderColor: String(dumpsite) === String(recommended.id) ? '#16a34a' : '#e4e6eb', background: String(dumpsite) === String(recommended.id) ? '#f0fdf4' : '#ffffff' }}>
+                            <div style={{ width: 36, height: 36, borderRadius: 6, background: String(dumpsite) === String(recommended.id) ? '#e7f5eb' : '#f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              <IcoFactory size={18} color={String(dumpsite) === String(recommended.id) ? '#16a34a' : '#65676b'} />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 700, fontSize: 13, color: '#1c1e21', marginBottom: 1 }}>{recommended.name}</div>
+                              <div style={{ fontSize: 11, color: '#65676b' }}>
+                                {(+recommended.latitude).toFixed(4)}, {(+recommended.longitude).toFixed(4)} • {recommended.fill_percent || 0}% full
+                              </div>
+                            </div>
+                            {String(dumpsite) === String(recommended.id) && (
+                              <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                <IcoCheck size={11} color="#fff" sw={3} />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {otherDumpsites.length > 0 && (
+                        <>
+                          <p style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
+                            Other Dumpsites
+                          </p>
+                          {otherDumpsites.map(ds => (
+                            <div key={ds.id} className={`rb-ds-card${String(dumpsite) === String(ds.id) ? ' sel' : ''}`} onClick={() => setDumpsite(String(ds.id))}>
+                              <div style={{ width: 36, height: 36, borderRadius: 6, background: String(dumpsite) === String(ds.id) ? '#e7f5eb' : '#f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                <IcoFactory size={18} color={String(dumpsite) === String(ds.id) ? '#16a34a' : '#65676b'} />
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontWeight: 700, fontSize: 13, color: '#1c1e21', marginBottom: 1 }}>{ds.name}</div>
+                                <div style={{ fontSize: 11, color: '#65676b' }}>
+                                  {(+ds.latitude).toFixed(4)}, {(+ds.longitude).toFixed(4)} • {ds.fill_percent || 0}% full
+                                </div>
+                              </div>
+                              {String(dumpsite) === String(ds.id) && (
+                                <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                  <IcoCheck size={11} color="#fff" sw={3} />
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  )
+                })()}
+
+                {/* Step 3 — Stops (Ordered between Dumpsite Origin and Dumpsite Return) */}
+                {step === 3 && (
                   <div className="rb-panel">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, gap: 8 }}>
                       <div>
                         <p className="rb-panel-title" style={{ margin: 0 }}>Route Stops</p>
                         <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>{stops.length} stop{stops.length !== 1 ? 's' : ''} placed</p>
                       </div>
-                      <button className="rb-btn-primary rb-btn-sm" onClick={() => { setAddMode(true); setShowMap(true); setTimeout(() => { try { mapInst.current?.invalidateSize() } catch { } }, 50) }}>
-                        <IcoPlus size={12} color="#fff" /> Add Stop
-                      </button>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {stops.length > 1 && selectedDumpsite && (
+                          <button
+                            type="button"
+                            className="rb-btn-ghost rb-btn-sm"
+                            disabled={optimizingRoute}
+                            onClick={() => runRouteOptimization({ applyOrder: true })}
+                            title="Optimize closed-loop stop order"
+                          >
+                            <IcoRoute size={12} color="#16a34a" />
+                            {optimizingRoute ? 'Optimizing...' : 'Optimize'}
+                          </button>
+                        )}
+                        <button className="rb-btn-primary rb-btn-sm" onClick={() => { setAddMode(true); setShowMap(true); setTimeout(() => { try { mapInst.current?.invalidateSize() } catch { } }, 50) }}>
+                          <IcoPlus size={12} color="#fff" /> Add Stop
+                        </button>
+                      </div>
                     </div>
 
                     {stops.length === 0 && <div style={{ textAlign: 'center', padding: '16px 0', fontSize: 12, color: 'var(--text-muted)' }}>Tap "+ Add Stop", then click the map to place points.</div>}
 
                     {orsStats && stops.length > 0 && (
                       <div style={{ display: 'flex', gap: 7, marginBottom: 13 }}>
-                        <div className="rb-stat"><div className="rb-stat-val">{orsStats.distKm} km</div><div className="rb-stat-lbl">Distance</div></div>
+                        <div className="rb-stat"><div className="rb-stat-val">{orsStats.distKm} km</div><div className="rb-stat-lbl">Loop Distance</div></div>
                         <div className="rb-stat"><div className="rb-stat-val" style={{ color: 'var(--text)' }}>{orsStats.durationMin} min</div><div className="rb-stat-lbl">Est. Time</div></div>
                         <div className="rb-stat"><div className="rb-stat-val" style={{ color: 'var(--text)' }}>{stops.length}</div><div className="rb-stat-lbl">Stops</div></div>
                       </div>
                     )}
-                    {orsFetching && stops.length > 0 && (
+                    {(orsFetching || optimizingRoute) && stops.length > 0 && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10, fontSize: 11, color: 'var(--warning)' }}>
-                        <div className="rb-spinner" style={{ borderTopColor: 'var(--warning)' }} /> Calculating road route…
+                        <div className="rb-spinner" style={{ borderTopColor: 'var(--warning)' }} /> Calculating closed-loop dumpsite route…
                       </div>
                     )}
 
-                    {/* Start point */}
-                    <div style={{ padding: '9px 0 10px', borderBottom: '1px solid var(--border)', marginBottom: 5 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
-                        <div style={{ width: 26, height: 26, background: '#fff', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: '2px solid var(--accent)', color: 'var(--accent)', boxShadow: 'var(--shadow-xs)' }}><IcoBuilding size={12} /></div>
-                        <input className="rb-input" value={startPoint.label} onChange={e => {
-                          setStartPoint(p => ({ ...p, label: e.target.value }));
-                          if (universalStart) { setUniversalStart(false); showToast('Apply-to-all was cleared because the start changed') }
-                        }} style={{ flex: 1, padding: '5px 9px', fontSize: 12 }} placeholder="Start location label" />
-                        <span style={{ fontSize: 9, color: 'var(--accent)', fontWeight: 800, flexShrink: 0, letterSpacing: '.05em' }}>START</span>
+                    {/* Authoritative Origin: Assigned Dumpsite */}
+                    {selectedDumpsite && (
+                      <div style={{ padding: '9px 10px', borderRadius: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ width: 26, height: 26, background: '#15803d', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: '#fff' }}>
+                          <IcoFactory size={12} color="#fff" />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#14532d' }}>{selectedDumpsite.name}</div>
+                          <div style={{ fontSize: 10, color: '#15803d', fontWeight: 600 }}>Origin Base (Departure)</div>
+                        </div>
+                        <span style={{ fontSize: 9, color: '#15803d', fontWeight: 800, flexShrink: 0, letterSpacing: '.05em' }}>START</span>
                       </div>
-                      <label className="rb-check" style={{ paddingLeft: 34 }}>
-                        <input type="checkbox" checked={universalStart} onChange={e => {
-                          if (e.target.checked) setConfirmUniversal(true)
-                          else setUniversalStart(false)
-                        }} />
-                        Apply to all truck routes
-                      </label>
-                    </div>
+                    )}
 
                     {stops.map((s, i) => (
-                      <div key={i} className="rb-stop-row">
+                      <div key={s.stop_id || i} className="rb-stop-row">
                         <div className="rb-stop-num" style={s.is_hotspot ? { borderColor: '#f59e0b', color: '#d97706' } : {}}>{i + 1}</div>
                         <input className="rb-input" value={s.label} onChange={e => setStops(p => p.map((x, idx) => idx === i ? { ...x, label: e.target.value } : x))} style={{ flex: 1, padding: '5px 9px', fontSize: 12 }} placeholder="Label (optional)…" disabled={s.is_hotspot} />
                         <button onClick={() => {
@@ -1582,13 +1779,27 @@ export default function RouteBuilder() {
                             setTimeout(() => { try { mapInst.current?.invalidateSize() } catch { } }, 50);
                           }
                         }} style={{ background: 'none', border: 'none', color: 'var(--text-light)', cursor: 'pointer', padding: '2px 4px', transition: 'color .1s', display: 'flex', alignItems: 'center' }} onMouseEnter={e => e.currentTarget.style.color = 'var(--info)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--text-light)'} title="View on map"><IcoPin size={15} /></button>
-                        <button onClick={() => removeStop(i)} style={{ background: 'none', border: 'none', color: 'var(--text-light)', fontSize: 18, cursor: 'pointer', padding: '0 3px', transition: 'color .1s' }} onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--text-light)'} title="Remove stop">×</button>
+                        <button onClick={() => removeStop(i)} style={{ background: 'none', border: 'none', color: 'var(--text-light)', cursor: 'pointer', padding: '2px 4px', transition: 'color .1s', display: 'flex', alignItems: 'center' }} onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--text-light)'} title="Remove stop"><IcoX size={14} /></button>
                       </div>
                     ))}
 
+                    {/* Authoritative Return Destination: Same Assigned Dumpsite */}
+                    {selectedDumpsite && (
+                      <div style={{ padding: '9px 10px', borderRadius: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', marginTop: 8, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ width: 26, height: 26, background: '#15803d', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: '#fff' }}>
+                          <IcoFactory size={12} color="#fff" />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#14532d' }}>{selectedDumpsite.name}</div>
+                          <div style={{ fontSize: 10, color: '#15803d', fontWeight: 600 }}>Final Return Destination</div>
+                        </div>
+                        <span style={{ fontSize: 9, color: '#15803d', fontWeight: 800, flexShrink: 0, letterSpacing: '.05em' }}>RETURN</span>
+                      </div>
+                    )}
+
                     {stops.length > 1 && (
-                      <div style={{ marginTop: 9, padding: '6px 10px', background: 'rgba(22,163,74,.04)', border: '1px solid rgba(22,163,74,.12)', borderRadius: 7, fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <IcoRoute size={11} color="var(--accent)" /> Order auto-optimized by proximity
+                      <div style={{ marginTop: 4, marginBottom: 10, padding: '6px 10px', background: 'rgba(22,163,74,.04)', border: '1px solid rgba(22,163,74,.12)', borderRadius: 7, fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <IcoRoute size={11} color="var(--accent)" /> Closed-loop order anchored to {selectedDumpsite?.name || 'Assigned Dumpsite'}
                       </div>
                     )}
 
@@ -1791,107 +2002,14 @@ export default function RouteBuilder() {
                         </div>
                       );
                     })()}
-
-                    {/* Manual coords */}
-                    <div style={{ marginTop: 9, paddingLeft: 32 }}>
-                      <button onClick={() => setShowManualCoords(v => !v)} style={{ background: 'none', border: 'none', color: 'var(--info)', fontSize: 11, fontWeight: 600, padding: 0, cursor: 'pointer' }}>
-                        {showManualCoords ? '▲ Hide coordinates' : '▼ Enter manual coordinates'}
-                      </button>
-                      {showManualCoords && (
-                        <div style={{ marginTop: 9, display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 7, alignItems: 'flex-end' }}>
-                          <div><label className="rb-label">Latitude</label><input className="rb-input" value={manualCoords.lat} onChange={e => setManualCoords(p => ({ ...p, lat: e.target.value }))} placeholder="13.9350" style={{ padding: '7px 9px', fontSize: 12 }} type="number" step="0.000001" /></div>
-                          <div><label className="rb-label">Longitude</label><input className="rb-input" value={manualCoords.lng} onChange={e => setManualCoords(p => ({ ...p, lng: e.target.value }))} placeholder="121.617" style={{ padding: '7px 9px', fontSize: 12 }} type="number" step="0.000001" /></div>
-                          <button className="rb-btn-primary rb-btn-sm" onClick={() => {
-                            const lat = parseFloat(manualCoords.lat), lng = parseFloat(manualCoords.lng)
-                            if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) { showToast('Invalid coordinates'); return }
-                            setStartPoint(p => ({ ...p, lat, lng }))
-                            setUniversalStart(false)
-                            if (mapInst.current) { mapInst.current.panTo([lat, lng]); setShowMap(true); setTimeout(() => { try { mapInst.current?.invalidateSize() } catch { } }, 50) }
-                            showToast('Start location updated'); setShowManualCoords(false); setManualCoords({ lat: '', lng: '' })
-                          }}>Set</button>
-                        </div>
-                      )}
-                    </div>
                   </div>
                 )}
-
-                {/* Step 3 — Dumpsite */}
-                {step === 3 && (() => {
-                  const lastStop = stops.length > 0 ? stops[stops.length - 1] : startPoint;
-                  const recommended = [...dumpsites]
-                    .filter(d => (d.fill_percent || 0) < 100)
-                    .sort((a, b) => {
-                      const distA = Math.hypot(Number(a.latitude) - lastStop.lat, Number(a.longitude) - lastStop.lng);
-                      const distB = Math.hypot(Number(b.latitude) - lastStop.lat, Number(b.longitude) - lastStop.lng);
-                      if (distA === distB) return (a.fill_percent || 0) - (b.fill_percent || 0);
-                      return distA - distB;
-                    })[0] || dumpsites[0];
-
-                  const availableDumpsites = dumpsites.filter(d => String(d.id) !== String(recommended?.id));
-
-                  return (
-                    <div className="rb-panel">
-                      <p className="rb-panel-title">Select Dumpsite</p>
-                      <p className="rb-panel-sub">Where does the truck unload after collection?</p>
-
-                      {recommended && (
-                        <div style={{ marginBottom: 16 }}>
-                          <p style={{ fontSize: 11, fontWeight: 700, color: '#16a34a', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
-                            <IcoStar size={13} color="#d97706" /> Recommended (Nearest)
-                          </p>
-                          <div className={`rb-ds-card${String(dumpsite) === String(recommended.id) ? ' sel' : ''}`} onClick={() => setDumpsite(recommended.id)} style={{ marginBottom: 0, borderColor: String(dumpsite) === String(recommended.id) ? '#16a34a' : '#e4e6eb', background: String(dumpsite) === String(recommended.id) ? '#f0fdf4' : '#ffffff' }}>
-                            <div style={{ width: 36, height: 36, borderRadius: 6, background: String(dumpsite) === String(recommended.id) ? '#e7f5eb' : '#f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                              <IcoFactory size={18} color={String(dumpsite) === String(recommended.id) ? '#16a34a' : '#65676b'} />
-                            </div>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ fontWeight: 700, fontSize: 13, color: '#1c1e21', marginBottom: 1 }}>{recommended.name}</div>
-                              <div style={{ fontSize: 11, color: '#65676b' }}>
-                                {(+recommended.latitude).toFixed(4)}, {(+recommended.longitude).toFixed(4)} • {recommended.fill_percent || 0}% full
-                              </div>
-                            </div>
-                            {String(dumpsite) === String(recommended.id) && (
-                              <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                <IcoCheck size={11} color="#fff" sw={3} />
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {availableDumpsites.length > 0 && (
-                        <>
-                          <p style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
-                            Other Dumpsites
-                          </p>
-                          {availableDumpsites.map(ds => (
-                            <div key={ds.id} className={`rb-ds-card${String(dumpsite) === String(ds.id) ? ' sel' : ''}`} onClick={() => setDumpsite(ds.id)}>
-                              <div style={{ width: 36, height: 36, borderRadius: 6, background: String(dumpsite) === String(ds.id) ? '#e7f5eb' : '#f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                <IcoFactory size={18} color={String(dumpsite) === String(ds.id) ? '#16a34a' : '#65676b'} />
-                              </div>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontWeight: 700, fontSize: 13, color: '#1c1e21', marginBottom: 1 }}>{ds.name}</div>
-                                <div style={{ fontSize: 11, color: '#65676b' }}>
-                                  {(+ds.latitude).toFixed(4)}, {(+ds.longitude).toFixed(4)} • {ds.fill_percent || 0}% full
-                                </div>
-                              </div>
-                              {String(dumpsite) === String(ds.id) && (
-                                <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                  <IcoCheck size={11} color="#fff" sw={3} />
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </>
-                      )}
-                    </div>
-                  )
-                })()}
 
                 {/* Step 4 — Review */}
                 {step === 4 && (
                   <div className="rb-panel">
                     <p className="rb-panel-title">Route Summary</p>
-                    <p className="rb-panel-sub">Review before saving.</p>
+                    <p className="rb-panel-sub">Review closed-loop dumpsite route before saving.</p>
 
                     {orsStats && (
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
@@ -1905,7 +2023,7 @@ export default function RouteBuilder() {
                         </div>
                       </div>
                     )}
-                    {orsFetching && <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 11, fontSize: 11, color: '#d97706' }}><div className="rb-spinner" style={{ borderTopColor: '#d97706' }} /> Calculating…</div>}
+                    {(orsFetching || optimizingRoute) && <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 11, fontSize: 11, color: '#d97706' }}><div className="rb-spinner" style={{ borderTopColor: '#d97706' }} /> Calculating…</div>}
                     {!orsData && !orsFetching && stops.length > 0 && !ORS_API_KEY && (
                       <div style={{ marginBottom: 13, padding: '8px 11px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, fontSize: 11, color: '#b45309', display: 'flex', alignItems: 'center', gap: 6 }}>
                         <IcoAlertTriangle size={14} color="#b45309" /> <span>Add <code>VITE_ORS_API_KEY</code> to enable road routing</span>
@@ -1918,8 +2036,9 @@ export default function RouteBuilder() {
                         { label: 'Driver', value: selectedDriverObj?.full_name },
                         { label: 'Days', value: days.join(', ') },
                         { label: 'Time', value: `${time} – ${endTime}` },
+                        { label: 'Origin Base', value: selectedDumpsite?.name || 'Missing Dumpsite' },
                         { label: 'Stops', value: `${stops.length} collection points` },
-                        { label: 'Dumpsite', value: selectedDumpsite?.name },
+                        { label: 'Return Base', value: selectedDumpsite?.name || 'Missing Dumpsite' },
                       ].map(r => (
                         <div key={r.label} className="rb-info-row">
                           <span className="rb-info-key">{r.label}</span>
@@ -1929,8 +2048,8 @@ export default function RouteBuilder() {
                     </div>
 
                     <div className="rb-path" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 700, color: '#1c1e21' }}>
-                        <IcoBuilding size={14} color="#16a34a" /> Home Base
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 700, color: '#15803d' }}>
+                        <IcoFactory size={14} color="#15803d" /> {selectedDumpsite?.name || 'Assigned Dumpsite'} (Start)
                       </span>
                       {stops.map((s, i) => (
                         <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -1938,15 +2057,9 @@ export default function RouteBuilder() {
                           <span style={{ color: '#16a34a', fontWeight: 700 }}>#{i + 1}</span> {s.label || `Stop ${i + 1}`}
                         </span>
                       ))}
-                      {selectedDumpsite && (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <span style={{ color: '#8a8d91' }}>→</span>
-                          <IcoFactory size={14} color="#dc2626" /> {selectedDumpsite.name}
-                        </span>
-                      )}
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 700, color: '#15803d' }}>
                         <span style={{ color: '#8a8d91' }}>→</span>
-                        <IcoBuilding size={14} color="#16a34a" /> Return
+                        <IcoFactory size={14} color="#15803d" /> {selectedDumpsite?.name || 'Assigned Dumpsite'} (Return)
                       </span>
                     </div>
 
@@ -2000,7 +2113,7 @@ export default function RouteBuilder() {
               )}
 
               {/* Pre-loaded Stops Panel */}
-              {activeTab === 'builder' && step < 2 && stops.length > 0 && (
+              {activeTab === 'builder' && step < 3 && stops.length > 0 && (
                 <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 1000, background: 'rgba(255, 255, 255, 0.95)', padding: '6px 14px', borderRadius: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', gap: 12, backdropFilter: 'blur(4px)', border: '1px solid var(--border)' }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', letterSpacing: '.03em' }}>{stops.length} Pre-loaded Stop{stops.length > 1 ? 's' : ''}</span>
                   <button onClick={() => {
@@ -2012,14 +2125,13 @@ export default function RouteBuilder() {
 
               {/* Map legend */}
               <div className="rb-map-legend">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}><span style={{ color: 'var(--accent)', display: 'flex' }}><IcoBuilding size={14} /></span> <span>Start</span></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}><span style={{ color: '#15803d', display: 'flex' }}><IcoFactory size={14} /></span> <span>Dumpsite (Start &amp; Return)</span></div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
                   <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#fff', border: '2px solid var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent)', fontSize: 8, fontWeight: 800 }}>1</div>
                   <span>Stop</span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}><span style={{ color: '#6366f1', display: 'flex' }}><IcoFactory size={14} /></span> <span>Dumpsite</span></div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-                  <div style={{ width: 18, height: 2, background: selectedTruck ? getTruckColor(selectedTruck.id).color : 'var(--accent)', borderRadius: 1 }} /><span>Route</span>
+                  <div style={{ width: 18, height: 2, background: selectedTruck ? getTruckColor(selectedTruck.id).color : 'var(--accent)', borderRadius: 1 }} /><span>Closed-Loop Route</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
                   <div style={{ width: 14, height: 14, borderRadius: '50%', border: '2px dotted #2563eb', background: 'rgba(37,99,235,0.15)', boxSizing: 'border-box' }} />
@@ -2039,10 +2151,10 @@ export default function RouteBuilder() {
                 )}
               </div>
 
-              {step === 2 && (
+              {step === 3 && (
                 <button className="rb-add-btn" onClick={() => setAddMode(a => !a)}
-                  style={{ background: addMode ? '#D97706' : 'rgba(255,255,255,.92)', color: addMode ? '#fff' : 'var(--accent)', borderColor: addMode ? '#D97706' : 'rgba(22,163,74,.4)', backdropFilter: 'blur(4px)' }}>
-                  {addMode ? '✕ Click map to add stop' : '+ Add Stop'}
+                  style={{ background: addMode ? '#D97706' : 'rgba(255,255,255,.92)', color: addMode ? '#fff' : 'var(--accent)', borderColor: addMode ? '#D97706' : 'rgba(22,163,74,.4)', backdropFilter: 'blur(4px)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  {addMode ? <><IcoX size={12} color="#fff" /> Click map to add stop</> : '+ Add Stop'}
                 </button>
               )}
             </div>
@@ -2128,8 +2240,13 @@ export default function RouteBuilder() {
                             {s.start_time ? `${formatTime12h(s.start_time)} – ${formatTime12h(s.end_time)}` : '—'}
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: tc.bg, color: tc.color, borderRadius: 20, padding: '2px 8px', fontSize: 11, fontWeight: 800 }}>
-                            <IcoPin size={10} color={tc.color} /> {Array.isArray(s.waypoints) ? s.waypoints.length : 0} Stops
+                            <IcoPin size={10} color={tc.color} /> {resolveScheduleStops(s).length} Stops
                           </div>
+                          {!s.dumpsite && (
+                            <span style={{ fontSize: 10, fontWeight: 800, background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6, padding: '2px 7px' }}>
+                              Missing Dumpsite
+                            </span>
+                          )}
                         </div>
                         <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                           <button className="rb-btn-edit" onClick={() => handleEdit(s)}><IcoEdit size={12} /> Edit</button>
@@ -2178,7 +2295,7 @@ export default function RouteBuilder() {
                           {s.barangay_names || '—'}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: tc.bg, color: tc.color, borderRadius: 20, padding: '3px 10px', fontSize: 11, fontWeight: 800, flexShrink: 0, border: `1px solid ${tc.color}33` }}>
-                          <IcoPin size={10} color={tc.color} />{Array.isArray(s.waypoints) ? s.waypoints.length : 0}
+                          <IcoPin size={10} color={tc.color} />{resolveScheduleStops(s).length}
                         </div>
                       </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 11 }}>
@@ -2419,7 +2536,7 @@ export default function RouteBuilder() {
                                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                                               <span style={{ background: tc.bg, color: tc.color, padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{s.truck_plate}</span>
                                               <span style={{ background: '#EFF6FF', color: '#2563EB', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{s.driver_name}</span>
-                                              <span style={{ background: '#F3F4F6', color: '#4B5563', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{Array.isArray(s.waypoints) ? s.waypoints.length : 0} stops</span>
+                                              <span style={{ background: '#F3F4F6', color: '#4B5563', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{resolveScheduleStops(s).length} stops</span>
                                             </div>
                                           </div>
                                         )
@@ -2439,56 +2556,6 @@ export default function RouteBuilder() {
             })()}
 
             <div style={{ height: 10 }} />
-          </div>
-        </div>
-      )}
-
-      {pendingHomeBase && (
-        <div
-          className="rb-modal-ov"
-          onClick={() => { try { pendingHomeBase.marker.setLatLng([pendingHomeBase.oldLat, pendingHomeBase.oldLng]) } catch (e) { } setPendingHomeBase(null) }}
-          style={{ zIndex: 9998 }}
-        >
-          <div className="rb-modal" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
-            <h3 style={{ margin: '0 0 10px', fontSize: 16 }}>Move Home Base?</h3>
-            <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>Are you sure you want to move your home base?</p>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button
-                className="rb-btn-ghost"
-                autoFocus
-                onClick={() => { try { pendingHomeBase.marker.setLatLng([pendingHomeBase.oldLat, pendingHomeBase.oldLng]) } catch (e) { } setPendingHomeBase(null) }}
-              >No</button>
-              <button
-                className="rb-btn-primary"
-                onClick={() => {
-                  setStartPoint(p => ({ ...p, lat: pendingHomeBase.lat, lng: pendingHomeBase.lng, label: p.label === homeBase.label ? 'Custom Base' : p.label }));
-                  setUniversalStart(false)
-                  setPendingHomeBase(null)
-                }}
-              >Yes, Move It</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {confirmUniversal && (
-        <div className="rb-modal-ov" onClick={() => setConfirmUniversal(false)} style={{ zIndex: 9998 }}>
-          <div className="rb-modal" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
-            <h3 style={{ margin: '0 0 10px', fontSize: 16 }}>Change base for everyone?</h3>
-            <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text-muted)' }}>
-              Are you sure you want to change the base for everyone?
-            </p>
-            <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--text-muted)' }}>
-              When you save this route, <strong>{startPoint.label || 'this location'}</strong> becomes the
-              start point of all existing routes and the default for new ones.
-            </p>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button className="rb-btn-ghost" autoFocus onClick={() => setConfirmUniversal(false)}>No</button>
-              <button className="rb-btn-primary"
-                onClick={() => { setUniversalStart(true); setConfirmUniversal(false) }}>
-                Yes, Apply to All
-              </button>
-            </div>
           </div>
         </div>
       )}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
@@ -16,19 +16,137 @@ import {
   FeedCardSkeleton,
   SidebarWidgetSkeleton,
 } from '../../components/ui/Skeleton'
+import { useCalendarEntries } from '../../hooks/useCalendarEntries'
+import { formatToManilaDateString } from '../../api/calendarService'
+import { getWatcherAttendanceDeployments } from '../../api/watcherAttendanceApi'
+
+function formatOccurrenceDate(isoString, todayDateStr) {
+  if (!isoString) return { dayName: '', dateDisplay: '', isToday: false }
+  const dateStr = isoString.slice(0, 10)
+  const isToday = dateStr === todayDateStr
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dateObj = new Date(y, m - 1, d)
+  const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' })
+  const dateDisplay = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return { dateStr, dayName, dateDisplay, isToday }
+}
+
+function formatOccurrenceTime(startIso, endIso) {
+  if (!startIso) return '—'
+  const extractTime = (iso) => {
+    if (!iso) return ''
+    const timePart = iso.slice(11, 16)
+    if (!timePart) return ''
+    const [hStr, mStr] = timePart.split(':')
+    const h = parseInt(hStr, 10), m = mStr || '00'
+    const ampm = h >= 12 ? 'PM' : 'AM'
+    const h12 = h % 12 || 12
+    return `${h12}:${m} ${ampm}`
+  }
+  const s = extractTime(startIso)
+  const e = extractTime(endIso)
+  if (s && e) return `${s} – ${e}`
+  return s || '—'
+}
+
+function getOccurrenceStatusBadge(status, isToday) {
+  switch (status) {
+    case 'verified_collected':
+      return {
+        label: 'VERIFIED COLLECTED',
+        color: '#15803d',
+        bg: '#e7f5eb',
+        border: '#bbf7d0',
+      }
+    case 'operationally_completed':
+      return {
+        label: 'REPORTED COMPLETE',
+        color: '#0369a1',
+        bg: '#f0f9ff',
+        border: '#bae6fd',
+      }
+    case 'in_progress':
+      return {
+        label: isToday ? "TODAY'S PICKUP" : 'IN PROGRESS',
+        color: '#b45309',
+        bg: '#fffbeb',
+        border: '#fde68a',
+      }
+    case 'scheduled':
+    default:
+      if (isToday) {
+        return {
+          label: 'TODAY',
+          color: '#16a34a',
+          bg: '#f0fdf4',
+          border: '#bbf7d0',
+        }
+      }
+      return {
+        label: 'SCHEDULED',
+        color: '#475569',
+        bg: '#f1f5f9',
+        border: '#cbd5e1',
+      }
+  }
+}
+
+/**
+ * Calculates a strictly bounded 7-day upcoming collection schedule window
+ * anchored to Asia/Manila (today + 6 following calendar dates = exactly 7 inclusive days).
+ */
+export function calculateWatcherScheduleDateRange(referenceDate = new Date()) {
+  const now = referenceDate instanceof Date ? referenceDate : new Date(referenceDate)
+  const todayFormatted = formatToManilaDateString(now)
+  const [y, m, d] = todayFormatted.split('-').map(Number)
+  const anchorDate = new Date(Date.UTC(y, m - 1, d, 12, 0, 0))
+  const future = new Date(anchorDate.getTime() + 6 * 24 * 60 * 60 * 1000)
+  const futureFormatted = formatToManilaDateString(future)
+  return {
+    startDateStr: todayFormatted,
+    endDateStr: futureFormatted,
+    todayStr: todayFormatted,
+  }
+}
 
 export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const { addReport } = useOfflineReports()
 
-  const userBrgyId = user?.barangay || user?.barangay_id
+  const userBrgyId = user?.barangay_id ?? (typeof user?.barangay === 'object' ? user?.barangay?.id : user?.barangay) ?? null
   const tracker = useBarangayTracker(userBrgyId)
+
+  // Exactly 7 inclusive calendar dates anchored to Asia/Manila (today through today + 6 following dates)
+  const { startDateStr, endDateStr, todayStr } = useMemo(() => {
+    return calculateWatcherScheduleDateRange()
+  }, [])
+
+  // Authoritative Calendar Service integration for Watcher collection schedules
+  const {
+    entries: calendarEntries,
+    loading: calendarLoading,
+    error: calendarError,
+    refresh: refreshCalendar,
+    isRefreshing: isCalendarRefreshing,
+    isStale: isCalendarStale,
+    isCapacityError: isCalendarCapacityError,
+    isNetworkError: isCalendarNetworkError,
+  } = useCalendarEntries({
+    startDate: startDateStr,
+    endDate: endDateStr,
+    barangayId: userBrgyId,
+    source: 'collection_schedule',
+    paginate: false,
+    autoFetch: Boolean(userBrgyId),
+  })
 
   const [reports, setReports] = useState([])
   const [stats, setStats] = useState({ total: 0, pending_approval: 0, resolved: 0, rejected: 0 })
   const [pendingTasksCount, setPendingTasksCount] = useState(0)
   const [totalTasksCount, setTotalTasksCount] = useState(0)
+  const [attendanceDeploymentsCount, setAttendanceDeploymentsCount] = useState(0)
+  const [attendancePendingCount, setAttendancePendingCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('schedule')
   const [activeTab1, setActiveTab1] = useState('reports')
@@ -42,9 +160,10 @@ export default function Dashboard() {
     Promise.all([
       api.get('/api/watcher/reports/?paginate=false'),
       api.get('/api/watcher/stop-validations/'),
-      api.get('/api/public/live/').catch(() => ({ data: [] }))
+      api.get('/api/public/live/').catch(() => ({ data: [] })),
+      getWatcherAttendanceDeployments(todayStr).catch(() => []),
     ])
-      .then(([rRes, vRes, liveRes]) => {
+      .then(([rRes, vRes, liveRes, attRes]) => {
         if (cancelled) return;
         const rawReports = rRes.data
         const allReports = Array.isArray(rawReports) ? rawReports : (rawReports?.results || [])
@@ -70,6 +189,10 @@ export default function Dashboard() {
             if (dispatched) setActiveDispatch(dispatched);
           }
         }
+
+        const attList = Array.isArray(attRes) ? attRes : (attRes?.results || attRes?.deployments || [])
+        setAttendanceDeploymentsCount(attList.length)
+        setAttendancePendingCount(attList.filter(d => d.attendance_status !== 'SUBMITTED').length)
       })
       .catch(err => {
         if (!cancelled) console.error(err)
@@ -283,6 +406,46 @@ export default function Dashboard() {
             </div>
           </div>
 
+          {/* ── CREW ATTENDANCE CTA (Team Leader Card) ── */}
+          <div
+            onClick={() => navigate('/watcher/attendance')}
+            className="wd-inspection-card"
+            onMouseEnter={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.borderColor = '#16a34a' }}
+            onMouseLeave={e => { e.currentTarget.style.background = '#ffffff'; e.currentTarget.style.borderColor = '#e4e6eb' }}
+          >
+            <div style={{ width: 42, height: 42, borderRadius: 8, background: '#ecfdf5', border: '1px solid #a7f3d0', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#059669', flexShrink: 0 }}>
+              <div style={{ width: 20, height: 20 }}>{ICONS.users}</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 2, flexWrap: 'wrap' }}>
+                <div style={{ fontFamily: 'var(--font-head)', fontSize: 15, fontWeight: 700, color: '#1c1e21' }}>
+                  Crew Attendance
+                </div>
+                {!loading && attendanceDeploymentsCount > 0 && (
+                  <span style={{
+                    padding: '2px 8px',
+                    borderRadius: 12,
+                    fontSize: 10,
+                    fontWeight: 800,
+                    color: attendancePendingCount > 0 ? '#b45309' : '#15803d',
+                    background: attendancePendingCount > 0 ? '#fffbeb' : '#f0fdf4',
+                    border: `1px solid ${attendancePendingCount > 0 ? '#fde68a' : '#bbf7d0'}`,
+                    letterSpacing: '.03em',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    {attendancePendingCount > 0 ? `${attendancePendingCount} PENDING ROLL-CALL` : 'SUBMITTED'}
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 12, color: '#65676b', lineHeight: 1.35, marginBottom: 4 }}>
+                Submit pre-departure crew attendance and audit corrections for your Team Leader deployments
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#059669', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                Manage Crew Attendance →
+              </div>
+            </div>
+          </div>
+
           <div className='mobile-schedule' style={{ marginTop: 0, marginBottom: 14 }}>
             <HomeCarousel role="watcher" userBarangay={user?.barangay_name} onReport={() => setShowBuilder(true)} />
           </div>
@@ -431,7 +594,12 @@ export default function Dashboard() {
               {/* ── Collection Schedule with tabs ── */}
               <div className="wd-card-panel">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                  <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#1c1e21' }}>Your Collection Schedule</h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#1c1e21' }}>Your Collection Schedule</h3>
+                    {isCalendarRefreshing && (
+                      <span style={{ fontSize: 11, color: '#16a34a', fontWeight: 600 }}>Syncing...</span>
+                    )}
+                  </div>
                   <div style={{ display: 'flex', background: '#e4e6eb', padding: 3, borderRadius: 6, gap: 2 }}>
                     <button
                       onClick={() => setActiveTab('schedule')}
@@ -457,34 +625,137 @@ export default function Dashboard() {
                 </div>
 
                 <div>
-                  {loading ? (
-                    <SidebarWidgetSkeleton rows={3} />
-                  ) : activeTab === 'schedule' ? (
-                    user?.barangay_name ? (
-                      <div className="ww-stagger" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        {[
-                          { day: 'Monday', time: '6:00 AM – 10:00 AM' },
-                          { day: 'Wednesday', time: 'N/A' },
-                          { day: 'Friday', time: '6:00 AM – 10:00 AM' },
-                        ].map((s, i) => (
-                          <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                              <div style={{ width: 32, height: 32, borderRadius: 6, background: '#ffffff', border: '1px solid #ced0d4', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#16a34a' }}>
-                                <div style={{ width: 16, height: 16 }}>{ICONS.schedule}</div>
-                              </div>
-                              <div>
-                                <div style={{ fontWeight: 700, fontSize: 13, color: '#1c1e21' }}>{s.day}</div>
-                                <div style={{ fontSize: 11, color: '#65676b' }}>{user.barangay_name}</div>
-                              </div>
-                            </div>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: '#16a34a' }}>{s.time}</div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
+                  {activeTab === 'schedule' ? (
+                    !userBrgyId ? (
                       <p className="ww-fade-in" style={{ textAlign: 'center', padding: '16px 0', fontSize: 13, color: '#65676b', margin: 0 }}>
                         No barangay assigned. Contact your administrator.
                       </p>
+                    ) : calendarLoading && calendarEntries.length === 0 ? (
+                      <SidebarWidgetSkeleton rows={3} />
+                    ) : calendarError && calendarEntries.length === 0 ? (
+                      <div className="ww-fade-in" style={{ padding: '16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, textAlign: 'center' }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#dc2626', marginBottom: 4 }}>
+                          {isCalendarCapacityError
+                            ? 'Calendar Service Busy'
+                            : isCalendarNetworkError
+                            ? 'Network Connection Issue'
+                            : 'Schedule Unavailable'}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#7f1d1d', marginBottom: 10 }}>
+                          {calendarError?.message || 'Unable to retrieve the collection schedule at this time.'}
+                        </div>
+                        <button
+                          onClick={() => refreshCalendar()}
+                          style={{
+                            padding: '4px 12px',
+                            background: '#ffffff',
+                            border: '1px solid #fca5a5',
+                            borderRadius: 4,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: '#dc2626',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="ww-stagger" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {isCalendarStale && (
+                          <div style={{
+                            padding: '6px 10px',
+                            background: '#fffbeb',
+                            border: '1px solid #fde68a',
+                            borderRadius: 6,
+                            fontSize: 11,
+                            color: '#92400e',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                          }}>
+                            <span>Offline Mode: Displaying cached collection schedule</span>
+                            <button
+                              onClick={() => refreshCalendar()}
+                              style={{ background: 'none', border: 'none', color: '#b45309', fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 11 }}
+                            >
+                              Sync
+                            </button>
+                          </div>
+                        )}
+                        {calendarEntries.length === 0 ? (
+                          <p className="ww-fade-in" style={{ textAlign: 'center', padding: '16px 0', fontSize: 13, color: '#65676b', margin: 0 }}>
+                            No scheduled collections in the next 7 days for {user?.barangay_name || 'your barangay'}.
+                          </p>
+                        ) : (
+                          calendarEntries.map(entry => {
+                            const { dayName, dateDisplay, isToday } = formatOccurrenceDate(entry.start_datetime || entry.start, todayStr)
+                            const timeDisplay = formatOccurrenceTime(entry.start_datetime || entry.start, entry.end_datetime || entry.end)
+                            const badge = getOccurrenceStatusBadge(entry.status, isToday)
+
+                            return (
+                              <div
+                                key={entry.id}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  padding: '10px 14px',
+                                  background: isToday ? '#f0fdf4' : '#f8fafc',
+                                  border: `1px solid ${isToday ? '#bbf7d0' : '#e2e8f0'}`,
+                                  borderRadius: 6,
+                                  gap: 12,
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                                  <div style={{
+                                    width: 32,
+                                    height: 32,
+                                    borderRadius: 6,
+                                    background: '#ffffff',
+                                    border: `1px solid ${isToday ? '#86efac' : '#ced0d4'}`,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    color: '#16a34a',
+                                    flexShrink: 0
+                                  }}>
+                                    <div style={{ width: 16, height: 16 }}>{ICONS.schedule}</div>
+                                  </div>
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                      <span style={{ fontWeight: 700, fontSize: 13, color: '#1c1e21' }}>
+                                        {isToday ? `Today (${dayName})` : `${dayName}, ${dateDisplay}`}
+                                      </span>
+                                      <span style={{
+                                        background: badge.bg,
+                                        color: badge.color,
+                                        border: `1px solid ${badge.border}`,
+                                        borderRadius: 4,
+                                        padding: '1px 6px',
+                                        fontSize: 10,
+                                        fontWeight: 700,
+                                        letterSpacing: '.03em',
+                                        textTransform: 'uppercase',
+                                        whiteSpace: 'nowrap'
+                                      }}>
+                                        {badge.label}
+                                      </span>
+                                    </div>
+                                    <div style={{ fontSize: 11, color: '#65676b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {entry.location || user?.barangay_name || 'Assigned Barangay'}
+                                      {entry.metadata?.frequency ? ` • ${entry.metadata.frequency}` : ''}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: '#16a34a', whiteSpace: 'nowrap', textAlign: 'right' }}>
+                                  {timeDisplay}
+                                </div>
+                              </div>
+                            )
+                          })
+                        )}
+                      </div>
                     )
                   ) : (
                     <p className="ww-fade-in" style={{ textAlign: 'center', padding: '16px 0', fontSize: 13, color: '#65676b', margin: 0 }}>
@@ -521,6 +792,25 @@ export default function Dashboard() {
                     Watcher Tasks
                   </button>
                   <button
+                    onClick={() => navigate('/watcher/attendance')}
+                    style={{
+                      background: '#ffffff',
+                      border: '1px solid #a7f3d0',
+                      color: '#065f46',
+                      borderRadius: 6,
+                      height: 36,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                      cursor: 'pointer',
+                      transition: 'background 0.14s'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#ecfdf5'}
+                    onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
+                  >
+                    <div style={{ width: 16, height: 16 }}>{ICONS.users}</div> Crew Attendance
+                  </button>
+                  <button
                     onClick={() => navigate('/map')}
                     style={{
                       background: '#ffffff',
@@ -543,27 +833,76 @@ export default function Dashboard() {
               </div>
 
               <div style={{ background: '#ffffff', border: '1px solid #e4e6eb', borderRadius: 8, padding: 18, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
-                <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 700, color: '#1c1e21' }}>Collection Schedule</h3>
-                {loading ? (
-                  <SidebarWidgetSkeleton rows={3} />
-                ) : user?.barangay_name ? (
-                  <div className="ww-stagger" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {[
-                      { day: 'Monday', time: '6:00 AM – 10:00 AM' },
-                      { day: 'Wednesday', time: 'N/A' },
-                      { day: 'Friday', time: '6:00 AM – 10:00 AM' },
-                    ].map((s, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', background: '#f8fafc', borderRadius: 6, border: '1px solid #e2e8f0' }}>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: 12, color: '#1c1e21' }}>{s.day}</div>
-                          <div style={{ fontSize: 11, color: '#65676b' }}>{user.barangay_name}</div>
-                        </div>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: '#16a34a' }}>{s.time}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#1c1e21' }}>Collection Schedule</h3>
+                  {isCalendarStale && (
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', padding: '1px 5px', borderRadius: 3 }}>
+                      CACHED
+                    </span>
+                  )}
+                </div>
+                {!userBrgyId ? (
                   <p className="ww-fade-in" style={{ fontSize: 13, color: '#65676b', margin: 0 }}>No barangay assigned.</p>
+                ) : calendarLoading && calendarEntries.length === 0 ? (
+                  <SidebarWidgetSkeleton rows={3} />
+                ) : calendarError && calendarEntries.length === 0 ? (
+                  <p className="ww-fade-in" style={{ fontSize: 12, color: '#dc2626', margin: 0 }}>
+                    Schedule currently unavailable.
+                  </p>
+                ) : calendarEntries.length === 0 ? (
+                  <p className="ww-fade-in" style={{ fontSize: 13, color: '#65676b', margin: 0 }}>
+                    No collections in next 7 days.
+                  </p>
+                ) : (
+                  <div className="ww-stagger" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {calendarEntries.slice(0, 5).map(entry => {
+                      const { dayName, dateDisplay, isToday } = formatOccurrenceDate(entry.start_datetime || entry.start, todayStr)
+                      const timeDisplay = formatOccurrenceTime(entry.start_datetime || entry.start, entry.end_datetime || entry.end)
+                      const badge = getOccurrenceStatusBadge(entry.status, isToday)
+
+                      return (
+                        <div
+                          key={entry.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '8px 10px',
+                            background: isToday ? '#f0fdf4' : '#f8fafc',
+                            borderRadius: 6,
+                            border: `1px solid ${isToday ? '#bbf7d0' : '#e2e8f0'}`
+                          }}
+                        >
+                          <div style={{ minWidth: 0, marginRight: 8 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ fontWeight: 700, fontSize: 12, color: '#1c1e21' }}>
+                                {isToday ? 'Today' : dayName.slice(0, 3)}
+                              </span>
+                              <span style={{ fontSize: 10, color: '#65676b' }}>{dateDisplay}</span>
+                              {isToday && (
+                                <span style={{
+                                  background: badge.bg,
+                                  color: badge.color,
+                                  fontSize: 9,
+                                  fontWeight: 700,
+                                  padding: '0 4px',
+                                  borderRadius: 2
+                                }}>
+                                  TODAY
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 11, color: '#65676b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {entry.location || user?.barangay_name}
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: '#16a34a', whiteSpace: 'nowrap' }}>
+                            {timeDisplay}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
                 )}
               </div>
 

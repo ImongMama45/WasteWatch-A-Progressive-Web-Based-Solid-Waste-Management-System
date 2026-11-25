@@ -28,6 +28,7 @@ import { ICONS } from '../../api/navConfig'
 import MultiPhotoPicker from '../../components/MultiPhotoPicker'
 import OfflineQueueBadge from '../../components/OfflineQueueBadge'
 import { MapSkeleton, Skeleton, SkeletonText } from '../../components/ui/Skeleton'
+import { normalizeAuthorizedStops, getRouteCoverageLabel } from './watcherRouteHelpers'
 
 const ARRIVAL_RADIUS_M = 30
 const LUCENA_CENTER = [13.9373, 121.617]
@@ -164,7 +165,7 @@ function MapLegend({ isDrawerCollapsed = false }) {
     )
 }
 
-function NoScheduleBanner({ barangayName, mode }) {
+function NoScheduleBanner({ coverageLabel, mode }) {
     const modeText = mode === 'pre' ? 'pre-collection inspections' : 'collections to confirm'
     return (
         <div style={{
@@ -186,9 +187,9 @@ function NoScheduleBanner({ barangayName, mode }) {
                     No Scheduled Tasks Today
                 </div>
                 <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.6, maxWidth: 280, margin: '0 auto 16px' }}>
-                    {barangayName
-                        ? `There are no ${modeText} for ${barangayName} today.`
-                        : `There are no ${modeText} for your barangay today.`}
+                    {coverageLabel
+                        ? `There are no ${modeText} for ${coverageLabel} today.`
+                        : `There are no ${modeText} on your assigned route today.`}
                     {' '}Check back on your next scheduled collection day.
                 </div>
                 <div style={{
@@ -261,30 +262,14 @@ export default function WatcherMapTaskModule({ mode = 'pre' }) {
     useLayoutEffect(() => { gpsPosRef.current = gpsPos }, [gpsPos])
 
     useEffect(() => {
-        if (!allStops.length) { setStops([]); return }
-        const barangayId = user?.barangay
-        const barangayName = user?.barangay_name?.toLowerCase()
-
-        if (!barangayId && !barangayName) {
+        if (!allStops.length) {
             setStops([])
             return
         }
-
-        const filtered = allStops.filter(stop => {
-            const stopBrgy = stop.barangay_id ?? stop.barangay
-            const stopName = stop.barangay_names?.toLowerCase() ?? ''
-            if (barangayId && stopBrgy != null) return String(stopBrgy) === String(barangayId)
-            if (barangayName) return stopName.includes(barangayName) || barangayName.includes(stopName)
-            return false
-        })
-
-        setHasScheduleToday(filtered.length > 0)
-        setStops(filtered.map(r => ({
-            ...r,
-            lat: r.lat ?? r.pre_validation_latitude ?? null,
-            lng: r.lng ?? r.pre_validation_longitude ?? null,
-        })))
-    }, [allStops, user?.barangay, user?.barangay_name])
+        const normalized = normalizeAuthorizedStops(allStops)
+        setHasScheduleToday(normalized.length > 0)
+        setStops(normalized)
+    }, [allStops])
 
     const nearestStop = (() => {
         const pending = stops.filter(s => normalizeStopStatus(s.current_status) === TARGET_STATUS && s.lat && s.lng)
@@ -630,23 +615,38 @@ export default function WatcherMapTaskModule({ mode = 'pre' }) {
         })
         : []
 
-    const activeBarangayId = user?.barangay || stops[0]?.barangay_id
-    const activeBarangayName = user?.barangay_name?.toLowerCase() || stops[0]?.barangay_names?.toLowerCase()
+    const stopBarangayIds = new Set(
+        stops.map(s => s.barangay_id ?? s.barangay).filter(v => v != null).map(v => String(v))
+    )
+    const stopBarangayNames = stops
+        .flatMap(s => [s.barangay_name, ...(s.barangay_names ? String(s.barangay_names).split(',') : [])])
+        .map(v => (typeof v === 'string' ? v.toLowerCase().trim() : ''))
+        .filter(Boolean)
 
     const areaWatcherSpots = watcherSpots.filter(ws => {
-        if (!activeBarangayId && !activeBarangayName) return true
+        if (stopBarangayIds.size === 0 && stopBarangayNames.length === 0 && !user?.barangay && !user?.barangay_name) {
+            return true
+        }
         const wsBrgyId = ws.barangay ?? ws.barangay_id
-        if (activeBarangayId && wsBrgyId && String(wsBrgyId) === String(activeBarangayId)) return true
-        if (activeBarangayName && ws.barangay_name) {
-            const n1 = activeBarangayName.trim()
+        if (wsBrgyId != null) {
+            if (stopBarangayIds.has(String(wsBrgyId))) return true
+            if (user?.barangay != null && String(wsBrgyId) === String(user.barangay)) return true
+        }
+        if (ws.barangay_name) {
             const n2 = ws.barangay_name.toLowerCase().trim()
-            if (n1 === n2 || n1.includes(n2) || n2.includes(n1)) return true
+            if (stopBarangayNames.some(n1 => n1 === n2 || n1.includes(n2) || n2.includes(n1))) return true
+            if (user?.barangay_name) {
+                const uName = user.barangay_name.toLowerCase().trim()
+                if (uName === n2 || uName.includes(n2) || n2.includes(uName)) return true
+            }
         }
         if (stops.some(s => Math.abs(Number(s.lat) - Number(ws.latitude)) < 0.0001 && Math.abs(Number(s.lng) - Number(ws.longitude)) < 0.0001)) {
             return true
         }
         return false
     })
+
+    const routeCoverageLabel = getRouteCoverageLabel(stops, 'Assigned Route')
 
     if (showCelebration) {
         return (
@@ -755,7 +755,7 @@ export default function WatcherMapTaskModule({ mode = 'pre' }) {
                                 <OfflineQueueBadge />
                             </div>
                             <div style={{ fontSize: 12, color: 'rgba(255,255,255,.55)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
-                                <div style={{ width: 14, height: 14 }}>{ICONS.pin}</div> {user?.barangay_name || 'No barangay assigned'} ·{' '}
+                                <div style={{ width: 14, height: 14 }}>{ICONS.pin}</div> {loading ? 'Loading route...' : routeCoverageLabel} ·{' '}
                                 {loading ? 'Loading…' : `${pendingCount} pending`}
                             </div>
                         </div>
@@ -858,7 +858,7 @@ export default function WatcherMapTaskModule({ mode = 'pre' }) {
                 )}
 
                 {!loading && !hasScheduleToday ? (
-                    <NoScheduleBanner barangayName={user?.barangay_name} mode={mode} />
+                    <NoScheduleBanner coverageLabel={stops.length > 0 ? routeCoverageLabel : ''} mode={mode} />
                 ) : (
                     <div style={{
                         position: 'absolute',

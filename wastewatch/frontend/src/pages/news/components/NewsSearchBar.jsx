@@ -40,17 +40,17 @@ export default function NewsSearchBar({
           onChange={e => onChange(e.target.value)}
           style={{
             width: '100%',
-            height: 44,
-            paddingLeft: 40,
-            paddingRight: value ? 38 : 14,
-            borderRadius: 12,
+            height: 38,
+            paddingLeft: 38,
+            paddingRight: value ? 36 : 12,
+            borderRadius: 6,
             border: '1px solid #cbd5e1',
             background: '#ffffff',
             fontSize: 13,
             color: '#0f172a',
             fontFamily: 'inherit',
             outline: 'none',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
             transition: 'border-color .15s ease, box-shadow .15s ease',
           }}
           onFocus={e => {

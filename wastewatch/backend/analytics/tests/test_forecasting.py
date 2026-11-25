@@ -18,17 +18,21 @@ Remediated per Independent Technical Audit (Claude) & Directive:
 """
 
 import os
+import sys
 import time
 import json
 import shutil
 import tempfile
 import hashlib
 import math
+import platform
 from datetime import date, timedelta
 from decimal import Decimal
 
 import numpy as np
 import pandas as pd
+import sklearn
+import joblib
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.conf import settings
@@ -346,10 +350,19 @@ class WasteForecastingComprehensiveTests(TestCase):
                 json.dump({
                     'model_version': 'test_v1',
                     'synthetic_records': 0,
+                    'distinct_genuine_days': 84,
+                    'is_promotion_eligible': True,
                     'sha256': sha,
                     'model_sha256': sha,
                     'validation_status': 'PASSED',
                     'feature_schema': forecaster.feature_names,
+                    'library_versions': {
+                        'python': platform.python_version(),
+                        'sklearn': sklearn.__version__,
+                        'numpy': np.__version__,
+                        'pandas': pd.__version__,
+                        'joblib': joblib.__version__,
+                    },
                     'validation_metrics': {'overall_mae': 123.4}
                 }, f)
 
@@ -560,17 +573,37 @@ class WasteForecastingComprehensiveTests(TestCase):
             model_file = os.path.join(temp_dir, 'waste_forecast_model_latest.joblib')
             meta_file = os.path.join(temp_dir, 'waste_forecast_metadata_latest.json')
 
+            runtime_libs = {
+                'python': platform.python_version(),
+                'sklearn': sklearn.__version__,
+                'numpy': np.__version__,
+                'pandas': pd.__version__,
+                'joblib': joblib.__version__,
+            }
+
+            dates = [date(2026, 1, 1) + timedelta(days=i) for i in range(60)]
+            df = pd.DataFrame({
+                'date': dates,
+                'weight_kg': [4000.0 + (i % 7) * 200.0 for i in range(60)],
+                'barangay_id': 1,
+                'population': 12000.0,
+            })
+            X_dict, y_dict = generate_training_matrix(df, horizon=7, min_history_required=28)
+
             # Version A (Newer timestamp)
             forecaster_a = RidgeMultiHorizonForecaster(horizon=7)
-            import joblib
+            forecaster_a.fit_and_calibrate(X_dict, y_dict, n_cv_splits=3)
             joblib.dump(forecaster_a, model_file)
             with open(model_file, 'rb') as f:
                 sha_a = hashlib.sha256(f.read()).hexdigest()
             meta_a = {
                 'model_version': 'v_new',
                 'synthetic_records': 0,
+                'distinct_genuine_days': 84,
+                'is_promotion_eligible': True,
                 'validation_status': 'PASSED',
                 'feature_schema': forecaster_a.feature_names,
+                'library_versions': runtime_libs,
                 'sha256': sha_a,
             }
             with open(meta_file, 'w', encoding='utf-8') as f:
@@ -582,14 +615,18 @@ class WasteForecastingComprehensiveTests(TestCase):
 
             # Rollback to Version B: write different model with valid metadata but an older mtime
             forecaster_b = RidgeMultiHorizonForecaster(horizon=7)
+            forecaster_b.fit_and_calibrate(X_dict, y_dict, n_cv_splits=3)
             joblib.dump(forecaster_b, model_file)
             with open(model_file, 'rb') as f:
                 sha_b = hashlib.sha256(f.read()).hexdigest()
             meta_b = {
                 'model_version': 'v_rolled_back',
                 'synthetic_records': 0,
+                'distinct_genuine_days': 84,
+                'is_promotion_eligible': True,
                 'validation_status': 'PASSED',
                 'feature_schema': forecaster_b.feature_names,
+                'library_versions': runtime_libs,
                 'sha256': sha_b,
             }
             with open(meta_file, 'w', encoding='utf-8') as f:
@@ -886,8 +923,17 @@ class WasteForecastingComprehensiveTests(TestCase):
                 json.dump({
                     'model_version': 'v1',
                     'synthetic_records': 0,
+                    'distinct_genuine_days': 84,
+                    'is_promotion_eligible': True,
                     'validation_status': 'PASSED',
                     'feature_schema': forecaster.feature_names,
+                    'library_versions': {
+                        'python': platform.python_version(),
+                        'sklearn': sklearn.__version__,
+                        'numpy': np.__version__,
+                        'pandas': pd.__version__,
+                        'joblib': joblib.__version__,
+                    },
                     'sha256': valid_sha
                 }, f)
             fc, meta = load_latest_forecaster(artifacts_dir=temp_dir)
@@ -1129,8 +1175,17 @@ class WasteForecastingComprehensiveTests(TestCase):
                 json.dump({
                     'model_version': 'ridge_v1',
                     'synthetic_records': 0,
+                    'distinct_genuine_days': 84,
+                    'is_promotion_eligible': True,
                     'validation_status': 'PASSED',
                     'feature_schema': f_valid.feature_names,
+                    'library_versions': {
+                        'python': platform.python_version(),
+                        'sklearn': sklearn.__version__,
+                        'numpy': np.__version__,
+                        'pandas': pd.__version__,
+                        'joblib': joblib.__version__,
+                    },
                     'sha256': sha_valid
                 }, f)
 
@@ -1182,6 +1237,11 @@ class WasteForecastingComprehensiveTests(TestCase):
             with open(cand_meta_file, 'r', encoding='utf-8') as f:
                 meta_json = json.load(f)
             meta_json['validation_status'] = 'PASSED'
+            meta_json['distinct_genuine_days'] = 84
+            # Keep the fixture internally consistent: the shared validator rejects
+            # distinct_genuine_days > genuine_records (Stage 2.3 Remediation A).
+            meta_json['genuine_records'] = max(int(meta_json.get('genuine_records') or 0), 84)
+            meta_json['is_promotion_eligible'] = True
             with open(cand_meta_file, 'w', encoding='utf-8') as f:
                 json.dump(meta_json, f)
 
@@ -1958,13 +2018,33 @@ class WasteForecastingComprehensiveTests(TestCase):
             target_model_path = os.path.join(temp_dir, 'waste_forecast_model_target.joblib')
             target_meta_path = os.path.join(temp_dir, 'waste_forecast_metadata_target.json')
 
+            runtime_libs = {
+                'python': platform.python_version(),
+                'sklearn': sklearn.__version__,
+                'numpy': np.__version__,
+                'pandas': pd.__version__,
+                'joblib': joblib.__version__,
+            }
+
             def write_target_artifact(model_obj, meta_dict):
                 joblib.dump(model_obj, target_model_path)
                 with open(target_model_path, 'rb') as f:
                     actual_sha = hashlib.sha256(f.read()).hexdigest()
-                meta_to_write = dict(meta_dict)
-                if 'sha256' not in meta_to_write:
-                    meta_to_write['sha256'] = actual_sha
+                meta_to_write = {
+                    'model_version': 'target_v1',
+                    'synthetic_records': 0,
+                    'distinct_genuine_days': 84,
+                    'is_promotion_eligible': True,
+                    'validation_status': 'PASSED',
+                    'feature_schema': getattr(model_obj, 'feature_names', NUMERIC_FEATURES + CATEGORICAL_FEATURES),
+                    'library_versions': runtime_libs,
+                    'sha256': actual_sha,
+                }
+                meta_to_write.update(meta_dict)
+                # Allow explicit deletion of keys for negative tests
+                for k, v in meta_dict.items():
+                    if v is None and k in meta_to_write:
+                        del meta_to_write[k]
                 with open(target_meta_path, 'w', encoding='utf-8') as f:
                     json.dump(meta_to_write, f, indent=2)
                 return actual_sha
@@ -1972,8 +2052,7 @@ class WasteForecastingComprehensiveTests(TestCase):
             # 1. Missing 'feature_schema' during rollback
             write_target_artifact(f_valid, {
                 'model_version': 'target_v1',
-                'synthetic_records': 0,
-                'validation_status': 'PASSED',
+                'feature_schema': None,
             })
             with self.assertRaises(CommandError) as ctx:
                 call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
@@ -2042,8 +2121,7 @@ class WasteForecastingComprehensiveTests(TestCase):
             # 5. Missing 'synthetic_records' during rollback and primary loader
             write_target_artifact(f_valid, {
                 'model_version': 'target_v1',
-                'validation_status': 'PASSED',
-                'feature_schema': f_valid.feature_names,
+                'synthetic_records': None,
             })
             with self.assertRaises(CommandError) as ctx:
                 call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
@@ -2128,6 +2206,396 @@ class WasteForecastingComprehensiveTests(TestCase):
             self.assertIsNotNone(p_fc)
             self.assertEqual(p_meta['model_version'], 'target_v1_valid')
             self.assertEqual(p_fc.feature_names, f_valid.feature_names)
+
+    # 50. Comprehensive Artifact Governance & Regression Matrix
+    def test_50_shared_artifact_governance_comprehensive_matrix(self):
+        """
+        Comprehensive test matrix for shared artifact governance across all 3 execution paths:
+        1. Primary loader (load_latest_forecaster)
+        2. Candidate loader (load_candidate_forecaster)
+        3. Rollback command (rollback_forecast_model)
+
+        Exercises:
+        - Incomplete / subset schema
+        - Superset schema
+        - Nonzero synthetic_records
+        - Missing library_versions dictionary
+        - Missing required library key
+        - Incompatible scikit-learn version
+        - Incompatible Python version
+        - Ineligible artifact (distinct_genuine_days < 84 for production/rollback)
+        - Ineligible artifact (is_promotion_eligible = False for production/rollback)
+        - Ineligible candidate (distinct_genuine_days < 28 for candidate loader)
+        - Missing metadata file during rollback
+        - Missing model artifact file during rollback
+        - Corrupted / unreadable model file during rollback
+        - Preservation of active manifest and active model on every failure
+        """
+        import joblib
+        from forecasting.service import validate_forecaster_artifact
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = os.path.join(temp_dir, 'active_manifest.json')
+            cand_manifest_path = os.path.join(temp_dir, 'candidate_manifest.json')
+            latest_model_path = os.path.join(temp_dir, 'waste_forecast_model_latest.joblib')
+            latest_meta_path = os.path.join(temp_dir, 'waste_forecast_metadata_latest.json')
+            target_model_path = os.path.join(temp_dir, 'waste_forecast_model_target.joblib')
+            target_meta_path = os.path.join(temp_dir, 'waste_forecast_metadata_target.json')
+
+            # Initial active production baseline
+            initial_bytes = b"ACTIVE_BASELINE_PROD_MODEL_V0"
+            with open(latest_model_path, 'wb') as f:
+                f.write(initial_bytes)
+            with open(latest_meta_path, 'w', encoding='utf-8') as f:
+                json.dump({'model_version': 'v0_initial'}, f)
+            initial_manifest = {
+                'active_model_file': 'waste_forecast_model_latest.joblib',
+                'active_metadata_file': 'waste_forecast_metadata_latest.json',
+                'model_version': 'v0_initial',
+                'sha256': hashlib.sha256(initial_bytes).hexdigest()
+            }
+            with open(manifest_path, 'w', encoding='utf-8') as mf:
+                json.dump(initial_manifest, mf, indent=2)
+
+            runtime_libs = {
+                'python': platform.python_version(),
+                'sklearn': sklearn.__version__,
+                'numpy': np.__version__,
+                'pandas': pd.__version__,
+                'joblib': joblib.__version__,
+            }
+
+            # Helper to create a valid fitted 7-horizon model
+            dates = [date(2026, 1, 1) + timedelta(days=i) for i in range(60)]
+            df = pd.DataFrame({
+                'date': dates,
+                'weight_kg': [3500.0 + (i % 7) * 150.0 for i in range(60)],
+                'barangay_id': 1,
+                'population': 15000.0,
+            })
+            X_dict, y_dict = generate_training_matrix(df, horizon=7, min_history_required=28)
+            f_valid = RidgeMultiHorizonForecaster(horizon=7)
+            f_valid.fit_and_calibrate(X_dict, y_dict, n_cv_splits=3)
+
+            def write_target(meta_updates, corrupt_model=False):
+                if corrupt_model:
+                    with open(target_model_path, 'wb') as f:
+                        f.write(b"CORRUPTED_NOT_A_VALID_JOBLIB_PICKLE")
+                    actual_sha = hashlib.sha256(b"CORRUPTED_NOT_A_VALID_JOBLIB_PICKLE").hexdigest()
+                else:
+                    joblib.dump(f_valid, target_model_path)
+                    with open(target_model_path, 'rb') as f:
+                        actual_sha = hashlib.sha256(f.read()).hexdigest()
+
+                base_meta = {
+                    'model_version': 'target_v1',
+                    'synthetic_records': 0,
+                    'distinct_genuine_days': 84,
+                    'is_promotion_eligible': True,
+                    'validation_status': 'PASSED',
+                    'feature_schema': f_valid.feature_names,
+                    'library_versions': runtime_libs,
+                    'sha256': actual_sha,
+                }
+                base_meta.update(meta_updates)
+                for k, v in meta_updates.items():
+                    if v is None and k in base_meta:
+                        del base_meta[k]
+                with open(target_meta_path, 'w', encoding='utf-8') as f:
+                    json.dump(base_meta, f, indent=2)
+                return actual_sha
+
+            def assert_active_manifest_untouched():
+                with open(manifest_path, 'r', encoding='utf-8') as mf:
+                    self.assertEqual(json.load(mf), initial_manifest)
+                with open(latest_model_path, 'rb') as f:
+                    self.assertEqual(f.read(), initial_bytes)
+
+            # --- A. INCOMPLETE / SUBSET SCHEMA ---
+            # 1. Rollback
+            write_target({'feature_schema': ['population', 'target_is_weekend']})
+            with self.assertRaises(CommandError) as ctx:
+                call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            self.assertIn("does not exactly match active model schema", str(ctx.exception).lower())
+            assert_active_manifest_untouched()
+
+            # 2. Candidate loader
+            with open(cand_manifest_path, 'w', encoding='utf-8') as cmf:
+                json.dump({'candidate_model_file': 'waste_forecast_model_target.joblib', 'candidate_metadata_file': 'waste_forecast_metadata_target.json'}, cmf)
+            c_fc, _ = load_candidate_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNone(c_fc)
+
+            # 3. Primary loader
+            with open(manifest_path, 'w', encoding='utf-8') as mf:
+                json.dump({'active_model_file': 'waste_forecast_model_target.joblib', 'active_metadata_file': 'waste_forecast_metadata_target.json'}, mf)
+            p_fc, _ = load_latest_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNone(p_fc)
+            with open(manifest_path, 'w', encoding='utf-8') as mf:
+                json.dump(initial_manifest, mf)
+
+            # --- B. SUPERSET SCHEMA ---
+            write_target({'feature_schema': f_valid.feature_names + ['extra_unapproved_feature']})
+            with self.assertRaises(CommandError):
+                call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            assert_active_manifest_untouched()
+            c_fc, _ = load_candidate_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNone(c_fc)
+
+            # --- C. NONZERO SYNTHETIC RECORDS ---
+            write_target({'synthetic_records': 15})
+            with self.assertRaises(CommandError) as ctx:
+                call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            self.assertIn("governance rejection: trained on synthetic data", str(ctx.exception).lower())
+            assert_active_manifest_untouched()
+            c_fc, _ = load_candidate_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNone(c_fc)
+
+            # --- D. MISSING LIBRARY VERSIONS METADATA ---
+            write_target({'library_versions': None})
+            with self.assertRaises(CommandError) as ctx:
+                call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            self.assertIn("missing mandatory 'library_versions'", str(ctx.exception).lower())
+            assert_active_manifest_untouched()
+            c_fc, _ = load_candidate_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNone(c_fc)
+
+            # --- E. INCOMPATIBLE SCIKIT-LEARN VERSION ---
+            stale_sklearn_libs = dict(runtime_libs)
+            stale_sklearn_libs['sklearn'] = '1.3.2'  # Different major.minor than active runtime
+            write_target({'library_versions': stale_sklearn_libs})
+            with self.assertRaises(CommandError) as ctx:
+                call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            self.assertIn("incompatible scikit-learn version", str(ctx.exception).lower())
+            assert_active_manifest_untouched()
+            c_fc, _ = load_candidate_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNone(c_fc)
+
+            # --- F. INCOMPATIBLE PYTHON VERSION ---
+            stale_py_libs = dict(runtime_libs)
+            stale_py_libs['python'] = '3.9.1'  # Different major.minor
+            write_target({'library_versions': stale_py_libs})
+            with self.assertRaises(CommandError) as ctx:
+                call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            self.assertIn("incompatible python version", str(ctx.exception).lower())
+            assert_active_manifest_untouched()
+            c_fc, _ = load_candidate_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNone(c_fc)
+
+            # --- G. PRODUCTION REJECTION ON INSUFFICIENT GENUINE DAYS (<84) ---
+            # 83 genuine days: boundary test (must reject)
+            write_target({'distinct_genuine_days': 83})
+            with self.assertRaises(CommandError) as ctx:
+                call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            self.assertIn("insufficient distinct genuine collection days", str(ctx.exception).lower())
+            assert_active_manifest_untouched()
+
+            # For candidate shadow evaluation, any genuine day count (e.g. 45 or 14) is valid
+            # (Remediation B: 28-day training rule is NOT a loader-level governance gate)
+            write_target({'distinct_genuine_days': 45})
+            c_fc, _ = load_candidate_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNotNone(c_fc)
+
+            write_target({'distinct_genuine_days': 14})
+            c_fc, _ = load_candidate_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNotNone(c_fc)
+
+            # --- H. INELIGIBLE ARTIFACT: is_promotion_eligible=False ---
+            write_target({'is_promotion_eligible': False, 'distinct_genuine_days': 90})
+            with self.assertRaises(CommandError) as ctx:
+                call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            self.assertIn("marks 'is_promotion_eligible' as false", str(ctx.exception).lower())
+            assert_active_manifest_untouched()
+            # Candidate loader allows is_promotion_eligible=False
+            c_fc, _ = load_candidate_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNotNone(c_fc)
+
+            # --- I. MISSING MANDATORY METADATA FIELDS (FAIL-CLOSED ACROSS ALL 3 PATHS) ---
+            # 1. Missing 'distinct_genuine_days'
+            write_target({'distinct_genuine_days': None})
+            with self.assertRaises(CommandError) as ctx:
+                call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            self.assertIn("missing mandatory 'distinct_genuine_days'", str(ctx.exception).lower())
+            assert_active_manifest_untouched()
+            c_fc, _ = load_candidate_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNone(c_fc)
+
+            # 2. Missing 'is_promotion_eligible'
+            write_target({'is_promotion_eligible': None})
+            with self.assertRaises(CommandError) as ctx:
+                call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            self.assertIn("missing mandatory 'is_promotion_eligible'", str(ctx.exception).lower())
+            assert_active_manifest_untouched()
+            c_fc, _ = load_candidate_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNone(c_fc)
+
+            # 3. Missing 'validation_status'
+            write_target({'validation_status': None})
+            with self.assertRaises(CommandError) as ctx:
+                call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            self.assertIn("missing mandatory 'validation_status'", str(ctx.exception).lower())
+            assert_active_manifest_untouched()
+            c_fc, _ = load_candidate_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNone(c_fc)
+
+            # 4. Inconsistent genuine records count (records < days)
+            write_target({'distinct_genuine_days': 85, 'genuine_records': 80})
+            with self.assertRaises(CommandError) as ctx:
+                call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            self.assertIn("distinct_genuine_days (85) exceeds genuine_records (80)", str(ctx.exception).lower())
+            assert_active_manifest_untouched()
+
+            # --- J. MISSING MODEL OR METADATA FILE ON DISK ---
+            if os.path.exists(target_meta_path):
+                os.remove(target_meta_path)
+            with self.assertRaises(CommandError) as ctx:
+                call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            self.assertIn("not found", str(ctx.exception).lower())
+            assert_active_manifest_untouched()
+
+            # --- K1. SHA-256 INTEGRITY MISMATCH ---
+            write_target({'sha256': '0' * 64})
+            with self.assertRaises(CommandError) as ctx:
+                call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            self.assertIn("sha-256 integrity mismatch", str(ctx.exception).lower())
+            assert_active_manifest_untouched()
+
+            # --- K2. CORRUPTED / UNREADABLE MODEL FILE ---
+            write_target({}, corrupt_model=True)
+            with self.assertRaises(CommandError) as ctx:
+                call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            self.assertIn("failed to deserialize forecaster model", str(ctx.exception).lower())
+            assert_active_manifest_untouched()
+
+            # --- L. SUCCESSFUL VALID ROLLBACK EXECUTION (84 DISTINCT GENUINE DAYS BOUNDARY) ---
+            target_sha = write_target({'model_version': 'valid_final_v1', 'distinct_genuine_days': 84, 'genuine_records': 120})
+            call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            with open(manifest_path, 'r', encoding='utf-8') as mf:
+                m_after = json.load(mf)
+            self.assertEqual(m_after['model_version'], 'valid_final_v1')
+            self.assertEqual(m_after['sha256'], target_sha)
+            self.assertEqual(m_after['active_model_file'], 'waste_forecast_model_target.joblib')
+            p_fc, p_meta = load_latest_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNotNone(p_fc)
+            self.assertEqual(p_meta['model_version'], 'valid_final_v1')
+
+            # --- M. RELIABLE CACHE INVALIDATION TEST (IDENTICAL MTIME & SIZE) ---
+            # 1. Warm cache with current artifact
+            p_fc1, p_meta1 = load_latest_forecaster(artifacts_dir=temp_dir)
+            self.assertEqual(p_meta1['model_version'], 'valid_final_v1')
+
+            # 2. Update model and manifest with a different valid version
+            f_replacement = RidgeMultiHorizonForecaster(horizon=7)
+            f_replacement.fit_and_calibrate(X_dict, y_dict, n_cv_splits=3)
+            replacement_model_path = os.path.join(temp_dir, 'waste_forecast_model_v_replace.joblib')
+            replacement_meta_path = os.path.join(temp_dir, 'waste_forecast_metadata_v_replace.json')
+            joblib.dump(f_replacement, replacement_model_path)
+            with open(replacement_model_path, 'rb') as f:
+                repl_sha = hashlib.sha256(f.read()).hexdigest()
+            with open(replacement_meta_path, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'model_version': 'v_replace_99',
+                    'synthetic_records': 0,
+                    'distinct_genuine_days': 84,
+                    'genuine_records': 100,
+                    'is_promotion_eligible': True,
+                    'validation_status': 'PASSED',
+                    'feature_schema': f_replacement.feature_names,
+                    'library_versions': runtime_libs,
+                    'sha256': repl_sha,
+                }, f, indent=2)
+
+            # Artificial test: force identical mtime on the model file
+            old_mtime = os.path.getmtime(latest_model_path)
+            old_atime = os.path.getatime(latest_model_path)
+            shutil.copy2(replacement_model_path, latest_model_path)
+            shutil.copy2(replacement_meta_path, latest_meta_path)
+            os.utime(latest_model_path, (old_atime, old_mtime))
+            self.assertEqual(os.path.getmtime(latest_model_path), old_mtime)
+
+            # Update active_manifest.json to point to the new replacement
+            with open(manifest_path, 'w', encoding='utf-8') as mf:
+                json.dump({
+                    'active_model_file': 'waste_forecast_model_latest.joblib',
+                    'active_metadata_file': 'waste_forecast_metadata_latest.json',
+                    'model_version': 'v_replace_99',
+                    'sha256': repl_sha,
+                }, mf, indent=2)
+
+            # Invalidate and load: must NOT return stale cached model even though mtime is identical!
+            p_fc2, p_meta2 = load_latest_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNotNone(p_fc2)
+            self.assertEqual(p_meta2['model_version'], 'v_replace_99')
+            self.assertEqual(p_meta2['sha256'], repl_sha)
+
+            # --- N. ROLLBACK FAILURE AUTOMATIC RECOVERY ---
+            # Active manifest is currently v_replace_99
+            with open(manifest_path, 'r', encoding='utf-8') as mf:
+                m_prior_recovery = json.load(mf)
+            self.assertEqual(m_prior_recovery['model_version'], 'v_replace_99')
+
+            # Attempt rollback to an invalid target that fails verification
+            # (corrupt model file with mismatched sha)
+            with open(target_model_path, 'wb') as f:
+                f.write(b"CORRUPTED_BYTES")
+            write_target({'model_version': 'corrupt_attempt', 'sha256': '0' * 64})
+
+            with self.assertRaises(CommandError):
+                call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+
+            # Verify active manifest was safely recovered / untouched and remains usable
+            with open(manifest_path, 'r', encoding='utf-8') as mf:
+                m_after_failed_rollback = json.load(mf)
+            self.assertEqual(m_after_failed_rollback['model_version'], 'v_replace_99')
+            self.assertEqual(m_after_failed_rollback['sha256'], repl_sha)
+            rec_fc, rec_meta = load_latest_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNotNone(rec_fc)
+            self.assertEqual(rec_meta['model_version'], 'v_replace_99')
+
+            # --- O. POST-COMMIT FAILURE EXERCISES THE RECOVERY HANDLER ---
+            # Mode N fails at pre-validation (no disk mutation). Here the target is
+            # VALID, so the command stages files, overwrites the 'latest' files and
+            # commits the manifest; a failure is then injected at post-commit
+            # verification. Every byte of prior active state must be restored.
+            from unittest import mock
+            from forecasting.management.commands.rollback_forecast_model import Command as RollbackCommand
+
+            write_target({'model_version': 'post_commit_fail', 'distinct_genuine_days': 84, 'genuine_records': 120})
+
+            def snapshot():
+                out = {}
+                for p in (manifest_path, latest_model_path, latest_meta_path):
+                    with open(p, 'rb') as fh:
+                        out[p] = fh.read()
+                return out
+
+            before = snapshot()
+            with mock.patch.object(
+                RollbackCommand, '_verify_committed_state',
+                side_effect=ValueError('injected post-commit verification failure'),
+            ):
+                with self.assertRaises(CommandError) as ctx:
+                    call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            self.assertIn('rollback aborted and recovered', str(ctx.exception).lower())
+            self.assertIn('injected post-commit verification failure', str(ctx.exception).lower())
+
+            # Manifest AND latest model/metadata bytes are byte-identical to pre-rollback state
+            self.assertEqual(snapshot(), before)
+            # No staging or backup residue remains in the registry directory
+            residue = [n for n in os.listdir(temp_dir) if n.startswith('.staging_') or n.endswith('.bak')]
+            self.assertEqual(residue, [])
+            # Active slot still loads the prior model through the shared validator
+            rec2_fc, rec2_meta = load_latest_forecaster(artifacts_dir=temp_dir)
+            self.assertIsNotNone(rec2_fc)
+            self.assertEqual(rec2_meta['model_version'], 'v_replace_99')
+            self.assertEqual(rec2_meta['sha256'], repl_sha)
+
+            # Same valid target succeeds once the injected fault is removed
+            call_command('rollback_forecast_model', artifacts_dir=temp_dir, target_version='target')
+            with open(manifest_path, 'r', encoding='utf-8') as mf:
+                self.assertEqual(json.load(mf)['model_version'], 'post_commit_fail')
+            residue = [n for n in os.listdir(temp_dir) if n.startswith('.staging_') or n.endswith('.bak')]
+            self.assertEqual(residue, [])
+
 
 
 

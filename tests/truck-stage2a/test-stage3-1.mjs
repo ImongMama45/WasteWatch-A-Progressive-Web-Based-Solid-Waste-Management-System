@@ -1597,6 +1597,909 @@ await test('5.9 Pre-cache single-flight concurrency: updatePrecacheSequence duri
   manager.destroy()
 })
 
+function deferred() {
+  let resolve, reject
+  const promise = new Promise((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+await test('5.10 [Test A] Offline and reconnect while abort is unresolved preserves single-flight and resumes on settlement', async () => {
+  let inFlightCount = 0
+  let maxConcurrency = 0
+  let fetchCount = 0
+  let firstDeferred = deferred()
+  let secondDeferred = deferred()
+
+  const mockFetch = (url, opts) => {
+    fetchCount++
+    inFlightCount++
+    if (inFlightCount > maxConcurrency) maxConcurrency = inFlightCount
+
+    const currentFetch = fetchCount
+    const currentDef = currentFetch === 1 ? firstDeferred : secondDeferred
+
+    opts.signal?.addEventListener('abort', () => {
+      // Note: Signal aborted, but promise settlement can be delayed
+    })
+
+    return currentDef.promise.then((res) => {
+      inFlightCount--
+      return res
+    }).catch((err) => {
+      inFlightCount--
+      throw err
+    })
+  }
+
+  const manager = new RouteRequestManager({
+    apiKey: 'test-key',
+    fetchFn: mockFetch,
+    storage: null,
+    config: {
+      PRECACHE_QUEUE_START_DELAY_MS: 20,
+      PRECACHE_PACING_MS: 30,
+    },
+  })
+
+  // 1. Start a pre-cache request
+  manager.updatePrecacheSequence(
+    [{ lat: 13.93, lng: 121.61 }, { lat: 13.94, lng: 121.62 }, { lat: 13.95, lng: 121.63 }],
+    0
+  )
+
+  // 2. Keep its fetch promise unresolved
+  await new Promise((r) => setTimeout(r, 25))
+  assert.strictEqual(fetchCount, 1)
+  assert.strictEqual(inFlightCount, 1)
+  const firstController = manager.precacheAbortController
+  assert.ok(firstController !== null)
+
+  // 3. Switch offline and verify the request receives an abort signal
+  manager.setOnline(false)
+  assert.strictEqual(firstController.signal.aborted, true, 'Request must receive abort signal on offline')
+  assert.ok(manager.precacheAbortController !== null, 'precacheAbortController must NOT be cleared immediately upon abort')
+
+  // 4. Reconnect before the old promise settles
+  manager.setOnline(true)
+
+  // 5. Advance the scheduler
+  await new Promise((r) => setTimeout(r, 40))
+
+  // 6. Assert that no second pre-cache request starts while the first remains unresolved
+  assert.strictEqual(fetchCount, 1, 'No second pre-cache request must start while first is unresolved')
+  assert.strictEqual(inFlightCount, 1)
+  assert.strictEqual(maxConcurrency, 1)
+
+  // 7. Resolve/reject the original promise
+  const abortErr = new Error('Aborted')
+  abortErr.name = 'AbortError'
+  firstDeferred.reject(abortErr)
+
+  // Wait a tick for catch/finally to run
+  await new Promise((r) => setTimeout(r, 5))
+  assert.strictEqual(inFlightCount, 0, 'Original request has now settled')
+
+  // 8. Verify queued work resumes correctly under approved pacing
+  await new Promise((r) => setTimeout(r, 35))
+  assert.strictEqual(fetchCount, 2, 'Queued work must resume after aborted request settles')
+  assert.strictEqual(inFlightCount, 1)
+  assert.strictEqual(maxConcurrency, 1, 'Maximum concurrency must remain strictly 1 throughout')
+
+  // Resolve second fetch to clean up
+  secondDeferred.resolve({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    json: async () => ({ routes: [{ geometry: [[121.610, 13.930], [121.620, 13.940]] }] }),
+  })
+  await new Promise((r) => setTimeout(r, 10))
+  assert.strictEqual(inFlightCount, 0)
+  manager.destroy()
+})
+
+await test('5.11 [Test G] Deterministic M1 pacing regression: strict pacing with navigation interleaving, stale completion, and aborts', async () => {
+  const originalSetTimeout = globalThis.setTimeout
+  const originalClearTimeout = globalThis.clearTimeout
+
+  class FakeScheduler {
+    constructor(initialTime = 1000) {
+      this.currentTime = initialTime
+      this.timers = new Map()
+      this.nextId = 1
+    }
+    now() {
+      return this.currentTime
+    }
+    setTimeout(fn, delayMs) {
+      const id = this.nextId++
+      const fireAt = this.currentTime + Math.max(0, delayMs)
+      this.timers.set(id, { fn, fireAt })
+      return id
+    }
+    clearTimeout(id) {
+      this.timers.delete(id)
+    }
+    async advance(ms) {
+      this.currentTime += ms
+      while (true) {
+        let earliestId = null
+        let earliestFireAt = Infinity
+        for (const [id, t] of this.timers.entries()) {
+          if (t.fireAt <= this.currentTime && t.fireAt < earliestFireAt) {
+            earliestId = id
+            earliestFireAt = t.fireAt
+          }
+        }
+        if (earliestId === null) break
+        const timer = this.timers.get(earliestId)
+        this.timers.delete(earliestId)
+        await timer.fn()
+        for (let i = 0; i < 10; i++) await Promise.resolve()
+      }
+    }
+  }
+
+  const scheduler = new FakeScheduler(1000)
+  globalThis.setTimeout = (fn, ms) => scheduler.setTimeout(fn, ms)
+  globalThis.clearTimeout = (id) => scheduler.clearTimeout(id)
+
+  try {
+    const precacheDispatches = []
+    const navDispatches = []
+    let inFlightCount = 0
+    let maxConcurrency = 0
+    let deferredLeg3 = null
+
+    const mockFetch = async (url, opts) => {
+      inFlightCount++
+      if (inFlightCount > maxConcurrency) maxConcurrency = inFlightCount
+
+      let body = {}
+      try {
+        body = JSON.parse(opts.body)
+      } catch {}
+
+      const isPrecache = body.instructions === false
+      const timestamp = scheduler.now()
+
+      if (isPrecache) {
+        precacheDispatches.push({ timestamp, body, signal: opts.signal })
+      } else {
+        navDispatches.push({ timestamp, body, signal: opts.signal })
+      }
+
+      if (deferredLeg3 && precacheDispatches.length === 3) {
+        return deferredLeg3.promise.then((res) => {
+          inFlightCount--
+          return res
+        }).catch((err) => {
+          inFlightCount--
+          throw err
+        })
+      }
+
+      inFlightCount--
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: async () => ({
+          routes: [{
+            geometry: [[121.610, 13.930], [121.620, 13.940]],
+            segments: [{ steps: [{ instruction: 'Go' }] }],
+          }],
+        }),
+      }
+    }
+
+    const manager = new RouteRequestManager({
+      apiKey: 'test-key',
+      fetchFn: mockFetch,
+      storage: null,
+      clock: () => scheduler.now(),
+      config: {
+        PRECACHE_QUEUE_START_DELAY_MS: 1000,
+        PRECACHE_PACING_MS: 10000, // 10s pacing
+      },
+      initialGps: { lat: 13.930, lng: 121.610 },
+    })
+
+    // Step 1: Start queue with 2 legs
+    manager.updatePrecacheSequence(
+      [{ lat: 13.93, lng: 121.61 }, { lat: 13.94, lng: 121.62 }, { lat: 13.95, lng: 121.63 }],
+      0
+    )
+
+    // Advance 999ms -> start delay is 1000ms, not fired yet
+    await scheduler.advance(999)
+    assert.strictEqual(precacheDispatches.length, 0, 'No precache dispatch before start delay')
+
+    // Advance 1ms to 1000ms -> leg 1 dispatches and completes at t=2000 (start=1000, +1000ms elapsed)
+    await scheduler.advance(1)
+    assert.strictEqual(precacheDispatches.length, 1, 'Leg 1 dispatches at t=2000')
+    const leg1Completion = 2000
+    assert.strictEqual(manager.lastPrecacheCompletedAt, leg1Completion, 'Leg 1 completion recorded at 2000')
+
+    // Step 2: At t = 4000 (2000ms after leg 1 completion, 8000ms remaining on pacing), start active navigation
+    await scheduler.advance(2000) // current time: 4000
+    manager.currentTarget = {
+      targetId: 'stop:1',
+      targetKey: '13.94,121.62',
+      isRoutable: true,
+      hasValidCoords: true,
+      coords: [121.62, 13.94],
+    }
+    const navDispatched = manager.requestRoute({
+      reason: 'driver_progress',
+      bypassCooldown: true,
+    })
+    assert.strictEqual(navDispatched, true, 'Navigation request dispatched')
+    assert.strictEqual(navDispatches.length, 1, 'Navigation fetch executed')
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    assert.strictEqual(manager.activeAbortController, null, 'Active navigation controller cleared after settlement')
+    // Navigation completed at t=4000. Navigation completion must NOT shorten pacing timer!
+    assert.strictEqual(manager.precacheTimerTargetTime, 12000, 'Navigation completion must not shorten pending 12000 deadline')
+
+    // Cycle offline/online at t=4000 to clear pending timer and test pacingRemaining enforcement
+    manager.setOnline(false)
+    assert.strictEqual(manager.precacheTimer, null, 'Offline clears pending timer')
+    manager.setOnline(true)
+    assert.strictEqual(manager.precacheTimerTargetTime, 12000, 'Reconnect enforces pacingRemaining to preserve 12000 deadline')
+
+    // Step 3: Verify leg 2 cannot begin before 12000
+    await scheduler.advance(7999) // current time: 11999
+    assert.strictEqual(precacheDispatches.length, 1, 'Precache leg 2 must NOT dispatch before 10s pacing')
+
+    await scheduler.advance(1) // current time: 12000
+    assert.strictEqual(precacheDispatches.length, 2, 'Precache leg 2 dispatches exactly at 10s pacing mark')
+    assert.strictEqual(precacheDispatches[1].timestamp, 12000)
+    assert.strictEqual(manager.lastPrecacheCompletedAt, 12000, 'Leg 2 completion recorded at 12000')
+
+    // Step 4: Discarded but genuinely completed stale request still updates pacing timestamp
+    manager.legCache.clear()
+    deferredLeg3 = deferred()
+    manager.updatePrecacheSequence(
+      [{ lat: 13.95, lng: 121.63 }, { lat: 13.96, lng: 121.64 }, { lat: 13.97, lng: 121.65 }],
+      0
+    )
+    // Advance to t=22000: leg 3 dispatches with coords [13.95, 121.63] -> [13.96, 121.64]
+    await scheduler.advance(10000) // current time: 22000
+    assert.strictEqual(precacheDispatches.length, 3, 'Precache leg 3 dispatched at t=22000')
+    assert.strictEqual(inFlightCount, 1, 'Leg 3 is in flight')
+
+    // Before leg 3 settles, replace sequence with new coordinates for leg 0-1 (making leg 3 stale)
+    manager.updatePrecacheSequence(
+      [{ lat: 13.98, lng: 121.68 }, { lat: 13.99, lng: 121.69 }],
+      0
+    )
+
+    // Advance 500ms and resolve leg 3 at t=22500
+    await scheduler.advance(500) // current time: 22500
+    deferredLeg3.resolve({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({ routes: [{ geometry: [[121.63, 13.95], [121.64, 13.96]] }] }),
+    })
+    // Allow promise handlers to run
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    assert.strictEqual(inFlightCount, 0, 'Leg 3 has settled')
+    // Stale completed request MUST update lastPrecacheCompletedAt
+    assert.strictEqual(manager.lastPrecacheCompletedAt, 22500, 'Stale completed request updates lastPrecacheCompletedAt')
+    // Replacement leg must NOT dispatch before 22500 + 10000 = 32500
+    assert.strictEqual(manager.precacheTimerTargetTime, 32500, 'Replacement leg pacing set to 32500')
+
+    await scheduler.advance(9999) // current time: 32499
+    assert.strictEqual(precacheDispatches.length, 3, 'Replacement leg must not dispatch before 32500')
+
+    await scheduler.advance(1) // current time: 32500
+    assert.strictEqual(precacheDispatches.length, 4, 'Replacement leg dispatches at 32500')
+    assert.strictEqual(precacheDispatches[3].timestamp, 32500)
+
+    // Step 5: Aborted request does NOT update pacing timestamp
+    assert.strictEqual(manager.lastPrecacheCompletedAt, 32500)
+    assert.strictEqual(maxConcurrency, 1, 'Concurrency strictly 1 throughout')
+
+    manager.destroy()
+  } finally {
+    globalThis.setTimeout = originalSetTimeout
+    globalThis.clearTimeout = originalClearTimeout
+  }
+})
+
+await test('5.12 [Test C] Abort and target replacement preserves in-flight tracking until settlement and prevents overlap', async () => {
+  let inFlightCount = 0
+  let maxConcurrency = 0
+  let fetchCount = 0
+  let firstDeferred = deferred()
+  let secondDeferred = deferred()
+
+  const mockFetch = (url, opts) => {
+    fetchCount++
+    inFlightCount++
+    if (inFlightCount > maxConcurrency) maxConcurrency = inFlightCount
+
+    const currentFetch = fetchCount
+    const currentDef = currentFetch === 1 ? firstDeferred : secondDeferred
+
+    return currentDef.promise.then((res) => {
+      inFlightCount--
+      return res
+    }).catch((err) => {
+      inFlightCount--
+      throw err
+    })
+  }
+
+  const manager = new RouteRequestManager({
+    apiKey: 'test-key',
+    fetchFn: mockFetch,
+    storage: null,
+    config: {
+      PRECACHE_QUEUE_START_DELAY_MS: 15,
+      PRECACHE_PACING_MS: 30,
+    },
+  })
+
+  // 1. Start a pre-cache request
+  manager.updatePrecacheSequence(
+    [{ lat: 13.93, lng: 121.61 }, { lat: 13.94, lng: 121.62 }],
+    0
+  )
+
+  await new Promise((r) => setTimeout(r, 20))
+  assert.strictEqual(fetchCount, 1)
+  assert.strictEqual(inFlightCount, 1)
+  const initialController = manager.precacheAbortController
+  assert.ok(initialController !== null)
+
+  // 2. Change the target while promise is unresolved
+  manager.setTarget({
+    targetId: 'stop:2',
+    targetKey: '13.95,121.63',
+    isRoutable: true,
+    hasValidCoords: true,
+    coords: [121.63, 13.95],
+  })
+
+  // 3. Verify the old request is aborted but remains tracked as in-flight until settlement
+  assert.strictEqual(initialController.signal.aborted, true, 'Old request must receive abort signal')
+  assert.strictEqual(manager.precacheAbortController, initialController, 'Old controller remains tracked until settlement')
+
+  // 4. Update precache sequence for new target and advance scheduler
+  manager.updatePrecacheSequence(
+    [{ lat: 13.95, lng: 121.63 }, { lat: 13.96, lng: 121.64 }],
+    0
+  )
+  await new Promise((r) => setTimeout(r, 40))
+
+  // Verify new target's pre-cache request does NOT overlap
+  assert.strictEqual(fetchCount, 1, 'New pre-cache request must not start while old request is unresolved')
+  assert.strictEqual(maxConcurrency, 1)
+
+  // 5. Settle the old request
+  const abortErr = new Error('Aborted')
+  abortErr.name = 'AbortError'
+  firstDeferred.reject(abortErr)
+
+  await new Promise((r) => setTimeout(r, 10))
+  assert.strictEqual(inFlightCount, 0, 'Old request has settled')
+  assert.strictEqual(manager.precacheAbortController, null, 'Controller cleared in finally upon settlement')
+
+  // Verify new target can proceed safely
+  await new Promise((r) => setTimeout(r, 30))
+  assert.strictEqual(fetchCount, 2, 'New target pre-cache proceeded after settlement')
+  assert.strictEqual(inFlightCount, 1)
+  assert.strictEqual(maxConcurrency, 1)
+
+  secondDeferred.resolve({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    json: async () => ({ routes: [{ geometry: [[121.630, 13.950], [121.640, 13.960]] }] }),
+  })
+  await new Promise((r) => setTimeout(r, 10))
+  manager.destroy()
+})
+
+await test('5.13 [Test D] Destruction during unresolved request prevents future dispatch, cache writes, or timer creation', async () => {
+  let inFlightCount = 0
+  let fetchCount = 0
+  let firstDeferred = deferred()
+  let callbackFired = false
+
+  const mockStorage = {
+    store: new Map(),
+    getItem(k) { return this.store.get(k) || null },
+    setItem(k, v) { this.store.set(k, v) },
+  }
+
+  const mockFetch = (url, opts) => {
+    fetchCount++
+    inFlightCount++
+    return firstDeferred.promise.then((res) => {
+      inFlightCount--
+      return res
+    }).catch((err) => {
+      inFlightCount--
+      throw err
+    })
+  }
+
+  const manager = new RouteRequestManager({
+    apiKey: 'test-key',
+    fetchFn: mockFetch,
+    storage: mockStorage,
+    config: {
+      PRECACHE_QUEUE_START_DELAY_MS: 15,
+      PRECACHE_PACING_MS: 30,
+    },
+    onPrecacheSuccess: () => {
+      callbackFired = true
+    },
+  })
+
+  // 1. Start a pre-cache request and keep it unresolved
+  manager.updatePrecacheSequence(
+    [{ lat: 13.93, lng: 121.61 }, { lat: 13.94, lng: 121.62 }, { lat: 13.95, lng: 121.63 }],
+    0
+  )
+
+  await new Promise((r) => setTimeout(r, 20))
+  assert.strictEqual(fetchCount, 1)
+  assert.strictEqual(inFlightCount, 1)
+
+  // 2. Destroy the manager
+  manager.destroy()
+  assert.strictEqual(manager.isDestroyed, true)
+  assert.strictEqual(manager.precacheTimer, null)
+  assert.strictEqual(manager.precacheQueue.length, 0)
+
+  // 3. Settle the pending request afterward
+  firstDeferred.resolve({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    json: async () => ({ routes: [{ geometry: [[121.610, 13.930], [121.620, 13.940]] }] }),
+  })
+
+  await new Promise((r) => setTimeout(r, 40))
+
+  // 4. Verify no new request, timer, cache write, callback, or queue dispatch occurs
+  assert.strictEqual(inFlightCount, 0)
+  assert.strictEqual(fetchCount, 1, 'No new request after destruction')
+  assert.strictEqual(manager.precacheTimer, null, 'No timer scheduled after destruction')
+  assert.strictEqual(callbackFired, false, 'No success callback after destruction')
+  assert.strictEqual(mockStorage.store.size, 0, 'No cache write after destruction')
+  assert.strictEqual(manager.precacheQueue.length, 0, 'No queue dispatch after destruction')
+})
+
+await test('5.14 [Test E.1] Stale queue replacement and cache integrity: old in-flight request resolves', async () => {
+  let inFlightCount = 0
+  let maxConcurrency = 0
+  const dispatchedRequests = []
+  const oldDeferred = deferred()
+  const replacementDeferred = deferred()
+  let successCallbacks = []
+
+  const mockStorage = {
+    store: new Map(),
+    getItem(k) { return this.store.get(k) || null },
+    setItem(k, v) { this.store.set(k, v) },
+  }
+
+  const mockFetch = (url, opts) => {
+    inFlightCount++
+    if (inFlightCount > maxConcurrency) maxConcurrency = inFlightCount
+
+    const parsedBody = JSON.parse(opts.body)
+    const callIndex = dispatchedRequests.length
+    dispatchedRequests.push({ body: parsedBody, signal: opts.signal })
+
+    const curDef = callIndex === 0 ? oldDeferred : replacementDeferred
+    return curDef.promise.then((res) => {
+      inFlightCount--
+      return res
+    }).catch((err) => {
+      inFlightCount--
+      throw err
+    })
+  }
+
+  const manager = new RouteRequestManager({
+    apiKey: 'test-key',
+    fetchFn: mockFetch,
+    storage: mockStorage,
+    config: {
+      PRECACHE_QUEUE_START_DELAY_MS: 15,
+      PRECACHE_PACING_MS: 30,
+    },
+    onPrecacheSuccess: (data) => {
+      successCallbacks.push(data)
+    },
+  })
+
+  // 1. Start an old in-flight pre-cache leg with key '0-1' and coordinates A
+  const coordsA = [
+    { lat: 13.931111, lng: 121.611111 },
+    { lat: 13.941111, lng: 121.621111 },
+  ]
+  manager.updatePrecacheSequence(coordsA, 0)
+
+  await new Promise((r) => setTimeout(r, 20))
+  assert.strictEqual(dispatchedRequests.length, 1, 'Old request dispatched')
+  assert.strictEqual(inFlightCount, 1, 'Old request is in flight')
+  assert.deepStrictEqual(dispatchedRequests[0].body.coordinates, [
+    [121.611111, 13.931111],
+    [121.621111, 13.941111],
+  ])
+
+  // 2. Replace the sequence with a leg using the same key '0-1' but different coordinates B
+  const coordsB = [
+    { lat: 13.982222, lng: 121.682222 },
+    { lat: 13.992222, lng: 121.692222 },
+  ]
+  manager.updatePrecacheSequence(coordsB, 0)
+
+  // 3. Verify old request was not aborted by updatePrecacheSequence alone
+  assert.strictEqual(manager.precacheAbortController.signal.aborted, false)
+
+  // 4. Settle old request by resolving with old geometry A
+  const oldGeometry = [[121.611111, 13.931111], [121.621111, 13.941111]]
+  oldDeferred.resolve({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    json: async () => ({ routes: [{ geometry: oldGeometry }] }),
+  })
+
+  await new Promise((r) => setTimeout(r, 10))
+  assert.strictEqual(inFlightCount, 0, 'Old request settled')
+
+  // 5. Verify assertions on stale discard:
+  assert.strictEqual(manager.legCache.has('0-1'), false, 'Old geometry must not be written to legCache')
+  assert.strictEqual(mockStorage.store.size, 0, 'Old geometry must not be written to storage')
+  assert.strictEqual(successCallbacks.length, 0, 'onPrecacheSuccess must not be called for stale result')
+
+  // 6. Verify replacement request dispatches using coordinates B
+  await new Promise((r) => setTimeout(r, 40))
+  assert.strictEqual(dispatchedRequests.length, 2, 'Replacement request dispatched')
+  assert.strictEqual(inFlightCount, 1, 'Replacement request in flight')
+  assert.strictEqual(maxConcurrency, 1, 'Max concurrency strictly 1')
+  assert.deepStrictEqual(
+    dispatchedRequests[1].body.coordinates,
+    [
+      [121.682222, 13.982222],
+      [121.692222, 13.992222],
+    ],
+    'Replacement request must use coordinates B'
+  )
+
+  // 7. Settle replacement request with replacement geometry B
+  const replacementGeometry = [[121.682222, 13.982222], [121.692222, 13.992222]]
+  replacementDeferred.resolve({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    json: async () => ({ routes: [{ geometry: replacementGeometry }] }),
+  })
+
+  await new Promise((r) => setTimeout(r, 10))
+  assert.strictEqual(inFlightCount, 0, 'Replacement settled')
+  assert.strictEqual(manager.legCache.has('0-1'), true, 'Replacement geometry cached')
+  assert.deepStrictEqual(manager.legCache.get('0-1').geometry, replacementGeometry)
+  assert.strictEqual(successCallbacks.length, 1, 'Success callback fired for replacement')
+  assert.deepStrictEqual(successCallbacks[0].route.geometry, replacementGeometry)
+  assert.strictEqual(mockStorage.store.has('ww_ors_route_cache'), true, 'Storage updated with replacement')
+
+  // No duplicate queued work
+  assert.strictEqual(manager.precacheQueue.length, 0, 'No duplicate queued items')
+  manager.destroy()
+})
+
+await test('5.15 [Test E.2] Stale queue replacement and cache integrity: old in-flight request rejects', async () => {
+  let inFlightCount = 0
+  let maxConcurrency = 0
+  const dispatchedRequests = []
+  const oldDeferred = deferred()
+  const replacementDeferred = deferred()
+  let successCallbacks = []
+
+  const mockStorage = {
+    store: new Map(),
+    getItem(k) { return this.store.get(k) || null },
+    setItem(k, v) { this.store.set(k, v) },
+  }
+
+  const mockFetch = (url, opts) => {
+    inFlightCount++
+    if (inFlightCount > maxConcurrency) maxConcurrency = inFlightCount
+
+    const parsedBody = JSON.parse(opts.body)
+    const callIndex = dispatchedRequests.length
+    dispatchedRequests.push({ body: parsedBody, signal: opts.signal })
+
+    const curDef = callIndex === 0 ? oldDeferred : replacementDeferred
+    return curDef.promise.then((res) => {
+      inFlightCount--
+      return res
+    }).catch((err) => {
+      inFlightCount--
+      throw err
+    })
+  }
+
+  const manager = new RouteRequestManager({
+    apiKey: 'test-key',
+    fetchFn: mockFetch,
+    storage: mockStorage,
+    config: {
+      PRECACHE_QUEUE_START_DELAY_MS: 15,
+      PRECACHE_PACING_MS: 30,
+    },
+    onPrecacheSuccess: (data) => {
+      successCallbacks.push(data)
+    },
+  })
+
+  // 1. Start old in-flight pre-cache leg with coords A
+  const coordsA = [
+    { lat: 13.931111, lng: 121.611111 },
+    { lat: 13.941111, lng: 121.621111 },
+  ]
+  manager.updatePrecacheSequence(coordsA, 0)
+
+  await new Promise((r) => setTimeout(r, 20))
+  assert.strictEqual(dispatchedRequests.length, 1)
+
+  // 2. Replace sequence with coords B
+  const coordsB = [
+    { lat: 13.982222, lng: 121.682222 },
+    { lat: 13.992222, lng: 121.692222 },
+  ]
+  manager.updatePrecacheSequence(coordsB, 0)
+
+  // 3. Old request rejects with network error
+  oldDeferred.reject(new Error('Network failure'))
+
+  await new Promise((r) => setTimeout(r, 10))
+  assert.strictEqual(inFlightCount, 0)
+
+  // Assert failedLegs was NOT set for replacement key '0-1'
+  assert.strictEqual(manager.failedLegs.has('0-1'), false, 'Stale failure must not backoff replacement leg')
+  assert.strictEqual(manager.legCache.has('0-1'), false)
+  assert.strictEqual(mockStorage.store.size, 0)
+
+  // 4. Replacement request dispatches coords B
+  await new Promise((r) => setTimeout(r, 40))
+  assert.strictEqual(dispatchedRequests.length, 2)
+  assert.deepStrictEqual(
+    dispatchedRequests[1].body.coordinates,
+    [
+      [121.682222, 13.982222],
+      [121.692222, 13.992222],
+    ]
+  )
+
+  const replacementGeometry = [[121.682222, 13.982222], [121.692222, 13.992222]]
+  replacementDeferred.resolve({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    json: async () => ({ routes: [{ geometry: replacementGeometry }] }),
+  })
+
+  await new Promise((r) => setTimeout(r, 10))
+  assert.strictEqual(inFlightCount, 0)
+  assert.strictEqual(manager.legCache.has('0-1'), true)
+  assert.deepStrictEqual(manager.legCache.get('0-1').geometry, replacementGeometry)
+  assert.strictEqual(successCallbacks.length, 1)
+
+  manager.destroy()
+})
+
+await test('5.16 [Test F.1] Abort, settlement, and recovery: abort in-flight request and resolve while online', async () => {
+  let inFlightCount = 0
+  let maxConcurrency = 0
+  const dispatchedRequests = []
+  const firstDeferred = deferred()
+  const secondDeferred = deferred()
+  let successCallbacks = []
+
+  const mockStorage = {
+    store: new Map(),
+    getItem(k) { return this.store.get(k) || null },
+    setItem(k, v) { this.store.set(k, v) },
+  }
+
+  const mockFetch = (url, opts) => {
+    inFlightCount++
+    if (inFlightCount > maxConcurrency) maxConcurrency = inFlightCount
+
+    const parsedBody = JSON.parse(opts.body)
+    const callIndex = dispatchedRequests.length
+    dispatchedRequests.push({ body: parsedBody, signal: opts.signal })
+
+    const curDef = callIndex === 0 ? firstDeferred : secondDeferred
+    return curDef.promise.then((res) => {
+      inFlightCount--
+      return res
+    }).catch((err) => {
+      inFlightCount--
+      throw err
+    })
+  }
+
+  const manager = new RouteRequestManager({
+    apiKey: 'test-key',
+    fetchFn: mockFetch,
+    storage: mockStorage,
+    config: {
+      PRECACHE_QUEUE_START_DELAY_MS: 15,
+      PRECACHE_PACING_MS: 30,
+    },
+    onPrecacheSuccess: (data) => {
+      successCallbacks.push(data)
+    },
+  })
+
+  const coords = [
+    { lat: 13.931111, lng: 121.611111 },
+    { lat: 13.941111, lng: 121.621111 },
+  ]
+  manager.updatePrecacheSequence(coords, 0)
+
+  await new Promise((r) => setTimeout(r, 20))
+  assert.strictEqual(dispatchedRequests.length, 1)
+  assert.strictEqual(inFlightCount, 1)
+  const controller = manager.precacheAbortController
+  assert.ok(controller !== null)
+  assert.strictEqual(manager.precacheSessionCount, 1, 'Session count incremented')
+
+  // Abort request while online (e.g. active navigation begins)
+  controller.abort()
+  assert.strictEqual(controller.signal.aborted, true)
+  assert.strictEqual(manager.precacheAbortController, controller, 'Controller not cleared immediately')
+
+  // Resolve the aborted promise while online
+  firstDeferred.resolve({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    json: async () => ({ routes: [{ geometry: [[121.611111, 13.931111], [121.621111, 13.941111]] }] }),
+  })
+
+  await new Promise((r) => setTimeout(r, 10))
+  assert.strictEqual(inFlightCount, 0, 'First request settled')
+  assert.strictEqual(manager.precacheAbortController, null, 'Controller cleared in finally upon settlement')
+  assert.strictEqual(manager.precacheSessionCount, 0, 'Session count restored after abort')
+  assert.strictEqual(successCallbacks.length, 0, 'No success callback for aborted request')
+  assert.strictEqual(manager.legCache.has('0-1'), false, 'No cache write for aborted request')
+
+  // Since sequence was unchanged and request was aborted, leg was retained/reinserted
+  // Queue resumes online
+  await new Promise((r) => setTimeout(r, 30))
+  assert.strictEqual(dispatchedRequests.length, 2, 'Leg resumed and redispatched')
+  assert.strictEqual(inFlightCount, 1)
+  assert.strictEqual(maxConcurrency, 1)
+  assert.deepStrictEqual(dispatchedRequests[1].body.coordinates, dispatchedRequests[0].body.coordinates)
+
+  secondDeferred.resolve({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    json: async () => ({ routes: [{ geometry: [[121.611111, 13.931111], [121.621111, 13.941111]] }] }),
+  })
+  await new Promise((r) => setTimeout(r, 10))
+  assert.strictEqual(manager.legCache.has('0-1'), true, 'Cached on successful second attempt')
+  assert.strictEqual(successCallbacks.length, 1)
+
+  manager.destroy()
+})
+
+await test('5.17 [Test F.2] Abort, settlement, and recovery: abort in-flight request and reject while offline, then reconnect', async () => {
+  let inFlightCount = 0
+  let maxConcurrency = 0
+  const dispatchedRequests = []
+  const firstDeferred = deferred()
+  const secondDeferred = deferred()
+  let successCallbacks = []
+
+  const mockStorage = {
+    store: new Map(),
+    getItem(k) { return this.store.get(k) || null },
+    setItem(k, v) { this.store.set(k, v) },
+  }
+
+  const mockFetch = (url, opts) => {
+    inFlightCount++
+    if (inFlightCount > maxConcurrency) maxConcurrency = inFlightCount
+
+    const parsedBody = JSON.parse(opts.body)
+    const callIndex = dispatchedRequests.length
+    dispatchedRequests.push({ body: parsedBody, signal: opts.signal })
+
+    const curDef = callIndex === 0 ? firstDeferred : secondDeferred
+    return curDef.promise.then((res) => {
+      inFlightCount--
+      return res
+    }).catch((err) => {
+      inFlightCount--
+      throw err
+    })
+  }
+
+  const manager = new RouteRequestManager({
+    apiKey: 'test-key',
+    fetchFn: mockFetch,
+    storage: mockStorage,
+    config: {
+      PRECACHE_QUEUE_START_DELAY_MS: 15,
+      PRECACHE_PACING_MS: 30,
+    },
+    onPrecacheSuccess: (data) => {
+      successCallbacks.push(data)
+    },
+  })
+
+  const coords = [
+    { lat: 13.931111, lng: 121.611111 },
+    { lat: 13.941111, lng: 121.621111 },
+  ]
+  manager.updatePrecacheSequence(coords, 0)
+
+  await new Promise((r) => setTimeout(r, 20))
+  assert.strictEqual(dispatchedRequests.length, 1)
+  assert.strictEqual(inFlightCount, 1)
+  const controller = manager.precacheAbortController
+  assert.ok(controller !== null)
+  assert.strictEqual(manager.precacheSessionCount, 1)
+
+  // Switch offline: aborts request
+  manager.setOnline(false)
+  assert.strictEqual(controller.signal.aborted, true)
+  assert.strictEqual(manager.precacheAbortController, controller)
+
+  // While offline, request rejects with AbortError
+  const abortErr = new Error('Aborted')
+  abortErr.name = 'AbortError'
+  firstDeferred.reject(abortErr)
+
+  await new Promise((r) => setTimeout(r, 10))
+  assert.strictEqual(inFlightCount, 0, 'First request settled')
+  assert.strictEqual(manager.precacheAbortController, null, 'Controller released after settlement')
+  assert.strictEqual(manager.precacheSessionCount, 0, 'Session count restored')
+  assert.strictEqual(successCallbacks.length, 0)
+  assert.strictEqual(manager.legCache.has('0-1'), false)
+
+  // While offline, no immediate dispatch must occur
+  await new Promise((r) => setTimeout(r, 30))
+  assert.strictEqual(dispatchedRequests.length, 1, 'No dispatch while offline')
+
+  // Reconnect online: queue resumes
+  manager.setOnline(true)
+  await new Promise((r) => setTimeout(r, 30))
+  assert.strictEqual(dispatchedRequests.length, 2, 'Queued leg resumes upon reconnect')
+  assert.strictEqual(inFlightCount, 1)
+  assert.strictEqual(maxConcurrency, 1)
+  assert.deepStrictEqual(dispatchedRequests[1].body.coordinates, dispatchedRequests[0].body.coordinates)
+
+  secondDeferred.resolve({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    json: async () => ({ routes: [{ geometry: [[121.611111, 13.931111], [121.621111, 13.941111]] }] }),
+  })
+  await new Promise((r) => setTimeout(r, 10))
+  assert.strictEqual(manager.legCache.has('0-1'), true)
+  assert.strictEqual(successCallbacks.length, 1)
+
+  manager.destroy()
+})
+
 // ── 6. PRODUCTION SOURCE INVARIANTS ─────────────────────────────────────────
 console.log('\n--- 6. [REGRESSION] Production Source Invariants ---')
 

@@ -19,7 +19,6 @@ import {
   Users,
   MessageSquare,
   Filter,
-  RefreshCw,
   MapPin,
   Sparkles,
   ArrowRight,
@@ -66,6 +65,11 @@ export default function CommunityPage() {
     error,
     hasMore,
     loadingMore,
+    totalCount,
+    pageSize,
+    setPageSize,
+    hasNewContent,
+    loadNewContent,
     loadMore,
     refresh,
     createPost,
@@ -199,134 +203,115 @@ export default function CommunityPage() {
       <main
         className="ww-page-enter"
         style={{
-          maxWidth: 1140,
+          maxWidth: 1100,
           margin: '0 auto',
-          padding: '0 20px',
+          padding: '0 16px',
         }}
       >
-        {/* Page Introduction Hero */}
+        {/* Compact Reddit-Inspired Community Header */}
         <div
           style={{
-            background: 'linear-gradient(135deg, #15803d 0%, #16a34a 100%)',
-            borderRadius: 16,
-            padding: '28px 30px',
-            color: '#ffffff',
-            marginBottom: 24,
-            boxShadow: '0 4px 14px rgba(22, 163, 74, 0.15)',
+            background: '#ffffff',
+            border: '1px solid #e2e8f0',
+            borderRadius: 8,
+            padding: '12px 16px',
+            marginBottom: 14,
+            boxShadow: '0 1px 2px rgba(15, 23, 42, 0.02)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: 16,
-          }}
-        >
-          <div style={{ maxWidth: 640 }}>
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '4px 10px',
-                borderRadius: 20,
-                background: 'rgba(255, 255, 255, 0.2)',
-                fontSize: 12,
-                fontWeight: 700,
-                marginBottom: 10,
-                letterSpacing: 0.3,
-              }}
-            >
-              <Users size={14} />
-              <span>Lucena City Civic Forum</span>
-            </div>
-            <h1
-              style={{
-                fontSize: 26,
-                fontWeight: 800,
-                margin: '0 0 8px',
-                letterSpacing: -0.5,
-                lineHeight: 1.25,
-              }}
-            >
-              Community Voice & Neighborhood Cleanliness
-            </h1>
-            <p
-              style={{
-                fontSize: 14,
-                margin: 0,
-                opacity: 0.92,
-                lineHeight: 1.5,
-              }}
-            >
-              A collaborative citizen space to discuss local collection schedules, report neighborhood concerns, share cleanup drives, and support environmental initiatives across Lucena City.
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button
-              onClick={refresh}
-              disabled={refreshing}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '9px 16px',
-                borderRadius: 10,
-                border: '1.5px solid rgba(255, 255, 255, 0.4)',
-                background: 'rgba(255, 255, 255, 0.12)',
-                color: '#ffffff',
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
-              <span>{refreshing ? 'Updating...' : 'Refresh Feed'}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Filter Toolbar */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: 20,
             flexWrap: 'wrap',
             gap: 12,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <MessageSquare size={18} style={{ color: '#16a34a' }} />
-            <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0 }}>
-              Community Feed & Reports
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: '50%',
+                background: '#16a34a',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Users size={16} strokeWidth={2.4} />
+            </div>
+
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <h1
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 800,
+                    margin: 0,
+                    color: '#0f172a',
+                    letterSpacing: '-0.01em',
+                  }}
+                >
+                  WasteWatch Community
+                </h1>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#16a34a', background: '#f0fdf4', padding: '1px 6px', borderRadius: 4 }}>
+                  Civic Forum
+                </span>
+              </div>
+              <p
+                style={{
+                  fontSize: 12,
+                  margin: 0,
+                  color: '#64748b',
+                  lineHeight: 1.4,
+                }}
+              >
+                Lucena City neighborhood discussions, solid waste reports, and community cleanup coordination.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Feed Sorting & Scope Filter Bar */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 12,
+            padding: '4px 2px',
+            flexWrap: 'wrap',
+            gap: 10,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <MessageSquare size={15} style={{ color: '#16a34a' }} />
+            <h2 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>
+              Community Feed
             </h2>
             <span
               style={{
-                fontSize: 12,
-                fontWeight: 700,
-                padding: '2px 8px',
-                borderRadius: 12,
-                background: '#e2e8f0',
-                color: '#475569',
+                fontSize: 11,
+                fontWeight: 600,
+                color: '#64748b',
               }}
             >
-              {posts.length}
+              ({posts.length} {posts.length === 1 ? 'post' : 'posts'})
             </span>
           </div>
 
-          {/* Barangay Filter */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Filter size={15} style={{ color: '#64748b' }} />
+          {/* Barangay Filter Dropdown */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Filter size={13} style={{ color: '#64748b' }} />
             <select
               value={selectedBarangay}
               onChange={(e) => setSelectedBarangay(e.target.value)}
               style={{
-                padding: '8px 12px',
-                borderRadius: 8,
+                padding: '5px 8px',
+                borderRadius: 6,
                 border: '1px solid #cbd5e1',
                 background: '#ffffff',
-                fontSize: 13,
+                fontSize: 12,
                 color: '#334155',
                 fontWeight: 600,
                 fontFamily: 'inherit',
@@ -347,8 +332,8 @@ export default function CommunityPage() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr) 340px',
-            gap: 28,
+            gridTemplateColumns: 'minmax(0, 1fr) 300px',
+            gap: 20,
             alignItems: 'start',
           }}
           className="ww-community-grid"
@@ -434,6 +419,11 @@ export default function CommunityPage() {
               error={error}
               hasMore={hasMore}
               loadingMore={loadingMore}
+              totalCount={totalCount}
+              pageSize={pageSize}
+              onPageSizeChange={setPageSize}
+              hasNewContent={hasNewContent}
+              onLoadNewContent={loadNewContent}
               onLoadMore={loadMore}
               onRefresh={refresh}
               onLike={toggleLike}

@@ -1,7 +1,8 @@
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 from accounts.models import User, UserRole, EmployeeType
-from driver.models import Truck, TruckStatus, CollectionSchedule
+from driver.models import Truck, TruckStatus, CollectionSchedule, CommissioningProvenance, TruckRetirementState
 
 class ScheduleAPITests(TestCase):
     def setUp(self):
@@ -11,7 +12,13 @@ class ScheduleAPITests(TestCase):
         self.driver2 = User.objects.create_user(username='driver2_sched', email='driver2@test.com', password='pw', role=UserRole.DRIVER, full_name='Driver 2')
         self.citizen = User.objects.create_user(username='citizen_sched', email='citizen@test.com', password='pw', role=UserRole.CITIZEN, full_name='Citizen')
         
-        self.truck_a = Truck.objects.create(plate_number='TRK-A', status=TruckStatus.ACTIVE)
+        self.truck_a = Truck.objects.create(
+            plate_number='TRK-A',
+            status=TruckStatus.ACTIVE,
+            commissioning_provenance=CommissioningProvenance.COMMISSIONED_VERIFIED,
+            commissioned_at=timezone.now(),
+            retirement_state=TruckRetirementState.OPERATIONAL,
+        )
         self.truck_a.drivers.add(self.driver1)
         
         self.truck_maintenance = Truck.objects.create(plate_number='TRK-M', status=TruckStatus.MAINTENANCE)

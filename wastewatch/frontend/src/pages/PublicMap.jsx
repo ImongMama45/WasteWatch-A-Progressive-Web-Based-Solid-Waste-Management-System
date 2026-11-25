@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import ReactDOMServer from 'react-dom/server'
-import { Truck, Trash2, AlertTriangle, Navigation2, X, Map as MapIcon, Layers, Search, MessageSquare } from 'lucide-react'
+import { Truck, Trash2, AlertTriangle, Navigation2, X, Map as MapIcon, Layers, Search, MessageSquare, Users } from 'lucide-react'
 import Navbar from '../components/Navbar'
 import api from '../api/client'
 import useUserLocation from '../hooks/useUserLocation'
 import { useAuth } from '../context/AuthContext'
 import CommentThread from './community/components/CommentThread'
 import ReportVoting from '../components/community/ReportVoting'
+import MapSpotlightMask from '../components/MapSpotlightMask'
 import { getGarbageReportId } from '../utils/reportIdentity'
 import { MapSkeleton, SidebarWidgetSkeleton } from '../components/ui/Skeleton'
 
@@ -136,11 +137,40 @@ export default function PublicMap() {
   const [barangaySummary, setBarangaySummary] = useState([])
   const [zoneStops, setZoneStops] = useState(null)
   const [loadingReports, setLoadingReports] = useState(true)
-  const [selected, setSelected] = useState(null) // { type: 'truck'|'dumpsite'|'report'|'zone', data }
+  const [selected, setSelected] = useState(null) // { type: 'truck'|'dumpsite'|'report'|'zone'|'stop', data }
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [showSearchResults, setShowSearchResults] = useState(false)
   const [focusedReport, setFocusedReport] = useState(null)
+
+  const spotlightTarget = useMemo(() => {
+    if (!selected) return null
+    if (selected.type === 'report' || selected.type === 'hotspot') {
+      const lat = selected.data?.lat ?? selected.data?.latitude
+      const lng = selected.data?.lng ?? selected.data?.longitude
+      if (lat != null && lng != null) {
+        return {
+          lat: Number(lat),
+          lng: Number(lng),
+          radius: 95,
+          color: SEVERITY_COLORS[selected.data.severity] || '#f59e0b',
+        }
+      }
+    }
+    if (selected.type === 'stop') {
+      const lat = selected.data?.lat
+      const lng = selected.data?.lng
+      if (lat != null && lng != null) {
+        return {
+          lat: Number(lat),
+          lng: Number(lng),
+          radius: 75,
+          color: '#10b981',
+        }
+      }
+    }
+    return null
+  }, [selected])
 
   const [filterOpen, setFilterOpen] = useState(false)
   const [legendOpen, setLegendOpen] = useState(false)
@@ -494,17 +524,21 @@ export default function PublicMap() {
       }
     }
 
-    // Tiny dots for zone stops if a zone is active
-    if (selected?.type === 'zone' && zoneStops?.stops) {
+    // Tiny dots for zone stops if a zone is active or a stop within the zone is selected
+    if ((selected?.type === 'zone' || selected?.type === 'stop') && zoneStops?.stops) {
       zoneStops.stops.forEach((st) => {
         const isDone = st.status === 'VERIFIED_COLLECTED' || st.status === 'COLLECTION_REPORTED'
-        const col = isDone ? '#10b981' : '#cbd5e1'
-        const shadow = isDone ? 'box-shadow: 0 0 6px rgba(16,185,129,0.5);' : ''
-        const html = `<div style="width:10px;height:10px;background:${col};border-radius:50%;border:1.5px solid #fff;${shadow}"></div>`
+        const isTargeted = selected?.type === 'stop' && selected.data?.schedule_id === st.schedule_id && selected.data?.stop_order === st.stop_order
+        const col = isTargeted ? '#38bdf8' : (isDone ? '#10b981' : '#cbd5e1')
+        const shadow = isTargeted ? 'box-shadow: 0 0 10px #38bdf8;' : (isDone ? 'box-shadow: 0 0 6px rgba(16,185,129,0.5);' : '')
+        const html = `<div style="width:${isTargeted ? 14 : 10}px;height:${isTargeted ? 14 : 10}px;background:${col};border-radius:50%;border:${isTargeted ? 2 : 1.5}px solid #fff;${shadow}"></div>`
         desired.set(`stop-${st.schedule_id}-${st.stop_order}`, {
-          lat: st.lat, lng: st.lng, html, size: 10,
-          onClick: () => { }, // empty click handler so it doesn't close panel
-          z: 500
+          lat: st.lat, lng: st.lng, html, size: isTargeted ? 14 : 10,
+          onClick: () => {
+            setSelected({ type: 'stop', data: st })
+            setIsPanelCollapsed(false)
+          },
+          z: isTargeted ? 800 : 500
         })
       })
     }
@@ -599,6 +633,7 @@ export default function PublicMap() {
 
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <div ref={mapRef} style={{ position: 'absolute', inset: 0 }} />
+        <MapSpotlightMask map={mapInstanceRef.current} target={spotlightTarget} />
 
         {!mapReady && (
           <div style={{ position: 'absolute', inset: 0, zIndex: 10 }}>
@@ -960,6 +995,59 @@ function SelectedPanel({ selected, summaryData, barangays, zoneStops, isCollapse
     )
   }
 
+  if (type === 'stop') {
+    const isDone = data.status === 'VERIFIED_COLLECTED' || data.status === 'COLLECTION_REPORTED'
+    const color = isDone ? '#10b981' : '#f59e0b'
+    const statusText = isDone ? 'Collected' : 'Pending Collection'
+    return (
+      <div style={{ opacity: isCollapsed ? 0.6 : 1, transition: '0.3s' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: isCollapsed ? 0 : 16 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: `${color}22`, border: `2px solid ${color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color }}>
+            <Navigation2 size={22} />
+          </div>
+          <div>
+            <div style={{ color: 'white', fontWeight: 800, fontSize: 18 }}>{data.label || `Stop #${data.stop_order}`}</div>
+            <div style={{ color: '#94a3b8', fontSize: 13 }}>Collection Route Stop</div>
+          </div>
+        </div>
+        {!isCollapsed && (
+          <>
+            <Row label="Status" value={statusText} color={color} />
+            <Row label="Stop Sequence" value={`Stop #${data.stop_order}`} />
+            <div style={{ marginTop: 16, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 14 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  const topic = `Collection stop #${data.stop_order} inquiry`
+                  window.location.href = `/community?topic=${encodeURIComponent(topic)}`
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  width: '100%',
+                  background: 'rgba(59, 130, 246, 0.15)',
+                  border: '1px solid rgba(59, 130, 246, 0.35)',
+                  color: '#60a5fa',
+                  padding: '9px 14px',
+                  borderRadius: 10,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <Users size={15} />
+                <span>Report this in Community</span>
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+
   if (type === 'dumpsite') {
     const meta = DUMPSITE_TYPE_META[data.type] || DUMPSITE_TYPE_META.dumpsite
     const capacity = data.fill_percent ?? data.capacity_used ?? data.capacity ?? 0
@@ -995,8 +1083,10 @@ function SelectedPanel({ selected, summaryData, barangays, zoneStops, isCollapse
 }
 
 function ReportSelectedPanel({ data, isCollapsed, onAuthRequired }) {
+  const navigate = useNavigate()
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [commentCount, setCommentCount] = useState(data.comment_count || 0)
+  const [isReportingInCommunity, setIsReportingInCommunity] = useState(false)
 
   useEffect(() => {
     setCommentCount(data.comment_count || 0)
@@ -1007,6 +1097,34 @@ function ReportSelectedPanel({ data, isCollapsed, onAuthRequired }) {
   const reportedStr = data.created_at || data.reported ? new Date(data.created_at || data.reported).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }) : 'Unknown'
   const reportId = getGarbageReportId(data)
   const hasThread = Boolean(data.community_post_id || reportId)
+
+  const handleReportInCommunity = async () => {
+    if (data.community_post_id) {
+      navigate(`/community?post=${data.community_post_id}`)
+      return
+    }
+
+    if (reportId) {
+      setIsReportingInCommunity(true)
+      try {
+        const res = await api.post(`/api/watcher/reports/${reportId}/community_post/`)
+        if (res.data?.id) {
+          navigate(`/community?post=${res.data.id}`)
+          return
+        }
+      } catch (err) {
+        if (err.response?.status === 401 && onAuthRequired) {
+          onAuthRequired()
+          return
+        }
+      } finally {
+        setIsReportingInCommunity(false)
+      }
+    }
+
+    const topic = `${typeLabel} at ${data.barangay_name || data.address || 'Lucena City'}`
+    navigate(`/community?topic=${encodeURIComponent(topic)}&brgy=${encodeURIComponent(data.barangay_name || '')}`)
+  }
 
   return (
     <div style={{ opacity: isCollapsed ? 0.6 : 1, transition: '0.3s' }}>
@@ -1047,7 +1165,7 @@ function ReportSelectedPanel({ data, isCollapsed, onAuthRequired }) {
             </div>
           )}
 
-          {/* Unified Comment Thread Toggle / Notice */}
+          {/* Unified Comment Thread & Community Reporting */}
           <div style={{ marginTop: 16, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 14 }}>
             {hasThread ? (
               <>
@@ -1074,19 +1192,28 @@ function ReportSelectedPanel({ data, isCollapsed, onAuthRequired }) {
                     <span>{commentCount} {commentCount === 1 ? 'Comment' : 'Comments'}</span>
                   </button>
 
-                  {data.community_post_id && (
-                    <a
-                      href={`/community?post=${data.community_post_id}`}
-                      style={{
-                        color: '#94a3b8',
-                        fontSize: 12,
-                        textDecoration: 'none',
-                        fontWeight: 500,
-                      }}
-                    >
-                      View in Community
-                    </a>
-                  )}
+                  <button
+                    type="button"
+                    onClick={handleReportInCommunity}
+                    disabled={isReportingInCommunity}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      background: 'rgba(59, 130, 246, 0.15)',
+                      border: '1px solid rgba(59, 130, 246, 0.35)',
+                      color: '#60a5fa',
+                      padding: '6px 12px',
+                      borderRadius: 8,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: isReportingInCommunity ? 'wait' : 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <Users size={14} />
+                    <span>{isReportingInCommunity ? 'Connecting...' : 'Report this in Community'}</span>
+                  </button>
                 </div>
 
                 {commentsOpen && (
@@ -1101,8 +1228,28 @@ function ReportSelectedPanel({ data, isCollapsed, onAuthRequired }) {
                 )}
               </>
             ) : (
-              <div style={{ padding: '10px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, color: '#94a3b8', fontSize: 12 }}>
-                Hotspot monitoring location. No resident report attached.
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', padding: '10px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
+                <span style={{ color: '#94a3b8', fontSize: 12 }}>Hotspot monitoring location.</span>
+                <button
+                  type="button"
+                  onClick={handleReportInCommunity}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    background: 'rgba(59, 130, 246, 0.15)',
+                    border: '1px solid rgba(59, 130, 246, 0.35)',
+                    color: '#60a5fa',
+                    padding: '6px 12px',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Users size={14} />
+                  <span>Report this in Community</span>
+                </button>
               </div>
             )}
           </div>

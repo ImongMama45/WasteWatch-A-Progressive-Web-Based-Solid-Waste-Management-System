@@ -61,11 +61,11 @@ export default function CommunityPreviewSection() {
       aria-label="Community voices and discussions preview"
       style={{
         background: '#ffffff',
-        borderRadius: 14,
-        padding: '24px 26px',
-        marginBottom: 28,
+        borderRadius: 12,
+        padding: '18px 20px',
+        marginBottom: 20,
         border: '1px solid #e2e8f0',
-        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.03)',
+        boxShadow: '0 1px 3px rgba(15, 23, 42, 0.03)',
       }}
     >
       {/* Section Header */}
@@ -74,17 +74,17 @@ export default function CommunityPreviewSection() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          marginBottom: 16,
+          marginBottom: 12,
           flexWrap: 'wrap',
-          gap: 12,
+          gap: 10,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div
             style={{
-              width: 34,
-              height: 34,
-              borderRadius: 8,
+              width: 30,
+              height: 30,
+              borderRadius: 6,
               background: '#f0fdf4',
               color: '#16a34a',
               display: 'flex',
@@ -92,21 +92,21 @@ export default function CommunityPreviewSection() {
               justifyContent: 'center',
             }}
           >
-            <Users size={18} strokeWidth={2.2} />
+            <Users size={16} strokeWidth={2.2} />
           </div>
           <div>
             <span
               style={{
-                fontSize: 11,
+                fontSize: 10.5,
                 fontWeight: 700,
                 color: '#16a34a',
                 textTransform: 'uppercase',
-                letterSpacing: 0.5,
+                letterSpacing: 0.4,
               }}
             >
               Citizen Discussions
             </span>
-            <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.01em' }}>
               This is what your community has to say.
             </h2>
           </div>
@@ -117,24 +117,24 @@ export default function CommunityPreviewSection() {
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: 6,
-            fontSize: 13,
+            gap: 5,
+            fontSize: 12,
             fontWeight: 700,
             color: '#16a34a',
             textDecoration: 'none',
-            padding: '6px 12px',
-            borderRadius: 8,
+            padding: '5px 11px',
+            borderRadius: 6,
             background: '#f0fdf4',
             border: '1px solid #bbf7d0',
             transition: 'background 0.15s',
           }}
         >
-          <span>Join the Conversation</span>
-          <ArrowRight size={14} />
+          <span>Join Conversation</span>
+          <ArrowRight size={13} />
         </Link>
       </div>
 
-      <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 18px', lineHeight: 1.5 }}>
+      <p style={{ fontSize: 12.5, color: '#64748b', margin: '0 0 14px', lineHeight: 1.5 }}>
         Recent neighborhood feedback, collection inquiries, and environmental initiatives submitted by Lucena residents in the civic Community Forum.
       </p>
 
@@ -238,8 +238,8 @@ export default function CommunityPreviewSection() {
                 textDecoration: 'none',
                 background: '#f8fafc',
                 border: '1px solid #e2e8f0',
-                borderRadius: 10,
-                padding: '14px 16px',
+                borderRadius: 8,
+                padding: '12px 14px',
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',

@@ -108,15 +108,23 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     def update(self, request, *args, **kwargs):
+        from driver.team_service import ActiveShiftConflictError
         instance = self.get_object()
         if instance.role == 'admin':
             return Response(
                 {'error': 'Administrator accounts cannot be edited through User Management.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        return super().update(request, *args, **kwargs)
+        try:
+            return super().update(request, *args, **kwargs)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
 
     def partial_update(self, request, *args, **kwargs):
+        from driver.team_service import ActiveShiftConflictError
         instance = self.get_object()
         if instance.id == request.user.id and 'is_active' in request.data and not request.data['is_active']:
             return Response(
@@ -139,9 +147,20 @@ class UserViewSet(viewsets.ModelViewSet):
                     {'error': 'Your administrator credentials should be updated in Profile settings.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-        return super().partial_update(request, *args, **kwargs)
+        try:
+            return super().partial_update(request, *args, **kwargs)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
 
     def destroy(self, request, *args, **kwargs):
+        from django.db import transaction
+        from django.db.models.deletion import ProtectedError
+        from driver.models import Worker, SanitationTeamMembership
+        from driver.team_service import TeamService
+
         instance = self.get_object()
         if instance.id == request.user.id:
             return Response(
@@ -153,7 +172,26 @@ class UserViewSet(viewsets.ModelViewSet):
                 {'error': 'Administrator accounts cannot be deleted through User Management.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        return super().destroy(request, *args, **kwargs)
+        with transaction.atomic():
+            worker = Worker.objects.filter(user_id=instance.id).select_for_update().first()
+            if worker:
+                if TeamService.is_worker_on_active_shift(worker.id):
+                    return Response(
+                        {'error': f"Cannot delete user while linked worker '{worker.full_name}' is on an active shift."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                if SanitationTeamMembership.objects.filter(worker=worker, is_active=True).exists():
+                    return Response(
+                        {'error': f"Cannot delete user while linked worker '{worker.full_name}' has an active team membership. Remove worker from team first."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+            try:
+                return super().destroy(request, *args, **kwargs)
+            except ProtectedError:
+                return Response(
+                    {'error': 'User cannot be deleted because operational records reference this account; deactivate instead.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
 
     @action(detail=True, methods=['patch'], url_path='lift_suspension')
     def lift_suspension(self, request, pk=None):
@@ -186,6 +224,17 @@ class UserViewSet(viewsets.ModelViewSet):
         
         return Response({'status': 'suspension_lifted'})
 
+    @action(detail=True, methods=['get'], url_path='attendance-history', permission_classes=[permissions.IsAuthenticated, IsAdminRole])
+    def attendance_history(self, request, pk=None):
+        """
+        GET /api/accounts/users/{id}/attendance-history/
+        Admin-only inspection of persisted shift and attendance history for a User account.
+        """
+        from driver.shift_service import ShiftService
+        target_user = self.get_object()
+        payload = ShiftService.get_personal_attendance_history(target_user)
+        return Response(payload, status=status.HTTP_200_OK)
+
 class BarangayViewSet(viewsets.ModelViewSet):
     queryset = Barangay.objects.all()
     serializer_class = BarangaySerializer
@@ -198,6 +247,13 @@ def user_to_dict(user):
     Helper to convert a User model instance into a JSON-serializable dict.
     Used by /api/auth/me/ and admin user list.
     """
+    effective_dumpsite = user.dumpsite
+    if effective_dumpsite is None and getattr(user, 'role', None) == UserRole.DUMPSITE:
+        try:
+            effective_dumpsite = user.operated_dumpsite
+        except Exception:
+            effective_dumpsite = None
+
     data = {
         'id':            user.id,
         'full_name':     user.full_name or '',
@@ -207,9 +263,9 @@ def user_to_dict(user):
         'barangay':      user.barangay_id,
         'barangay_id':   user.barangay_id,
         'barangay_name': user.barangay.name if user.barangay else None,
-        'dumpsite':      user.dumpsite_id,
-        'dumpsite_id':   user.dumpsite_id,
-        'dumpsite_name': user.dumpsite.name if user.dumpsite else None,
+        'dumpsite':      effective_dumpsite.id if effective_dumpsite else None,
+        'dumpsite_id':   effective_dumpsite.id if effective_dumpsite else None,
+        'dumpsite_name': effective_dumpsite.name if effective_dumpsite else None,
         'phone_number':  user.phone_number or '',
         'address_line':  user.address_line or '',
         'email_verified': user.email_verified,
@@ -262,16 +318,39 @@ def get_csrf_token_view(request):
     return Response({'detail': 'CSRF cookie set'})
 
 
+RESTRICTED_SELF_FIELDS = (
+    'role',
+    'dumpsite',
+    'dumpsite_id',
+    'operated_dumpsite',
+    'is_staff',
+    'is_superuser',
+    'employee_type',
+    'groups',
+    'user_permissions',
+)
+
+
 # ── GET  /api/auth/me/ ────────────────────────────────────────────────────────
 @api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def me_view(request):
     if request.method == 'PATCH':
+        attempted_restricted = [field for field in RESTRICTED_SELF_FIELDS if field in request.data]
+        if attempted_restricted:
+            return Response(
+                {
+                    'error': 'You are not authorized to modify role, facility assignment, or permissions.',
+                    'restricted_fields': attempted_restricted,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         allowed = {}
         for field in ('full_name', 'first_name', 'last_name', 'username', 'barangay', 'profile_pic', 'phone_number', 'address_line'):
             if field in request.data:
                 allowed[field] = request.data[field]
-                
+
         serializer = UserSerializer(request.user, data=allowed, partial=True)
         if not serializer.is_valid():
             return Response(serializer.errors, status=400)
@@ -366,8 +445,7 @@ def barangay_list_view(request):
 @require_http_methods(['GET'])
 def user_list_view(request):
     # Basic protection: only admins can see all users
-    # In a real app, you'd use a better check
-    if not request.user.is_authenticated or request.user.role != 'admin':
+    if not is_admin_user(request.user):
         return JsonResponse({'error': 'Unauthorized'}, status=403)
 
     role_filter = request.GET.get('role')
@@ -477,23 +555,68 @@ class BarangayManagementViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=True, methods=['patch'], url_path='assign-personnel')
     def assign_personnel(self, request, pk=None):
+        from django.db import transaction
+        from driver.models import Worker, SanitationTeamMembership
+        from driver.team_service import TeamService
+
         barangay = self.get_object()
         user_id = request.data.get('user_id')
         role = request.data.get('role')
-        
+
         if not user_id or not role:
             return Response({"error": "user_id and role are required."}, status=status.HTTP_400_BAD_REQUEST)
         if role not in UserRole.values:
             return Response({"error": "Invalid role."}, status=status.HTTP_400_BAD_REQUEST)
-            
-        try:
-            user = User.objects.get(pk=user_id)
+
+        with transaction.atomic():
+            user = User.objects.select_for_update().filter(pk=user_id).first()
+            if not user:
+                return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            role_changed = (role != user.role)
+            worker = Worker.objects.filter(user_id=user.id).select_for_update().first()
+            if worker and role_changed:
+                if TeamService.is_worker_on_active_shift(worker.id):
+                    return Response(
+                        {
+                            "error": (
+                                f"User '{user.username}' is linked to worker '{worker.full_name}' "
+                                "who is currently participating in an active operational shift."
+                            )
+                        },
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                active_membership = (
+                    SanitationTeamMembership.objects
+                    .select_related('team')
+                    .filter(worker=worker, is_active=True)
+                    .select_for_update(of=('self',))
+                    .first()
+                )
+                if active_membership:
+                    role_in_team = active_membership.role_in_team
+                    new_emp_type = user.employee_type if role == UserRole.CITIZEN else ''
+                    compatible = (
+                        (role_in_team == 'leader' and role in ('watcher', 'driver'))
+                        or (role_in_team == 'driver' and role == 'driver')
+                        or (role_in_team == 'crew' and role == 'citizen' and new_emp_type == 'crew_member')
+                    )
+                    if not compatible:
+                        return Response(
+                            {
+                                "error": (
+                                    f"Cannot change role while linked worker '{worker.full_name}' holds "
+                                    f"an active '{role_in_team}' membership on Team '{active_membership.team.name}'. "
+                                    "Remove or transfer worker first."
+                                )
+                            },
+                            status=status.HTTP_409_CONFLICT,
+                        )
+
             user.role = role
             user.barangay = barangay
             user.save()
             return Response({"status": "assigned successfully", "user_id": user_id, "role": role})
-        except User.DoesNotExist:
-            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
     @action(detail=False, methods=['get'], url_path='unassigned-users')
     def unassigned_users(self, request):

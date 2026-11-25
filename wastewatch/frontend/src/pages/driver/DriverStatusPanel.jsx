@@ -33,11 +33,15 @@ import {
   AlertCircle,
   FileText,
   Calendar,
-  Ban
+  Ban,
+  Fuel
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { useNotification } from '../../context/NotificationContext'
 import api, { handleStaleShift } from '../../api/client'
+import { submitFuelGauge, getFuelLogs, unwrapList } from '../../api/dumpsiteApi'
+import { getActiveShift } from '../../api/driverWorkflowApi'
+import { getApiErrorMessage } from '../../utils/notificationHelpers'
 import useShiftTimer from '../../hooks/useShiftTimer'
 import {
   resolveDriverSchedule,
@@ -188,6 +192,11 @@ export default function DriverStatusPanel({ isOverlay = false, open = true, onCl
   const [showEndConfirm, setShowEndConfirm] = useState(false)
   const [logsOverlayOpen, setLogsOverlayOpen] = useState(false)
   const [hotspotsOverlayOpen, setHotspotsOverlayOpen] = useState(false)
+  const [activeShiftId, setActiveShiftId] = useState(null)
+  const [fuelGaugePct, setFuelGaugePct] = useState(50)
+  const [fuelGaugeNotes, setFuelGaugeNotes] = useState('')
+  const [fuelLogLatest, setFuelLogLatest] = useState(null)
+  const [fuelSubmitting, setFuelSubmitting] = useState(false)
 
   // Shift timer hook
   const {
@@ -208,6 +217,38 @@ export default function DriverStatusPanel({ isOverlay = false, open = true, onCl
     if (shiftActive && opStatus === 'off_shift') setOpStatus('on_shift')
     if (!shiftActive) setOpStatus('off_shift')
   }, [shiftActive])
+
+  // Load active shift fuel gauge status when an active shift exists
+  useEffect(() => {
+    if (!shiftActive || !user?.id) {
+      setActiveShiftId(null)
+      setFuelLogLatest(null)
+      return
+    }
+    let cancelled = false
+    getActiveShift()
+      .then((res) => {
+        if (cancelled) return
+        const sid = res?.shift?.id || res?.id || res?.driver_shift_id || null
+        setActiveShiftId(sid)
+        if (sid) {
+          getFuelLogs({ driver_shift_id: sid })
+            .then((raw) => {
+              if (cancelled) return
+              const list = unwrapList(raw)
+              if (list.length > 0) {
+                setFuelLogLatest(list[0])
+                if (list[0].gauge_percentage != null) {
+                  setFuelGaugePct(Number(list[0].gauge_percentage))
+                }
+              }
+            })
+            .catch(() => {})
+        }
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [shiftActive, user?.id])
 
   useEffect(() => {
     if (!user?.id) {
@@ -288,6 +329,32 @@ export default function DriverStatusPanel({ isOverlay = false, open = true, onCl
     if (!shiftActive) return
     setOpStatus(newStatus)
     api.post('/api/driver/shift/status/', { status: newStatus }).catch(() => { })
+  }
+
+  async function handleSubmitFuelGauge(e) {
+    e.preventDefault()
+    if (!shiftActive) return
+    const pct = Number(fuelGaugePct)
+    if (Number.isNaN(pct) || pct < 0 || pct > 100) {
+      notify({ variant: 'warning-dark', message: 'Fuel gauge percentage must be between 0 and 100.' })
+      return
+    }
+    setFuelSubmitting(true)
+    try {
+      const payload = {
+        gauge_percentage: pct,
+        notes: fuelGaugeNotes.trim(),
+      }
+      if (activeShiftId) payload.driver_shift_id = activeShiftId
+      const saved = await submitFuelGauge(payload)
+      setFuelLogLatest(saved)
+      setFuelGaugeNotes('')
+      notify({ variant: 'success', message: `Fuel gauge reading (${pct}%) submitted.` })
+    } catch (err) {
+      notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed to submit fuel gauge reading.') })
+    } finally {
+      setFuelSubmitting(false)
+    }
   }
 
   if (isOverlay && !open) return null
@@ -805,6 +872,114 @@ export default function DriverStatusPanel({ isOverlay = false, open = true, onCl
               </div>
             </div>
           </div>
+
+          {/* Driver Fuel Gauge Submission Card (Active Shift Only) */}
+          {shiftActive && (
+            <div style={{
+              background: '#ffffff',
+              border: '1px solid #e4e6eb',
+              borderRadius: 8,
+              padding: '20px',
+              marginBottom: 16,
+              boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Fuel size={15} style={{ color: '#16a34a' }} />
+                  <h3 style={{ fontSize: 13, fontWeight: 700, color: '#1c1e21', textTransform: 'uppercase', letterSpacing: '0.04em', margin: 0 }}>
+                    Fuel Gauge Reading
+                  </h3>
+                </div>
+                {fuelLogLatest?.gauge_percentage != null && (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#15803d', background: '#e7f5eb', border: '1px solid #bbf7d0', borderRadius: 4, padding: '2px 7px' }}>
+                    Last: {fuelLogLatest.gauge_percentage}%
+                  </span>
+                )}
+              </div>
+              <p style={{ fontSize: 12, color: '#65676b', margin: '0 0 12px', lineHeight: 1.45 }}>
+                Report your current dashboard fuel gauge percentage for your active shift.
+              </p>
+              <form onSubmit={handleSubmitFuelGauge} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: '#65676b', textTransform: 'uppercase' }}>
+                      Gauge Percentage
+                    </label>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: '#15803d' }}>{fuelGaugePct}%</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={fuelGaugePct}
+                      onChange={(e) => setFuelGaugePct(Number(e.target.value))}
+                      style={{ flex: 1, accentColor: '#16a34a', cursor: 'pointer' }}
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={fuelGaugePct}
+                      onChange={(e) => setFuelGaugePct(e.target.value)}
+                      style={{
+                        width: 68,
+                        height: 32,
+                        borderRadius: 6,
+                        border: '1px solid #ced0d4',
+                        padding: '0 8px',
+                        fontSize: 13,
+                        fontWeight: 700,
+                        textAlign: 'right',
+                        color: '#1c1e21',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <input
+                  type="text"
+                  value={fuelGaugeNotes}
+                  onChange={(e) => setFuelGaugeNotes(e.target.value)}
+                  placeholder="Optional fuel note (e.g. before route / after unload)"
+                  style={{
+                    width: '100%',
+                    height: 34,
+                    borderRadius: 6,
+                    border: '1px solid #ced0d4',
+                    padding: '0 10px',
+                    fontSize: 12.5,
+                    color: '#1c1e21',
+                    boxSizing: 'border-box',
+                  }}
+                />
+
+                <button
+                  type="submit"
+                  disabled={fuelSubmitting}
+                  style={{
+                    width: '100%',
+                    height: 36,
+                    borderRadius: 6,
+                    background: fuelSubmitting ? '#86efac' : '#16a34a',
+                    border: 'none',
+                    color: '#ffffff',
+                    fontWeight: 600,
+                    fontSize: 13,
+                    cursor: fuelSubmitting ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Fuel size={14} /> {fuelSubmitting ? 'Submitting...' : 'Submit Fuel Gauge %'}
+                </button>
+              </form>
+            </div>
+          )}
 
           {/* Quick Collection Log Navigation Card */}
           <div style={{

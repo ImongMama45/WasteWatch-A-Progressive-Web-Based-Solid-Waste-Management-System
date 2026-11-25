@@ -42,29 +42,28 @@ export default function CategoryTabs({ active = 'All', onChange, counts = {} }) 
               flexShrink: 0,
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 6,
-              padding: '8px 14px',
-              borderRadius: 20,
+              gap: 5,
+              padding: '6px 12px',
+              borderRadius: 6,
               fontSize: 12,
-              fontWeight: 700,
+              fontWeight: isActive ? 700 : 500,
               cursor: 'pointer',
               whiteSpace: 'nowrap',
               transition: 'all .15s ease',
               background: isActive ? '#16a34a' : '#ffffff',
               color: isActive ? '#ffffff' : '#475569',
-              border: isActive ? '1px solid #16a34a' : '1px solid #e2e8f0',
-              boxShadow: isActive ? '0 2px 8px rgba(22,163,74,0.25)' : '0 1px 2px rgba(0,0,0,0.02)',
+              border: isActive ? '1px solid #16a34a' : '1px solid #cbd5e1',
             }}
           >
-            <Icon size={13} strokeWidth={2.2} style={{ color: isActive ? '#ffffff' : cfg?.color || '#64748b' }} />
+            <Icon size={12} strokeWidth={2.2} style={{ color: isActive ? '#ffffff' : '#64748b' }} />
             <span>{label}</span>
             {typeof count === 'number' && (
               <span
                 style={{
                   fontSize: 10,
-                  fontWeight: 800,
-                  padding: '1px 6px',
-                  borderRadius: 10,
+                  fontWeight: 700,
+                  padding: '1px 5px',
+                  borderRadius: 4,
                   background: isActive ? 'rgba(255,255,255,0.25)' : '#f1f5f9',
                   color: isActive ? '#ffffff' : '#64748b',
                 }}

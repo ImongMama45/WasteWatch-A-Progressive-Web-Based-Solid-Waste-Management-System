@@ -23,16 +23,38 @@ class DumpsiteSerializer(serializers.ModelSerializer):
         return 0.0
 
     def get_staff_accounts(self, obj):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        if not user or not user.is_authenticated:
+            return []
+
+        from django.db.models import Q
         from accounts.models import User
-        users = User.objects.filter(dumpsite=obj).select_related('barangay')
+        from accounts.permissions import is_admin_user
+        from driver.truck_service import TruckService
+
+        allowed = is_admin_user(user) or (
+            getattr(user, 'role', None) == 'dumpsite'
+            and TruckService.get_operator_dumpsite_id(user) == obj.id
+        )
+        if not allowed:
+            return []
+
+        users = (
+            User.objects.filter(Q(dumpsite=obj) | Q(operated_dumpsite=obj))
+            .select_related('barangay')
+            .distinct()
+            .order_by('id')
+        )
         return [
             {
-                'id':         u.id,
-                'full_name':  u.full_name,
-                'email':      u.email,
-                'role':       u.role,
-                'barangay':   u.barangay.name if u.barangay else None,
-                'is_active':  u.is_active,
+                'id': u.id,
+                'full_name': u.full_name,
+                'email': u.email,
+                'role': u.role,
+                'barangay': u.barangay.name if u.barangay else None,
+                'is_active': u.is_active,
+                'is_primary_operator': u.id == obj.operator_id,
                 'created_at': u.created_at.strftime('%b %d, %Y') if u.created_at else None,
             }
             for u in users
@@ -64,6 +86,7 @@ class WasteDeliverySerializer(serializers.ModelSerializer):
     dumpsite_name     = serializers.CharField(source='dumpsite.name',               read_only=True)
     operator_name     = serializers.CharField(source='dumpsite_operator.full_name', read_only=True)
     barangay_names    = serializers.SerializerMethodField()
+    barangay_name     = serializers.SerializerMethodField()
     schedule_area     = serializers.CharField(source='schedule.area',               read_only=True)
     incident_count    = serializers.SerializerMethodField()
 
@@ -72,6 +95,15 @@ class WasteDeliverySerializer(serializers.ModelSerializer):
 
     def get_barangay_names(self, obj):
         return [b.name for b in obj.barangays.all()]
+
+    def get_barangay_name(self, obj):
+        names = [b.name for b in obj.barangays.all()]
+        return ', '.join(names) if names else None
+
+    def validate_estimated_kg(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError('Estimated weight (kg) cannot be negative.')
+        return value
 
     class Meta:
         model  = WasteDelivery
@@ -86,11 +118,11 @@ class WasteDeliverySerializer(serializers.ModelSerializer):
             'gross_weight', 'tare_weight', 'net_weight',
             'estimated_kg', 'fill_level',
             'photo',
-            'barangays', 'barangay_names',
+            'barangays', 'barangay_names', 'barangay_name',
             'remarks', 'is_validated', 'created_at',
             'incident_count',
         ]
-        read_only_fields = ['net_weight', 'created_at']
+        read_only_fields = ['net_weight', 'created_at', 'dumpsite_operator']
 
 class DumpsiteIncidentSerializer(serializers.ModelSerializer):
     reported_by_name = serializers.CharField(source='reported_by.full_name', read_only=True)

@@ -1,4 +1,5 @@
 from datetime import timedelta
+import logging
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
@@ -7,11 +8,15 @@ from django.utils import timezone
 
 from driver.models import DriverShift
 
+logger = logging.getLogger(__name__)
+
 # Keep this equal to STALE_SHIFT_MS in frontend/src/utils/shiftState.js
 STALE_AFTER = timedelta(hours=getattr(settings, 'SHIFT_STALE_HOURS', 6))
 
 
 def sweep_stale_shifts(dry_run=False):
+    from driver.shift_service import ShiftService
+
     cutoff = timezone.now() - STALE_AFTER
     stale = (
         DriverShift.objects
@@ -21,14 +26,29 @@ def sweep_stale_shifts(dry_run=False):
     )
     closed = []
     for s in stale:
-        closed.append((s.id, s.truck_id, s.last_seen))
         if dry_run:
+            closed.append((s.id, s.truck_id, s.last_seen))
             continue
-        s.is_active = False
-        s.end_reason = 'heartbeat_timeout'
-        s.ended_at = s.last_seen        # last proof of life, not "now"
-        s.duration_ms = int((s.ended_at - s.started_at).total_seconds() * 1000)
-        s.save(update_fields=['is_active', 'end_reason', 'ended_at', 'duration_ms'])
+        try:
+            ShiftService.conclude_shift_atomic(
+                driver_shift_id=s.id,
+                concluded_by=None,
+                end_reason='heartbeat_timeout',
+                ended_at=s.last_seen,
+            )
+            closed.append((s.id, s.truck_id, s.last_seen))
+        except Exception:
+            logger.exception(
+                "Failed to conclude stale DriverShift #%s (truck_id=%s, last_seen=%s)",
+                s.id,
+                s.truck_id,
+                s.last_seen,
+            )
+    if not dry_run:
+        try:
+            ShiftService.cleanup_stale_unlinked_watcher_shifts()
+        except Exception:
+            logger.exception("Failed during stale unlinked WatcherShift cleanup")
     return closed
 
 

@@ -8,7 +8,7 @@
  *    Driver must navigate back to waypoints[0] (home base) before ending
  *    their shift. Shows a Leaflet map with ORS route to base, live distance
  *    counter, and a "Confirm Return to Base" button that unlocks within
- *    BASE_ARRIVAL_RADIUS_M metres. Dev 🏠 button teleports to base.
+ *    BASE_ARRIVAL_RADIUS_M metres. Dev Home button teleports to base.
  *
  *  Phase 2a — EARLY TERMINATION  (ww_route_complete !== 'true')
  *    Form: driver explains why they ended early → notifies admin via API.
@@ -26,6 +26,7 @@ import useShiftTimer, { clearDriverSessionData } from '../../../hooks/useShiftTi
 import useGpsTracking from '../../../hooks/useGpsTracking'
 import api, { handleStaleShift } from '../../../api/client'
 import { resolveDriverSchedule } from '../../../utils/driverSchedule'
+import { resolveScheduleReturnDestination } from '../../../utils/routeBaseHelpers'
 import NavigateToDumpsiteModule from './NavigateToDumpsiteModule'
 import CalibrationCelebrationModule from './CalibrationCelebrationModule'
 import RouteCompletionMiniMap from './RouteCompletionMiniMap'
@@ -369,7 +370,11 @@ export default function EndShiftModule({ onAdvance, shift, schedule: schedulePro
           } catch (e) { console.error('Failed to fetch validations snapshot:', e) }
         }
 
-        if (match?.waypoints?.length > 0) {
+        const returnDest = resolveScheduleReturnDestination(match)
+        if (returnDest) {
+          setBaseLocation(returnDest)
+          setBaseName(returnDest.label || match?.dumpsite_detail?.name || 'Assigned Dumpsite')
+        } else if (match?.waypoints?.length > 0) {
           setBaseLocation(match.waypoints[0])
           setBaseName(match.waypoints[0]?.label || 'Home Base')
         }

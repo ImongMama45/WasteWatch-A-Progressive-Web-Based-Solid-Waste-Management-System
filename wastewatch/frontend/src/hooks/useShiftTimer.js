@@ -44,6 +44,7 @@ const EMPTY_STATE = {
   startTime: null,
   shiftId: null,
   scheduleId: null,
+  allocationId: null,
   truckId: null,
   opStatus: null,
 }
@@ -72,10 +73,16 @@ export default function useShiftTimer() {
       startTime: shift.started_at ? new Date(shift.started_at) : null,
       shiftId: shift.id ?? null,
       scheduleId: shift.schedule_id ?? shift.schedule ?? null,
+      allocationId: shift.allocation_id ?? shift.allocation ?? null,
       truckId: shift.truck_id ?? shift.truck ?? null,
       opStatus: shift.op_status ?? null,
     })
   }, [])
+
+  const syncShiftPayload = useCallback((shift) => {
+    applyShiftPayload(shift)
+    window.dispatchEvent(new Event('ww_shift_updated'))
+  }, [applyShiftPayload])
 
   const refresh = useCallback(async () => {
     if (!userId) {
@@ -129,19 +136,28 @@ export default function useShiftTimer() {
   }, [state.shiftActive, state.startTime])
 
   /**
-   * startShift({ scheduleId, latitude, longitude, dutyType })
+   * startShift({ scheduleId, allocationId, latitude, longitude, accuracy, dutyType })
    * Resolves with the backend shift payload on success.
-   * Rejects (throws) on failure — including 409 when the driver already
-   * has an active shift on a DIFFERENT schedule. Callers should inspect
-   * err.response?.status === 409 and err.response?.data?.active_schedule_id.
+   * Rejects (throws) if scheduleId/allocationId are missing or on backend failure —
+   * including 409 when the driver already has an active shift on a DIFFERENT
+   * schedule or allocation. Callers should inspect err.response?.status === 409
+   * and err.response?.data?.active_schedule_id.
    */
-  const startShift = useCallback(async ({ scheduleId = null, latitude = null, longitude = null, dutyType = 'normal' } = {}) => {
-    const res = await api.post('/api/driver/shift/start/', {
+  const startShift = useCallback(async ({ scheduleId = null, allocationId = null, latitude = null, longitude = null, accuracy = null, dutyType = 'normal' } = {}) => {
+    if (scheduleId == null && allocationId == null) {
+      throw new Error('scheduleId or allocationId is required to start a shift.')
+    }
+    const payload = {
       schedule_id: scheduleId,
       latitude,
       longitude,
+      accuracy,
       duty_type: dutyType,
-    })
+    }
+    if (allocationId !== null && allocationId !== undefined) {
+      payload.allocation_id = allocationId
+    }
+    const res = await api.post('/api/driver/shift/start/', payload)
     applyShiftPayload(res.data)
     window.dispatchEvent(new Event('ww_shift_updated'))
     return res.data
@@ -177,6 +193,7 @@ export default function useShiftTimer() {
     startTime: state.startTime,
     shiftId: state.shiftId,
     scheduleId: state.scheduleId,
+    allocationId: state.allocationId,
     truckId: state.truckId,
     opStatus: state.opStatus,
     elapsedMs,
@@ -186,5 +203,6 @@ export default function useShiftTimer() {
     startShift,
     endShift,
     refresh,
+    syncShiftPayload,
   }
 }

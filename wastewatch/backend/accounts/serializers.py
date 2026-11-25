@@ -8,10 +8,12 @@ Three serializers:
 """
 
 from rest_framework import serializers
+from django.db import transaction
 from django.utils import timezone
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from .models import User, Barangay, UserRole, BarangayEstablishment
+from .permissions import is_admin_user
 from .validators import normalize_ph_phone
 
 
@@ -62,13 +64,17 @@ class UserSerializer(serializers.ModelSerializer):
             'is_active', 'is_staff', 'is_superuser', 'created_at',
             'points', 'is_suspended', 'suspension_overrides'
         ]
-        read_only_fields = ['created_at', 'role', 'points', 'is_suspended', 'suspension_overrides', 'email_verified', 'email_verified_at', 'is_staff', 'is_superuser']
+        read_only_fields = [
+            'created_at', 'role', 'employee_type', 'dumpsite',
+            'points', 'is_suspended', 'suspension_overrides',
+            'email_verified', 'email_verified_at', 'is_staff', 'is_superuser',
+        ]
 
     def get_points(self, obj):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return None
-        if obj.role == 'driver' and (getattr(request.user, 'role', '') == 'admin' or request.user.id == obj.id):
+        if obj.role == 'driver' and (is_admin_user(request.user) or request.user.id == obj.id):
             return getattr(obj.driverprofile, 'points', 0) if hasattr(obj, 'driverprofile') else 0
         return None
 
@@ -76,7 +82,7 @@ class UserSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return None
-        if obj.role == 'driver' and (getattr(request.user, 'role', '') == 'admin' or request.user.id == obj.id):
+        if obj.role == 'driver' and (is_admin_user(request.user) or request.user.id == obj.id):
             return getattr(obj.driverprofile, 'is_suspended', False) if hasattr(obj, 'driverprofile') else False
         return None
 
@@ -84,7 +90,7 @@ class UserSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return None
-        if obj.role == 'driver' and getattr(request.user, 'role', '') == 'admin':
+        if obj.role == 'driver' and is_admin_user(request.user):
             overrides = obj.suspension_overrides.all().order_by('-created_at')
             return [
                 {
@@ -131,7 +137,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return None
-        if obj.role == 'driver' and (getattr(request.user, 'role', '') == 'admin' or request.user.id == obj.id):
+        if obj.role == 'driver' and (is_admin_user(request.user) or request.user.id == obj.id):
             return getattr(obj.driverprofile, 'points', 0) if hasattr(obj, 'driverprofile') else 0
         return None
 
@@ -139,7 +145,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return None
-        if obj.role == 'driver' and (getattr(request.user, 'role', '') == 'admin' or request.user.id == obj.id):
+        if obj.role == 'driver' and (is_admin_user(request.user) or request.user.id == obj.id):
             return getattr(obj.driverprofile, 'is_suspended', False) if hasattr(obj, 'driverprofile') else False
         return None
 
@@ -147,7 +153,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return None
-        if obj.role == 'driver' and getattr(request.user, 'role', '') == 'admin':
+        if obj.role == 'driver' and is_admin_user(request.user):
             overrides = obj.suspension_overrides.all().order_by('-created_at')
             return [
                 {
@@ -179,27 +185,102 @@ class AdminUserSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
+        from dumpsite.models import Dumpsite
+
         password = validated_data.pop('password', None)
         # Admin-created staff/official/driver accounts are auto-verified
         if 'email_verified' not in validated_data:
             validated_data['email_verified'] = True
             validated_data['email_verified_at'] = timezone.now()
 
-        user = User(**validated_data)
-        if password:
-            user.set_password(password)
-        else:
-            user.set_unusable_password()
-        user.save()
+        if validated_data.get('role') != UserRole.DUMPSITE:
+            validated_data['dumpsite'] = None
+
+        with transaction.atomic():
+            user = User(**validated_data)
+            if password:
+                user.set_password(password)
+            else:
+                user.set_unusable_password()
+            user.save()
+            if user.role == UserRole.DUMPSITE and user.dumpsite_id:
+                Dumpsite.objects.select_for_update().filter(
+                    pk=user.dumpsite_id, operator__isnull=True
+                ).update(operator=user)
         return user
 
     def update(self, instance, validated_data):
+        from dumpsite.models import Dumpsite
+        from driver.models import Worker, SanitationTeamMembership
+        from driver.team_service import TeamService, ActiveShiftConflictError
+
         password = validated_data.pop('password', None)
-        for attr, val in validated_data.items():
-            setattr(instance, attr, val)
-        if password:
-            instance.set_password(password)
-        instance.save()
+        with transaction.atomic():
+            worker = Worker.objects.filter(user_id=instance.id).select_for_update().first()
+            if worker:
+                new_is_active = validated_data.get('is_active', instance.is_active)
+                new_role = validated_data.get('role', instance.role)
+                new_emp_type = validated_data.get('employee_type', instance.employee_type)
+                is_deactivating = instance.is_active and not new_is_active
+                role_changed = new_role != instance.role
+                emp_type_changed = new_emp_type != instance.employee_type
+
+                if (is_deactivating or role_changed or emp_type_changed) and TeamService.is_worker_on_active_shift(worker.id):
+                    raise ActiveShiftConflictError({
+                        'active_shift': (
+                            f"User '{instance.username}' is linked to worker '{worker.full_name}' "
+                            "who is currently participating in an active operational shift."
+                        )
+                    })
+
+                active_membership = (
+                    SanitationTeamMembership.objects
+                    .select_related('team')
+                    .filter(worker=worker, is_active=True)
+                    .select_for_update(of=('self',))
+                    .first()
+                )
+                if active_membership:
+                    if is_deactivating:
+                        raise ActiveShiftConflictError({
+                            'is_active': (
+                                f"Cannot deactivate user while linked worker '{worker.full_name}' has an active "
+                                f"membership on Team '{active_membership.team.name}'. Remove or transfer worker first."
+                            )
+                        })
+                    if role_changed or emp_type_changed:
+                        role_in_team = active_membership.role_in_team
+                        compatible = (
+                            (role_in_team == 'leader' and new_role in ('watcher', 'driver'))
+                            or (role_in_team == 'driver' and new_role == 'driver')
+                            or (role_in_team == 'crew' and new_role == 'citizen' and new_emp_type == 'crew_member')
+                        )
+                        if not compatible:
+                            raise ActiveShiftConflictError({
+                                'role': (
+                                    f"Cannot change role/employee_type while linked worker '{worker.full_name}' holds "
+                                    f"an active '{role_in_team}' membership on Team '{active_membership.team.name}'. "
+                                    "Remove or transfer worker first."
+                                )
+                            })
+
+            for attr, val in validated_data.items():
+                setattr(instance, attr, val)
+            if instance.role != UserRole.DUMPSITE:
+                instance.dumpsite = None
+            if password:
+                instance.set_password(password)
+            instance.save()
+
+            if instance.role != UserRole.DUMPSITE or not instance.dumpsite_id:
+                Dumpsite.objects.select_for_update().filter(operator=instance).update(operator=None)
+            else:
+                Dumpsite.objects.select_for_update().filter(operator=instance).exclude(
+                    pk=instance.dumpsite_id
+                ).update(operator=None)
+                Dumpsite.objects.select_for_update().filter(
+                    pk=instance.dumpsite_id, operator__isnull=True
+                ).update(operator=instance)
         return instance
 
 

@@ -37,6 +37,7 @@ export default function ZonePanel({ zone, barangayData, schedules = [], onClearF
       const zoneId = zone.id ? String(zone.id) : null
       if (zoneId && s.barangays && s.barangays.some(bId => String(bId) === zoneId)) return true
       if (s.barangay_names && s.barangay_names.toLowerCase().includes(zone.name.toLowerCase())) return true
+      if (s.area && s.area.toLowerCase().includes(zone.name.toLowerCase())) return true
       return false
     })
 
@@ -52,32 +53,46 @@ export default function ZonePanel({ zone, barangayData, schedules = [], onClearF
             <div style={{ color: '#64748b', textAlign: 'center', padding: '20px 0', fontSize: 14 }}>No schedules found for this barangay.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {brgySchedules.map(sched => (
-                <div key={sched.id} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 10, padding: 14 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <strong style={{ color: '#14b8a6', fontSize: 15 }}>{sched.days || 'Regular'}</strong>
-                    <span style={{ color: '#94a3b8', fontSize: 12 }}>{sched.start_time ? sched.start_time.slice(0, 5) : 'N/A'} - {sched.end_time ? sched.end_time.slice(0, 5) : 'N/A'}</span>
-                  </div>
-                  <div style={{ color: '#cbd5e1', fontSize: 13, marginBottom: 4, display: 'flex', alignItems: 'center' }}>
-                    <span className="material-symbols-outlined" style={{ fontSize: 16, marginRight: 6 }}>local_shipping</span> {sched.truck_plate || 'Unassigned'} ({sched.driver_name || 'No driver'})
-                  </div>
-                  <div style={{ color: '#64748b', fontSize: 12 }}>
-                    Stops: {sched.waypoints?.length || 0}
-                  </div>
-                  {sched.waypoints && sched.waypoints.length > 0 && (
-                    <details style={{ marginTop: 10 }}>
-                      <summary style={{ color: '#3b82f6', fontSize: 12, cursor: 'pointer', outline: 'none' }}>View Stops</summary>
-                      <div style={{ marginTop: 8, paddingLeft: 8, borderLeft: '2px solid #1e293b', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {sched.waypoints.map((wp, i) => (
-                          <div key={i} style={{ color: '#94a3b8', fontSize: 11 }}>
-                            <span style={{ color: '#cbd5e1' }}>{i + 1}.</span> {wp.label || wp.address || 'Unknown Stop'}
-                          </div>
-                        ))}
+              {brgySchedules.map(sched => {
+                const stopsList = Array.isArray(sched.stops)
+                  ? sched.stops
+                  : (Array.isArray(sched.waypoints) ? sched.waypoints.slice(1) : [])
+                const stopCount = sched.total_stops ?? stopsList.length
+                const timeDisplay = sched.time_window || (
+                  sched.start_time && sched.end_time
+                    ? `${sched.start_time.slice(0, 5)} - ${sched.end_time.slice(0, 5)}`
+                    : (sched.start_time ? sched.start_time.slice(0, 5) : 'N/A')
+                )
+
+                return (
+                  <div key={sched.id} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 10, padding: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <strong style={{ color: '#14b8a6', fontSize: 15 }}>{sched.days || 'Regular'}</strong>
+                      <span style={{ color: '#94a3b8', fontSize: 12 }}>{timeDisplay}</span>
+                    </div>
+                    {sched.area && (
+                      <div style={{ color: '#cbd5e1', fontSize: 13, marginBottom: 6 }}>
+                        {sched.area}
                       </div>
-                    </details>
-                  )}
-                </div>
-              ))}
+                    )}
+                    <div style={{ color: '#64748b', fontSize: 12 }}>
+                      Stops: {stopCount}
+                    </div>
+                    {stopsList.length > 0 && (
+                      <details style={{ marginTop: 10 }}>
+                        <summary style={{ color: '#3b82f6', fontSize: 12, cursor: 'pointer', outline: 'none' }}>View Stops</summary>
+                        <div style={{ marginTop: 8, paddingLeft: 8, borderLeft: '2px solid #1e293b', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {stopsList.map((stop, i) => (
+                            <div key={stop.order ?? i} style={{ color: '#94a3b8', fontSize: 11 }}>
+                              <span style={{ color: '#cbd5e1' }}>{stop.order ?? i + 1}.</span> {stop.label || 'Unknown Stop'}
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
@@ -294,7 +309,6 @@ export default function ZonePanel({ zone, barangayData, schedules = [], onClearF
                   <div style={{ color: '#f59e0b', fontWeight: 700, fontSize: 13 }}>{stop.label}</div>
                   <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 4 }}>
                     {STOP_STATUS_LABELS[normalizeStopStatus(stop.current_status || stop.status)] || 'Active stop'}
-                    {stop.driver_name ? ` · ${stop.driver_name}` : ''}
                   </div>
                 </div>
               ))}

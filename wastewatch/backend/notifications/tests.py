@@ -33,6 +33,13 @@ class NotificationBroadcastTests(TestCase):
             barangay=self.b1,
         )
 
+        from django.utils import timezone
+        from notifications.models import NotificationReceiptCutover
+        NotificationReceiptCutover.objects.get_or_create(
+            id=1,
+            defaults={'cutover_at': timezone.now()}
+        )
+
     def test_anonymous_and_citizen_forbidden_on_broadcast(self):
         payload = {
             'title': 'Test Notice',

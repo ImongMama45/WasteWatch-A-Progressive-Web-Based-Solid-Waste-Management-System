@@ -456,7 +456,7 @@ export default function RouteOverview() {
     api.get('/api/driver/collection-schedules/?paginate=false')
       .then(async res => {
         if (ignore) return
-        const matches = extractArray(res.data).filter(s => String(s.driver) === String(user.id))
+        const matches = extractArray(res.data).filter(s => s && s.status !== 'CANCELLED')
         setSchedules(matches)
 
         const activeMatch = matches.find(s => {

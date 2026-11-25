@@ -127,8 +127,11 @@ export function resolveDriverSchedule(schedulesData, userId, activeScheduleId = 
     if (activeMatch) return activeMatch
   }
 
+  // CollectionScheduleViewSet.get_queryset() already scopes schedules to the
+  // authenticated driver (active shifts, allocations, team overrides, default
+  // teams, crew assignments, and legacy driver assignments).
   const driverSchedules = list.filter(
-    s => s && String(s.driver) === String(userId) && s.status !== 'CANCELLED'
+    s => s && s.status !== 'CANCELLED'
   )
   if (driverSchedules.length === 0) return null
 

@@ -23,6 +23,7 @@ import { useAuth } from '../../../context/AuthContext'
 import useShiftTimer from '../../../hooks/useShiftTimer'
 import api from '../../../api/client'
 import { resolveDriverSchedule } from '../../../utils/driverSchedule'
+import { getApiErrorMessage } from '../../../utils/notificationHelpers'
 import { MapSkeleton } from '../../../components/ui/Skeleton'
 
 function decodePolyline(encoded) {
@@ -58,7 +59,7 @@ const STEPS = [
 
 export default function CheckInModule({ onAdvance, shift }) {
   const { user } = useAuth()
-  const { startShift } = useShiftTimer()
+  const { refresh: refreshShiftTimer, syncShiftPayload } = useShiftTimer()
 
   const [stepIndex, setStepIndex] = useState(0)
   const [completed, setCompleted] = useState([])
@@ -73,6 +74,10 @@ export default function CheckInModule({ onAdvance, shift }) {
   const [leafletReady, setLeafletReady] = useState(false)
   const [schedule, setSchedule] = useState(null)
   const [mapLoading, setMapLoading] = useState(true)
+  const shiftRef = useRef(shift)
+  const scheduleRef = useRef(schedule)
+  useEffect(() => { shiftRef.current = shift }, [shift])
+  useEffect(() => { scheduleRef.current = schedule }, [schedule])
 
   const dutyType = sessionStorage.getItem('ww_duty_type') || 'normal'
   const firstName = user?.full_name?.split(' ')[0] || 'Driver'
@@ -259,34 +264,35 @@ export default function CheckInModule({ onAdvance, shift }) {
       var lat = sessionStorage.getItem('ww_gps_lat')
       var lng = sessionStorage.getItem('ww_gps_lng')
 
-      const alreadyActive = !!localStorage.getItem(`ww_shift_start_${user?.id || 'anon'}`)
-      if (!alreadyActive) {
-        try {
-          const res = await api.post('/api/driver/shift/start/', {
-            duty_type: dutyType,
-            started_at: shiftTs,
-            latitude: lat,
-            longitude: lng,
-          })
-          startShift()
-          sessionStorage.setItem('ww_shift_started_at', shiftTs)
-          console.log('Shift started:', res.data)
-        } catch (err) {
-          console.error(err.response?.status)
-          console.error(err.response?.data)
-          if (err.response?.status === 400 && err.response?.data?.error?.includes('active shift')) {
-            // Already active on backend — sync local timer
-            startShift()
-          } else {
-            setGpsStatus('error')
-            const errMsg = err.response?.data?.error || 'Failed to start shift. Please try again.'
-            setInitError(errMsg)
-            return
-          }
+      const activeShiftObj = shiftRef.current
+      const resolvedScheduleId = activeShiftObj?.schedule_id ?? activeShiftObj?.schedule ?? scheduleRef.current?.id ?? null
+      const resolvedAllocationId = activeShiftObj?.allocation_id ?? activeShiftObj?.allocation ?? null
+
+      if (resolvedScheduleId == null) {
+        setGpsStatus('error')
+        setInitError('Missing route schedule for shift check-in. Please return to Assignment and restart.')
+        return
+      }
+
+      try {
+        const startPayload = {
+          duty_type: dutyType,
+          schedule_id: resolvedScheduleId,
+          latitude: lat,
+          longitude: lng,
         }
-      } else {
-        // Shift already active locally — just advance
-        sessionStorage.setItem('ww_shift_started_at', shiftTs)
+        if (resolvedAllocationId != null) {
+          startPayload.allocation_id = resolvedAllocationId
+        }
+        const res = await api.post('/api/driver/shift/start/', startPayload)
+        syncShiftPayload(res.data)
+        sessionStorage.setItem('ww_shift_started_at', res.data?.started_at || shiftTs)
+      } catch (err) {
+        console.error(err.response?.status)
+        console.error(err.response?.data)
+        setGpsStatus('error')
+        setInitError(getApiErrorMessage(err, 'Failed to start shift. Please try again.'))
+        return
       }
 
       // ── Step 3: Done ─────────────────────────────────────────────────────
@@ -551,10 +557,10 @@ export default function CheckInModule({ onAdvance, shift }) {
                 </button>
                 {initError && import.meta.env.DEV && (
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       console.warn('Developer bypass activated')
-                      // Must call startShift() so shiftActive=true before ShiftRouteModule mounts
-                      startShift()
+                      await refreshShiftTimer()
+                      window.dispatchEvent(new Event('ww_shift_updated'))
                       sessionStorage.setItem(
                         'ww_shift_started_at',
                         new Date().toISOString()

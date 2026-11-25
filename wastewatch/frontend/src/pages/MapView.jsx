@@ -1,6 +1,6 @@
 // MapView.jsx — WasteWatch Admin/Watcher/Barangay Official Map
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import { useAuth } from '../context/AuthContext'
@@ -20,9 +20,10 @@ import {
   subscribePickupStatusSync,
 } from '../utils/pickupStatusSync'
 import useUserLocation from '../hooks/useUserLocation'
-import { AlertTriangle, MapPin, User, Clock, Tag, Pin, Info, CheckCircle, XCircle, MessageSquare } from 'lucide-react'
+import { AlertTriangle, MapPin, User, Clock, Tag, Pin, Info, CheckCircle, XCircle, MessageSquare, Users, X } from 'lucide-react'
 import CommentThread from './community/components/CommentThread'
 import ReportVoting from '../components/community/ReportVoting'
+import MapSpotlightMask from '../components/MapSpotlightMask'
 import { getGarbageReportId } from '../utils/reportIdentity'
 import { getApiErrorMessage } from '../utils/notificationHelpers'
 
@@ -102,8 +103,10 @@ function scheduleMatchesZone(schedule, zone) {
   const barangays = Array.isArray(schedule.barangays) ? schedule.barangays : []
   if (zoneId && barangays.some(b => String(b) === zoneId)) return true
 
-  const waypoints = Array.isArray(schedule.waypoints) ? schedule.waypoints : []
-  return waypoints.some(wp => String(wp?.barangay_id ?? '') === zoneId)
+  const stopList = Array.isArray(schedule.stops)
+    ? schedule.stops
+    : (Array.isArray(schedule.waypoints) ? schedule.waypoints : [])
+  return stopList.some(wp => String(wp?.barangay_id ?? '') === zoneId)
 }
 
 function getRouteColor(schedule, index = 0) {
@@ -330,8 +333,33 @@ export default function MapView() {
   const [selectedRoute, setSelectedRoute] = useState(null)
   const [selectedZone, setSelectedZone] = useState(null)
   const [selectedReport, setSelectedReport] = useState(null)
+  const [selectedStop, setSelectedStop] = useState(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [panelMode, setPanelMode] = useState("route")
+
+  const spotlightTarget = useMemo(() => {
+    if (panelOpen && panelMode === "report" && selectedReport) {
+      const lat = selectedReport.latitude ?? selectedReport.lat
+      const lng = selectedReport.longitude ?? selectedReport.lng
+      if (lat != null && lng != null) {
+        return {
+          lat: Number(lat),
+          lng: Number(lng),
+          radius: 95,
+          color: '#ef4444',
+        }
+      }
+    }
+    if (selectedStop) {
+      return {
+        lat: Number(selectedStop.lat),
+        lng: Number(selectedStop.lng),
+        radius: 75,
+        color: '#10b981',
+      }
+    }
+    return null
+  }, [panelOpen, panelMode, selectedReport, selectedStop])
   const [mapReady, setMapReady] = useState(false)
   const [legendOpen, setLegendOpen] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
@@ -357,14 +385,14 @@ export default function MapView() {
   const { position: userPosition, accuracy: userAccuracy, error: userLocationError, isTracking: userLocationReady } = useUserLocation({ enabled: true })
 
   useEffect(() => subscribePickupStatusSync(() => {
-    api.get('/api/watcher/stop-validations/')
+    api.get('/api/public/map/stop-statuses/')
       .then(res => {
         const rows = res.data?.results ?? res.data ?? []
         const snapshot = buildStopValidationSnapshot(rows)
         setStopStatusMap(snapshot.statusMap)
         setStopDetailsMap(snapshot.detailsMap)
       })
-      .catch(err => console.error('[MapView] sync stop-validations error', err))
+      .catch(err => console.error('[MapView] sync stop-statuses error', err))
   }), [])
 
   useEffect(() => {
@@ -517,6 +545,9 @@ export default function MapView() {
     }).addTo(map)
     L.control.zoom({ position: "topright" }).addTo(map)
 
+    map.on('popupclose', () => setSelectedStop(null))
+    map.on('click', () => { setSelectedStop(null) })
+
     setMapInstance(map)
     mapInstanceRef.current = map
 
@@ -550,37 +581,18 @@ export default function MapView() {
         })
         .catch(err => console.error('[MapView] active_shifts error', err))
 
-      api.get('/api/driver/collection-schedules/?paginate=false')
+      api.get('/api/public/map/pins/')
         .then(res => setSchedules(Array.isArray(res.data) ? res.data : (res.data?.results || [])))
-        .catch(err => console.error('[MapView] collection-schedules error', err))
+        .catch(err => console.error('[MapView] map-pins error', err))
 
-      api.get('/api/watcher/stop-validations/')
+      api.get('/api/public/map/stop-statuses/')
         .then(res => {
           const rows = res.data?.results ?? res.data ?? []
-          setStopStatusMap(buildStopStatusMap(rows))
-          const details = new Map()
-          rows.forEach(ps => {
-            const scheduleId = ps.schedule_id ?? pickupScheduleId(ps)
-            const stopOrder = Number(ps.stop_order ?? ps.stopOrder ?? ps.stop_id)
-            if (scheduleId == null || Number.isNaN(stopOrder)) return
-            const key = `${scheduleId}:${stopOrder}`
-            let collectedAt = ''
-            try {
-              if (ps.collected_at) {
-                const d = new Date(ps.collected_at)
-                if (!isNaN(d)) collectedAt = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              }
-            } catch { }
-            details.set(key, {
-              collectedAt,
-              truck: ps.truck_plate || ps.truck || '',
-              scheduleId,
-              scheduledTime: ps.scheduledTime || '',
-            })
-          })
-          setStopDetailsMap(details)
+          const snapshot = buildStopValidationSnapshot(rows)
+          setStopStatusMap(snapshot.statusMap)
+          setStopDetailsMap(snapshot.detailsMap)
         })
-        .catch(err => console.error('[MapView] stop-validations error', err))
+        .catch(err => console.error('[MapView] stop-statuses error', err))
 
       // ── NEW: if a zone panel is open, re-fetch its barangay stops so
       // collected/current markers stay live on the same 10s heartbeat.
@@ -712,6 +724,7 @@ export default function MapView() {
     selectedZoneRef.current = null
     setSelectedZone(null)
     setSelectedRoute(null)
+    setSelectedStop(null)
     setPanelOpen(false)
     drawAllTimeoutRef.current = setTimeout(() => {
       drawAllTimeoutRef.current = null
@@ -816,8 +829,8 @@ export default function MapView() {
       const statusKey = `${scheduleId}:${stopOrder}`
 
       const sched = schedLookup[scheduleId]
-      const totalStops = sched ? Math.max(0, (sched.waypoints?.length || 1) - 1) : '?'
-      const scheduledTime = sched?.start_time ? sched.start_time.slice(0, 5) : 'N/A'
+      const totalStops = sched ? (sched.total_stops ?? Math.max(0, (sched.stops?.length || sched.waypoints?.length || 1) - 1)) : '?'
+      const scheduledTime = sched?.time_window || (sched?.start_time ? sched.start_time.slice(0, 5) : 'N/A')
       const driverName = stop.driver_name || sched?.driver_name || '—'
       const truckPlate = stop.truck_plate || sched?.truck_plate || '—'
 
@@ -836,12 +849,12 @@ export default function MapView() {
             <span style="background:${displayColor};color:#fff;font-size:9px;font-weight:800;padding:2px 7px;border-radius:20px;text-transform:uppercase;">${STOP_STATUS_LABELS[stopStatus] || stopStatus}</span>
             <span style="color:#94a3b8;font-size:10px;font-weight:700;">STOP ${stopOrder} of ${totalStops}</span>
           </div>
-          <div style="font-size:11px;color:#64748b;margin-top:4px;">🕐 Scheduled: <b style="color:#e2e8f0">${scheduledTime}</b></div>
-          <div style="font-size:11px;color:#64748b;">👤 Driver: <b style="color:#e2e8f0">${driverName}</b></div>
-          <div style="font-size:11px;color:#64748b;">🚛 Truck: <b style="color:#14b8a6">${truckPlate}</b></div>
+          <div style="font-size:11px;color:#64748b;margin-top:4px;">Scheduled: <b style="color:#e2e8f0">${scheduledTime}</b></div>
+          <div style="font-size:11px;color:#64748b;">Driver: <b style="color:#e2e8f0">${driverName}</b></div>
+          <div style="font-size:11px;color:#64748b;">Truck: <b style="color:#14b8a6">${truckPlate}</b></div>
           ${bCollected ? `<div style="margin-top:5px;font-size:11px;color:#10b981;">✓ Collected: ${bCollected}</div>` : ''}
           <div style="margin-top:8px;">
-            <button onclick="window.__wwViewRoute && window.__wwViewRoute(${scheduleId})" style="background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.5);color:#93c5fd;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;">🗺️ View Full Route</button>
+            <button onclick="window.__wwViewRoute && window.__wwViewRoute(${scheduleId})" style="background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.5);color:#93c5fd;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;">View Full Route</button>
           </div>
         </div>`
 
@@ -895,6 +908,11 @@ export default function MapView() {
       })
         .addTo(mapInstanceRef.current)
         .bindPopup(entry.popupHtml)
+
+      marker.on('click', () => {
+        setSelectedStop({ lat: entry.lat, lng: entry.lng, stopOrder: key.split(':')[1], status: entry.status })
+      })
+      marker.on('popupclose', () => setSelectedStop(null))
 
       barangayMarkersRef.current.set(key, { marker, status: entry.status, signature })
     })
@@ -954,33 +972,26 @@ export default function MapView() {
 
     const desired = new Map()
     pendingSchedules.forEach(schedule => {
-      const waypoints = schedule.waypoints || []
+      const stops = Array.isArray(schedule.stops)
+        ? schedule.stops
+        : (Array.isArray(schedule.waypoints) ? schedule.waypoints.slice(1) : [])
 
-      // ── Index 0: home base marker ──
-      if (waypoints[0]?.lat && waypoints[0]?.lng) {
-        if (showCitywide || Boolean(selectedZoneRef.current)) {
-          const baseKey = `${schedule.id}:base`
-          desired.set(baseKey, {
-            wp: waypoints[0], stopOrder: 'base',
-            stopStatus: 'base', details: null, schedule, statusKey: baseKey,
-          })
-        }
-      }
-
-      // ── Index 1+: collection stops ──
-      waypoints.slice(1).forEach((wp, i) => {
-        const stopOrder = i + 1
-        if (!wp.lat || !wp.lng) return
+      stops.forEach((wp, i) => {
+        if (!wp || wp.lat == null || wp.lng == null) return
+        const lat = Number(wp.lat)
+        const lng = Number(wp.lng)
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+        const stopOrder = wp.order ?? (i + 1)
 
         const currentZone = selectedZoneRef.current
         // Compare as strings — barangay_id may be int or string from API
-        if (!showCitywide && currentZone && currentZone.id != null && String(wp.barangay_id) !== String(currentZone.id)) return
+        if (!showCitywide && currentZone && currentZone.id != null && wp.barangay_id != null && String(wp.barangay_id) !== String(currentZone.id)) return
 
         const statusKey = `${schedule.id}:${stopOrder}`
         if (!stopStatusMapRef.current.has(statusKey)) return
         const stopStatus = normalizeStopStatus(stopStatusMapRef.current.get(statusKey))
         const details = stopDetailsMapRef.current.get(statusKey)
-        desired.set(statusKey, { wp, stopOrder, stopStatus, details, schedule, statusKey })
+        desired.set(statusKey, { wp: { ...wp, lat, lng }, stopOrder, stopStatus, details, schedule, statusKey })
       })
     })
 
@@ -997,32 +1008,6 @@ export default function MapView() {
     // Add new or repaint changed markers
     desired.forEach(({ wp, stopOrder, stopStatus, details, schedule }, key) => {
       const existing = globalStopMarkersRef.current.get(key)
-
-      // ── Home base: special green house marker ──
-      if (stopOrder === 'base') {
-        if (existing) return  // base marker never changes
-        const baseIcon = L.divIcon({
-          html: `<div style="position:relative;width:36px;height:36px;">
-            <div style="position:absolute;inset:0;background:#16a34a;border:2.5px solid #fff;
-              border-radius:50%;display:flex;align-items:center;justify-content:center;
-              box-shadow:0 3px 14px rgba(22,163,74,0.55);font-size:16px;">🏠</div>
-          </div>`,
-          className: '',
-          iconSize: [36, 36],
-          iconAnchor: [18, 18],
-        })
-        const marker = L.marker([Number(wp.lat), Number(wp.lng)], {
-          icon: baseIcon, zIndexOffset: 700,
-        })
-          .addTo(map)
-          .bindPopup(`<div style="font-family:sans-serif;min-width:160px;">
-            <b style="font-size:13px;">${wp.label || 'Home Base'}</b><br/>
-            <span style="font-size:11px;color:#16a34a;font-weight:700;text-transform:uppercase;">HOME BASE</span><br/>
-            <span style="font-size:11px;color:#64748b;">${schedule.barangay_names || ''}</span>
-          </div>`)
-        globalStopMarkersRef.current.set(key, { marker, status: 'base' })
-        return
-      }
 
       // ── Collection stop: repaint if status changed ──
       if (existing) {
@@ -1061,11 +1046,16 @@ export default function MapView() {
               </span>
               <span style="color:#94a3b8;font-size:9px;font-weight:700;">STOP ${stopOrder}</span>
             </div>
-            <span style="font-size:11px;color:#64748b;">📍 ${barangayName}</span>
-            ${details?.collectedAt ? `<div style="margin-top:6px;font-size:11px;color:#10b981">✓ Collected: ${details.collectedAt}</div>` : ''}
-            ${details?.truck ? `<div style="font-size:11px;color:#64748b;">🚛 ${details.truck}</div>` : ''}
+            <span style="font-size:11px;color:#64748b;">${barangayName}</span>
+            ${details?.collectedAt ? `<div style="margin-top:6px;font-size:11px;color:#10b981">${details?.isToday === false ? `✓ Collected Yesterday: ${details.collectedAt}` : `✓ Collected: ${details.collectedAt}`}</div>` : (details?.isToday === false ? `<div style="margin-top:6px;font-size:11px;color:#94a3b8;">Yesterday</div>` : '')}
+            ${details?.truck ? `<div style="font-size:11px;color:#64748b;">Truck: ${details.truck}</div>` : ''}
           </div>
         `)
+
+      marker.on('click', () => {
+        setSelectedStop({ lat: Number(wp.lat), lng: Number(wp.lng), stopOrder, status: stopStatus })
+      })
+      marker.on('popupclose', () => setSelectedStop(null))
 
       globalStopMarkersRef.current.set(key, { marker, status: stopStatus })
     })
@@ -1102,7 +1092,13 @@ export default function MapView() {
     if (!sched) return
     const L = window.L
     const routeColor = getRouteColor(sched)
-    const pts = (sched.waypoints || []).filter(wp => wp.lat && wp.lng).map(wp => [Number(wp.lat), Number(wp.lng)])
+    const rawPoints = Array.isArray(sched.stops)
+      ? sched.stops
+      : (Array.isArray(sched.waypoints) ? sched.waypoints : [])
+    const pts = rawPoints
+      .filter(wp => wp && wp.lat != null && wp.lng != null)
+      .map(wp => [Number(wp.lat), Number(wp.lng)])
+      .filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng))
     if (pts.length < 2) return
     const paintFallback = () => {
       if (layersRef.current['ondemand-route']) return
@@ -1246,21 +1242,26 @@ export default function MapView() {
       schedulesRef.current.forEach((schedule, index) => {
         if (!scheduleMatchesZone(schedule, focusedZone)) return
 
-        const routePoints = (schedule.waypoints || [])
-          .map(wp => ({
+        const rawPoints = Array.isArray(schedule.stops)
+          ? schedule.stops
+          : (Array.isArray(schedule.waypoints) ? schedule.waypoints : [])
+        const routePoints = rawPoints
+          .map((wp, idx) => ({
             lat: Number(wp.lat),
             lng: Number(wp.lng),
             label: wp.label || wp.name || '',
             barangay_id: wp.barangay_id ?? null,
+            order: wp.order ?? (idx + 1),
           }))
           .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng))
         if (routePoints.length < 2) return
 
         const routeColor = getRouteColor(schedule, index)
         const routeId = schedule.id ?? `schedule-${index}`
-        const stopOrders = routePoints.slice(1)
-        const collectedCount = stopOrders.reduce((count, _, stopIndex) => {
-          const key = `${routeId}:${stopIndex + 1}`
+        const stopOrders = Array.isArray(schedule.stops) ? routePoints : routePoints.slice(1)
+        const collectedCount = stopOrders.reduce((count, pt, stopIndex) => {
+          const stopOrder = pt.order ?? (stopIndex + 1)
+          const key = `${routeId}:${stopOrder}`
           const status = normalizeStopStatus(stopStatusMapRef.current.get(key))
           return ['VERIFIED_COLLECTED', 'COLLECTION_REPORTED'].includes(status) ? count + 1 : count
         }, 0)
@@ -1483,14 +1484,15 @@ export default function MapView() {
         })
         const m = L.marker([truck.lat, truck.lng], { icon }).addTo(map)
 
-        const statusLabel = truck.status === 'active' ? '🟢 Active'
-          : truck.status === 'weak_signal' ? '🟡 Weak Signal' : '⚫ Offline'
+        const statusLabel = truck.status === 'active' ? 'Active'
+          : truck.status === 'weak_signal' ? 'Weak Signal' : 'Offline'
         const lastUpdate = truck.last_update
           ? new Date(truck.last_update).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
           : 'N/A'
 
         m.bindPopup(`<div style="font-family:sans-serif;min-width:200px;">
-          <strong style="font-size:14px;">🚛 ${truck.truckId}</strong><br/>
+          ${truck.team_code ? `<div style="display:inline-block;padding:2px 6px;border-radius:4px;background:#dcfce7;color:#15803d;font-size:10px;font-weight:700;margin-bottom:4px;border:1px solid #86efac;">${truck.team_code} • ${truck.team_name || 'Sanitation Team'}</div><br/>` : ''}
+          <strong style="font-size:14px;">${truck.truckId}</strong><br/>
           <span style="color:#64748b;font-size:12px;">${truck.truckModel || '—'}</span><br/>
           <hr style="border:none;border-top:1px solid #e2e8f0;margin:6px 0;"/>
           <div style="font-size:12px;margin-bottom:3px;">
@@ -1514,6 +1516,8 @@ export default function MapView() {
             truckModel: truck.truckModel || '—',
             driver: truck.driver,
             plateNumber: truck.truckId,
+            teamName: truck.team_name || null,
+            teamCode: truck.team_code || null,
             opStatus: truck.phase_status || truck.op_status,
             barangay: 'Live Tracking',
             status: truck.status,
@@ -1651,6 +1655,7 @@ export default function MapView() {
 
         {/* Map canvas */}
         <div ref={mapRef} style={{ position: "absolute", inset: 0, zIndex: 1 }} />
+        <MapSpotlightMask map={mapInstance} target={spotlightTarget} />
 
         {/* Loading overlay */}
         {!mapReady && (
@@ -2273,6 +2278,7 @@ function ReportPanel({ report, onStatusChange, onClose }) {
   const [commentCount, setCommentCount] = useState(report.comment_count || 0)
   const [isRejecting, setIsRejecting] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
+  const [isReportingInCommunity, setIsReportingInCommunity] = useState(false)
   const canModerate = REPORT_MODERATOR_ROLES.includes(user?.role)
   const severityColors = { high: "#ef4444", medium: "#f59e0b", low: "#22c55e" }
   const typeLabels = { overflow: "Overflow", illegal_dumping: "Illegal Dumping", missed: "Missed Pickup" }
@@ -2280,6 +2286,35 @@ function ReportPanel({ report, onStatusChange, onClose }) {
   const garbageReportId = getGarbageReportId(report)
   const hasReport = garbageReportId !== null
   const hasThread = Boolean(report.community_post_id || hasReport)
+
+  const handleReportInCommunity = async () => {
+    if (report.community_post_id) {
+      navigate(`/community?post=${report.community_post_id}`)
+      return
+    }
+
+    if (garbageReportId) {
+      setIsReportingInCommunity(true)
+      try {
+        const res = await api.post(`/api/watcher/reports/${garbageReportId}/community_post/`)
+        if (res.data?.id) {
+          navigate(`/community?post=${res.data.id}`)
+          return
+        }
+      } catch (err) {
+        if (err.response?.status === 401) {
+          navigate('/login')
+          return
+        }
+        notify({ variant: 'error-dark', message: getApiErrorMessage(err, 'Failed to create community post') })
+      } finally {
+        setIsReportingInCommunity(false)
+      }
+    }
+
+    const topic = `${typeLabels[report.issue_type || report.type] || 'Waste Report'} at ${report.barangay_name || report.address || 'Lucena City'}`
+    navigate(`/community?topic=${encodeURIComponent(topic)}&brgy=${encodeURIComponent(report.barangay_name || '')}`)
+  }
 
   useEffect(() => {
     setCommentCount(report.comment_count || 0)
@@ -2353,9 +2388,9 @@ function ReportPanel({ report, onStatusChange, onClose }) {
         <button onClick={onClose} style={{
           position: 'absolute', top: 12, right: 12, width: 32, height: 32,
           borderRadius: '50%', background: 'var(--surface-2)', border: '1px solid var(--border)',
-          color: 'var(--text-muted)', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center',
           cursor: 'pointer', zIndex: 10
-        }}>✕</button>
+        }}><X size={16} /></button>
       )}
 
       <div style={{ padding: '24px', overflowY: 'auto' }}>
@@ -2478,8 +2513,30 @@ function ReportPanel({ report, onStatusChange, onClose }) {
         )}
 
         {!hasReport && (
-          <div style={{ marginTop: 10, padding: "12px 16px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, color: "#94a3b8", fontSize: 12 }}>
-            Hotspot monitoring location. No official resident report attached to this pin.
+          <div style={{ marginTop: 10, padding: "12px 16px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ color: "#94a3b8", fontSize: 12 }}>
+              Hotspot monitoring location.
+            </span>
+            <button
+              type="button"
+              onClick={handleReportInCommunity}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                background: 'rgba(59, 130, 246, 0.15)',
+                border: '1px solid rgba(59, 130, 246, 0.35)',
+                color: '#60a5fa',
+                padding: '6px 12px',
+                borderRadius: 8,
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              <Users size={14} />
+              <span>Report this in Community</span>
+            </button>
           </div>
         )}
 
@@ -2533,19 +2590,28 @@ function ReportPanel({ report, onStatusChange, onClose }) {
                 <span>{commentCount} {commentCount === 1 ? 'Comment' : 'Comments'}</span>
               </button>
 
-              {report.community_post_id && (
-                <a
-                  href={`/community?post=${report.community_post_id}`}
-                  style={{
-                    color: 'var(--text-muted)',
-                    fontSize: 12,
-                    textDecoration: 'none',
-                    fontWeight: 500,
-                  }}
-                >
-                  View in Community
-                </a>
-              )}
+              <button
+                type="button"
+                onClick={handleReportInCommunity}
+                disabled={isReportingInCommunity}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  background: 'rgba(59, 130, 246, 0.15)',
+                  border: '1px solid rgba(59, 130, 246, 0.35)',
+                  color: '#60a5fa',
+                  padding: '6px 12px',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: isReportingInCommunity ? 'wait' : 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <Users size={14} />
+                <span>{isReportingInCommunity ? 'Connecting...' : 'Report this in Community'}</span>
+              </button>
             </div>
 
             {commentsOpen && (

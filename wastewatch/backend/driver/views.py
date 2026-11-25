@@ -5,7 +5,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from datetime import timezone, timedelta
-from django.utils.dateparse import parse_datetime
+from django.utils.dateparse import parse_datetime, parse_date
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 from .models import (
@@ -18,6 +18,20 @@ from .models import (
     TruckCrewAssignment,
     CalendarEvent,
     DriverShift,
+    Worker,
+    LegacyCrewReconciliationAudit,
+    SanitationTeam,
+    SanitationTeamMembership,
+    ScheduleTeamOverride,
+    ScheduleTruckAllocation,
+    WatcherShift,
+    CrewShift,
+    ShiftCrewRosterSnapshot,
+    TruckReplacementRequest,
+    TruckOperationalHoldLog,
+    TruckMaintenanceRecord,
+    FuelLog,
+    is_truck_dispatchable,
 )
 from .serializers import (
     TruckSerializer,
@@ -29,15 +43,29 @@ from .serializers import (
     TruckCrewAssignmentSerializer,
     CalendarEventSerializer,
     DriverShiftSerializer,
+    WorkerSerializer,
+    LegacyCrewReconciliationAuditSerializer,
+    SanitationTeamSerializer,
+    SanitationTeamMembershipSerializer,
+    ScheduleTeamOverrideSerializer,
+    ScheduleTruckAllocationSerializer,
+    WatcherShiftSerializer,
+    TruckOperationalHoldLogSerializer,
+    TruckMaintenanceRecordSerializer,
+    FuelLogSerializer,
 )
 
-from django.db import transaction
-from django.db.models import Q, Count
+from django.db import IntegrityError, transaction
+from django.db.models import Q, Count, Prefetch
+from django.db.models.deletion import ProtectedError
+from django.http import Http404
 from django.utils import timezone
 import logging
 from accounts.models import UserRole
-from accounts.permissions import is_admin_user
+from accounts.permissions import IsAdminRole, is_admin_user
+from dumpsite.permissions import IsAdminOrAssignedDumpsiteOperator
 from wastewatch.pagination import StandardResultsSetPagination
+from .pagination import SanitationTeamPagination
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +265,9 @@ def _is_driver_schedule_for_date(schedule, today=None):
 def _resolve_driver_today_schedule(driver, today=None, requested_schedule_id=None):
     """
     Resolve `(schedule, truck, scheduled_today)` for `driver` on `today`.
+    Supports legacy `TruckCrewAssignment` / `CollectionSchedule.driver` as well as
+    D-10/D-11 team, override, and `ScheduleTruckAllocation` assignments
+    (including Driver-Team Leaders).
     Raises `CollectionSchedule.DoesNotExist` if `requested_schedule_id` is given
     and does not belong to `driver` (or is cancelled).
     """
@@ -249,41 +280,107 @@ def _resolve_driver_today_schedule(driver, today=None, requested_schedule_id=Non
         .first()
     )
 
+    driver_team_ids = list(
+        SanitationTeamMembership.objects.filter(
+            worker__user=driver,
+            worker__is_active=True,
+            is_active=True,
+            team__is_active=True,
+            role_in_team__in=('driver', 'leader'),
+        ).values_list('team_id', flat=True)
+    )
+
+    today_allocs = list(
+        ScheduleTruckAllocation.objects.filter(
+            team_id__in=driver_team_ids,
+            allocation_date=today,
+        ).select_related('schedule', 'truck', 'team').order_by('id')
+    ) if driver_team_ids else []
+    alloc_by_schedule_id = {a.schedule_id: a for a in today_allocs}
+
+    override_schedule_ids = set(
+        ScheduleTeamOverride.objects.filter(
+            team_id__in=driver_team_ids,
+            effective_date=today,
+        ).values_list('schedule_id', flat=True)
+    ) if driver_team_ids else set()
+    overridden_away_ids = set(
+        ScheduleTeamOverride.objects.filter(
+            effective_date=today,
+        ).exclude(team_id__in=driver_team_ids).values_list('schedule_id', flat=True)
+    )
+    other_team_alloc_ids = set(
+        ScheduleTruckAllocation.objects.filter(
+            allocation_date=today,
+        ).exclude(team_id__in=driver_team_ids).values_list('schedule_id', flat=True)
+    )
+    excluded_direct_ids = list(overridden_away_ids | other_team_alloc_ids)
+
     if requested_schedule_id:
+        auth_q = Q(driver=driver) & ~Q(pk__in=excluded_direct_ids)
+        if assignment and assignment.schedule_id == int(requested_schedule_id):
+            auth_q |= Q(pk=requested_schedule_id)
+        if driver_team_ids:
+            auth_q |= Q(pk__in=list(alloc_by_schedule_id.keys()))
+            auth_q |= Q(pk__in=list(override_schedule_ids))
+            auth_q |= (Q(default_team_id__in=driver_team_ids) & ~Q(pk__in=list(overridden_away_ids)))
         schedule = (
-            CollectionSchedule.objects.exclude(status='CANCELLED')
-            .select_related('truck')
-            .get(pk=requested_schedule_id, driver=driver)
+            CollectionSchedule.objects.exclude(status__in=['CANCELLED', 'COMPLETED'])
+            .filter(is_available=True)
+            .select_related('truck', 'dumpsite')
+            .filter(auth_q)
+            .distinct()
+            .get(pk=requested_schedule_id)
         )
+        alloc = alloc_by_schedule_id.get(schedule.id)
         is_today = bool(
             (assignment and assignment.schedule_id == schedule.id)
+            or alloc is not None
             or _is_driver_schedule_for_date(schedule, today)
         )
         truck = (
-            assignment.truck
-            if (assignment and assignment.schedule_id == schedule.id and assignment.truck)
-            else schedule.truck
+            alloc.truck
+            if alloc and alloc.truck
+            else (
+                assignment.truck
+                if (assignment and assignment.schedule_id == schedule.id and assignment.truck)
+                else schedule.truck
+            )
         )
         return schedule, truck, is_today
 
-    if assignment and assignment.schedule and assignment.schedule.status != 'CANCELLED':
+    if assignment and assignment.schedule and assignment.schedule.status not in ('CANCELLED', 'COMPLETED') and getattr(assignment.schedule, 'is_available', True):
         schedule = assignment.schedule
-        truck = assignment.truck or schedule.truck
+        alloc = alloc_by_schedule_id.get(schedule.id)
+        truck = (alloc.truck if alloc and alloc.truck else None) or assignment.truck or schedule.truck
         return schedule, truck, True
+
+    candidate_q = Q(driver=driver) & ~Q(id__in=excluded_direct_ids)
+    if driver_team_ids:
+        candidate_q |= Q(id__in=list(alloc_by_schedule_id.keys()))
+        candidate_q |= Q(id__in=list(override_schedule_ids))
+        candidate_q |= (Q(default_team_id__in=driver_team_ids) & ~Q(id__in=list(overridden_away_ids)))
 
     candidates = [
         s for s in (
-            CollectionSchedule.objects.filter(driver=driver)
-            .exclude(status='CANCELLED')
-            .select_related('truck')
+            CollectionSchedule.objects.filter(candidate_q)
+            .exclude(status__in=['CANCELLED', 'COMPLETED'])
+            .filter(is_available=True)
+            .select_related('truck', 'dumpsite')
+            .distinct()
         )
-        if _is_driver_schedule_for_date(s, today)
+        if s.id in alloc_by_schedule_id or _is_driver_schedule_for_date(s, today)
     ]
     if not candidates:
         return None, (assignment.truck if assignment else None), False
 
     unfinished = [s for s in candidates if not is_schedule_complete_today(s)]
     pool = unfinished or candidates
+
+    # Prefer schedules with an explicit today allocation if multiple candidates exist
+    alloc_pool = [s for s in pool if s.id in alloc_by_schedule_id]
+    if alloc_pool:
+        pool = alloc_pool
 
     now_time = timezone.localtime().time()
     chosen = None
@@ -299,12 +396,79 @@ def _resolve_driver_today_schedule(driver, today=None, requested_schedule_id=Non
             with_start = [s for s in pool if s.start_time]
             chosen = min(with_start, key=lambda s: s.start_time) if with_start else pool[0]
 
-    truck = (assignment.truck if assignment and assignment.truck else None) or chosen.truck
+    alloc = alloc_by_schedule_id.get(chosen.id)
+    truck = (
+        (alloc.truck if alloc and alloc.truck else None)
+        or (assignment.truck if assignment and assignment.truck else None)
+        or chosen.truck
+    )
     return chosen, truck, True
 
-class IsAppAdmin(permissions.BasePermission):
+def _pick_present_field(data, *keys):
+    for key in keys:
+        if key in data:
+            val = data.get(key)
+            if val is not None and str(val).strip() != '':
+                return val
+    return None
+
+
+def _sweep_stale_shifts_for(*, driver=None, truck=None):
+    """
+    Auto-close active shifts abandoned beyond SHIFT_STALE_HOURS for the given driver
+    and/or truck, strictly via ShiftService.conclude_shift_atomic.
+    """
+    from datetime import timedelta
+    from django.conf import settings as django_settings
+    from .shift_service import ShiftService
+
+    if driver is None and truck is None:
+        return []
+
+    now = timezone.now()
+    staleness_cutoff = now - timedelta(hours=getattr(django_settings, 'SHIFT_STALE_HOURS', 6))
+    scope_q = Q()
+    if driver is not None:
+        scope_q |= Q(driver=driver)
+    if truck is not None:
+        scope_q |= Q(truck=truck) | Q(allocation__truck=truck)
+
+    stale_shifts = list(
+        DriverShift.objects.filter(
+            scope_q,
+            Q(last_location_update__lt=staleness_cutoff)
+            | Q(last_location_update__isnull=True, started_at__lt=staleness_cutoff),
+            ended_at__isnull=True,
+            is_active=True,
+        ).order_by('id')
+    )
+    concluded = []
+    for stale_s in stale_shifts:
+        concluded.append(
+            ShiftService.conclude_shift_atomic(
+                driver_shift_id=stale_s.id,
+                concluded_by=None,
+                end_reason='heartbeat_timeout',
+                ended_at=stale_s.last_location_update or stale_s.started_at,
+            )
+        )
+    return concluded
+
+
+class IsOperationalStaffOrAdmin(permissions.BasePermission):
+    """
+    Allows access to Administrators (role='admin' or is_staff=True) and operational roles
+    (dumpsite, watcher, driver); denies citizens and brgy_official.
+    """
+    ALLOWED_ROLES = {UserRole.ADMIN, UserRole.DUMPSITE, UserRole.WATCHER, UserRole.DRIVER}
+
     def has_permission(self, request, view):
-        return is_admin_user(getattr(request, 'user', None))
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated:
+            return False
+        if is_admin_user(user):
+            return True
+        return getattr(user, 'role', None) in self.ALLOWED_ROLES
 
 class TruckViewSet(viewsets.ModelViewSet):
     queryset = Truck.objects.all().prefetch_related('drivers', 'crew').order_by('id')
@@ -314,19 +478,64 @@ class TruckViewSet(viewsets.ModelViewSet):
 
     @property
     def allow_unpaginated(self):
-        # Admins (Route Builder / assignment dropdowns) may request the full fleet.
-        return is_admin_user(getattr(getattr(self, 'request', None), 'user', None))
+        # Admins and assigned Dumpsite Operators (facility-scoped) may request unpaginated fleet lists.
+        from .truck_service import TruckService
+        user = getattr(getattr(self, 'request', None), 'user', None)
+        return is_admin_user(user) or TruckService.get_operator_dumpsite_id(user) is not None
 
     def get_permissions(self):
         if self.request.method in permissions.SAFE_METHODS:
             return [permissions.IsAuthenticated()]
-        return [IsAppAdmin()]
+        action_name = getattr(self, 'action', None)
+        if action_name in {
+            'clear_hold',
+            'record_maintenance',
+            'update_inspection',
+            'replace_truck',
+        }:
+            return [permissions.IsAuthenticated(), IsAdminOrAssignedDumpsiteOperator()]
+        if action_name == 'request_replacement':
+            return [permissions.IsAuthenticated()]
+        return [permissions.IsAuthenticated(), IsAdminRole()]
+
+    def _base_scoped_queryset(self):
+        qs = Truck.objects.all().prefetch_related('drivers', 'crew').order_by('id')
+        user = getattr(self.request, 'user', None)
+        if not user or not user.is_authenticated:
+            return Truck.objects.none()
+        if is_admin_user(user):
+            return qs
+        if getattr(user, 'role', None) == UserRole.DUMPSITE:
+            from .truck_service import TruckService
+            fac_id = TruckService.get_operator_dumpsite_id(user)
+            if not fac_id:
+                return Truck.objects.none()
+            return qs.filter(TruckService.facility_trucks_q(fac_id)).distinct()
+        return qs
 
     def get_queryset(self):
-        qs = Truck.objects.all().prefetch_related('drivers', 'crew').order_by('id')
+        qs = self._base_scoped_queryset()
         status_param = self.request.query_params.get('status')
         if status_param and status_param.lower() != 'all':
             qs = qs.filter(status=status_param.lower())
+
+        lifecycle_param = (self.request.query_params.get('lifecycle') or '').strip().lower()
+        if lifecycle_param == 'available':
+            qs = qs.filter(status='active', is_retired=False, is_operational_hold=False, op_status='AVAILABLE')
+        elif lifecycle_param == 'assigned':
+            qs = qs.filter(status='active', is_retired=False, drivers__isnull=False).distinct()
+        elif lifecycle_param == 'in_use':
+            qs = qs.filter(
+                status='active',
+                is_retired=False,
+                op_status__in=['ON_DUTY', 'IN_USE', 'EN_ROUTE', 'IN_TRANSIT'],
+            )
+        elif lifecycle_param == 'maintenance':
+            qs = qs.filter(status='maintenance', is_retired=False)
+        elif lifecycle_param == 'operational_hold':
+            qs = qs.filter(is_operational_hold=True, is_retired=False)
+        elif lifecycle_param == 'retired':
+            qs = qs.filter(is_retired=True)
 
         search_query = self.request.query_params.get('search', '').strip()
         if search_query:
@@ -341,13 +550,23 @@ class TruckViewSet(viewsets.ModelViewSet):
         return qs
 
     def list(self, request, *args, **kwargs):
+        base_qs = self._base_scoped_queryset()
         queryset = self.filter_queryset(self.get_queryset())
 
         if getattr(self, 'paginator', None) is not None:
-            summary_agg = Truck.objects.aggregate(
+            summary_agg = base_qs.aggregate(
                 all=Count('id', distinct=True),
-                active=Count('id', filter=Q(status='active'), distinct=True),
-                maintenance=Count('id', filter=Q(status='maintenance'), distinct=True),
+                active=Count('id', filter=Q(status='active', is_retired=False), distinct=True),
+                available=Count('id', filter=Q(status='active', is_retired=False, is_operational_hold=False, op_status='AVAILABLE'), distinct=True),
+                assigned=Count('id', filter=Q(status='active', is_retired=False, drivers__isnull=False), distinct=True),
+                in_use=Count(
+                    'id',
+                    filter=Q(status='active', is_retired=False, op_status__in=['ON_DUTY', 'IN_USE', 'EN_ROUTE', 'IN_TRANSIT']),
+                    distinct=True,
+                ),
+                maintenance=Count('id', filter=Q(status='maintenance', is_retired=False), distinct=True),
+                operational_hold=Count('id', filter=Q(is_operational_hold=True, is_retired=False), distinct=True),
+                retired=Count('id', filter=Q(is_retired=True), distinct=True),
                 inactive=Count('id', filter=Q(status='inactive'), distinct=True),
             )
             self.paginator.extra_data = {'summary': summary_agg}
@@ -367,24 +586,651 @@ class TruckViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         return super().update(request, *args, **kwargs)
 
+    def destroy(self, request, *args, **kwargs):
+        from django.db.models.deletion import ProtectedError
+        from django.core.exceptions import PermissionDenied
+        from .truck_service import TruckService, TruckLifecycleConflictError
+
+        instance = self.get_object()
+        try:
+            TruckService.delete_uncommissioned_truck(instance, user=request.user)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except PermissionDenied as e:
+            return Response({'error': str(e), 'code': 'permission_denied'}, status=status.HTTP_403_FORBIDDEN)
+        except (ProtectedError, TruckLifecycleConflictError, DjangoValidationError) as e:
+            msg = e.args[0] if getattr(e, 'args', None) else str(e)
+            return Response(
+                {
+                    'error': str(msg),
+                    'code': getattr(e, 'error_code', 'deletion_prohibited'),
+                    'truck_id': instance.id,
+                    'retirement_state': instance.retirement_state,
+                    'commissioning_provenance': instance.commissioning_provenance,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+    @action(detail=True, methods=['post'], url_path='commission', permission_classes=[IsAdminRole])
+    def commission(self, request, pk=None):
+        """
+        POST /api/driver/trucks/{id}/commission/
+        Controlled initial commissioning endpoint for newly created uncommissioned trucks.
+        """
+        from django.core.exceptions import PermissionDenied
+        from .models import is_truck_dispatchable
+        from .truck_service import TruckService, TruckLifecycleConflictError
+
+        truck = self.get_object()
+        commissioned_at = request.data.get('commissioned_at')
+        notes = request.data.get('notes', '')
+        try:
+            updated = TruckService.commission_truck(
+                truck,
+                user=request.user,
+                commissioned_at=commissioned_at,
+                notes=notes,
+            )
+            return Response(
+                {
+                    'status': 'success',
+                    'truck_id': updated.id,
+                    'retirement_state': updated.retirement_state,
+                    'commissioning_provenance': updated.commissioning_provenance,
+                    'commissioned_at': updated.commissioned_at.isoformat() if updated.commissioned_at else None,
+                    'is_dispatchable': is_truck_dispatchable(updated),
+                    'truck': TruckSerializer(updated, context=self.get_serializer_context()).data,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except PermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TruckLifecycleConflictError as e:
+            return Response(
+                {
+                    'error': str(e.message if hasattr(e, 'message') else e),
+                    'code': e.error_code,
+                    **e.details,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        except DjangoValidationError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    @action(detail=True, methods=['post'], url_path='reconcile-commissioning', permission_classes=[IsAdminRole])
+    def reconcile_commissioning(self, request, pk=None):
+        """
+        POST /api/driver/trucks/{id}/reconcile-commissioning/
+        Administrative reconciliation endpoint for legacy_reconciliation trucks.
+        """
+        from django.core.exceptions import PermissionDenied
+        from .models import is_truck_dispatchable
+        from .truck_service import TruckService, TruckHistoricalAuditService, TruckLifecycleConflictError
+
+        truck = self.get_object()
+        act = request.data.get('action')
+        verified_commissioned_at = request.data.get('verified_commissioned_at')
+        verification_notes = request.data.get('verification_notes', '')
+        try:
+            updated = TruckService.reconcile_legacy_truck(
+                truck,
+                user=request.user,
+                action=act,
+                verified_commissioned_at=verified_commissioned_at,
+                verification_notes=verification_notes,
+            )
+            payload = {
+                'status': 'success',
+                'truck_id': updated.id,
+                'retirement_state': updated.retirement_state,
+                'commissioning_provenance': updated.commissioning_provenance,
+                'commissioned_at': updated.commissioned_at.isoformat() if updated.commissioned_at else None,
+                'is_dispatchable': is_truck_dispatchable(updated),
+                'eligible_for_physical_deletion': TruckHistoricalAuditService.is_eligible_for_physical_delete(updated),
+            }
+            return Response(payload, status=status.HTTP_200_OK)
+        except PermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TruckLifecycleConflictError as e:
+            return Response(
+                {
+                    'error': str(e.message if hasattr(e, 'message') else e),
+                    'code': e.error_code,
+                    **e.details,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        except DjangoValidationError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    @action(detail=True, methods=['post'], url_path='retire', permission_classes=[IsAdminRole])
+    def retire(self, request, pk=None):
+        """
+        POST /api/driver/trucks/{id}/retire/
+        Owner-Approved Item 13 (Option A): 4-phase resumable permanent retirement endpoint.
+        """
+        from django.core.exceptions import PermissionDenied
+        from .models import is_truck_dispatchable
+        from .truck_service import TruckService, TruckLifecycleConflictError
+
+        truck = self.get_object()
+        reason = request.data.get('reason', '')
+        try:
+            updated = TruckService.retire_truck(truck, user=request.user, reason=reason)
+            return Response(
+                {
+                    'status': 'success',
+                    'truck_id': updated.id,
+                    'retirement_state': updated.retirement_state,
+                    'commissioning_provenance': updated.commissioning_provenance,
+                    'is_retired': updated.is_retired,
+                    'is_dispatchable': is_truck_dispatchable(updated),
+                    'truck': TruckSerializer(updated, context=self.get_serializer_context()).data,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except PermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TruckLifecycleConflictError as e:
+            return Response(
+                {
+                    'error': str(e.message if hasattr(e, 'message') else e),
+                    'code': e.error_code,
+                    **e.details,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+    def _get_unscoped_truck(self, pk):
+        from django.shortcuts import get_object_or_404
+        return get_object_or_404(Truck.objects.all(), pk=pk)
+
+    @action(detail=True, methods=['post'], url_path='clear-hold', permission_classes=[permissions.IsAuthenticated, IsAdminOrAssignedDumpsiteOperator])
+    def clear_hold(self, request, pk=None):
+        from django.core.exceptions import PermissionDenied
+        from .truck_service import TruckService, TruckLifecycleConflictError
+        truck = self._get_unscoped_truck(pk)
+        self.check_object_permissions(request, truck)
+        try:
+            updated = TruckService.clear_operational_hold(
+                truck,
+                user=request.user,
+                resolution_notes=request.data.get('resolution_notes', ''),
+            )
+            return Response(TruckSerializer(updated, context=self.get_serializer_context()).data, status=status.HTTP_200_OK)
+        except PermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TruckLifecycleConflictError as e:
+            return Response({'error': str(e.message if hasattr(e, 'message') else e), 'code': e.error_code}, status=status.HTTP_409_CONFLICT)
+        except DjangoValidationError as e:
+            return Response(e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='record-maintenance', permission_classes=[permissions.IsAuthenticated, IsAdminOrAssignedDumpsiteOperator])
+    def record_maintenance(self, request, pk=None):
+        from django.core.exceptions import PermissionDenied
+        from .truck_service import TruckService, TruckLifecycleConflictError
+        truck = self._get_unscoped_truck(pk)
+        self.check_object_permissions(request, truck)
+        scheduled_for_raw = request.data.get('scheduled_for')
+        scheduled_for = parse_date(str(scheduled_for_raw)) if scheduled_for_raw else None
+        if scheduled_for_raw and not scheduled_for:
+            return Response({'scheduled_for': 'Invalid scheduled_for date format.'}, status=status.HTTP_400_BAD_REQUEST)
+        record_id_raw = request.data.get('record_id')
+        record_id = None
+        if record_id_raw not in (None, ''):
+            try:
+                record_id = int(record_id_raw)
+            except (TypeError, ValueError):
+                return Response({'record_id': 'Invalid record_id.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            updated = TruckService.record_maintenance(
+                truck,
+                user=request.user,
+                action_type=request.data.get('action_type', 'start'),
+                reason=request.data.get('reason', '') or request.data.get('notes', ''),
+                maintenance_status=request.data.get('maintenance_status', 'under_repair'),
+                maintenance_type=request.data.get('maintenance_type', 'CORRECTIVE'),
+                title=request.data.get('title', ''),
+                scheduled_for=scheduled_for,
+                cost=request.data.get('cost'),
+                odometer_km=request.data.get('odometer_km'),
+                record_id=record_id,
+            )
+            return Response(TruckSerializer(updated, context=self.get_serializer_context()).data, status=status.HTTP_200_OK)
+        except PermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TruckLifecycleConflictError as e:
+            return Response({'error': str(e.message if hasattr(e, 'message') else e), 'code': e.error_code}, status=status.HTTP_409_CONFLICT)
+        except DjangoValidationError as e:
+            return Response(e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='update-inspection', permission_classes=[permissions.IsAuthenticated, IsAdminOrAssignedDumpsiteOperator])
+    def update_inspection(self, request, pk=None):
+        from django.core.exceptions import PermissionDenied
+        from .truck_service import TruckService, TruckLifecycleConflictError
+        truck = self._get_unscoped_truck(pk)
+        self.check_object_permissions(request, truck)
+        try:
+            updated = TruckService.update_inspection_state(
+                truck,
+                user=request.user,
+                inspection_state=request.data.get('inspection_state', 'PASSED'),
+                mechanical_condition=request.data.get('mechanical_condition'),
+                reason=request.data.get('reason', ''),
+            )
+            return Response(TruckSerializer(updated, context=self.get_serializer_context()).data, status=status.HTTP_200_OK)
+        except PermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TruckLifecycleConflictError as e:
+            return Response({'error': str(e.message if hasattr(e, 'message') else e), 'code': e.error_code}, status=status.HTTP_409_CONFLICT)
+        except DjangoValidationError as e:
+            return Response(e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='replace-truck', permission_classes=[permissions.IsAuthenticated, IsAdminOrAssignedDumpsiteOperator])
+    def replace_truck(self, request, pk=None):
+        from django.core.exceptions import PermissionDenied
+        from .truck_service import TruckService, TruckLifecycleConflictError
+        from .serializers import ScheduleTruckAllocationSerializer
+        truck = self._get_unscoped_truck(pk)
+        self.check_object_permissions(request, truck)
+        replacement_truck_id = request.data.get('replacement_truck_id')
+        schedule_id = request.data.get('schedule_id')
+        if not replacement_truck_id or not schedule_id:
+            return Response({'error': 'replacement_truck_id and schedule_id are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        eff_date_raw = request.data.get('effective_date')
+        eff_date = parse_date(str(eff_date_raw)) if eff_date_raw else None
+        if eff_date_raw and not eff_date:
+            return Response({'error': 'Invalid effective_date format.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            res = TruckService.replace_truck_assignment(
+                truck,
+                replacement_truck_id=int(replacement_truck_id),
+                schedule_id=int(schedule_id),
+                user=request.user,
+                effective_date=eff_date,
+                reason=request.data.get('reason', ''),
+                transfer_drivers=bool(request.data.get('transfer_drivers', False)),
+            )
+            return Response({
+                'old_truck': TruckSerializer(res['old_truck'], context=self.get_serializer_context()).data,
+                'replacement_truck': TruckSerializer(res['replacement_truck'], context=self.get_serializer_context()).data,
+                'allocation': ScheduleTruckAllocationSerializer(res['allocation']).data,
+                'transferred_driver_ids': res['transferred_driver_ids'],
+            }, status=status.HTTP_200_OK)
+        except PermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TruckLifecycleConflictError as e:
+            return Response({'error': str(e.message if hasattr(e, 'message') else e), 'code': e.error_code}, status=status.HTTP_409_CONFLICT)
+        except (DjangoValidationError, ValueError) as e:
+            return Response(e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='request-replacement', permission_classes=[permissions.IsAuthenticated])
+    def request_replacement(self, request, pk=None):
+        from django.core.exceptions import PermissionDenied
+        from .truck_service import TruckLifecycleConflictError, TruckService
+        truck = self._get_unscoped_truck(pk)
+        try:
+            res = TruckService.request_truck_replacement(
+                truck,
+                user=request.user,
+                schedule_id=request.data.get('schedule_id'),
+                reason=request.data.get('reason', ''),
+            )
+            return Response(res, status=status.HTTP_201_CREATED)
+        except PermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TruckLifecycleConflictError as e:
+            return Response(
+                {'error': str(e.message if hasattr(e, 'message') else e), 'code': e.error_code},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except DjangoValidationError as e:
+            return Response(e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['get'], url_path='audit-history', permission_classes=[permissions.IsAuthenticated])
+    def audit_history(self, request, pk=None):
+        import json as _json
+        from django.core.exceptions import PermissionDenied
+        from analytics.models import ActivityLog
+        from .truck_service import TruckService
+
+        truck = self._get_unscoped_truck(pk)
+        try:
+            TruckService.require_admin_or_facility_operator(request.user, truck=truck)
+        except PermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+
+        logs = ActivityLog.objects.filter(module='Trucks').select_related('admin').order_by('-timestamp')[:100]
+        matched = []
+        for log in logs:
+            try:
+                parsed = _json.loads(log.details) if log.details else {}
+            except Exception:
+                parsed = {}
+            if (
+                str(parsed.get('target_object_id')) == str(truck.id)
+                or str(parsed.get('replacement_truck_id')) == str(truck.id)
+                or str(parsed.get('old_truck_id')) == str(truck.id)
+            ):
+                matched.append({
+                    'id': log.id,
+                    'event': parsed.get('event', log.action),
+                    'actor': log.admin.username if log.admin_id else 'system',
+                    'timestamp': log.timestamp,
+                    'created_at': log.timestamp,
+                    'details': parsed,
+                })
+        return Response(matched[:25], status=status.HTTP_200_OK)
+
+class IsCollectionScheduleAuthorized(permissions.BasePermission):
+    """
+    Operational permission for CollectionScheduleViewSet:
+    - Anonymous users: Denied (HTTP 401 Unauthorized via IsAuthenticated check).
+    - Write actions: Admins only (role='admin' or is_staff=True).
+    - Read actions: Admins, Drivers, and Dumpsite operators only.
+      Citizens, Watchers, and Barangay Officials are denied (HTTP 403 Forbidden).
+    """
+    def has_permission(self, request, view):
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated:
+            return False
+        if is_admin_user(user):
+            return True
+        if request.method in permissions.SAFE_METHODS:
+            return getattr(user, 'role', None) in (UserRole.DRIVER, UserRole.DUMPSITE)
+        return False
+
+
 class CollectionScheduleViewSet(viewsets.ModelViewSet):
-    queryset = CollectionSchedule.objects.all().order_by('-id')
+    queryset = CollectionSchedule.objects.select_related('truck', 'driver', 'dumpsite', 'default_team').prefetch_related('barangays').order_by('-id')
     serializer_class = CollectionScheduleSerializer
     pagination_class = StandardResultsSetPagination
-    allow_unpaginated = True  # Fixed municipal schedule referenced by map and calendar
-    
-    def get_permissions(self):
-        if self.request.method in permissions.SAFE_METHODS:
-            return [permissions.AllowAny()]
-        return [IsAppAdmin()]
+    permission_classes = [permissions.IsAuthenticated, IsCollectionScheduleAuthorized]
+
+    @property
+    def allow_unpaginated(self):
+        user = getattr(getattr(self, 'request', None), 'user', None)
+        if not user or not user.is_authenticated:
+            return False
+        if is_admin_user(user):
+            return True
+        return getattr(user, 'role', None) in (UserRole.DRIVER, UserRole.DUMPSITE)
+
+    def get_queryset(self):
+        user = getattr(self.request, 'user', None)
+        if not user or not user.is_authenticated:
+            return CollectionSchedule.objects.none()
+
+        qs = CollectionSchedule.objects.select_related('truck', 'driver', 'dumpsite', 'default_team').prefetch_related('barangays').order_by('-id')
+
+        if is_admin_user(user):
+            driver_param = self.request.query_params.get('driver')
+            if driver_param:
+                qs = qs.filter(driver_id=driver_param)
+            truck_param = self.request.query_params.get('truck')
+            if truck_param:
+                qs = qs.filter(truck_id=truck_param)
+            dumpsite_param = self.request.query_params.get('dumpsite')
+            if dumpsite_param:
+                qs = qs.filter(dumpsite_id=dumpsite_param)
+            return qs
+
+        role = getattr(user, 'role', None)
+        if role == UserRole.DRIVER:
+            today = timezone.localdate()
+            # 1. Active DriverShift schedule
+            active_shift_schedules = DriverShift.objects.filter(
+                driver=user, is_active=True, schedule__isnull=False
+            ).values_list('schedule_id', flat=True)
+
+            # 2. Daily crew assignment for today
+            crew_schedules = TruckCrewAssignment.objects.filter(
+                driver=user, date=today, schedule__isnull=False, is_active=True
+            ).values_list('schedule_id', flat=True)
+
+            # 3. Recurring default driver assignment + D-10/D-11 team/allocation assignments
+            driver_team_ids = SanitationTeamMembership.objects.filter(
+                worker__user=user, role_in_team__in=('driver', 'leader'), is_active=True
+            ).values_list('team_id', flat=True)
+            alloc_schedule_ids = ScheduleTruckAllocation.objects.filter(
+                team_id__in=driver_team_ids, allocation_date=today
+            ).values_list('schedule_id', flat=True)
+            override_schedule_ids = ScheduleTeamOverride.objects.filter(
+                team_id__in=driver_team_ids, effective_date=today
+            ).values_list('schedule_id', flat=True)
+
+            return qs.filter(
+                Q(id__in=active_shift_schedules) |
+                Q(id__in=crew_schedules) |
+                Q(id__in=alloc_schedule_ids) |
+                Q(id__in=override_schedule_ids) |
+                Q(default_team_id__in=driver_team_ids) |
+                Q(driver=user)
+            ).distinct()
+
+        if role == UserRole.DUMPSITE:
+            from .truck_service import TruckService
+            facility_id = TruckService.get_operator_dumpsite_id(user)
+            if facility_id:
+                return qs.filter(dumpsite_id=facility_id)
+            return CollectionSchedule.objects.none()
+
+        return CollectionSchedule.objects.none()
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
-        return super().create(request, *args, **kwargs)
+        from notifications.services import process_schedule_lifecycle_change
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        schedule = serializer.save()
+
+        process_schedule_lifecycle_change(
+            before_snapshot=None,
+            after_schedule=schedule,
+            actor=request.user,
+        )
+
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     @transaction.atomic
     def update(self, request, *args, **kwargs):
-        return super().update(request, *args, **kwargs)
+        from notifications.services import (
+            capture_schedule_snapshot,
+            process_schedule_lifecycle_change,
+        )
+        partial = kwargs.pop('partial', False)
+        schedule_pk = kwargs.get('pk') or self.kwargs.get('pk')
+
+        locked_instance = CollectionSchedule.objects.select_for_update().get(pk=schedule_pk)
+        before_snapshot = capture_schedule_snapshot(locked_instance)
+
+        serializer = self.get_serializer(locked_instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        updated_schedule = serializer.save()
+
+        process_schedule_lifecycle_change(
+            before_snapshot=before_snapshot,
+            after_schedule=updated_schedule,
+            actor=request.user,
+        )
+
+        return Response(serializer.data)
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        from notifications.services import (
+            capture_schedule_snapshot,
+            dispatch_schedule_cancellation_notifications,
+        )
+        schedule_pk = kwargs.get('pk') or self.kwargs.get('pk')
+        locked_instance = CollectionSchedule.objects.select_for_update().get(pk=schedule_pk)
+
+        has_shift_or_alloc = (
+            DriverShift.objects.filter(Q(schedule=locked_instance) | Q(allocation__schedule=locked_instance)).exists()
+            or ScheduleTruckAllocation.objects.filter(schedule=locked_instance).exists()
+            or CrewShift.objects.filter(Q(schedule=locked_instance) | Q(allocation__schedule=locked_instance)).exists()
+            or TruckReplacementRequest.objects.filter(schedule=locked_instance).exists()
+        )
+        if has_shift_or_alloc:
+            return Response(
+                {
+                    'error': (
+                        'Cannot delete a schedule with existing truck allocations, shifts, or replacement requests. '
+                        'Cancel or mark the schedule unavailable instead.'
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        before_snapshot = capture_schedule_snapshot(locked_instance)
+        try:
+            response = super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            transaction.set_rollback(True)
+            return Response(
+                {'error': 'Schedule is referenced by protected operational records and cannot be deleted.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        if before_snapshot and before_snapshot['is_available'] and before_snapshot['barangay_ids']:
+            dispatch_schedule_cancellation_notifications(
+                schedule_pk=locked_instance.pk,
+                barangay_ids=before_snapshot['barangay_ids'],
+                actor=request.user,
+            )
+
+        return response
+
+    @action(detail=True, methods=['get'], url_path='resolve-team')
+    def resolve_team(self, request, pk=None):
+        from .allocation_service import AllocationService
+        from .serializers import SanitationTeamSerializer
+        schedule = self.get_object()
+        date_str = request.query_params.get('date')
+        target_date = parse_date(date_str) if date_str else timezone.localdate()
+        try:
+            team = AllocationService.resolve_schedule_team(schedule_id=schedule.id, target_date=target_date)
+            return Response(SanitationTeamSerializer(team).data if team else None, status=status.HTTP_200_OK)
+        except DjangoValidationError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='set-default-team', permission_classes=[IsAdminRole])
+    def set_default_team(self, request, pk=None):
+        from .allocation_service import AllocationService
+        from .team_service import ActiveShiftConflictError
+        team_id = request.data.get('team_id')
+        if not team_id:
+            return Response({'error': 'team_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            schedule = AllocationService.set_schedule_default_team(
+                schedule_id=int(pk),
+                team_id=int(team_id),
+            )
+            return Response(CollectionScheduleSerializer(schedule).data, status=status.HTTP_200_OK)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError, TypeError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    @action(detail=True, methods=['post'], url_path='create-override', permission_classes=[IsAdminRole])
+    def create_override(self, request, pk=None):
+        from .allocation_service import AllocationService
+        from .serializers import ScheduleTeamOverrideSerializer
+        from .team_service import ActiveShiftConflictError
+        effective_date_str = request.data.get('effective_date')
+        team_id = request.data.get('team_id')
+        reason = request.data.get('reason', '')
+        if not effective_date_str or not team_id:
+            return Response({'error': 'effective_date and team_id are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        eff_date = parse_date(effective_date_str)
+        if not eff_date:
+            return Response({'error': 'Invalid date format.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            override = AllocationService.create_schedule_override(
+                schedule_id=int(pk),
+                effective_date=eff_date,
+                team_id=int(team_id),
+                reason=reason,
+                created_by=request.user,
+            )
+            return Response(ScheduleTeamOverrideSerializer(override).data, status=status.HTTP_201_CREATED)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='allocate-truck', permission_classes=[permissions.IsAuthenticated, IsAdminOrAssignedDumpsiteOperator])
+    def allocate_truck(self, request, pk=None):
+        from django.core.exceptions import PermissionDenied
+        from .allocation_service import AllocationService
+        from .serializers import ScheduleTruckAllocationSerializer
+        from .team_service import ActiveShiftConflictError
+        from .truck_service import TruckService
+        schedule = CollectionSchedule.objects.filter(pk=pk).first()
+        if not schedule:
+            return Response({'error': f'Schedule #{pk} not found.'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            TruckService.require_admin_or_facility_operator(request.user, schedule=schedule)
+        except PermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+
+        allocation_date_str = request.data.get('allocation_date')
+        truck_id = request.data.get('truck_id')
+        team_id = request.data.get('team_id')
+        if not allocation_date_str or not truck_id:
+            return Response({'error': 'allocation_date and truck_id are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            truck_id_int = int(truck_id)
+        except (TypeError, ValueError):
+            return Response({'error': 'Invalid truck_id.'}, status=status.HTTP_400_BAD_REQUEST)
+        truck_obj = Truck.objects.filter(pk=truck_id_int).first()
+        if not truck_obj:
+            return Response({'error': f'Truck #{truck_id_int} not found.'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            TruckService.require_admin_or_facility_operator(request.user, schedule=schedule, truck=truck_obj)
+        except PermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+
+        alloc_date = parse_date(allocation_date_str)
+        if not alloc_date:
+            return Response({'error': 'Invalid date format.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            allocation = AllocationService.allocate_truck_for_schedule(
+                schedule_id=int(pk),
+                allocation_date=alloc_date,
+                truck_id=truck_id_int,
+                team_id=int(team_id) if team_id else None,
+                allocated_by=request.user,
+            )
+            return Response(ScheduleTruckAllocationSerializer(allocation).data, status=status.HTTP_201_CREATED)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
 
 class RouteAssignmentViewSet(viewsets.ModelViewSet):
     queryset = RouteAssignment.objects.all()
@@ -471,7 +1317,7 @@ class RouteAssignmentViewSet(viewsets.ModelViewSet):
             'message': 'No route assigned for today',
         }, status=status.HTTP_200_OK)
 
-class PickupStatusViewSet(viewsets.ModelViewSet):
+class PickupStatusViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = PickupStatus.objects.all()
     serializer_class = PickupStatusSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -483,18 +1329,66 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
             .select_related('driver', 'schedule', 'schedule__truck')
         )
 
-        user = self.request.user
+        user = getattr(self.request, 'user', None)
+        if not user or not user.is_authenticated:
+            return qs.none()
+
         params = self.request.query_params
-
         schedule_id = params.get('schedule_id')
-        if schedule_id:
-            qs = qs.filter(schedule_id=schedule_id)
-
         driver_id = params.get('driver_id')
-        if driver_id:
-            qs = qs.filter(driver_id=driver_id)
-        elif getattr(user, 'role', None) == 'driver':
+
+        if is_admin_user(user):
+            if schedule_id:
+                try:
+                    qs = qs.filter(schedule_id=int(schedule_id))
+                except (TypeError, ValueError):
+                    return qs.none()
+            if driver_id:
+                try:
+                    qs = qs.filter(driver_id=int(driver_id))
+                except (TypeError, ValueError):
+                    return qs.none()
+        elif getattr(user, 'role', None) == UserRole.DRIVER:
             qs = qs.filter(driver=user)
+            if schedule_id:
+                try:
+                    qs = qs.filter(schedule_id=int(schedule_id))
+                except (TypeError, ValueError):
+                    return qs.none()
+            if driver_id:
+                try:
+                    qs = qs.filter(driver_id=int(driver_id))
+                except (TypeError, ValueError):
+                    return qs.none()
+        elif getattr(user, 'role', None) == UserRole.WATCHER:
+            if schedule_id:
+                try:
+                    qs = qs.filter(schedule_id=int(schedule_id))
+                except (TypeError, ValueError):
+                    return qs.none()
+            if driver_id:
+                try:
+                    qs = qs.filter(driver_id=int(driver_id))
+                except (TypeError, ValueError):
+                    return qs.none()
+
+            from .team_service import filter_watcher_authorized_schedule_dates
+            today = timezone.localdate()
+            schedule_ids = list(
+                qs.filter(schedule_id__isnull=False)
+                .values_list('schedule_id', flat=True)
+                .distinct()
+            )
+            authorized_pairs = filter_watcher_authorized_schedule_dates(
+                user,
+                [(sid, today) for sid in schedule_ids],
+            )
+            authorized_schedule_ids = [sid for sid, _ in authorized_pairs]
+            if not authorized_schedule_ids:
+                return qs.none()
+            qs = qs.filter(schedule_id__in=authorized_schedule_ids)
+        else:
+            return qs.none()
 
         updated_after = params.get('updated_after')
         if updated_after:
@@ -753,6 +1647,11 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
         POST /api/driver/stops/collect/
         Form fields: schedule_id, stop_order, photo, note, lat, lng, collected_at
         """
+        if getattr(request.user, 'role', None) != UserRole.DRIVER:
+            return Response(
+                {'error': 'Only Drivers may submit collection proof.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         schedule_id  = request.data.get('schedule_id')
         stop_order   = request.data.get('stop_order')
         photo        = request.FILES.get('photo')
@@ -893,6 +1792,280 @@ class PickupStatusViewSet(viewsets.ModelViewSet):
             'collected_at': ps.collected_at,
         }, status=status.HTTP_201_CREATED)
 
+def is_dumpsite_base_marker(wp, dumpsite):
+    """
+    Returns True if waypoint `wp` explicitly or geographically represents the assigned dumpsite.
+    Approved Decisions 1 & 2:
+    - schedule.dumpsite is the authoritative operational base.
+    - Waypoint index 0 is a collection stop unless an explicit base marker or verified coordinate
+      match identifies it as the assigned Dumpsite.
+    - Treat the 50m Dumpsite coordinate comparison as a legacy base-marker heuristic, not sufficient
+      grounds to discard a legitimate resident stop without checking route identity and context.
+    """
+    if not isinstance(wp, dict):
+        return False
+
+    wp_type = str(wp.get('type') or '').strip().lower()
+    wp_role = str(wp.get('role') or '').strip().lower()
+    is_base_flag = bool(wp.get('is_base'))
+    if is_base_flag or wp_type in ('base', 'dumpsite', 'depot') or wp_role in ('origin', 'base', 'dumpsite'):
+        return True
+
+    label = str(wp.get('label') or wp.get('name') or wp.get('address') or '').strip().lower()
+    is_base_label = any(k in label for k in ('base depot', 'depot', 'dumpsite', 'staging base')) or label == 'base' or label.startswith('base ')
+
+    # Explicit base label without resident stop identity
+    if is_base_label and not wp.get('stop_id') and not wp.get('barangay_id'):
+        return True
+
+    # Coordinate match with dumpsite (within 50m) as heuristic
+    if dumpsite and dumpsite.latitude is not None and dumpsite.longitude is not None:
+        try:
+            w_lat = float(wp['lat'])
+            w_lng = float(wp['lng'])
+            d_lat = float(dumpsite.latitude)
+            d_lng = float(dumpsite.longitude)
+            dist_to_dumpsite = haversine(w_lat, w_lng, d_lat, d_lng)
+            if dist_to_dumpsite <= 50.0:
+                if not wp.get('stop_id') and not wp.get('barangay_id'):
+                    return True
+                if is_base_label:
+                    return True
+                if dist_to_dumpsite <= 10.0 and not wp.get('stop_id'):
+                    return True
+        except (ValueError, KeyError, TypeError):
+            pass
+
+    return False
+
+
+def resolve_eligible_collection_stops(shift, schedule):
+    """
+    Resolves all valid, eligible collection stops for a schedule during an active shift.
+    - Fails closed if schedule.dumpsite is missing or lacks valid coordinates.
+    - Evaluates waypoints (including index 0 if not a confirmed base marker).
+    - Matches PickupStatus and StopValidation records by schedule and stop_order (and stop_id).
+    - Rejects conflicting stop_ids and duplicate records.
+    - Excludes completed, verified, and empty stops.
+    - Excludes missed/failed stops unless shift.is_extended_mode is True.
+    - Includes PENDING_INSPECTION and READY_FOR_COLLECTION stops.
+    - Resolves target barangay: sole barangay fallback if schedule has 1 barangay;
+      multi-barangay schedule missing/invalid stop barangay fails closed for that stop.
+    - Missing status records default to pending if waypoint is valid.
+    """
+    dumpsite = getattr(schedule, 'dumpsite', None)
+    if not dumpsite or dumpsite.latitude is None or dumpsite.longitude is None:
+        logger.warning(
+            "resolve_eligible_collection_stops: Schedule pk=%s missing or invalid assigned dumpsite; failing closed.",
+            getattr(schedule, 'pk', None)
+        )
+        return []
+
+    waypoints = getattr(schedule, 'waypoints', None) or []
+    if not waypoints:
+        return []
+
+    from watcher.models import StopValidation, StopValidationStatus
+    today = timezone.localdate()
+
+    # Pre-fetch PickupStatus records for schedule
+    pickups_by_order = {}
+    pickups_duplicate_orders = set()
+    for ps in PickupStatus.objects.filter(schedule=schedule):
+        if ps.stop_order in pickups_by_order:
+            pickups_duplicate_orders.add(ps.stop_order)
+        else:
+            pickups_by_order[ps.stop_order] = ps
+
+    # Pre-fetch StopValidation records for schedule and today
+    validations_by_order = {}
+    validations_duplicate_orders = set()
+    for sv in StopValidation.objects.filter(schedule=schedule, collection_date=today):
+        if sv.stop_order in validations_by_order:
+            validations_duplicate_orders.add(sv.stop_order)
+        else:
+            validations_by_order[sv.stop_order] = sv
+
+    all_schedule_barangays = {b.id: b for b in schedule.barangays.all()}
+    single_barangay = list(all_schedule_barangays.values())[0] if len(all_schedule_barangays) == 1 else None
+    is_extended = getattr(shift, 'is_extended_mode', False)
+
+    eligible_stops = []
+    for idx, wp in enumerate(waypoints):
+        if not isinstance(wp, dict):
+            continue
+
+        try:
+            lat = float(wp['lat'])
+            lng = float(wp['lng'])
+        except (ValueError, KeyError, TypeError):
+            continue  # Invalid coordinates
+
+        # Determine stop_order
+        wp_order = wp.get('stop_order')
+        if wp_order is not None:
+            try:
+                order = int(wp_order)
+            except (ValueError, TypeError):
+                order = idx
+        else:
+            order = idx
+
+        # Exclude confirmed Dumpsite base marker
+        if is_dumpsite_base_marker(wp, dumpsite):
+            continue
+
+        # Check for duplicate records (fail closed for this stop)
+        if order in pickups_duplicate_orders or order in validations_duplicate_orders:
+            logger.warning(
+                "resolve_eligible_collection_stops: Duplicate records for schedule pk=%s stop_order=%s; failing closed.",
+                schedule.pk, order
+            )
+            continue
+
+        wp_stop_id = str(wp.get('stop_id') or '').strip()
+        ps = pickups_by_order.get(order)
+        sv = validations_by_order.get(order)
+
+        # Check for ID conflicts (fail closed for this stop)
+        if ps and ps.stop_id and wp_stop_id and str(ps.stop_id).strip() != wp_stop_id:
+            logger.warning(
+                "resolve_eligible_collection_stops: Conflicting stop_id in PickupStatus for schedule pk=%s stop_order=%s; failing closed.",
+                schedule.pk, order
+            )
+            continue
+        if sv and sv.stop_id and wp_stop_id and str(sv.stop_id).strip() != wp_stop_id:
+            logger.warning(
+                "resolve_eligible_collection_stops: Conflicting stop_id in StopValidation for schedule pk=%s stop_order=%s; failing closed.",
+                schedule.pk, order
+            )
+            continue
+
+        # Resolve barangay
+        wp_bid = wp.get('barangay_id')
+        resolved_brgy = None
+        if wp_bid is not None:
+            try:
+                resolved_brgy = all_schedule_barangays.get(int(wp_bid))
+            except (ValueError, TypeError):
+                resolved_brgy = None
+            if not resolved_brgy:
+                # Invalid barangay ID; fail closed
+                continue
+        else:
+            if single_barangay is not None:
+                resolved_brgy = single_barangay
+            else:
+                # Multi-barangay schedule with missing barangay ID: fail closed!
+                continue
+
+        # Exclusion checks based on status
+        if ps and ps.status == 'COMPLETED':
+            continue
+        if sv and sv.current_status in (StopValidationStatus.COLLECTION_REPORTED, StopValidationStatus.VERIFIED_COLLECTED):
+            continue
+        if sv and sv.current_status == StopValidationStatus.EMPTY_STOP:
+            continue
+
+        if not is_extended:
+            if ps and ps.status in ('DRIVER_MISSED', 'FAILED'):
+                continue
+            if sv and sv.current_status == StopValidationStatus.COLLECTION_DISPUTED:
+                continue
+
+        label = wp.get('label') or wp.get('name') or wp.get('address') or ''
+        eligible_stops.append({
+            'stop_order': order,
+            'stop_id': wp_stop_id,
+            'lat': lat,
+            'lng': lng,
+            'barangay': resolved_brgy,
+            'label': label,
+        })
+
+    # Sort deterministically by stop_order ASC
+    eligible_stops.sort(key=lambda s: s['stop_order'])
+    return eligible_stops
+
+
+def evaluate_and_dispatch_truck_near(shift, schedule, driver_lat, driver_lng, last_location):
+    """
+    Evaluates approaching proximity for active collection route and calls notify_truck_near.
+    - Preserves deterministic target selection and stop-invariant approach vector.
+    - Gated by detection radius (350m), immediate radius (75m), and approach delta (15m).
+    """
+    eligible_stops = resolve_eligible_collection_stops(shift, schedule)
+    if not eligible_stops:
+        return
+
+    DETECTION_RADIUS_M = 350.0
+    IMMEDIATE_RADIUS_M = 75.0
+    APPROACH_DELTA_M = 15.0
+    MAX_HISTORY_AGE_S = 180.0
+
+    # Calculate distance from current driver position to each eligible stop
+    stops_in_detection_zone = []
+    for s in eligible_stops:
+        d_curr = haversine(driver_lat, driver_lng, s['lat'], s['lng'])
+        if d_curr <= DETECTION_RADIUS_M:
+            stops_in_detection_zone.append((d_curr, s))
+
+    if not stops_in_detection_zone:
+        return  # No eligible stop within 350m
+
+    # Deterministic priority: lowest stop_order within detection zone
+    stops_in_detection_zone.sort(key=lambda item: item[1]['stop_order'])
+    d_curr, target_stop = stops_in_detection_zone[0]
+
+    s_lat = target_stop['lat']
+    s_lng = target_stop['lng']
+
+    should_dispatch = False
+
+    if not last_location:
+        # First ping of shift: permit dispatch only if already at immediate doorstep
+        if d_curr <= IMMEDIATE_RADIUS_M:
+            should_dispatch = True
+    else:
+        # Check staleness
+        now = timezone.now()
+        age_s = (now - last_location.timestamp).total_seconds()
+        if age_s > MAX_HISTORY_AGE_S:
+            # Stale history: permit only if within immediate radius
+            if d_curr <= IMMEDIATE_RADIUS_M:
+                should_dispatch = True
+        else:
+            # Fresh history: calculate approach delta against the SAME target stop
+            d_prev = haversine(
+                float(last_location.latitude), float(last_location.longitude),
+                s_lat, s_lng
+            )
+            delta_d = d_prev - d_curr  # Positive when closing in
+
+            if d_curr <= IMMEDIATE_RADIUS_M:
+                # Doorstep arrival: permit if not rapidly retreating (> 10m away)
+                if delta_d >= -10.0:
+                    should_dispatch = True
+            else:
+                # Outer detection zone (75m - 350m): require >= 15m approach
+                if delta_d >= APPROACH_DELTA_M:
+                    should_dispatch = True
+
+    if should_dispatch:
+        from notifications.services import notify_truck_near
+        notify_truck_near(
+            shift=shift,
+            schedule=schedule,
+            stop_order=target_stop['stop_order'],
+            stop_lat=s_lat,
+            stop_lng=s_lng,
+            driver_lat=driver_lat,
+            driver_lng=driver_lng,
+            target_barangay=target_stop['barangay'],
+            stop_label=target_stop['label'],
+        )
+
+
 class TruckLocationViewSet(viewsets.ModelViewSet):
     queryset = TruckLocation.objects.all().order_by('-timestamp')
     serializer_class = TruckLocationSerializer
@@ -913,82 +2086,51 @@ class TruckLocationViewSet(viewsets.ModelViewSet):
         lng = serializer.validated_data['longitude']
         accuracy = serializer.validated_data.get('accuracy')  # metres, can be None
 
-        ACCURACY_THRESHOLD = 150  # metres — only gate TruckLocation history rows, NOT the live map position
+        GPS_SHIFT_ACCURACY_THRESHOLD = getattr(settings, 'GPS_SHIFT_ACCURACY_THRESHOLD', 150)
+        TRUCK_NEAR_ACCURACY_THRESHOLD = getattr(settings, 'TRUCK_NEAR_ACCURACY_THRESHOLD', 100)
 
-        # 2. Always update the live map position (current_latitude / current_longitude)
-        #    so the truck marker always appears on the citizen map — even if GPS accuracy
-        #    is poor (common on mobile / indoors). Accuracy-gating is applied to the
-        #    TruckLocation history write below, not to the live position marker.
+        # ── 1. GPS Shift Accuracy Gate ────────────────────────────────────────
+        # Pings with accuracy > 150m must NOT mutate shift coordinates, write TruckLocation,
+        # or trigger truck-near notifications.
+        if accuracy is not None and accuracy > GPS_SHIFT_ACCURACY_THRESHOLD:
+            return Response({'skipped': True, 'reason': 'poor_accuracy', 'accuracy': accuracy}, status=200)
+
+        # ── 2. Retrieve previous observation and check movement ───────────────
         MIN_MOVEMENT_M = 10
-        last = (
+        last_location = (
             TruckLocation.objects
             .filter(shift=active_shift)
             .order_by('-timestamp')
-            .values('latitude', 'longitude')
             .first()
         )
 
-        # Always write live position so the citizen map always sees the truck
+        _schedule = active_shift.schedule
+
+        # Check if truck is within 75m immediate radius of an eligible target stop
+        is_immediate_eligible = False
+        if _schedule and active_shift.status == 'shiftroute' and active_shift.op_status == 'on_route':
+            eligible_stops = resolve_eligible_collection_stops(active_shift, _schedule)
+            for c_stop in eligible_stops:
+                if haversine(float(lat), float(lng), c_stop['lat'], c_stop['lng']) <= 75.0:
+                    is_immediate_eligible = True
+                    break
+
+        if last_location:
+            dist_moved = haversine(
+                float(last_location.latitude), float(last_location.longitude),
+                float(lat), float(lng)
+            )
+            # Sub-10m skip applies UNLESS truck is at the doorstep of an eligible stop
+            if dist_moved < MIN_MOVEMENT_M and not is_immediate_eligible:
+                return Response({'skipped': True, 'reason': 'no_movement'}, status=200)
+
+        # ── 3. Update authoritative shift coordinates and persist history ─────
         active_shift.current_latitude = lat
         active_shift.current_longitude = lng
         active_shift.last_location_update = timezone.now()
         active_shift.save(update_fields=[
             'current_latitude', 'current_longitude', 'last_location_update'
         ])
-
-        if last:
-            dist = haversine(
-                float(last['latitude']), float(last['longitude']),
-                float(lat), float(lng)
-            )
-            if dist < MIN_MOVEMENT_M:
-                return Response({'skipped': True, 'reason': 'no_movement'}, status=200)
-
-        # ── TRUCK_NEAR check ──────────────────────────────────────────────────
-        # Runs on every qualifying ping. The service handles distance + dedup
-        # internally — this call is always safe and non-blocking.
-        try:
-            from notifications.services import notify_truck_near
-
-            _schedule = active_shift.schedule
-            if not _schedule:
-                logger.warning(
-                    "Active shift pk=%s has no assigned schedule; skipping truck-near checks.",
-                    active_shift.pk,
-                )
-            elif _schedule.waypoints:
-                # Find the next uncompleted stop to check proximity against
-                from watcher.models import StopValidation, StopValidationStatus
-                today_date = timezone.localdate()
-                next_stop  = (
-                    StopValidation.objects
-                    .filter(
-                        schedule=_schedule,
-                        collection_date=today_date,
-                        current_status=StopValidationStatus.READY_FOR_COLLECTION,
-                    )
-                    .order_by('stop_order')
-                    .first()
-                )
-                if next_stop:
-                    wp = _schedule.waypoints[next_stop.stop_order] if next_stop.stop_order < len(_schedule.waypoints) else None
-                    if wp and 'lat' in wp and 'lng' in wp:
-                        notify_truck_near(
-                            shift=active_shift,
-                            schedule=_schedule,
-                            stop_order=next_stop.stop_order,
-                            stop_lat=float(wp['lat']),
-                            stop_lng=float(wp['lng']),
-                            driver_lat=float(lat),
-                            driver_lng=float(lng),
-                        )
-        except Exception:
-            pass  # TRUCK_NEAR is best-effort — never block GPS recording
-
-        # Only write a TruckLocation history row when accuracy is good enough.
-        # The live position (current_latitude) was already saved above unconditionally.
-        if accuracy is not None and accuracy > ACCURACY_THRESHOLD:
-            return Response({'skipped': True, 'reason': 'poor_accuracy', 'accuracy': accuracy}, status=200)
 
         location = TruckLocation.objects.create(
             driver=driver,
@@ -998,6 +2140,30 @@ class TruckLocationViewSet(viewsets.ModelViewSet):
             longitude=lng,
             accuracy=accuracy,
         )
+
+        # ── 4. TRUCK_NEAR evaluation ──────────────────────────────────────────
+        try:
+            if not _schedule:
+                logger.warning(
+                    "Active shift pk=%s has no assigned schedule; skipping truck-near checks.",
+                    active_shift.pk,
+                )
+            elif active_shift.status != 'shiftroute' or active_shift.op_status != 'on_route':
+                pass  # Alert gated on active route collection phase & on_route op_status
+            elif not getattr(_schedule, 'is_available', True) or getattr(_schedule, 'status', None) in ('CANCELLED', 'COMPLETED'):
+                pass  # Schedule cancelled or unavailable
+            elif accuracy is not None and accuracy > TRUCK_NEAR_ACCURACY_THRESHOLD:
+                pass  # 101m - 150m: accepted for shift tracking, but too coarse for push alerts
+            else:
+                evaluate_and_dispatch_truck_near(
+                    shift=active_shift,
+                    schedule=_schedule,
+                    driver_lat=float(lat),
+                    driver_lng=float(lng),
+                    last_location=last_location,
+                )
+        except Exception:
+            logger.exception("TRUCK_NEAR evaluation failed unexpectedly for shift pk=%s", active_shift.pk)
 
         return Response(TruckLocationSerializer(location).data, status=status.HTTP_201_CREATED)
 
@@ -1018,7 +2184,103 @@ class TruckCrewAssignmentViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action == 'my_assignment':
             return [permissions.IsAuthenticated()]
-        return [IsAppAdmin()]
+        return [IsAdminRole()]
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            with transaction.atomic():
+                instance = serializer.save(created_by=request.user)
+            return Response(self.get_serializer(instance).data, status=status.HTTP_201_CREATED)
+        except IntegrityError:
+            return Response(
+                {'error': 'An active TruckCrewAssignment already exists for this truck, date, and schedule.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+    def update(self, request, *args, **kwargs):
+        from dumpsite.models import WasteDelivery
+        partial = kwargs.pop('partial', False)
+        try:
+            with transaction.atomic():
+                instance = (
+                    TruckCrewAssignment.objects.select_for_update(of=('self',))
+                    .select_related('truck', 'driver', 'schedule')
+                    .filter(pk=kwargs.get('pk'))
+                    .first()
+                )
+                if not instance:
+                    self.get_object()
+
+                active_shift_q = Q(is_active=True, truck=instance.truck)
+                if instance.schedule_id:
+                    active_shift_q &= Q(schedule_id=instance.schedule_id)
+                elif instance.driver_id:
+                    active_shift_q &= Q(driver_id=instance.driver_id)
+                if DriverShift.objects.filter(active_shift_q).exists():
+                    return Response(
+                        {'error': 'Cannot modify TruckCrewAssignment while a matching DriverShift is active.'},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+
+                serializer = self.get_serializer(instance, data=request.data, partial=partial)
+                serializer.is_valid(raise_exception=True)
+                validated = serializer.validated_data
+                structural_change = (
+                    ('truck' in validated and validated['truck'].id != instance.truck_id)
+                    or ('driver' in validated and getattr(validated['driver'], 'id', None) != instance.driver_id)
+                    or ('schedule' in validated and getattr(validated['schedule'], 'id', None) != instance.schedule_id)
+                    or ('date' in validated and validated['date'] != instance.date)
+                    or ('is_active' in validated and instance.is_active and not validated['is_active'])
+                )
+                if structural_change and WasteDelivery.objects.filter(crew_assignment=instance).exists():
+                    return Response(
+                        {'error': 'Cannot structurally modify a TruckCrewAssignment referenced by WasteDelivery records.'},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+
+                updated = serializer.save()
+            return Response(self.get_serializer(updated).data, status=status.HTTP_200_OK)
+        except IntegrityError:
+            return Response(
+                {'error': 'An active TruckCrewAssignment already exists for this truck, date, and schedule.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        from dumpsite.models import WasteDelivery
+        with transaction.atomic():
+            instance = (
+                TruckCrewAssignment.objects.select_for_update(of=('self',))
+                .select_related('truck', 'driver', 'schedule')
+                .filter(pk=kwargs.get('pk'))
+                .first()
+            )
+            if not instance:
+                self.get_object()
+
+            active_shift_q = Q(is_active=True, truck=instance.truck)
+            if instance.schedule_id:
+                active_shift_q &= Q(schedule_id=instance.schedule_id)
+            elif instance.driver_id:
+                active_shift_q &= Q(driver_id=instance.driver_id)
+            if DriverShift.objects.filter(active_shift_q).exists():
+                return Response(
+                    {'error': 'Cannot delete TruckCrewAssignment while a matching DriverShift is active.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            if WasteDelivery.objects.filter(crew_assignment=instance).exists():
+                return Response(
+                    {'error': 'Cannot delete TruckCrewAssignment referenced by historical WasteDelivery records.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            instance.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=['get'], url_path='my-assignment')
     def my_assignment(self, request):
@@ -1114,30 +2376,98 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
         'end_shift',
         'update_status',
         'extended_mode',
+        'preallocated_truck',
+        'my_team_roster',
+        'my_attendance_history',
+        'attendance',
+        'attendance_correction',
+        'submit_deployment_attendance',
+        'correct_deployment_attendance',
+        'request_truck_replacement',
+        'roster_snapshot',
     })
 
     def get_permissions(self):
         # Allow public read access to endpoints used by the citizen map
         if self.action in self.PUBLIC_READ_ACTIONS and self.request.method in permissions.SAFE_METHODS:
             return [permissions.AllowAny()]
+        user = getattr(self.request, 'user', None)
+        if (
+            user
+            and user.is_authenticated
+            and not is_admin_user(user)
+            and getattr(user, 'role', None) == UserRole.DUMPSITE
+        ):
+            if self.action in ('list', 'retrieve', 'my_attendance_history') and self.request.method in permissions.SAFE_METHODS:
+                return [permissions.IsAuthenticated()]
+            return [IsAdminRole()]
         if self.action in self.ADMIN_ONLY_ACTIONS:
-            return [IsAppAdmin()]
+            return [IsAdminRole()]
         if self.action not in self.AUTHENTICATED_ACTIONS:
             if self.request.method == 'OPTIONS':
                 return [permissions.IsAuthenticated()]
-            return [IsAppAdmin()]
+            return [IsAdminRole()]
         return super().get_permissions()
 
     def get_queryset(self):
-        qs = super().get_queryset().select_related('driver', 'truck', 'schedule').order_by('-started_at')
+        qs = super().get_queryset().select_related('driver', 'truck', 'schedule', 'allocation', 'allocation__schedule').order_by('-started_at')
         user = getattr(self.request, 'user', None)
         if not user or not user.is_authenticated:
             return qs.none()
         if is_admin_user(user):
             return qs
+        if getattr(user, 'role', None) == UserRole.DUMPSITE:
+            from .truck_service import TruckService
+            fac_id = TruckService.get_operator_dumpsite_id(user)
+            if not fac_id:
+                return qs.none()
+            return qs.filter(
+                Q(schedule__dumpsite_id=fac_id) | Q(allocation__schedule__dumpsite_id=fac_id)
+            ).distinct()
+        if getattr(user, 'role', None) == UserRole.WATCHER:
+            candidate_qs = qs.filter(
+                Q(crew_shift__watcher_shift__watcher=user)
+                | Q(crew_shift__team_leader=user)
+                | Q(
+                    schedule__default_team__memberships__worker__user=user,
+                    schedule__default_team__memberships__role_in_team='leader',
+                    schedule__default_team__memberships__is_active=True,
+                )
+                | Q(
+                    schedule__team_overrides__team__memberships__worker__user=user,
+                    schedule__team_overrides__team__memberships__role_in_team='leader',
+                    schedule__team_overrides__team__memberships__is_active=True,
+                )
+                | Q(
+                    allocation__team__memberships__worker__user=user,
+                    allocation__team__memberships__role_in_team='leader',
+                    allocation__team__memberships__is_active=True,
+                )
+            ).select_related('allocation', 'schedule', 'crew_shift', 'crew_shift__watcher_shift').distinct()
+
+            from .team_service import resolve_deployment_team_leader
+            allowed_ids = []
+            for s in candidate_qs:
+                cs = getattr(s, 'crew_shift', None)
+                if cs and (cs.team_leader_id == user.id or (cs.watcher_shift_id and cs.watcher_shift.watcher_id == user.id)):
+                    allowed_ids.append(s.id)
+                    continue
+                if s.schedule_id:
+                    svc_date = (
+                        s.allocation.allocation_date
+                        if s.allocation_id and s.allocation
+                        else (timezone.localdate(s.started_at) if s.started_at else timezone.localdate())
+                    )
+                    try:
+                        resolved = resolve_deployment_team_leader(s.schedule, svc_date)
+                        if resolved.leadership_mode == 'watcher' and resolved.user.id == user.id:
+                            allowed_ids.append(s.id)
+                    except DjangoValidationError:
+                        continue
+            return qs.filter(id__in=allowed_ids)
         return qs.filter(driver=user)
 
-    @action(detail=False, methods=['post'], url_path='dev-reset', permission_classes=[IsAppAdmin])
+    @action(detail=False, methods=['post'], url_path='dev-reset', permission_classes=[IsAdminRole])
     def dev_reset(self, request):
         if not is_admin_user(request.user):
             return Response(
@@ -1154,7 +2484,7 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
             requested_driver_id = request.data.get('driver_id')
 
             if requested_shift_id is not None:
-                shift = DriverShift.objects.select_for_update().select_related('driver', 'schedule').filter(
+                shift = DriverShift.objects.select_for_update(of=('self',)).select_related('driver', 'schedule').filter(
                     pk=requested_shift_id
                 ).first()
                 if shift:
@@ -1165,7 +2495,7 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
                     resolved_driver = get_user_model().objects.filter(pk=requested_driver_id).first()
                     if resolved_driver:
                         target_driver = resolved_driver
-                shift = DriverShift.objects.select_for_update().select_related('driver', 'schedule').filter(
+                shift = DriverShift.objects.select_for_update(of=('self',)).select_related('driver', 'schedule').filter(
                     driver=target_driver, is_active=True
                 ).first()
 
@@ -1237,6 +2567,11 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
                     is_active=False,
                     started_at__gte=start_dt,
                     started_at__lt=end_dt,
+                ).exclude(
+                    Q(roster_snapshots__isnull=False)
+                    | Q(attendance_records__isnull=False)
+                    | Q(crew_shift__attendance_records__isnull=False)
+                    | Q(crew_shift__roster_snapshots__isnull=False)
                 ).delete()
 
         return Response({'status': 'reset', 'shift_id': shift.id if shift else None, 'phase': target_phase})
@@ -1249,19 +2584,8 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
         now = timezone.now()
         staleness_cutoff = now - timedelta(hours=getattr(settings, 'SHIFT_STALE_HOURS', 6))
 
-        # Auto-close any shifts abandoned for more than SHIFT_STALE_HOURS
-        from django.db.models import F
-        from django.db.models.functions import Coalesce
-        DriverShift.objects.filter(
-            Q(last_location_update__lt=staleness_cutoff) | Q(last_location_update__isnull=True, started_at__lt=staleness_cutoff),
-            driver=request.user,
-            ended_at__isnull=True,
-        ).update(
-            ended_at=Coalesce(F('last_location_update'), F('started_at')),
-            status='end_shift',
-            is_active=False,
-            end_reason='heartbeat_timeout',
-        )
+        # Auto-close any shifts abandoned for more than SHIFT_STALE_HOURS via coordinated lifecycle service
+        _sweep_stale_shifts_for(driver=request.user)
 
         # Now look for a genuinely active shift
         shift = DriverShift.objects.filter(
@@ -1278,6 +2602,9 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
             )
             if not truck and hasattr(request.user, 'assigned_trucks'):
                 truck = request.user.assigned_trucks.filter(status='active').first()
+
+            if truck is not None:
+                _sweep_stale_shifts_for(truck=truck)
 
             previous_shifts_qs = _get_truck_previous_shifts_today(
                 truck=truck,
@@ -1300,7 +2627,7 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
             truck_active_shift = (
                 DriverShift.objects.filter(
                     Q(last_location_update__gte=staleness_cutoff) | Q(last_location_update__isnull=True, started_at__gte=staleness_cutoff),
-                    truck=truck,
+                    Q(truck=truck) | Q(allocation__truck=truck),
                     ended_at__isnull=True,
                     is_active=True,
                 )
@@ -1323,6 +2650,10 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
                 can_start_shift = False
                 block_reason = 'no_schedule_today'
                 block_message = 'You have no scheduled collection duty for today.'
+            elif not schedule.dumpsite_id:
+                can_start_shift = False
+                block_reason = 'missing_dumpsite'
+                block_message = f"Schedule #{schedule.id} has no assigned dumpsite facility."
             elif truck_active_shift:
                 can_start_shift = False
                 block_reason = 'truck_in_use'
@@ -1342,8 +2673,20 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
                     else "Today's collection shift has already ended."
                 )
 
+            resolved_allocation = None
+            if schedule and scheduled_today:
+                from .allocation_service import AllocationService
+                try:
+                    resolved_allocation = AllocationService.get_preallocated_truck_for_driver(
+                        request.user, target_date=today, schedule_id=schedule.id
+                    )
+                except DjangoValidationError:
+                    resolved_allocation = None
+
             return Response({
                 'active_shift': None,
+                'schedule_id': schedule.id if schedule else None,
+                'allocation': ScheduleTruckAllocationSerializer(resolved_allocation).data if resolved_allocation else None,
                 'previous_shift_today': DriverShiftSerializer(latest_previous_shift).data if latest_previous_shift else None,
                 'truck_previous_shifts_today': DriverShiftSerializer(previous_shifts_qs[:5], many=True).data,
                 'can_start_shift': can_start_shift,
@@ -1384,98 +2727,103 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=True, methods=['patch'], url_path='update-status')
     def update_status(self, request, pk=None):
-        shift = self.get_object()
-        if not is_admin_user(request.user) and shift.driver_id != request.user.id:
-            return Response(
-                {'error': "You do not have permission to update another driver's shift."},
-                status=status.HTTP_403_FORBIDDEN,
+        with transaction.atomic():
+            shift = self.get_object()
+            shift = (
+                DriverShift.objects.select_for_update(of=('self',))
+                .filter(pk=shift.pk)
+                .first()
             )
+            if not shift:
+                return Response({'error': 'Shift not found.'}, status=status.HTTP_404_NOT_FOUND)
+            if not is_admin_user(request.user) and shift.driver_id != request.user.id:
+                return Response(
+                    {'error': "You do not have permission to update another driver's shift."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
-        if not shift.is_active:
-            return Response(
-                {'error': 'No active shift found.', 'code': 'no_active_shift'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            if not shift.is_active:
+                return Response(
+                    {'error': 'No active shift found.', 'code': 'no_active_shift'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
-        RECOGNIZED_PHASES = {
-            'navigate_to_base',
-            'confirm_start',
-            'checkin',
-            'shiftroute',
-            'end_shift',
-        }
+            RECOGNIZED_PHASES = {
+                'navigate_to_base',
+                'confirm_start',
+                'checkin',
+                'shiftroute',
+                'end_shift',
+            }
 
-        VALID_TRANSITIONS = {
-            'navigate_to_base': ['confirm_start', 'end_shift'],
-            'confirm_start':    ['checkin', 'end_shift'],
-            'checkin':          ['shiftroute', 'end_shift'],
-            'shiftroute':       ['end_shift'],
-            'end_shift':        ['end_shift', 'shiftroute'],  # allow re-entry for Extended Mode
-            'assignment':       ['navigate_to_base'],
-        }
+            VALID_TRANSITIONS = {
+                'navigate_to_base': ['confirm_start', 'end_shift'],
+                'confirm_start':    ['checkin', 'end_shift'],
+                'checkin':          ['shiftroute', 'end_shift'],
+                'shiftroute':       ['end_shift'],
+                'end_shift':        ['end_shift', 'shiftroute'],  # allow re-entry for Extended Mode
+                'assignment':       ['navigate_to_base'],
+            }
 
-        # Map each phase → op_status so the live map always shows a meaningful label
-        PHASE_OP_STATUS = {
-            'assignment':       'off_duty',
-            'navigate_to_base': 'heading_to_start',
-            'confirm_start':    'at_base',
-            'checkin':          'checking_in',
-            'shiftroute':       'on_route',
-            'end_shift':        'heading_to_dumpsite',
-        }
+            # Map each phase → op_status so the live map always shows a meaningful label
+            PHASE_OP_STATUS = {
+                'assignment':       'off_duty',
+                'navigate_to_base': 'heading_to_start',
+                'confirm_start':    'at_base',
+                'checkin':          'checking_in',
+                'shiftroute':       'on_route',
+                'end_shift':        'heading_to_dumpsite',
+            }
 
-        new_status = request.data.get('status')
-        current = shift.status
-        end_shift_phase = request.data.get('end_shift_phase')
+            new_status = request.data.get('status')
+            current = shift.status
+            end_shift_phase = request.data.get('end_shift_phase')
 
-        status_changed = new_status is not None and new_status != current
-        phase_changed  = end_shift_phase is not None and end_shift_phase != shift.end_shift_phase
+            status_changed = new_status is not None and new_status != current
+            phase_changed  = end_shift_phase is not None and end_shift_phase != shift.end_shift_phase
 
-        # Only a true no-op when NEITHER the top-level status NOR the sub-phase changed.
-        # Previously this guard fired on `new_status == current`, which silently dropped
-        # every end_shift_phase update after the first (since status is already 'end_shift').
-        if not status_changed and not phase_changed:
+            if not status_changed and not phase_changed:
+                return Response({
+                    'status': current,
+                    'op_status': shift.op_status,
+                    'end_shift_phase': shift.end_shift_phase,
+                })
+
+            update_fields = []
+
+            if status_changed:
+                if new_status not in RECOGNIZED_PHASES:
+                    return Response(
+                        {'error': f'Unrecognized phase status: {new_status}'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                is_dev_skip = bool(request.data.get('dev_skip', False))
+                can_bypass_transitions = (
+                    is_dev_skip
+                    and getattr(settings, 'DEBUG', False)
+                    and is_admin_user(request.user)
+                )
+
+                if not can_bypass_transitions and new_status not in VALID_TRANSITIONS.get(current, []):
+                    return Response(
+                        {'error': f'Invalid transition: {current} → {new_status}'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                shift.status = new_status
+                shift.op_status = PHASE_OP_STATUS.get(new_status, shift.op_status)
+                update_fields += ['status', 'op_status']
+
+            if phase_changed:
+                shift.end_shift_phase = end_shift_phase
+                update_fields.append('end_shift_phase')
+
+            shift.save(update_fields=update_fields)
             return Response({
-                'status': current,
+                'status': shift.status,
                 'op_status': shift.op_status,
                 'end_shift_phase': shift.end_shift_phase,
             })
-
-        update_fields = []
-
-        if status_changed:
-            if new_status not in RECOGNIZED_PHASES:
-                return Response(
-                    {'error': f'Unrecognized phase status: {new_status}'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            is_dev_skip = bool(request.data.get('dev_skip', False))
-            can_bypass_transitions = (
-                is_dev_skip
-                and getattr(settings, 'DEBUG', False)
-                and is_admin_user(request.user)
-            )
-
-            if not can_bypass_transitions and new_status not in VALID_TRANSITIONS.get(current, []):
-                return Response(
-                    {'error': f'Invalid transition: {current} → {new_status}'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            shift.status = new_status
-            shift.op_status = PHASE_OP_STATUS.get(new_status, shift.op_status)
-            update_fields += ['status', 'op_status']
-
-        if phase_changed:
-            shift.end_shift_phase = end_shift_phase
-            update_fields.append('end_shift_phase')
-
-        shift.save(update_fields=update_fields)
-        return Response({
-            'status': shift.status,
-            'op_status': shift.op_status,
-            'end_shift_phase': shift.end_shift_phase,
-        })
 
     @action(detail=True, methods=['post'], url_path='extended_mode')
     def extended_mode(self, request, pk=None):
@@ -1493,7 +2841,7 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
 
         with transaction.atomic():
             shift = (
-                DriverShift.objects.select_for_update()
+                DriverShift.objects.select_for_update(of=('self',))
                 .select_related('schedule')
                 .get(pk=shift.pk)
             )
@@ -1537,22 +2885,662 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
 
             return Response({'status': 'extended_mode_activated'})
 
-    @action(detail=True, methods=['post'], url_path='force-end', permission_classes=[IsAppAdmin])
+    @action(detail=True, methods=['post'], url_path='force-end', permission_classes=[IsAdminRole])
     def force_end(self, request, pk=None):
         if not is_admin_user(request.user):
             return Response({'error': 'Only admins can force-end shifts.'}, status=status.HTTP_403_FORBIDDEN)
-            
+
         shift = self.get_object()
         if not shift.is_active:
             return Response({'error': 'Shift is already inactive.'}, status=status.HTTP_400_BAD_REQUEST)
-            
-        shift.is_active = False
-        shift.status = 'end_shift'
-        shift.end_reason = 'admin_force_ended'
-        shift.ended_at = timezone.now()
-        shift.save(update_fields=['is_active', 'status', 'ended_at', 'end_reason'])
-        
+
+        from .shift_service import ShiftService
+        ShiftService.conclude_shift_atomic(
+            driver_shift_id=shift.id,
+            concluded_by=request.user,
+            end_reason='admin_force_ended',
+        )
+
         return Response({'status': 'force_ended', 'shift_id': shift.id})
+
+    @action(detail=True, methods=['get', 'post'], url_path='attendance')
+    def attendance(self, request, pk=None):
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from .serializers import CrewAttendanceRecordSerializer
+        from .shift_service import ShiftService
+        from .team_service import ActiveShiftConflictError
+        shift = self.get_object()
+        if request.method == 'GET':
+            effective = ShiftService.get_effective_shift_attendance(shift.id)
+            return Response(effective, status=status.HTTP_200_OK)
+
+        attendance_list = request.data.get('attendance', [])
+        if not attendance_list:
+            return Response({'error': 'attendance list cannot be empty.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            records = ShiftService.record_initial_attendance(shift.id, attendance_list, request.user)
+            from .serializers import CrewAttendanceRecordSerializer
+            return Response(CrewAttendanceRecordSerializer(records, many=True).data, status=status.HTTP_201_CREATED)
+        except DjangoPermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except DjangoValidationError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=True, methods=['post'], url_path='attendance-correction')
+    def attendance_correction(self, request, pk=None):
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from .serializers import CrewAttendanceRecordSerializer
+        from .shift_service import ShiftService
+        from .serializers import CrewAttendanceCorrectionSerializer
+        shift = self.get_object()
+        record_id = request.data.get('record_id')
+        corrected_status = request.data.get('corrected_status')
+        reason = request.data.get('reason', '')
+        if not record_id or not corrected_status or not reason:
+            return Response({'error': 'record_id, corrected_status, and reason are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            correction = ShiftService.correct_attendance(
+                attendance_record_id=int(record_id),
+                corrected_status=corrected_status,
+                reason=reason,
+                corrected_by=request.user,
+                driver_shift_id=shift.id,
+            )
+            return Response(CrewAttendanceCorrectionSerializer(correction).data, status=status.HTTP_201_CREATED)
+        except DjangoPermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=True, methods=['get'], url_path='roster-snapshot')
+    def roster_snapshot(self, request, pk=None):
+        shift = self.get_object()
+        snapshot = (
+            ShiftCrewRosterSnapshot.objects.filter(
+                Q(driver_shift=shift) | Q(crew_shift__driver_shift=shift)
+            )
+            .order_by('-snapshot_timestamp', '-id')
+            .first()
+        )
+        if not snapshot:
+            return Response(None, status=status.HTTP_200_OK)
+        from .serializers import ShiftCrewRosterSnapshotSerializer
+        return Response(ShiftCrewRosterSnapshotSerializer(snapshot).data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='preallocated-truck')
+    def preallocated_truck(self, request):
+        driver = request.user
+        from .allocation_service import AllocationService
+        from .serializers import ScheduleTruckAllocationSerializer
+        schedule_id_raw = request.query_params.get('schedule_id')
+        schedule_id = None
+        if schedule_id_raw is not None and str(schedule_id_raw).strip() != '':
+            try:
+                schedule_id = int(schedule_id_raw)
+            except (TypeError, ValueError):
+                return Response({'error': 'Invalid schedule_id parameter.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            alloc = AllocationService.get_preallocated_truck_for_driver(driver, schedule_id=schedule_id)
+        except DjangoValidationError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not alloc:
+            return Response({'has_allocation': False, 'allocation': None}, status=status.HTTP_200_OK)
+        return Response({
+            'has_allocation': True,
+            'allocation': ScheduleTruckAllocationSerializer(alloc).data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='my_team_roster')
+    def my_team_roster(self, request):
+        user = request.user
+        today = timezone.localdate()
+        date_raw = request.query_params.get('date')
+        service_date = today
+        if date_raw:
+            parsed_d = parse_date(str(date_raw))
+            if not parsed_d:
+                return Response({'error': 'Invalid date parameter. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+            service_date = parsed_d
+
+        requested_schedule_id_raw = request.query_params.get('schedule_id')
+        parsed_schedule_id = None
+        if requested_schedule_id_raw is not None:
+            raw_str = str(requested_schedule_id_raw).strip()
+            if not raw_str:
+                return Response({'error': 'Invalid schedule_id parameter.'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                parsed_schedule_id = int(raw_str)
+            except (TypeError, ValueError):
+                return Response({'error': 'Invalid schedule_id parameter.'}, status=status.HTTP_400_BAD_REQUEST)
+            if parsed_schedule_id <= 0:
+                return Response({'error': 'Invalid schedule_id parameter.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from .allocation_service import AllocationService
+        from .shift_service import ShiftService
+
+        active_shift = (
+            DriverShift.objects.filter(driver=user, is_active=True)
+            .select_related(
+                'allocation__team',
+                'crew_shift__team',
+                'crew_shift__attendance_submitted_by',
+                'crew_shift__team_leader',
+                'schedule',
+            )
+            .first()
+        )
+        matching_active_shift = (
+            active_shift
+            if (active_shift and (parsed_schedule_id is None or active_shift.schedule_id == parsed_schedule_id))
+            else None
+        )
+
+        def _empty_roster_response(shift_obj=None):
+            return Response({
+                'has_team': False,
+                'team': None,
+                'team_leader': None,
+                'leader_type': None,
+                'deployment_leader': None,
+                'is_driver_team_leader': False,
+                'has_watcher_assigned': False,
+                'is_watcher_led': False,
+                'can_submit_attendance': False,
+                'driver_shift_id': shift_obj.id if shift_obj else None,
+                'crew_shift_id': None,
+                'crew_members': [],
+                'members': [],
+                'attendance': [],
+                'attendance_records': [],
+                'attendance_submitted': False,
+                'submitted_by': None,
+                'submitted_at': None,
+            }, status=status.HTTP_200_OK)
+
+        effective_team = None
+        prealloc = None
+        if parsed_schedule_id is not None:
+            # Schedule-scoped path: resolve strictly from matching active shift, preallocation, or resolve_schedule_team
+            if matching_active_shift:
+                prealloc = matching_active_shift.allocation
+                crew_shift_from_active = getattr(matching_active_shift, 'crew_shift', None)
+                if crew_shift_from_active and crew_shift_from_active.team_id and crew_shift_from_active.team.is_active:
+                    effective_team = crew_shift_from_active.team
+                elif matching_active_shift.allocation_id and matching_active_shift.allocation.team_id and matching_active_shift.allocation.team.is_active:
+                    effective_team = matching_active_shift.allocation.team
+
+            if prealloc is None:
+                try:
+                    prealloc = AllocationService.get_preallocated_truck_for_driver(
+                        user, target_date=service_date, schedule_id=parsed_schedule_id
+                    )
+                    if not effective_team and prealloc and prealloc.team_id and prealloc.team.is_active:
+                        effective_team = prealloc.team
+                except DjangoValidationError:
+                    prealloc = None
+
+            if not effective_team:
+                try:
+                    effective_team = AllocationService.resolve_schedule_team(parsed_schedule_id, target_date=service_date)
+                except (DjangoValidationError, TypeError, ValueError):
+                    effective_team = None
+
+            if not effective_team or not effective_team.is_active:
+                return _empty_roster_response(matching_active_shift)
+        else:
+            # Unscoped path: only permitted when schedule_id is omitted
+            if matching_active_shift:
+                prealloc = matching_active_shift.allocation
+                crew_shift_from_active = getattr(matching_active_shift, 'crew_shift', None)
+                if crew_shift_from_active and crew_shift_from_active.team_id and crew_shift_from_active.team.is_active:
+                    effective_team = crew_shift_from_active.team
+                elif matching_active_shift.allocation_id and matching_active_shift.allocation.team_id and matching_active_shift.allocation.team.is_active:
+                    effective_team = matching_active_shift.allocation.team
+
+            if prealloc is None:
+                try:
+                    prealloc = AllocationService.get_preallocated_truck_for_driver(
+                        user, target_date=service_date, schedule_id=None
+                    )
+                    if not effective_team and prealloc and prealloc.team_id and prealloc.team.is_active:
+                        effective_team = prealloc.team
+                except DjangoValidationError:
+                    prealloc = None
+
+            if not effective_team:
+                personal_memberships = list(
+                    SanitationTeamMembership.objects.filter(
+                        worker__user=user,
+                        worker__is_active=True,
+                        is_active=True,
+                        team__is_active=True,
+                    ).select_related('team').order_by('id')
+                )
+                if len(personal_memberships) == 1:
+                    effective_team = personal_memberships[0].team
+
+            if not effective_team or not effective_team.is_active:
+                return _empty_roster_response(matching_active_shift)
+
+        memberships = list(
+            SanitationTeamMembership.objects.filter(team=effective_team, is_active=True)
+            .select_related('worker__user')
+            .order_by('role_in_team', 'worker__full_name')
+        )
+
+        target_schedule_id = None
+        if parsed_schedule_id is not None:
+            target_schedule_id = parsed_schedule_id
+        elif matching_active_shift and matching_active_shift.schedule_id:
+            target_schedule_id = matching_active_shift.schedule_id
+        elif prealloc and prealloc.schedule_id:
+            target_schedule_id = prealloc.schedule_id
+
+        resolved_leader_result = None
+        if target_schedule_id:
+            try:
+                from .team_service import resolve_deployment_team_leader
+                resolved_leader_result = resolve_deployment_team_leader(target_schedule_id, service_date=service_date)
+            except (DjangoValidationError, TypeError, ValueError):
+                resolved_leader_result = None
+            if resolved_leader_result and resolved_leader_result.team.id != effective_team.id:
+                resolved_leader_result = None
+
+        if parsed_schedule_id is not None:
+            is_team_member = any(
+                m.worker.is_active and m.worker.user_id == user.id
+                for m in memberships
+            )
+            is_resolved_leader = bool(
+                resolved_leader_result
+                and resolved_leader_result.user
+                and resolved_leader_result.user.id == user.id
+            )
+            if not (is_team_member or is_resolved_leader or is_admin_user(user)):
+                return _empty_roster_response()
+
+        crew_shift = getattr(matching_active_shift, 'crew_shift', None) if matching_active_shift else None
+        if crew_shift is None and prealloc is not None:
+            crew_shift = (
+                CrewShift.objects.filter(allocation=prealloc)
+                .select_related('attendance_submitted_by', 'team_leader', 'watcher_shift')
+                .first()
+            )
+
+        if resolved_leader_result:
+            leader_user = resolved_leader_result.user
+            leader_worker = resolved_leader_result.worker
+            leader_role = resolved_leader_result.leadership_mode
+            has_watcher_assigned = bool(
+                resolved_leader_result.has_watcher_assigned
+                or (crew_shift and crew_shift.watcher_shift_id is not None)
+            )
+            is_driver_team_leader = bool(
+                resolved_leader_result.is_driver_team_leader
+                and leader_user
+                and leader_user.id == user.id
+            )
+            can_submit_attendance = bool(is_driver_team_leader and not has_watcher_assigned)
+        elif target_schedule_id is not None:
+            # Schedule-specific leader resolution failed: do not silently substitute a different leader
+            leader_worker = None
+            leader_user = None
+            leader_role = None
+            has_watcher_assigned = bool(crew_shift and crew_shift.watcher_shift_id is not None)
+            is_driver_team_leader = False
+            can_submit_attendance = False
+        else:
+            leader_candidates = [
+                m for m in memberships
+                if m.role_in_team == 'leader'
+                and m.worker.is_active
+                and m.worker.user_id
+                and getattr(m.worker.user, 'is_active', True)
+                and getattr(m.worker.user, 'role', None) in ('watcher', 'driver')
+            ]
+            leader_membership = leader_candidates[0] if len(leader_candidates) == 1 else None
+            leader_worker = leader_membership.worker if leader_membership else None
+            leader_user = leader_worker.user if (leader_worker and leader_worker.user_id) else None
+            leader_role = getattr(leader_user, 'role', None) if leader_user else None
+
+            has_watcher_assigned = bool(
+                (crew_shift and crew_shift.watcher_shift_id is not None)
+                or leader_role == 'watcher'
+            )
+            is_driver_team_leader = bool(
+                leader_user
+                and leader_user.id == user.id
+                and getattr(user, 'role', '') == 'driver'
+            )
+            can_submit_attendance = bool(is_driver_team_leader and not has_watcher_assigned)
+
+        crew_members = [
+            {
+                'worker_id': m.worker_id,
+                'full_name': m.worker.full_name,
+                'employee_id': m.worker.employee_id,
+                'role_in_team': m.role_in_team,
+            }
+            for m in memberships
+            if m.role_in_team == 'crew'
+            and m.worker.is_active
+            and (not m.worker.user_id or getattr(m.worker.user, 'is_active', False))
+            and (not m.worker.user_id or m.worker.user_id != user.id)
+            and (not leader_worker or m.worker_id != leader_worker.id)
+        ]
+
+        attendance_data = ShiftService.get_effective_shift_attendance(
+            driver_shift_id=matching_active_shift.id if matching_active_shift else None,
+            crew_shift_id=crew_shift.id if crew_shift else None,
+        )
+
+        if getattr(user, 'role', '') == 'citizen' and not is_admin_user(user):
+            caller_worker = Worker.objects.filter(user=user).only('id').first()
+            caller_worker_id = caller_worker.id if caller_worker else None
+            attendance_data = [
+                rec for rec in attendance_data
+                if caller_worker_id is not None and rec.get('worker_id') == caller_worker_id
+            ]
+            crew_members = []
+
+        submitted_by = None
+        if crew_shift and crew_shift.attendance_submitted_by_id:
+            sub_u = crew_shift.attendance_submitted_by
+            submitted_by = {
+                'id': sub_u.id,
+                'username': sub_u.username,
+                'full_name': (getattr(sub_u, 'full_name', '') or '').strip() or sub_u.username,
+            }
+
+        resp_data = {
+            'has_team': True,
+            'team': {
+                'id': effective_team.id,
+                'name': effective_team.name,
+                'code': effective_team.code,
+            },
+            'team_leader': {
+                'user_id': leader_user.id if leader_user else None,
+                'username': leader_user.username if leader_user else None,
+                'full_name': leader_worker.full_name if leader_worker else None,
+                'role': leader_role,
+            } if leader_worker else None,
+            'leader_type': leader_role,
+            'deployment_leader': resolved_leader_result.to_dict() if resolved_leader_result else None,
+            'is_driver_team_leader': is_driver_team_leader,
+            'has_watcher_assigned': has_watcher_assigned,
+            'is_watcher_led': has_watcher_assigned,
+            'can_submit_attendance': can_submit_attendance,
+            'driver_shift_id': matching_active_shift.id if matching_active_shift else None,
+            'crew_shift_id': crew_shift.id if crew_shift else None,
+            'allocation_id': prealloc.id if prealloc else None,
+            'schedule_id': target_schedule_id,
+            'crew_members': crew_members,
+            'members': crew_members,
+            'attendance': attendance_data,
+            'attendance_records': attendance_data,
+            'attendance_submitted': len(attendance_data) > 0,
+            'submitted_by': submitted_by,
+            'submitted_at': crew_shift.attendance_submitted_at if crew_shift else None,
+        }
+        return Response(resp_data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='my-attendance-history')
+    def my_attendance_history(self, request):
+        """
+        GET /api/driver/shift/my-attendance-history/
+        Stage 5B read-only personal attendance and shift history scoped strictly to request.user.
+        Rejects or ignores any client attempt to inspect another user's private history.
+        """
+        from .shift_service import ShiftService
+
+        requested_user_id = request.query_params.get('user_id')
+        requested_worker_id = request.query_params.get('worker_id')
+        if requested_user_id is not None and str(requested_user_id).strip() != str(request.user.id):
+            return Response(
+                {'error': "You cannot view another user's private attendance history."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if requested_worker_id is not None:
+            own_worker = Worker.objects.filter(user=request.user).only('id').first()
+            if not own_worker or str(requested_worker_id).strip() != str(own_worker.id):
+                return Response(
+                    {'error': "You cannot view another worker's private attendance history."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        payload = ShiftService.get_personal_attendance_history(request.user)
+        return Response(payload, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='submit-deployment-attendance')
+    def submit_deployment_attendance(self, request):
+        """
+        POST /api/driver/shift/submit-deployment-attendance/
+        Pre-departure or staged Driver-led initial attendance submission.
+        """
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from .allocation_service import AllocationService
+        from .serializers import CrewAttendanceRecordSerializer
+        from .shift_service import ShiftService
+
+        user = request.user
+        today = timezone.localdate()
+        date_raw = request.data.get('service_date')
+        service_date = today
+        if date_raw:
+            parsed_d = parse_date(str(date_raw))
+            if not parsed_d:
+                return Response({'error': 'Invalid service_date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+            service_date = parsed_d
+
+        attendance_list = request.data.get('attendance')
+        if attendance_list is None:
+            attendance_list = request.data.get('records', [])
+
+        schedule_id = request.data.get('schedule_id')
+        allocation_id = request.data.get('allocation_id')
+
+        active_shift = DriverShift.objects.filter(driver=user, is_active=True).select_related('allocation').first()
+        if active_shift:
+            if not schedule_id:
+                schedule_id = active_shift.schedule_id
+            if allocation_id is None:
+                allocation_id = active_shift.allocation_id
+
+        if not schedule_id and allocation_id is not None:
+            alloc_obj = ScheduleTruckAllocation.objects.filter(id=allocation_id).first()
+            if not alloc_obj:
+                return Response({'error': f'Allocation #{allocation_id} not found.'}, status=status.HTTP_400_BAD_REQUEST)
+            schedule_id = alloc_obj.schedule_id
+
+        if not schedule_id:
+            try:
+                prealloc = AllocationService.get_preallocated_truck_for_driver(
+                    user, target_date=service_date, schedule_id=None
+                )
+            except DjangoValidationError as e:
+                return Response(e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            if prealloc:
+                schedule_id = prealloc.schedule_id
+                allocation_id = prealloc.id
+
+        if not schedule_id:
+            return Response(
+                {'error': 'schedule_id or an active allocation is required.', 'code': 'no_schedule_today'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            records, crew_shift = ShiftService.record_deployment_attendance(
+                schedule_id=int(schedule_id),
+                service_date=service_date,
+                attendance_list=attendance_list,
+                recorded_by=user,
+                require_leadership_mode='driver',
+                driver_shift_id=active_shift.id if active_shift else None,
+                allocation_id=int(allocation_id) if allocation_id is not None else None,
+            )
+            effective = ShiftService.get_effective_shift_attendance(
+                driver_shift_id=active_shift.id if active_shift else None,
+                crew_shift_id=crew_shift.id if crew_shift else None,
+            )
+            return Response(
+                {
+                    'crew_shift_id': crew_shift.id if crew_shift else None,
+                    'driver_shift_id': active_shift.id if active_shift else None,
+                    'attendance_submitted': True,
+                    'records': CrewAttendanceRecordSerializer(records, many=True).data,
+                    'attendance': effective,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+        except DjangoPermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'], url_path='correct-deployment-attendance')
+    def correct_deployment_attendance(self, request):
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from .serializers import CrewAttendanceCorrectionSerializer
+        from .shift_service import ShiftService
+
+        record_id = request.data.get('record_id') or request.data.get('attendance_record_id')
+        corrected_status = request.data.get('corrected_status') or request.data.get('new_status')
+        reason = request.data.get('reason', '')
+        if not record_id or not corrected_status or not str(reason).strip():
+            return Response(
+                {'error': 'record_id, corrected_status, and reason are required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            correction = ShiftService.correct_attendance(
+                attendance_record_id=int(record_id),
+                corrected_status=corrected_status,
+                reason=reason,
+                corrected_by=request.user,
+            )
+            return Response(CrewAttendanceCorrectionSerializer(correction).data, status=status.HTTP_201_CREATED)
+        except DjangoPermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'], url_path='request-truck-replacement')
+    def request_truck_replacement(self, request):
+        """
+        POST /api/driver/shift/request-truck-replacement/
+        Allows Driver to submit a TruckReplacementRequest; resolves truck strictly server-side
+        from the active DriverShift or authorized today's ScheduleTruckAllocation (never trusting client truck_id).
+        """
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from .allocation_service import AllocationService
+        from .truck_service import TruckLifecycleConflictError, TruckService
+
+        user = request.user
+        driver_shift_id = request.data.get('driver_shift_id')
+        schedule_id = request.data.get('schedule_id')
+        reason = request.data.get('reason', '')
+
+        resolved_schedule_id = None
+        if schedule_id is not None and str(schedule_id).strip() != '':
+            try:
+                resolved_schedule_id = int(schedule_id)
+            except (TypeError, ValueError):
+                return Response({'schedule_id': 'Invalid schedule_id.'}, status=status.HTTP_400_BAD_REQUEST)
+            if resolved_schedule_id <= 0:
+                return Response({'schedule_id': 'schedule_id must be a positive integer.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        shift = None
+        if driver_shift_id is not None and str(driver_shift_id).strip() != '':
+            try:
+                shift_id_int = int(driver_shift_id)
+            except (TypeError, ValueError):
+                return Response({'driver_shift_id': 'Invalid driver_shift_id.'}, status=status.HTTP_400_BAD_REQUEST)
+            if shift_id_int <= 0:
+                return Response({'driver_shift_id': 'driver_shift_id must be a positive integer.'}, status=status.HTTP_400_BAD_REQUEST)
+            shift = DriverShift.objects.select_related('truck', 'allocation__truck', 'schedule').filter(
+                id=shift_id_int
+            ).first()
+            if not shift:
+                return Response({'error': f'Shift #{shift_id_int} not found.'}, status=status.HTTP_404_NOT_FOUND)
+            if not is_admin_user(user) and shift.driver_id != user.id:
+                return Response({'error': 'You may only request replacement for your own shift.'}, status=status.HTTP_403_FORBIDDEN)
+            if not shift.is_active:
+                return Response(
+                    {'error': 'Cannot request truck replacement for an ended shift.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            shift = DriverShift.objects.select_related('truck', 'allocation__truck', 'schedule').filter(
+                driver=user, is_active=True
+            ).first()
+
+        truck = None
+        if shift is not None:
+            truck = shift.effective_truck
+            if resolved_schedule_id is None:
+                resolved_schedule_id = shift.schedule_id or (shift.allocation.schedule_id if shift.allocation_id else None)
+        else:
+            try:
+                alloc = AllocationService.get_preallocated_truck_for_driver(
+                    user, target_date=timezone.localdate(), schedule_id=resolved_schedule_id
+                )
+            except DjangoValidationError as e:
+                return Response(e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            if alloc:
+                truck = alloc.truck
+                if resolved_schedule_id is None:
+                    resolved_schedule_id = alloc.schedule_id
+
+        if truck is None:
+            return Response(
+                {'error': 'No active shift or authorized truck allocation found for truck replacement request.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            res = TruckService.request_truck_replacement(
+                truck,
+                user=user,
+                schedule_id=resolved_schedule_id,
+                driver_shift=shift,
+                reason=reason,
+            )
+            return Response(res, status=status.HTTP_201_CREATED)
+        except DjangoPermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TruckLifecycleConflictError as e:
+            return Response(
+                {'error': str(e.message if hasattr(e, 'message') else e), 'code': e.error_code},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except DjangoValidationError as e:
+            return Response(e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['post'], url_path='pre_start')
     def pre_start_shift(self, request):
@@ -1565,80 +3553,300 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
 
         duty_type = request.data.get('duty_type', 'normal')
         requested_schedule_id = request.data.get('schedule_id')
+        allocation_id = request.data.get('allocation_id')
+        manifested_worker_ids = request.data.get('manifested_worker_ids')
+        attendance_payload = request.data.get('attendance')
         today = timezone.localdate()
 
-        try:
-            schedule, truck, scheduled_today = _resolve_driver_today_schedule(
-                driver, today=today, requested_schedule_id=requested_schedule_id
-            )
-        except CollectionSchedule.DoesNotExist:
-            return Response(
-                {'error': 'The requested route was not found or is not assigned to you.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from .serializers import CrewAttendanceRecordSerializer
+        from .shift_service import ShiftService
+        from .team_service import ActiveShiftConflictError
+        from .allocation_service import AllocationService
 
-        with transaction.atomic():
-            shift = DriverShift.objects.select_for_update().filter(driver=driver, is_active=True).first()
-            if shift:
-                if shift.schedule_id and requested_schedule_id and str(shift.schedule_id) != str(requested_schedule_id):
-                    return Response({
-                        'error': 'You already have an active shift on a different route.',
-                        'active_schedule_id': shift.schedule_id,
-                        'active_shift_id': shift.id,
-                    }, status=status.HTTP_409_CONFLICT)
-                return Response(DriverShiftSerializer(shift).data, status=status.HTTP_200_OK)
+        req_sched_int = None
+        if requested_schedule_id is not None and str(requested_schedule_id).strip() != '':
+            try:
+                req_sched_int = int(requested_schedule_id)
+            except (TypeError, ValueError):
+                return Response({'schedule_id': 'Invalid schedule_id.'}, status=status.HTTP_400_BAD_REQUEST)
+            if req_sched_int <= 0:
+                return Response({'schedule_id': 'schedule_id must be a positive integer.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            if not schedule or not scheduled_today:
-                return Response(
-                    {
-                        'error': 'You have no scheduled collection duty for today.',
-                        'code': 'no_schedule_today',
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+        alloc_id_int = None
+        if allocation_id is not None and str(allocation_id).strip() != '':
+            try:
+                alloc_id_int = int(allocation_id)
+            except (TypeError, ValueError):
+                return Response({'allocation_id': 'Invalid allocation_id.'}, status=status.HTTP_400_BAD_REQUEST)
+            if alloc_id_int <= 0:
+                return Response({'allocation_id': 'allocation_id must be a positive integer.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        target_schedule_id = req_sched_int
+        pre_target_truck = None
+        if alloc_id_int is not None:
+            alloc_obj = ScheduleTruckAllocation.objects.select_related('truck').filter(id=alloc_id_int).first()
+            if not alloc_obj:
+                return Response({'error': f'Allocation #{alloc_id_int} not found.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not target_schedule_id:
+                target_schedule_id = alloc_obj.schedule_id
+            pre_target_truck = alloc_obj.truck
+        else:
+            try:
+                prealloc_for_sweep = AllocationService.get_preallocated_truck_for_driver(
+                    driver, target_date=today, schedule_id=target_schedule_id
                 )
+                if prealloc_for_sweep and prealloc_for_sweep.truck_id:
+                    pre_target_truck = prealloc_for_sweep.truck
+            except DjangoValidationError:
+                pre_target_truck = None
 
-            if is_schedule_complete_today(schedule):
+        _sweep_stale_shifts_for(driver=driver, truck=pre_target_truck)
+
+        class _ConcurrentShiftScheduleChange(Exception):
+            pass
+
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                observed_shift = DriverShift.objects.filter(driver=driver, is_active=True).values('id', 'schedule_id').first()
+                resolved_target_sched = target_schedule_id
+                resolved_alloc_id = alloc_id_int
+                if observed_shift is None and resolved_target_sched is None:
+                    try:
+                        prealloc = AllocationService.get_preallocated_truck_for_driver(driver, target_date=today)
+                    except DjangoValidationError as e:
+                        return Response(
+                            e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    if prealloc:
+                        resolved_alloc_id = prealloc.id
+                        resolved_target_sched = prealloc.schedule_id
+
+                schedule_ids_to_lock = sorted({
+                    sid for sid in (
+                        observed_shift['schedule_id'] if observed_shift else None,
+                        resolved_target_sched,
+                    ) if sid
+                })
+
+                existing_shift_id = None
+                existing_payload = None
+                with transaction.atomic():
+                    locked_schedules = {}
+                    if schedule_ids_to_lock:
+                        locked_schedules = {
+                            s.id: s
+                            for s in CollectionSchedule.objects.filter(id__in=schedule_ids_to_lock).order_by('id').select_for_update()
+                        }
+
+                    shift = (
+                        DriverShift.objects.select_for_update(of=('self',))
+                        .select_related('schedule', 'allocation', 'truck')
+                        .filter(driver=driver, is_active=True)
+                        .first()
+                    )
+
+                    if (
+                        (observed_shift is None and shift is not None)
+                        or (observed_shift is not None and shift is None)
+                        or (shift is not None and shift.schedule_id and shift.schedule_id not in locked_schedules)
+                    ):
+                        raise _ConcurrentShiftScheduleChange()
+
+                    if shift:
+                        if req_sched_int is not None and shift.schedule_id != req_sched_int:
+                            return Response({
+                                'error': (
+                                    'You already have an active shift on a different route.'
+                                    if shift.schedule_id
+                                    else 'Active shift has no matching schedule.'
+                                ),
+                                'active_schedule_id': shift.schedule_id,
+                                'active_shift_id': shift.id,
+                            }, status=status.HTTP_409_CONFLICT)
+
+                        if alloc_id_int is not None and shift.allocation_id != alloc_id_int:
+                            return Response({
+                                'error': 'allocation_id does not match your currently active shift.',
+                                'active_allocation_id': shift.allocation_id,
+                                'active_shift_id': shift.id,
+                            }, status=status.HTTP_409_CONFLICT)
+
+                        eff_truck = shift.effective_truck
+                        if eff_truck and not is_truck_dispatchable(eff_truck):
+                            return Response(
+                                {'truck': f"Truck {eff_truck.plate_number} is not dispatchable."},
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+
+                        if shift.schedule:
+                            if shift.schedule.status in ('CANCELLED', 'COMPLETED') or not shift.schedule.is_available:
+                                return Response(
+                                    {'schedule_id': f"Schedule #{shift.schedule.id} is not active or available for dispatch."},
+                                    status=status.HTTP_400_BAD_REQUEST,
+                                )
+                            if not shift.schedule.dumpsite_id:
+                                return Response(
+                                    {
+                                        'error': f"Schedule #{shift.schedule.id} has no assigned dumpsite facility.",
+                                        'code': 'missing_dumpsite',
+                                    },
+                                    status=status.HTTP_400_BAD_REQUEST,
+                                )
+                            if shift.allocation_id and shift.allocation:
+                                try:
+                                    resolved_team = AllocationService.resolve_schedule_team(
+                                        shift.schedule_id, shift.allocation.allocation_date
+                                    )
+                                except DjangoValidationError as e:
+                                    return Response(
+                                        e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                                        status=status.HTTP_400_BAD_REQUEST,
+                                    )
+                                if resolved_team.id != shift.allocation.team_id:
+                                    return Response(
+                                        {'allocation_id': 'Active shift allocation team no longer matches the resolved schedule team.'},
+                                        status=status.HTTP_409_CONFLICT,
+                                    )
+
+                        existing_payload = DriverShiftSerializer(shift).data
+                        if attendance_payload is None:
+                            return Response(existing_payload, status=status.HTTP_200_OK)
+                        existing_shift_id = shift.id
+
+                    if existing_shift_id is None:
+                        if not resolved_target_sched:
+                            return Response(
+                                {
+                                    'error': 'You have no pre-allocated collection duty for today.',
+                                    'code': 'no_schedule_today',
+                                },
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+
+                        schedule = locked_schedules.get(resolved_target_sched)
+                        if not schedule:
+                            return Response({'error': 'The requested route was not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+                        if schedule.status in ('CANCELLED', 'COMPLETED') or not schedule.is_available:
+                            return Response(
+                                {'schedule_id': f"Schedule #{schedule.id} is not active or available for dispatch."},
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+                        if not schedule.dumpsite_id:
+                            return Response(
+                                {
+                                    'error': f"Schedule #{schedule.id} has no assigned dumpsite facility.",
+                                    'code': 'missing_dumpsite',
+                                },
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+
+                        has_alloc_today = ScheduleTruckAllocation.objects.filter(
+                            schedule=schedule, allocation_date=today
+                        ).exists()
+                        if not has_alloc_today and not _is_driver_schedule_for_date(schedule, today):
+                            return Response(
+                                {
+                                    'error': 'You have no scheduled collection duty for today.',
+                                    'code': 'no_schedule_today',
+                                },
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+
+                        if is_schedule_complete_today(schedule):
+                            return Response(
+                                {
+                                    'error': 'This route has already been completed today.',
+                                    'code': 'route_completed',
+                                },
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+
+                        ended_schedule_shift = _get_ended_shift_for_schedule_today(
+                            schedule=schedule,
+                            truck=schedule.truck,
+                            driver=driver,
+                            today=today,
+                        )
+                        if ended_schedule_shift:
+                            return Response(
+                                {
+                                    'error': "Today's collection shift has already ended.",
+                                    'code': 'shift_already_ended',
+                                },
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+
+                        try:
+                            shift = ShiftService.stage_and_start_shift(
+                                driver_user=driver,
+                                schedule_id=schedule.id,
+                                allocation_id=resolved_alloc_id,
+                                manifested_worker_ids=manifested_worker_ids,
+                                duty_type=duty_type,
+                                initial_status='navigate_to_base',
+                                initial_op_status='heading_to_start',
+                            )
+                            payload = DriverShiftSerializer(shift).data
+                            if attendance_payload is not None:
+                                records = ShiftService.record_initial_attendance(
+                                    shift.id, attendance_payload, recorded_by=driver
+                                )
+                                payload['attendance'] = CrewAttendanceRecordSerializer(records, many=True).data
+                                payload['attendance_submitted'] = True
+                            return Response(payload, status=status.HTTP_201_CREATED)
+                        except DjangoPermissionDenied as e:
+                            transaction.set_rollback(True)
+                            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+                        except ActiveShiftConflictError as e:
+                            transaction.set_rollback(True)
+                            return Response(
+                                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                                status=status.HTTP_409_CONFLICT,
+                            )
+                        except (DjangoValidationError, ValueError) as e:
+                            transaction.set_rollback(True)
+                            return Response(
+                                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+
+                if existing_shift_id is not None:
+                    # Execute outside the DriverShift-locked atomic block so record_deployment_attendance
+                    # acquires locks strictly in canonical order (1 -> 2 -> 4 -> 6 -> 7 -> 8 -> 9 -> 10).
+                    try:
+                        records = ShiftService.record_initial_attendance(
+                            existing_shift_id, attendance_payload, recorded_by=driver
+                        )
+                        existing_payload['attendance'] = CrewAttendanceRecordSerializer(records, many=True).data
+                        existing_payload['attendance_submitted'] = True
+                        return Response(existing_payload, status=status.HTTP_200_OK)
+                    except DjangoPermissionDenied as e:
+                        return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+                    except ActiveShiftConflictError as e:
+                        return Response(
+                            e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                            status=status.HTTP_409_CONFLICT,
+                        )
+                    except (DjangoValidationError, ValueError) as e:
+                        return Response(
+                            e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+            except _ConcurrentShiftScheduleChange:
+                if attempt == max_attempts - 1:
+                    return Response(
+                        {'error': 'Active shift state changed concurrently; please retry.'},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+            except IntegrityError:
                 return Response(
-                    {
-                        'error': 'This route has already been completed today.',
-                        'code': 'route_completed',
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+                    {'error': 'Driver or truck already has an active shift (concurrent start conflict).'},
+                    status=status.HTTP_409_CONFLICT,
                 )
-
-            ended_today = _get_ended_shift_for_schedule_today(
-                schedule=schedule,
-                truck=truck,
-                driver=driver,
-                today=today,
-            )
-            if ended_today:
-                return Response(
-                    {
-                        'error': "Today's shift for this truck and route has already ended.",
-                        'code': 'shift_already_ended',
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if truck and truck.status == 'maintenance':
-                return Response({'error': 'This truck is currently under maintenance and cannot be used.'}, status=status.HTTP_400_BAD_REQUEST)
-            if truck and DriverShift.objects.select_for_update().filter(truck=truck, is_active=True).exists():
-                return Response({'error': 'Truck is currently being used in another active shift.'}, status=status.HTTP_400_BAD_REQUEST)
-
-            shift = DriverShift.objects.create(
-                driver=driver,
-                truck=truck,
-                schedule=schedule,
-                duty_type=duty_type,
-                started_at=timezone.now(),  # Temporary start time
-                is_active=True,
-                op_status='heading_to_start',
-                current_latitude=None,
-                current_longitude=None,
-                last_location_update=None
-            )
-        return Response(DriverShiftSerializer(shift).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['get'], url_path='active')
     def active(self, request):
@@ -1650,25 +3858,8 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
           { "active": false, "shift": null }
           { "active": true,  "shift": { ...DriverShiftSerializer... } }
         """
-        from datetime import timedelta
-        from django.db.models import Q
-        from django.conf import settings
-        now = timezone.now()
-        staleness_cutoff = now - timedelta(hours=getattr(settings, 'SHIFT_STALE_HOURS', 6))
-
-        # Auto-close any shifts abandoned for more than SHIFT_STALE_HOURS
-        from django.db.models import F
-        from django.db.models.functions import Coalesce
-        DriverShift.objects.filter(
-            Q(last_location_update__lt=staleness_cutoff) | Q(last_location_update__isnull=True, started_at__lt=staleness_cutoff),
-            driver=request.user,
-            is_active=True,
-        ).update(
-            ended_at=Coalesce(F('last_location_update'), F('started_at')),
-            status='end_shift',
-            is_active=False,
-            end_reason='heartbeat_timeout',
-        )
+        # Auto-close any shifts abandoned for more than SHIFT_STALE_HOURS via coordinated lifecycle service
+        _sweep_stale_shifts_for(driver=request.user)
 
         shift = (
             DriverShift.objects
@@ -1696,127 +3887,318 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
         driver_lat = request.data.get('latitude')
         driver_lng = request.data.get('longitude')
         requested_schedule_id = request.data.get('schedule_id')
+        allocation_id = request.data.get('allocation_id')
+        manifested_worker_ids = request.data.get('manifested_worker_ids')
 
         today = timezone.localdate()
-        try:
-            schedule, truck, scheduled_today = _resolve_driver_today_schedule(
-                driver, today=today, requested_schedule_id=requested_schedule_id
-            )
-        except CollectionSchedule.DoesNotExist:
-            return Response(
-                {'error': 'The requested route was not found or is not assigned to you.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
         from django.conf import settings as django_settings
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from .serializers import CrewAttendanceRecordSerializer
+        from .shift_service import ShiftService
+        from .team_service import ActiveShiftConflictError
+        from .allocation_service import AllocationService
 
         def _check_home_base_proximity(target_schedule):
-            if target_schedule and target_schedule.waypoints and not django_settings.DEBUG:
-                waypoints = target_schedule.waypoints
-                if waypoints and len(waypoints) > 0:
-                    home_base = waypoints[0]
-                    if driver_lat and driver_lng and 'lat' in home_base and 'lng' in home_base:
-                        try:
-                            dist = haversine(
-                                float(driver_lat), float(driver_lng),
-                                float(home_base['lat']), float(home_base['lng'])
-                            )
-                            if dist > 1000:
-                                return Response({
-                                    'error': f'You are too far from the home base ({int(dist)}m away)...'
-                                }, status=status.HTTP_403_FORBIDDEN)
-                        except ValueError:
-                            pass
+            if (
+                not target_schedule
+                or not target_schedule.dumpsite_id
+                or not target_schedule.dumpsite
+                or target_schedule.dumpsite.latitude is None
+                or target_schedule.dumpsite.longitude is None
+            ):
+                return Response(
+                    {
+                        'error': 'Schedule has no assigned dumpsite with valid coordinates and cannot start a shift.',
+                        'code': 'missing_dumpsite',
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if not django_settings.DEBUG:
+                base_lat = target_schedule.dumpsite.latitude
+                base_lng = target_schedule.dumpsite.longitude
+                if driver_lat is not None and driver_lng is not None and str(driver_lat).strip() != '' and str(driver_lng).strip() != '':
+                    try:
+                        dist = haversine(
+                            float(driver_lat), float(driver_lng),
+                            float(base_lat), float(base_lng)
+                        )
+                        if dist > 1000:
+                            return Response({
+                                'error': f'You are too far from the home base ({int(dist)}m away)...'
+                            }, status=status.HTTP_403_FORBIDDEN)
+                    except (TypeError, ValueError):
+                        pass
             return None
 
-        with transaction.atomic():
-            shift = (
-                DriverShift.objects.select_for_update()
-                .filter(driver=driver, is_active=True)
-                .select_related('schedule')
-                .first()
-            )
+        req_sched_int = None
+        if requested_schedule_id is not None and str(requested_schedule_id).strip() != '':
+            try:
+                req_sched_int = int(requested_schedule_id)
+            except (TypeError, ValueError):
+                return Response({'schedule_id': 'Invalid schedule_id.'}, status=status.HTTP_400_BAD_REQUEST)
+            if req_sched_int <= 0:
+                return Response({'schedule_id': 'schedule_id must be a positive integer.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            if shift:
-                # Driver already has an active shift (e.g. from pre_start). If it's tied
-                # to a DIFFERENT schedule than what's being requested, refuse — don't
-                # silently switch routes under them.
-                if shift.schedule_id and requested_schedule_id and str(shift.schedule_id) != str(requested_schedule_id):
-                    return Response({
-                        'error': 'You already have an active shift on a different route.',
-                        'active_schedule_id': shift.schedule_id,
-                        'active_shift_id': shift.id,
-                    }, status=status.HTTP_409_CONFLICT)
+        alloc_id_int = None
+        if allocation_id is not None and str(allocation_id).strip() != '':
+            try:
+                alloc_id_int = int(allocation_id)
+            except (TypeError, ValueError):
+                return Response({'allocation_id': 'Invalid allocation_id.'}, status=status.HTTP_400_BAD_REQUEST)
+            if alloc_id_int <= 0:
+                return Response({'allocation_id': 'allocation_id must be a positive integer.'}, status=status.HTTP_400_BAD_REQUEST)
 
-                proximity_err = _check_home_base_proximity(shift.schedule or schedule)
-                if proximity_err is not None:
-                    return proximity_err
-
-                shift.started_at = timezone.now()
-                shift.current_latitude = driver_lat
-                shift.current_longitude = driver_lng
-                shift.last_location_update = timezone.now()
-                shift.op_status = 'on_duty'
-                if schedule and not shift.schedule_id:
-                    shift.schedule = schedule
-                shift.save()
-                return Response(DriverShiftSerializer(shift).data, status=status.HTTP_200_OK)
-
-            if not schedule or not scheduled_today:
-                return Response(
-                    {
-                        'error': 'You have no scheduled collection duty for today.',
-                        'code': 'no_schedule_today',
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+        target_schedule_id = req_sched_int
+        pre_target_truck = None
+        if alloc_id_int is not None:
+            alloc_obj = ScheduleTruckAllocation.objects.select_related('truck').filter(id=alloc_id_int).first()
+            if not alloc_obj:
+                return Response({'error': f'Allocation #{alloc_id_int} not found.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not target_schedule_id:
+                target_schedule_id = alloc_obj.schedule_id
+            pre_target_truck = alloc_obj.truck
+        else:
+            try:
+                prealloc_for_sweep = AllocationService.get_preallocated_truck_for_driver(
+                    driver, target_date=today, schedule_id=target_schedule_id
                 )
+                if prealloc_for_sweep and prealloc_for_sweep.truck_id:
+                    pre_target_truck = prealloc_for_sweep.truck
+            except DjangoValidationError:
+                pre_target_truck = None
 
-            proximity_err = _check_home_base_proximity(schedule)
-            if proximity_err is not None:
-                return proximity_err
+        _sweep_stale_shifts_for(driver=driver, truck=pre_target_truck)
 
-            if truck and truck.status == 'maintenance':
-                return Response({'error': 'This truck is currently under maintenance and cannot be used.'}, status=status.HTTP_400_BAD_REQUEST)
-            if truck and DriverShift.objects.select_for_update().filter(truck=truck, is_active=True).exists():
-                return Response({'error': 'Truck is currently being used in another active shift.'}, status=status.HTTP_400_BAD_REQUEST)
+        class _ConcurrentShiftScheduleChange(Exception):
+            pass
 
-            if is_schedule_complete_today(schedule):
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                observed_shift = DriverShift.objects.filter(driver=driver, is_active=True).values('id', 'schedule_id').first()
+                resolved_target_sched = target_schedule_id
+                resolved_alloc_id = alloc_id_int
+                if observed_shift is None and resolved_target_sched is None:
+                    try:
+                        prealloc = AllocationService.get_preallocated_truck_for_driver(driver, target_date=today)
+                    except DjangoValidationError as e:
+                        return Response(
+                            e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    if prealloc:
+                        resolved_alloc_id = prealloc.id
+                        resolved_target_sched = prealloc.schedule_id
+
+                schedule_ids_to_lock = sorted({
+                    sid for sid in (
+                        observed_shift['schedule_id'] if observed_shift else None,
+                        resolved_target_sched,
+                    ) if sid
+                })
+
+                with transaction.atomic():
+                    locked_schedules = {}
+                    if schedule_ids_to_lock:
+                        locked_schedules = {
+                            s.id: s
+                            for s in CollectionSchedule.objects.filter(id__in=schedule_ids_to_lock).order_by('id').select_for_update()
+                        }
+
+                    shift = (
+                        DriverShift.objects.select_for_update(of=('self',))
+                        .filter(driver=driver, is_active=True)
+                        .select_related('schedule', 'allocation', 'truck')
+                        .first()
+                    )
+
+                    if (
+                        (observed_shift is None and shift is not None)
+                        or (observed_shift is not None and shift is None)
+                        or (shift is not None and shift.schedule_id and shift.schedule_id not in locked_schedules)
+                    ):
+                        raise _ConcurrentShiftScheduleChange()
+
+                    if shift:
+                        # Driver already has an active staged shift (e.g. from pre_start).
+                        if req_sched_int is not None and shift.schedule_id != req_sched_int:
+                            return Response({
+                                'error': (
+                                    'You already have an active shift on a different route.'
+                                    if shift.schedule_id
+                                    else 'Active shift has no matching schedule.'
+                                ),
+                                'active_schedule_id': shift.schedule_id,
+                                'active_shift_id': shift.id,
+                            }, status=status.HTTP_409_CONFLICT)
+
+                        if alloc_id_int is not None and shift.allocation_id != alloc_id_int:
+                            return Response({
+                                'error': 'allocation_id does not match your currently active shift.',
+                                'active_allocation_id': shift.allocation_id,
+                                'active_shift_id': shift.id,
+                            }, status=status.HTTP_409_CONFLICT)
+
+                        eff_truck = shift.effective_truck
+                        if eff_truck and not is_truck_dispatchable(eff_truck):
+                            return Response(
+                                {'truck': f"Truck {eff_truck.plate_number} is not dispatchable."},
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+
+                        if shift.schedule:
+                            if shift.schedule.status in ('CANCELLED', 'COMPLETED') or not shift.schedule.is_available:
+                                return Response(
+                                    {'schedule_id': f"Schedule #{shift.schedule.id} is not active or available for dispatch."},
+                                    status=status.HTTP_400_BAD_REQUEST,
+                                )
+                            if not shift.schedule.dumpsite_id:
+                                return Response(
+                                    {
+                                        'error': f"Schedule #{shift.schedule.id} has no assigned dumpsite facility.",
+                                        'code': 'missing_dumpsite',
+                                    },
+                                    status=status.HTTP_400_BAD_REQUEST,
+                                )
+                            if shift.allocation_id and shift.allocation:
+                                try:
+                                    resolved_team = AllocationService.resolve_schedule_team(
+                                        shift.schedule_id, shift.allocation.allocation_date
+                                    )
+                                except DjangoValidationError as e:
+                                    return Response(
+                                        e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                                        status=status.HTTP_400_BAD_REQUEST,
+                                    )
+                                if resolved_team.id != shift.allocation.team_id:
+                                    return Response(
+                                        {'allocation_id': 'Active shift allocation team no longer matches the resolved schedule team.'},
+                                        status=status.HTTP_409_CONFLICT,
+                                    )
+
+                        proximity_err = _check_home_base_proximity(shift.schedule)
+                        if proximity_err is not None:
+                            return proximity_err
+
+                        if shift.status == 'shiftroute' and shift.started_at is not None:
+                            update_fields = []
+                            if driver_lat is not None and driver_lng is not None:
+                                shift.current_latitude = driver_lat
+                                shift.current_longitude = driver_lng
+                                shift.last_location_update = timezone.now()
+                                update_fields.extend(['current_latitude', 'current_longitude', 'last_location_update'])
+                            if update_fields:
+                                shift.save(update_fields=update_fields)
+                        else:
+                            shift.started_at = timezone.now()
+                            shift.current_latitude = driver_lat
+                            shift.current_longitude = driver_lng
+                            shift.last_location_update = timezone.now()
+                            shift.op_status = 'on_duty'
+                            shift.save(update_fields=[
+                                'started_at', 'current_latitude', 'current_longitude',
+                                'last_location_update', 'op_status',
+                            ])
+                        return Response(DriverShiftSerializer(shift).data, status=status.HTTP_200_OK)
+
+                    if not resolved_target_sched:
+                        return Response(
+                            {
+                                'error': 'You have no pre-allocated collection duty for today.',
+                                'code': 'no_schedule_today',
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    schedule = locked_schedules.get(resolved_target_sched)
+                    if not schedule:
+                        return Response({'error': 'The requested route was not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+                    if schedule.status in ('CANCELLED', 'COMPLETED') or not schedule.is_available:
+                        return Response(
+                            {'schedule_id': f"Schedule #{schedule.id} is not active or available for dispatch."},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    has_alloc_today = ScheduleTruckAllocation.objects.filter(
+                        schedule=schedule, allocation_date=today
+                    ).exists()
+                    if not has_alloc_today and not _is_driver_schedule_for_date(schedule, today):
+                        return Response(
+                            {
+                                'error': 'You have no scheduled collection duty for today.',
+                                'code': 'no_schedule_today',
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    proximity_err = _check_home_base_proximity(schedule)
+                    if proximity_err is not None:
+                        return proximity_err
+
+                    if is_schedule_complete_today(schedule):
+                        return Response(
+                            {
+                                'error': 'This route has already been completed today.',
+                                'code': 'route_completed',
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    ended_schedule_shift = _get_ended_shift_for_schedule_today(
+                        schedule=schedule,
+                        truck=schedule.truck,
+                        driver=driver,
+                        today=today,
+                    )
+                    if ended_schedule_shift:
+                        return Response(
+                            {
+                                'error': "Today's collection shift has already ended.",
+                                'code': 'shift_already_ended',
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    try:
+                        shift = ShiftService.stage_and_start_shift(
+                            driver_user=driver,
+                            schedule_id=schedule.id,
+                            allocation_id=resolved_alloc_id,
+                            manifested_worker_ids=manifested_worker_ids,
+                            duty_type=duty_type,
+                            initial_status='shiftroute',
+                            initial_op_status='on_duty',
+                            latitude=driver_lat,
+                            longitude=driver_lng,
+                        )
+                        return Response(DriverShiftSerializer(shift).data, status=status.HTTP_201_CREATED)
+                    except DjangoPermissionDenied as e:
+                        transaction.set_rollback(True)
+                        return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+                    except ActiveShiftConflictError as e:
+                        transaction.set_rollback(True)
+                        return Response(
+                            e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                            status=status.HTTP_409_CONFLICT,
+                        )
+                    except (DjangoValidationError, ValueError) as e:
+                        transaction.set_rollback(True)
+                        return Response(
+                            e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+            except _ConcurrentShiftScheduleChange:
+                if attempt == max_attempts - 1:
+                    return Response(
+                        {'error': 'Active shift state changed concurrently; please retry.'},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+            except IntegrityError:
                 return Response(
-                    {
-                        'error': 'This route has already been completed today.',
-                        'code': 'route_completed',
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+                    {'error': 'Driver or truck already has an active shift (concurrent start conflict).'},
+                    status=status.HTTP_409_CONFLICT,
                 )
-
-            ended_today = _get_ended_shift_for_schedule_today(
-                schedule=schedule,
-                truck=truck,
-                driver=driver,
-                today=today,
-            )
-            if ended_today:
-                return Response(
-                    {
-                        'error': "Today's shift for this truck and route has already ended.",
-                        'code': 'shift_already_ended',
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            shift = DriverShift.objects.create(
-                driver=driver,
-                truck=truck,
-                schedule=schedule,
-                duty_type=duty_type,
-                started_at=timezone.now(),
-                is_active=True,
-                op_status='on_duty',
-                current_latitude=driver_lat,
-                current_longitude=driver_lng,
-                last_location_update=timezone.now()
-            )
-        return Response(DriverShiftSerializer(shift).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['post'], url_path='end')
     def end_shift(self, request):
@@ -1824,67 +4206,76 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
         missed_stop_orders = request.data.get('missed_stop_orders', [])
         client_schedule_id = request.data.get('schedule_id')
 
-        with transaction.atomic():
-            shift = (
-                DriverShift.objects.select_for_update()
-                .select_related('schedule')
-                .filter(driver=driver, is_active=True)
+        class _ConcurrentShiftTruckChange(Exception):
+            pass
+
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            observed = (
+                DriverShift.objects.filter(driver=driver, is_active=True)
+                .values('id', 'truck_id', 'allocation__truck_id')
                 .first()
             )
-            if not shift:
+            if not observed:
                 return Response(
-                    {'error': 'No active shift found.', 'code': 'no_active_shift'}, 
-                    status=status.HTTP_400_BAD_REQUEST
+                    {'error': 'No active shift found.', 'code': 'no_active_shift'},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
+            obs_truck_id = observed['truck_id'] or observed['allocation__truck_id']
 
-            # Schedule ownership & mismatch validation
-            if shift.schedule_id:
-                if client_schedule_id is not None and str(client_schedule_id) != str(shift.schedule_id):
-                    return Response({
-                        'error': 'schedule_id does not match your currently active shift.',
-                        'active_schedule_id': shift.schedule_id,
-                    }, status=status.HTTP_409_CONFLICT)
-                authoritative_schedule = shift.schedule
-            else:
-                if client_schedule_id is not None:
-                    return Response({
-                        'error': 'schedule_id cannot be specified for a shift without an assigned schedule.',
-                        'active_schedule_id': None,
-                    }, status=status.HTTP_409_CONFLICT)
-                authoritative_schedule = None
+            try:
+                with transaction.atomic():
+                    # Canonical lock order: Truck (Level 5) BEFORE DriverShift (Level 8)
+                    if obs_truck_id is not None:
+                        Truck.objects.filter(id=obs_truck_id).select_for_update().first()
 
-            now = timezone.now()
-            shift.ended_at = now
-            shift.duration_ms = int((now - shift.started_at).total_seconds() * 1000)
-            shift.is_active = False
-            shift.status = 'end_shift'
-            shift.end_reason = 'driver_ended'
-            shift.current_latitude = None
-            shift.current_longitude = None
-            shift.last_location_update = None
-            shift.save()
+                    shift = (
+                        DriverShift.objects.select_for_update(of=('self',))
+                        .select_related('schedule', 'allocation')
+                        .filter(driver=driver, is_active=True)
+                        .first()
+                    )
+                    if not shift:
+                        raise _ConcurrentShiftTruckChange()
 
-            ended_early = request.data.get('ended_early', False)
-            early_reason = request.data.get('reason', '') or ''
-            if authoritative_schedule and missed_stop_orders:
-                from driver.models import PickupStatus
-                PickupStatus.objects.filter(
-                    schedule=authoritative_schedule,
-                    stop_order__in=missed_stop_orders
-                ).update(status='DRIVER_MISSED', updated_at=timezone.now())
+                    actual_truck_id = shift.truck_id or (
+                        shift.allocation.truck_id if shift.allocation_id and shift.allocation else None
+                    )
+                    if actual_truck_id != obs_truck_id:
+                        raise _ConcurrentShiftTruckChange()
 
-                from driver.missed_stop_service import create_missed_stops
-                from driver.models import MissedStopReason
-                if ended_early:
-                    miss_reason = MissedStopReason.SHIFT_ENDED_EARLY
-                else:
-                    miss_reason = MissedStopReason.TRUCK_FULL
-                create_missed_stops(
-                    authoritative_schedule,
-                    missed_stop_orders,
-                    reason=miss_reason,
-                    early_end_reason=early_reason if ended_early else None,
-                )
+                    # Schedule ownership & mismatch validation
+                    if shift.schedule_id:
+                        if client_schedule_id is not None and str(client_schedule_id) != str(shift.schedule_id):
+                            return Response({
+                                'error': 'schedule_id does not match your currently active shift.',
+                                'active_schedule_id': shift.schedule_id,
+                            }, status=status.HTTP_409_CONFLICT)
+                        authoritative_schedule = shift.schedule
+                    else:
+                        if client_schedule_id is not None:
+                            return Response({
+                                'error': 'schedule_id cannot be specified for a shift without an assigned schedule.',
+                                'active_schedule_id': None,
+                            }, status=status.HTTP_409_CONFLICT)
+                        authoritative_schedule = None
+
+                    early_reason = (request.data.get('reason', '') or '').strip()
+
+                    from .shift_service import ShiftService
+                    shift = ShiftService.conclude_shift_atomic(
+                        driver_shift_id=shift.id,
+                        concluded_by=driver,
+                        end_reason='driver_ended',
+                        end_reason_notes=early_reason,
+                    )
+                    break
+            except _ConcurrentShiftTruckChange:
+                if attempt == max_attempts - 1:
+                    return Response(
+                        {'error': 'Active shift state changed concurrently; please retry.'},
+                        status=status.HTTP_409_CONFLICT,
+                    )
 
         try:
             _thin_shift_locations(shift.id)
@@ -1967,19 +4358,29 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='active_shifts')
     def active_shifts(self, request):
+        import logging
         from django.core.cache import cache
-        if cache.add('shift_sweep_lock', 1, 300):   # at most once per 5 min
-            from .management.commands.sweep_stale_shifts import sweep_stale_shifts
-            sweep_stale_shifts()
+        # Quarantined: never allow anonymous AllowAny GET requests to mutate shift rows.
+        if request.user.is_authenticated and is_admin_user(request.user):
+            if cache.add('shift_sweep_lock', 1, 300):   # at most once per 5 min
+                try:
+                    from .management.commands.sweep_stale_shifts import sweep_stale_shifts
+                    sweep_stale_shifts()
+                except Exception:
+                    logging.getLogger(__name__).exception("Stale shift sweep failed in active_shifts")
+                    try:
+                        cache.delete('shift_sweep_lock')
+                    except Exception:
+                        pass
 
         from django.db.models import Q
         is_privileged = request.user.is_authenticated and getattr(request.user, 'role', None) in _MAP_FULL_ACCESS_ROLES
         today = timezone.localdate()
-        # Include: all active shifts, today's inactive shifts, and today-swept abandoned shifts
+        # Include: all active shifts, today's inactive shifts, and today-swept/retired shifts
         shifts = DriverShift.objects.filter(
             Q(is_active=True)
             | Q(is_active=False, started_at__date=today)
-            | Q(is_active=False, end_reason__in=['heartbeat_timeout', 'truck_deleted'], ended_at__date=today)
+            | Q(is_active=False, end_reason__in=['heartbeat_timeout', 'truck_deleted', 'truck_retired'], ended_at__date=today)
         ).select_related('driver', 'truck')
         data = []
         now = timezone.now()
@@ -1987,9 +4388,9 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
         for shift in shifts:
             end_reason = shift.end_reason or ''
             if end_reason in ('heartbeat_timeout', 'truck_deleted'):
-                # Authoritative abandoned — swept by management command or truck delete signal
+                # Authoritative abandoned — swept by management command or legacy truck delete signal
                 conn_status = 'abandoned'
-            elif not shift.is_active:
+            elif end_reason == 'truck_retired' or not shift.is_active:
                 conn_status = 'done'
             elif shift.current_latitude and shift.current_longitude:
                 # Determine staleness status from last_location_update
@@ -2018,12 +4419,15 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
                     schedule = CollectionSchedule.objects.filter(driver=shift.driver).first()
                 truck = schedule.truck if schedule else None
 
+            team = shift.effective_team
             data.append({
                 'id': shift.id,
                 'driver': (shift.driver.full_name or shift.driver.username) if is_privileged else 'Collection Team',
                 'truck': truck.id if truck and is_privileged else None,
                 'truckId': truck.plate_number if truck and is_privileged else 'Hidden',
                 'truckModel': truck.model if truck and is_privileged else 'Hidden',
+                'team_name': team.name if team else None,
+                'team_code': team.code if team else None,
                 'lat': float(shift.current_latitude) if shift.current_latitude else None,
                 'lng': float(shift.current_longitude) if shift.current_longitude else None,
                 'last_update': shift.last_location_update,
@@ -2036,7 +4440,7 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
                 'status': conn_status,
                 'is_extended_mode': shift.is_extended_mode,
                 'schedule_id': shift.schedule_id,
-                })
+            })
         return Response(data)
 
     @action(detail=False, methods=['get'], url_path='my_active_shift',
@@ -2116,7 +4520,12 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=['get', 'post'], url_path='status')
     def shift_status(self, request):
-        shift = DriverShift.objects.filter(driver=request.user, is_active=True).first()
+        shift = (
+            DriverShift.objects
+            .select_related('schedule__dumpsite', 'allocation__schedule__dumpsite')
+            .filter(driver=request.user, is_active=True)
+            .first()
+        )
         if request.method == 'POST':
             new_status = request.data.get('status')
             valid_statuses = ('heading_to_start', 'on_duty', 'on_route', 'delayed', 'heading_to_dumpsite', 'at_dumpsite', 'returning_to_base')
@@ -2124,15 +4533,9 @@ class DriverShiftViewSet(viewsets.ReadOnlyModelViewSet):
                 # Trigger dumpsite notification if transitioning to heading_to_dumpsite
                 if new_status == 'heading_to_dumpsite':
                     from notifications.services import notify_dumpsite_inbound
-                    from driver.models import CollectionSchedule
-                    # Try to find today's schedule for this driver to know which dumpsite they're heading to
-                    import datetime
-                    date_str = str(datetime.date.today())
-                    sched = CollectionSchedule.objects.filter(driver=request.user, date=date_str).first()
-                    if not sched:
-                        sched = CollectionSchedule.objects.filter(driver=request.user).first()
-                    if sched and sched.dumpsite:
-                        notify_dumpsite_inbound(shift, sched.dumpsite)
+                    dumpsite = shift.effective_dumpsite or (shift.schedule.dumpsite if shift.schedule_id else None)
+                    if dumpsite:
+                        notify_dumpsite_inbound(shift, dumpsite)
 
                 shift.op_status = new_status
                 shift.save(update_fields=['op_status'])
@@ -2464,7 +4867,7 @@ def _home_base_payload(s):
 
 class HomeBaseView(APIView):
     def get_permissions(self):
-        return [IsAppAdmin()] if self.request.method == 'PUT' else [permissions.IsAuthenticated()]
+        return [IsAdminRole()] if self.request.method == 'PUT' else [permissions.IsAuthenticated()]
 
     def get(self, request):
         return Response(_home_base_payload(SystemSetting.load()))
@@ -2499,12 +4902,2186 @@ class HomeBaseView(APIView):
 
             if d.get('apply_to_existing'):
                 base = {'lat': d['lat'], 'lng': d['lng'], 'label': label}
-                schedules = list(CollectionSchedule.objects.select_for_update())
+                schedules = list(CollectionSchedule.objects.filter(dumpsite__isnull=True).select_for_update())
                 for sch in schedules:
                     wps = sch.waypoints if isinstance(sch.waypoints, list) else []
                     wps = [{**wps[0], **base}, *wps[1:]] if wps else [base]
                     sch.waypoints = wps
-                CollectionSchedule.objects.bulk_update(schedules, ['waypoints'])
+                if schedules:
+                    CollectionSchedule.objects.bulk_update(schedules, ['waypoints'])
                 updated_routes = len(schedules)
 
         return Response({**_home_base_payload(setting), 'updated_routes': updated_routes})
+
+
+from .worker_service import WorkerService
+from .team_service import TeamService, ActiveShiftConflictError
+from django.core.exceptions import ValidationError as DjangoValidationError
+
+class WorkerViewSet(viewsets.ModelViewSet):
+    """
+    CRUD and administrative operations for canonical Worker entities.
+    """
+    queryset = Worker.objects.select_related('user').all()
+    serializer_class = WorkerSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    allow_unpaginated = True
+
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'merge', 'update_employee_id', 'attendance_history']:
+            return [IsAdminRole()]
+        return [IsOperationalStaffOrAdmin()]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active.lower() in ('true', '1'))
+
+        search = self.request.query_params.get('search')
+        if search:
+            search = search.strip()
+            qs = qs.filter(
+                Q(full_name__icontains=search) |
+                Q(employee_id__icontains=search) |
+                Q(user__username__icontains=search) |
+                Q(team_memberships__team__name__icontains=search, team_memberships__is_active=True) |
+                Q(team_memberships__team__code__icontains=search, team_memberships__is_active=True)
+            ).distinct()
+
+        pool_filter = self.request.query_params.get('pool_filter') or self.request.query_params.get('role')
+        if pool_filter:
+            pool_filter = pool_filter.lower().strip()
+            if pool_filter in ('available', 'unassigned'):
+                qs = qs.exclude(
+                    team_memberships__is_active=True,
+                    team_memberships__team__is_active=True
+                )
+            elif pool_filter in ('watchers', 'watcher'):
+                qs = qs.filter(user__role='watcher')
+            elif pool_filter in ('drivers', 'driver'):
+                qs = qs.filter(user__role='driver')
+            elif pool_filter in ('crew', 'crew_members', 'crew_member'):
+                qs = qs.filter(
+                    Q(user__isnull=True) |
+                    Q(user__role='citizen', user__employee_type='crew_member')
+                )
+
+        provisional_only = self.request.query_params.get('provisional')
+        if provisional_only is not None:
+            if provisional_only.lower() in ('true', '1'):
+                qs = qs.filter(employee_id__startswith='PROV-')
+            else:
+                qs = qs.exclude(employee_id__startswith='PROV-')
+
+        worker_type = self.request.query_params.get('worker_type')
+        if worker_type == 'authenticated':
+            qs = qs.filter(user__isnull=False)
+        elif worker_type == 'non_login':
+            qs = qs.filter(user__isnull=True).exclude(employee_id__startswith='PROV-')
+        elif worker_type == 'provisional':
+            qs = qs.filter(employee_id__startswith='PROV-')
+
+        return qs.order_by('employee_id', 'id')
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        if getattr(self, 'action', None) == 'list':
+            from collections import defaultdict
+            from django.utils import timezone
+            from .models import (
+                SanitationTeamMembership,
+                CollectionSchedule,
+                ScheduleTeamOverride,
+                DriverShift,
+                WatcherShift,
+                CrewShift,
+                ShiftCrewRosterItem,
+            )
+
+            today = timezone.localdate()
+
+            # 1. Active memberships map
+            membership_map = {
+                m.worker_id: m
+                for m in SanitationTeamMembership.objects.filter(
+                    is_active=True, team__is_active=True
+                ).select_related('team')
+            }
+
+            # 2. Distinct active schedules for default team & driver assignments
+            # Excludes CANCELLED, COMPLETED, and expired single-date schedules (date < today)
+            team_sched_map = defaultdict(set)
+            driver_sched_map = defaultdict(set)
+
+            valid_schedules = (
+                CollectionSchedule.objects
+                .exclude(status__in=['CANCELLED', 'COMPLETED'])
+                .filter(Q(date__isnull=True) | Q(date__gte=today))
+                .values('id', 'default_team_id', 'driver_id')
+            )
+            for s in valid_schedules:
+                if s['default_team_id']:
+                    team_sched_map[s['default_team_id']].add(s['id'])
+                if s['driver_id']:
+                    driver_sched_map[s['driver_id']].add(s['id'])
+
+            # 3. Valid date overrides (effective_date >= today, schedule not CANCELLED or COMPLETED)
+            overrides = (
+                ScheduleTeamOverride.objects
+                .filter(effective_date__gte=today)
+                .exclude(schedule__status__in=['CANCELLED', 'COMPLETED'])
+                .filter(Q(schedule__date__isnull=True) | Q(schedule__date__gte=today))
+                .values('team_id', 'schedule_id')
+            )
+            for ov in overrides:
+                team_sched_map[ov['team_id']].add(ov['schedule_id'])
+
+            # 4. Active shifts across DriverShift, WatcherShift, CrewShift, ShiftCrewRosterItem
+            active_shift_workers = set(
+                DriverShift.objects.filter(
+                    is_active=True, driver__worker_profile__isnull=False
+                ).values_list('driver__worker_profile__id', flat=True)
+            )
+            active_shift_workers.update(
+                WatcherShift.objects.filter(
+                    is_active=True, watcher__worker_profile__isnull=False
+                ).values_list('watcher__worker_profile__id', flat=True)
+            )
+            active_shift_workers.update(
+                CrewShift.objects.filter(
+                    team_leader__worker_profile__isnull=False
+                ).filter(
+                    Q(is_active=True) | Q(driver_shift__is_active=True)
+                ).values_list('team_leader__worker_profile__id', flat=True)
+            )
+            active_shift_workers.update(
+                ShiftCrewRosterItem.objects.filter(
+                    Q(snapshot__driver_shift__is_active=True)
+                    | Q(snapshot__crew_shift__is_active=True)
+                    | Q(snapshot__crew_shift__driver_shift__is_active=True)
+                ).values_list('worker_id', flat=True)
+            )
+
+            context['active_membership_by_worker'] = membership_map
+            context['schedule_ids_by_team'] = team_sched_map
+            context['schedule_ids_by_driver_user'] = driver_sched_map
+            context['active_shift_worker_ids'] = active_shift_workers
+        return context
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user_val = serializer.validated_data.get('user')
+        try:
+            worker = WorkerService.create_worker(
+                employee_id=serializer.validated_data['employee_id'],
+                full_name=serializer.validated_data['full_name'],
+                user=user_val,
+                is_active=serializer.validated_data.get('is_active', True),
+            )
+            return Response(WorkerSerializer(worker).data, status=status.HTTP_201_CREATED)
+        except DjangoValidationError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        with transaction.atomic():
+            worker = Worker.objects.select_related('user').filter(pk=kwargs.get('pk')).select_for_update(of=('self',)).first()
+            if not worker:
+                self.get_object()
+            serializer = self.get_serializer(worker, data=request.data, partial=partial)
+            serializer.is_valid(raise_exception=True)
+            validated = serializer.validated_data
+
+            if 'is_active' in validated and worker.is_active and not validated['is_active']:
+                if TeamService.is_worker_on_active_shift(worker.id):
+                    return Response(
+                        {'error': f"Worker '{worker.full_name}' is currently on an active shift and cannot be deactivated."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                if SanitationTeamMembership.objects.filter(worker=worker, is_active=True).exists():
+                    return Response(
+                        {'error': f"Worker '{worker.full_name}' has an active sanitation team membership. Remove or transfer worker first."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+
+            if 'user' in validated and validated['user'] != worker.user:
+                if TeamService.is_worker_on_active_shift(worker.id):
+                    return Response(
+                        {'error': f"Worker '{worker.full_name}' is currently on an active shift; user link cannot be modified."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                if SanitationTeamMembership.objects.filter(worker=worker, is_active=True).exists():
+                    return Response(
+                        {'error': f"Worker '{worker.full_name}' has an active sanitation team membership; remove worker from team before changing linked user."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+
+            resulting_is_active = validated.get('is_active', worker.is_active)
+            effective_user = validated.get('user', worker.user)
+            user_changed = 'user' in validated and validated['user'] != worker.user
+            if effective_user is not None and (user_changed or resulting_is_active):
+                if not getattr(effective_user, 'is_active', False):
+                    return Response(
+                        {'user': f"User '{effective_user.username}' is inactive and cannot be linked to a Worker."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                sys_role = getattr(effective_user, 'role', None)
+                emp_type = getattr(effective_user, 'employee_type', None)
+                eligible = (
+                    sys_role in ('driver', 'watcher')
+                    or (sys_role == 'citizen' and emp_type == 'crew_member')
+                )
+                if not eligible:
+                    return Response(
+                        {'user': f"User '{effective_user.username}' with role '{sys_role}' is not eligible for operational sanitation Worker linkage."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            new_employee_id = validated.pop('employee_id', None)
+            if new_employee_id is not None and new_employee_id != worker.employee_id:
+                try:
+                    worker = WorkerService.update_employee_id(
+                        worker_id=worker.id,
+                        new_employee_id=new_employee_id,
+                        authorized_by=request.user,
+                    )
+                except DjangoValidationError as e:
+                    return Response(
+                        e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            update_fields = []
+            for field in ('full_name', 'user', 'is_active'):
+                if field in validated:
+                    setattr(worker, field, validated[field])
+                    update_fields.append(field)
+            if update_fields:
+                update_fields.append('updated_at')
+                worker.save(update_fields=update_fields)
+
+            return Response(WorkerSerializer(worker, context=self.get_serializer_context()).data)
+
+    def destroy(self, request, *args, **kwargs):
+        with transaction.atomic():
+            worker = Worker.objects.filter(pk=kwargs.get('pk')).select_for_update().first()
+            if not worker:
+                self.get_object()
+            if TeamService.is_worker_on_active_shift(worker.id):
+                return Response(
+                    {'error': f"Worker '{worker.full_name}' is currently on an active shift and cannot be deleted."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            if SanitationTeamMembership.objects.filter(worker=worker, is_active=True).exists():
+                return Response(
+                    {'error': f"Worker '{worker.full_name}' has an active team membership. Remove worker from team first."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            try:
+                worker.delete()
+            except ProtectedError:
+                return Response(
+                    {'error': f"Worker '{worker.full_name}' is referenced by historical operational records and cannot be deleted; deactivate instead."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'], url_path='merge', permission_classes=[IsAdminRole])
+    def merge(self, request, pk=None):
+        target_id = request.data.get('target_worker_id')
+        notes = request.data.get('notes', '')
+        if not target_id:
+            return Response({'error': 'target_worker_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            target = WorkerService.merge_workers(
+                source_worker_id=int(pk),
+                target_worker_id=int(target_id),
+                resolved_by=request.user,
+                notes=notes,
+            )
+            return Response(WorkerSerializer(target).data, status=status.HTTP_200_OK)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    @action(detail=True, methods=['post'], url_path='update-employee-id', permission_classes=[IsAdminRole])
+    def update_employee_id(self, request, pk=None):
+        new_id = request.data.get('new_employee_id')
+        if not new_id:
+            return Response({'error': 'new_employee_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            worker = WorkerService.update_employee_id(
+                worker_id=int(pk),
+                new_employee_id=new_id,
+                authorized_by=request.user,
+            )
+            return Response(WorkerSerializer(worker).data, status=status.HTTP_200_OK)
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    @action(detail=True, methods=['get'], url_path='attendance-history', permission_classes=[IsAdminRole])
+    def attendance_history(self, request, pk=None):
+        """
+        GET /api/driver/workers/{id}/attendance-history/
+        Admin-only inspection of persisted attendance, shift, and team membership history for a Worker.
+        """
+        from .shift_service import ShiftService
+        worker = self.get_object()
+        payload = ShiftService.get_worker_attendance_history(worker, viewer_user=request.user)
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class WorkerReconciliationViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Administrative quarantine review and resolution for provisional Worker records.
+    """
+    queryset = LegacyCrewReconciliationAudit.objects.select_related('provisional_worker', 'resolved_by').all()
+    serializer_class = LegacyCrewReconciliationAuditSerializer
+    permission_classes = [IsAdminRole]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        st = self.request.query_params.get('status')
+        if st:
+            qs = qs.filter(reconciliation_status=st.upper())
+        return qs.order_by('-id')
+
+    @action(detail=True, methods=['post'], url_path='resolve', permission_classes=[IsAdminRole])
+    def resolve(self, request, pk=None):
+        act = request.data.get('action')
+        target_worker_id = request.data.get('target_worker_id')
+        new_employee_id = request.data.get('new_employee_id')
+        notes = request.data.get('notes', '')
+
+        if not act:
+            return Response({'error': 'action is required (PROMOTE, MERGE, or DISMISS).'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            audit = WorkerService.reconcile_provisional_worker(
+                audit_id=int(pk),
+                action=act,
+                target_worker_id=int(target_worker_id) if target_worker_id else None,
+                new_employee_id=new_employee_id,
+                notes=notes,
+                resolved_by=request.user,
+            )
+            return Response(LegacyCrewReconciliationAuditSerializer(audit).data, status=status.HTTP_200_OK)
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+
+class SanitationTeamViewSet(viewsets.ModelViewSet):
+    """
+    CRUD and administrative operations for Sanitation Teams.
+    """
+    queryset = SanitationTeam.objects.prefetch_related(
+        Prefetch(
+            'memberships',
+            queryset=SanitationTeamMembership.objects.filter(is_active=True).select_related('worker__user')
+        ),
+        Prefetch(
+            'default_schedules',
+            queryset=CollectionSchedule.objects.select_related('dumpsite', 'truck').order_by('id')
+        )
+    ).all()
+    serializer_class = SanitationTeamSerializer
+    pagination_class = SanitationTeamPagination
+    permission_classes = [permissions.IsAuthenticated]
+    allow_unpaginated = True
+
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'assign_member', 'transfer_worker']:
+            return [IsAdminRole()]
+        return [IsOperationalStaffOrAdmin()]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active.lower() in ('true', '1'))
+        search = self.request.query_params.get('search')
+        if search:
+            qs = qs.filter(
+                Q(name__icontains=search) |
+                Q(code__icontains=search) |
+                Q(description__icontains=search) |
+                Q(memberships__is_active=True, memberships__worker__full_name__icontains=search) |
+                Q(memberships__is_active=True, memberships__worker__employee_id__icontains=search)
+            ).distinct()
+        leadership_mode = self.request.query_params.get('leadership_mode')
+        if leadership_mode == 'watcher':
+            qs = qs.filter(
+                memberships__is_active=True,
+                memberships__role_in_team='leader',
+                memberships__worker__user__role='watcher',
+            ).distinct()
+        elif leadership_mode == 'driver':
+            qs = qs.filter(
+                memberships__is_active=True,
+                memberships__role_in_team='leader',
+                memberships__worker__user__role='driver',
+            ).distinct()
+        elif leadership_mode == 'incomplete':
+            from django.db.models import Exists, OuterRef
+            active_leader = SanitationTeamMembership.objects.filter(
+                team=OuterRef('pk'), is_active=True, role_in_team='leader'
+            )
+            watcher_leader = SanitationTeamMembership.objects.filter(
+                team=OuterRef('pk'), is_active=True, role_in_team='leader', worker__user__role='watcher'
+            )
+            active_driver = SanitationTeamMembership.objects.filter(
+                team=OuterRef('pk'), is_active=True, role_in_team='driver'
+            )
+            active_crew = SanitationTeamMembership.objects.filter(
+                team=OuterRef('pk'), is_active=True, role_in_team='crew'
+            )
+            qs = qs.annotate(
+                _has_leader=Exists(active_leader),
+                _is_watcher_led=Exists(watcher_leader),
+                _has_driver=Exists(active_driver),
+                _has_crew=Exists(active_crew),
+            ).filter(
+                Q(_has_leader=False) |
+                Q(_is_watcher_led=True, _has_driver=False) |
+                Q(_has_crew=False)
+            )
+        return qs.order_by('code', 'id')
+
+    def _team_has_operational_dependencies(self, team):
+        today = timezone.localdate()
+        if SanitationTeamMembership.objects.filter(team=team, is_active=True).exists():
+            return 'Team still has active members. Remove or transfer all members first.'
+        if CrewShift.objects.filter(team=team).filter(Q(is_active=True) | Q(driver_shift__is_active=True)).exists():
+            return 'Team is participating in an active crew shift.'
+        if DriverShift.objects.filter(is_active=True).filter(
+            Q(allocation__team=team) | Q(schedule__default_team=team)
+        ).exists():
+            return 'Team is participating in an active driver shift.'
+        if CollectionSchedule.objects.filter(default_team=team).exclude(status__in=['CANCELLED', 'COMPLETED']).exists():
+            return 'Team is assigned as default team on active collection schedules.'
+        if ScheduleTeamOverride.objects.filter(team=team, effective_date__gte=today).exclude(
+            schedule__status__in=['CANCELLED', 'COMPLETED']
+        ).exists():
+            return 'Team is assigned on upcoming or current schedule team overrides.'
+        if ScheduleTruckAllocation.objects.filter(team=team, allocation_date__gte=today).exclude(
+            schedule__status__in=['CANCELLED', 'COMPLETED']
+        ).exists():
+            return 'Team is assigned on upcoming or current truck allocations.'
+        return None
+
+    def create(self, request, *args, **kwargs):
+        name = request.data.get('name')
+        code = request.data.get('code')
+        desc = request.data.get('description', '')
+        try:
+            team = TeamService.create_team(name=name, code=code, description=desc)
+            return Response(SanitationTeamSerializer(team).data, status=status.HTTP_201_CREATED)
+        except DjangoValidationError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        with transaction.atomic():
+            team = SanitationTeam.objects.filter(pk=kwargs.get('pk')).select_for_update().first()
+            if not team:
+                self.get_object()
+            serializer = self.get_serializer(team, data=request.data, partial=partial)
+            serializer.is_valid(raise_exception=True)
+            validated = serializer.validated_data
+            if 'is_active' in validated and team.is_active and not validated['is_active']:
+                conflict_msg = self._team_has_operational_dependencies(team)
+                if conflict_msg:
+                    return Response({'error': conflict_msg}, status=status.HTTP_409_CONFLICT)
+            serializer.save()
+            return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        with transaction.atomic():
+            team = SanitationTeam.objects.filter(pk=kwargs.get('pk')).select_for_update().first()
+            if not team:
+                self.get_object()
+            conflict_msg = self._team_has_operational_dependencies(team)
+            if conflict_msg:
+                return Response({'error': conflict_msg}, status=status.HTTP_409_CONFLICT)
+            try:
+                team.delete()
+            except ProtectedError:
+                return Response(
+                    {'error': 'Team is referenced by historical operational records and cannot be deleted; deactivate instead.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'], url_path='assign-member', permission_classes=[IsAdminRole])
+    def assign_member(self, request, pk=None):
+        worker_id = request.data.get('worker_id')
+        role_in_team = request.data.get('role') or request.data.get('role_in_team', 'crew')
+        if not worker_id:
+            return Response({'error': 'worker_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            membership = TeamService.assign_member(
+                team_id=int(pk),
+                worker_id=int(worker_id),
+                role_in_team=role_in_team,
+                created_by=request.user,
+            )
+            return Response(SanitationTeamMembershipSerializer(membership).data, status=status.HTTP_201_CREATED)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+    @action(detail=False, methods=['post'], url_path='transfer-worker', permission_classes=[IsAdminRole])
+    def transfer_worker(self, request):
+        worker_id = request.data.get('worker_id')
+        target_team_id = request.data.get('target_team_id') or request.data.get('to_team_id')
+        new_role = request.data.get('new_role') or request.data.get('role_in_team', 'crew')
+        if not worker_id or not target_team_id:
+            return Response({'error': 'worker_id and target_team_id are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            membership = TeamService.transfer_member(
+                worker_id=int(worker_id),
+                target_team_id=int(target_team_id),
+                new_role=new_role,
+                authorized_by=request.user,
+            )
+            return Response(SanitationTeamMembershipSerializer(membership).data, status=status.HTTP_200_OK)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+
+class SanitationTeamMembershipViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Membership audit and management viewset.
+    """
+    queryset = SanitationTeamMembership.objects.select_related('team', 'worker', 'worker__user', 'created_by').all()
+    serializer_class = SanitationTeamMembershipSerializer
+    permission_classes = [IsOperationalStaffOrAdmin]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        team_id = self.request.query_params.get('team_id')
+        if team_id:
+            qs = qs.filter(team_id=team_id)
+        worker_id = self.request.query_params.get('worker_id')
+        if worker_id:
+            qs = qs.filter(worker_id=worker_id)
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active.lower() in ('true', '1'))
+        return qs
+
+    @action(detail=True, methods=['post'], url_path='deactivate', permission_classes=[IsAdminRole])
+    def deactivate(self, request, pk=None):
+        try:
+            membership = TeamService.deactivate_member(
+                membership_id=int(pk),
+                authorized_by=request.user,
+            )
+            return Response(SanitationTeamMembershipSerializer(membership).data, status=status.HTTP_200_OK)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+class ScheduleTeamOverrideViewSet(viewsets.ModelViewSet):
+    queryset = ScheduleTeamOverride.objects.select_related('schedule', 'team', 'created_by').all()
+    serializer_class = ScheduleTeamOverrideSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminRole]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        schedule_id = self.request.query_params.get('schedule_id')
+        if schedule_id:
+            qs = qs.filter(schedule_id=schedule_id)
+        effective_date = self.request.query_params.get('effective_date')
+        if effective_date:
+            qs = qs.filter(effective_date=effective_date)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        from .allocation_service import AllocationService
+        from .team_service import ActiveShiftConflictError
+        schedule_id = request.data.get('schedule')
+        team_id = request.data.get('team')
+        effective_date_raw = request.data.get('effective_date')
+        reason = request.data.get('reason', '')
+        if not schedule_id or not team_id or not effective_date_raw:
+            return Response(
+                {'error': 'schedule, team, and effective_date are required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        eff_date = parse_date(str(effective_date_raw))
+        if not eff_date:
+            return Response({'error': 'Invalid effective_date format.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            override = AllocationService.create_schedule_override(
+                schedule_id=int(schedule_id),
+                effective_date=eff_date,
+                team_id=int(team_id),
+                reason=reason,
+                created_by=request.user,
+            )
+            return Response(self.get_serializer(override).data, status=status.HTTP_201_CREATED)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError, TypeError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    def update(self, request, *args, **kwargs):
+        from .allocation_service import AllocationService
+        from .team_service import ActiveShiftConflictError
+        instance = self.get_object()
+        schedule_id = request.data.get('schedule')
+        team_id = request.data.get('team')
+        effective_date_raw = request.data.get('effective_date')
+        reason = request.data.get('reason')
+        eff_date = None
+        if effective_date_raw is not None:
+            eff_date = parse_date(str(effective_date_raw))
+            if not eff_date:
+                return Response({'error': 'Invalid effective_date format.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            override = AllocationService.update_schedule_override(
+                override_id=instance.id,
+                schedule_id=int(schedule_id) if schedule_id is not None else None,
+                effective_date=eff_date,
+                team_id=int(team_id) if team_id is not None else None,
+                reason=reason,
+            )
+            return Response(self.get_serializer(override).data, status=status.HTTP_200_OK)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    def partial_update(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        from .allocation_service import AllocationService
+        from .team_service import ActiveShiftConflictError
+        instance = self.get_object()
+        try:
+            AllocationService.delete_schedule_override(instance.id)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+class ScheduleTruckAllocationViewSet(viewsets.ModelViewSet):
+    queryset = ScheduleTruckAllocation.objects.select_related('schedule', 'truck', 'team', 'allocated_by').all()
+    serializer_class = ScheduleTruckAllocationSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrAssignedDumpsiteOperator]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = getattr(self.request, 'user', None)
+        if user and not is_admin_user(user):
+            from .truck_service import TruckService
+            facility_id = TruckService.get_operator_dumpsite_id(user)
+            if not facility_id:
+                return qs.none()
+            qs = qs.filter(schedule__dumpsite_id=facility_id)
+        schedule_id = self.request.query_params.get('schedule_id')
+        if schedule_id:
+            qs = qs.filter(schedule_id=schedule_id)
+        truck_id = self.request.query_params.get('truck_id')
+        if truck_id:
+            qs = qs.filter(truck_id=truck_id)
+        team_id = self.request.query_params.get('team_id')
+        if team_id:
+            qs = qs.filter(team_id=team_id)
+        allocation_date = self.request.query_params.get('allocation_date')
+        if allocation_date:
+            qs = qs.filter(allocation_date=allocation_date)
+        dumpsite_id = self.request.query_params.get('dumpsite_id')
+        if dumpsite_id:
+            qs = qs.filter(schedule__dumpsite_id=dumpsite_id)
+        search = (self.request.query_params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(
+                Q(truck__plate_number__icontains=search)
+                | Q(truck__model__icontains=search)
+                | Q(schedule__area__icontains=search)
+                | Q(team__name__icontains=search)
+            )
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        from django.core.exceptions import PermissionDenied
+        from .allocation_service import AllocationService
+        from .truck_service import TruckService
+        schedule_id = request.data.get('schedule')
+        allocation_date_raw = request.data.get('allocation_date')
+        truck_id = request.data.get('truck')
+        team_id = request.data.get('team')
+        if not schedule_id or not allocation_date_raw or not truck_id:
+            return Response(
+                {'error': 'schedule, allocation_date, and truck are required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        schedule = CollectionSchedule.objects.filter(pk=schedule_id).first()
+        if not schedule:
+            return Response({'error': f'Schedule #{schedule_id} not found.'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            truck_id_int = int(truck_id)
+        except (TypeError, ValueError):
+            return Response({'error': 'Invalid truck.'}, status=status.HTTP_400_BAD_REQUEST)
+        truck_obj = Truck.objects.filter(pk=truck_id_int).first()
+        if not truck_obj:
+            return Response({'error': f'Truck #{truck_id_int} not found.'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            TruckService.require_admin_or_facility_operator(request.user, schedule=schedule, truck=truck_obj)
+        except PermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        alloc_date = parse_date(str(allocation_date_raw))
+        if not alloc_date:
+            return Response({'error': 'Invalid allocation_date format.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            from .team_service import ActiveShiftConflictError
+            allocation = AllocationService.allocate_truck_for_schedule(
+                schedule_id=int(schedule_id),
+                allocation_date=alloc_date,
+                truck_id=truck_id_int,
+                team_id=int(team_id) if team_id is not None else None,
+                allocated_by=request.user,
+            )
+            return Response(self.get_serializer(allocation).data, status=status.HTTP_201_CREATED)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    def update(self, request, *args, **kwargs):
+        from django.core.exceptions import PermissionDenied
+        from .allocation_service import AllocationService
+        from .team_service import ActiveShiftConflictError
+        from .truck_service import TruckService
+
+        schedule_id = request.data.get('schedule')
+        truck_id = request.data.get('truck')
+        allocation_date_raw = request.data.get('allocation_date')
+        team_id = request.data.get('team')
+
+        schedule_id_int = None
+        if schedule_id is not None:
+            try:
+                schedule_id_int = int(schedule_id)
+            except (TypeError, ValueError):
+                return Response({'error': 'Invalid schedule.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        truck_id_int = None
+        if truck_id is not None:
+            try:
+                truck_id_int = int(truck_id)
+            except (TypeError, ValueError):
+                return Response({'error': 'Invalid truck.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        team_id_int = None
+        if team_id is not None:
+            try:
+                team_id_int = int(team_id)
+            except (TypeError, ValueError):
+                return Response({'error': 'Invalid team.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        alloc_date = None
+        if allocation_date_raw is not None:
+            alloc_date = parse_date(str(allocation_date_raw))
+            if not alloc_date:
+                return Response({'error': 'Invalid allocation_date format.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            instance = (
+                ScheduleTruckAllocation.objects
+                .select_related('schedule', 'truck')
+                .filter(pk=kwargs.get('pk'))
+                .first()
+            )
+            if not instance:
+                raise Http404('ScheduleTruckAllocation not found.')
+            # Verify queryset facility visibility
+            if not self.get_queryset().filter(pk=instance.pk).exists():
+                raise Http404('ScheduleTruckAllocation not found.')
+
+            truck_obj = instance.truck
+            if truck_id_int is not None:
+                truck_obj = Truck.objects.filter(pk=truck_id_int).first()
+                if not truck_obj:
+                    return Response({'error': f'Truck #{truck_id_int} not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+            TruckService.require_admin_or_facility_operator(
+                request.user, schedule=instance.schedule, truck=instance.truck
+            )
+            if truck_obj and truck_obj.id != instance.truck_id:
+                TruckService.require_admin_or_facility_operator(
+                    request.user, schedule=instance.schedule, truck=truck_obj
+                )
+            if schedule_id_int is not None:
+                target_sched = CollectionSchedule.objects.filter(pk=schedule_id_int).first()
+                if target_sched:
+                    TruckService.require_admin_or_facility_operator(
+                        request.user, schedule=target_sched, truck=truck_obj
+                    )
+
+            allocation = AllocationService.update_truck_allocation(
+                allocation_id=instance.id,
+                schedule_id=schedule_id_int,
+                allocation_date=alloc_date,
+                truck_id=truck_id_int,
+                team_id=team_id_int,
+                actor=request.user,
+            )
+            return Response(self.get_serializer(allocation).data, status=status.HTTP_200_OK)
+        except PermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    def partial_update(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        from django.core.exceptions import PermissionDenied
+        from .allocation_service import AllocationService
+        from .team_service import ActiveShiftConflictError
+        from .truck_service import TruckService
+        try:
+            instance = (
+                ScheduleTruckAllocation.objects
+                .select_related('schedule', 'truck')
+                .filter(pk=kwargs.get('pk'))
+                .first()
+            )
+            if not instance:
+                raise Http404('ScheduleTruckAllocation not found.')
+            if not self.get_queryset().filter(pk=instance.pk).exists():
+                raise Http404('ScheduleTruckAllocation not found.')
+            TruckService.require_admin_or_facility_operator(
+                request.user, schedule=instance.schedule, truck=instance.truck
+            )
+            AllocationService.delete_truck_allocation(instance.id, actor=request.user)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except PermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except ActiveShiftConflictError as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except ProtectedError:
+            return Response(
+                {'error': 'Cannot delete truck allocation because operational shift records reference it.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+class WatcherShiftViewSet(viewsets.ModelViewSet):
+    queryset = WatcherShift.objects.select_related('watcher', 'schedule', 'barangay').order_by('-shift_date', '-started_at')
+    serializer_class = WatcherShiftSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ['get', 'post', 'head', 'options']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if not is_admin_user(user):
+            qs = qs.filter(watcher=user)
+        schedule_id = self.request.query_params.get('schedule_id')
+        if schedule_id:
+            qs = qs.filter(schedule_id=schedule_id)
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active.lower() in ('true', '1'))
+        return qs
+
+    @action(detail=False, methods=['get'], url_path='current')
+    def current(self, request):
+        from .shift_service import ShiftService
+        ShiftService.cleanup_stale_unlinked_watcher_shifts(watcher_user=request.user)
+        shift = self.get_queryset().filter(is_active=True).first()
+        if not shift:
+            return Response(None, status=status.HTTP_200_OK)
+        return Response(self.get_serializer(shift).data, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        return Response(
+            {'error': 'Use /api/driver/watcher-shifts/start/ to start and confirm a WatcherShift.'},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
+    @action(detail=False, methods=['post'], url_path='start')
+    def start_shift(self, request):
+        # Reject client-supplied watcher identity spoofing
+        supplied_watcher = request.data.get('watcher') or request.data.get('watcher_id')
+        if supplied_watcher is not None and str(supplied_watcher) != str(request.user.id):
+            return Response(
+                {'error': 'Cannot start a WatcherShift on behalf of another user.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if getattr(request.user, 'role', None) != UserRole.WATCHER:
+            return Response(
+                {'error': 'Only an assigned Watcher (Team Leader) may start a WatcherShift.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        schedule_id = request.data.get('schedule_id')
+        if not schedule_id:
+            return Response({'error': 'schedule_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            schedule_id_int = int(schedule_id)
+        except (TypeError, ValueError):
+            return Response({'error': 'Invalid schedule_id.'}, status=status.HTTP_400_BAD_REQUEST)
+        if schedule_id_int <= 0:
+            return Response({'error': 'schedule_id must be a positive integer.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        today = timezone.localdate()
+        from .allocation_service import AllocationService
+        from .shift_service import ShiftService
+
+        # Idempotently close any prior-date unlinked WatcherShifts / pre-departure CrewShifts BEFORE transaction.atomic()
+        ShiftService.cleanup_stale_unlinked_watcher_shifts(watcher_user=request.user)
+
+        class _ConcurrentTeamChange(Exception):
+            pass
+
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                with transaction.atomic():
+                    # Canonical lock order:
+                    # CollectionSchedule (1) -> SanitationTeam (2) -> Worker (6, asc id)
+                    # -> SanitationTeamMembership (7, asc id) -> CrewShift (9, asc id) -> WatcherShift (10, of=('self',))
+                    schedule = CollectionSchedule.objects.filter(id=schedule_id_int).select_for_update().first()
+                    if not schedule:
+                        return Response({'error': 'Schedule not found.'}, status=status.HTTP_404_NOT_FOUND)
+                    if schedule.status in ('CANCELLED', 'COMPLETED') or not schedule.is_available:
+                        return Response(
+                            {'error': f"Schedule #{schedule.id} is not active or available for dispatch."},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    try:
+                        pre_team = AllocationService.resolve_schedule_team(schedule.id, today)
+                    except DjangoValidationError as e:
+                        return Response(
+                            e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    locked_team = SanitationTeam.objects.filter(id=pre_team.id, is_active=True).select_for_update().first()
+                    if not locked_team:
+                        return Response(
+                            {'error': f'Resolved team for Schedule #{schedule.id} is inactive.'},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    team_worker_ids = sorted(
+                        SanitationTeamMembership.objects.filter(
+                            team=locked_team, is_active=True
+                        ).values_list('worker_id', flat=True)
+                    )
+                    if team_worker_ids:
+                        list(
+                            Worker.objects.filter(id__in=team_worker_ids)
+                            .order_by('id')
+                            .select_for_update(of=('self',))
+                        )
+                    list(
+                        SanitationTeamMembership.objects.filter(team=locked_team, is_active=True)
+                        .order_by('id')
+                        .select_for_update(of=('self',))
+                    )
+
+                    try:
+                        from .team_service import TeamService, resolve_deployment_team_leader
+                        deployment_leader = resolve_deployment_team_leader(schedule, today)
+                    except DjangoValidationError as e:
+                        return Response(
+                            e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    if deployment_leader.team.id != locked_team.id:
+                        raise _ConcurrentTeamChange()
+
+                    if deployment_leader.leadership_mode != 'watcher' or deployment_leader.user.id != request.user.id:
+                        return Response(
+                            {'error': f'You are not the designated Team Leader (Watcher) for Team {locked_team.code}.'},
+                            status=status.HTTP_403_FORBIDDEN,
+                        )
+
+                    # Lock CrewShift (9, asc id) BEFORE WatcherShift (10, of=('self',))
+                    unlinked_cs = list(
+                        CrewShift.objects.filter(
+                            schedule=schedule,
+                            service_date=today,
+                            team_leader=request.user,
+                            watcher_shift__isnull=True,
+                            is_active=True,
+                        ).order_by('id').select_for_update()
+                    )
+                    if len(unlinked_cs) > 1:
+                        return Response(
+                            {
+                                'error': (
+                                    'Multiple active unlinked CrewShifts exist for this schedule and date; '
+                                    'resolve duplicate CrewShifts before starting WatcherShift.'
+                                )
+                            },
+                            status=status.HTTP_409_CONFLICT,
+                        )
+
+                    active = WatcherShift.objects.select_for_update(of=('self',)).filter(
+                        watcher=request.user, is_active=True
+                    ).first()
+                    if active:
+                        if active.schedule_id != schedule.id or active.shift_date != today:
+                            return Response(
+                                {'error': 'You already have an active WatcherShift on a different schedule or date.'},
+                                status=status.HTTP_409_CONFLICT,
+                            )
+                        linked_cs_id = (
+                            CrewShift.objects.filter(watcher_shift=active, is_active=True)
+                            .values_list('id', flat=True)
+                            .first()
+                        )
+                        if TeamService.is_worker_on_active_shift(
+                            deployment_leader.worker.id,
+                            exclude_watcher_shift_id=active.id,
+                            exclude_crew_shift_id=unlinked_cs[0].id if len(unlinked_cs) == 1 else linked_cs_id,
+                            exclude_driver_shift_schedule_id=schedule.id,
+                        ):
+                            return Response(
+                                {'error': 'You are already participating in another active shift.'},
+                                status=status.HTTP_409_CONFLICT,
+                            )
+                        if len(unlinked_cs) == 1:
+                            cs = unlinked_cs[0]
+                            cs.watcher_shift = active
+                            cs.save(update_fields=['watcher_shift'])
+                        return Response(self.get_serializer(active).data, status=status.HTTP_200_OK)
+
+                    if TeamService.is_worker_on_active_shift(
+                        deployment_leader.worker.id,
+                        exclude_watcher_shift_id=None,
+                        exclude_crew_shift_id=unlinked_cs[0].id if len(unlinked_cs) == 1 else None,
+                        exclude_driver_shift_schedule_id=schedule.id,
+                    ):
+                        return Response(
+                            {'error': 'You are already participating in another active shift.'},
+                            status=status.HTTP_409_CONFLICT,
+                        )
+
+                    barangay = schedule.barangays.first() if schedule.barangays.exists() else None
+                    shift = WatcherShift.objects.create(
+                        watcher=request.user,
+                        schedule=schedule,
+                        barangay=barangay,
+                        shift_date=today,
+                        is_active=True,
+                    )
+                    if len(unlinked_cs) == 1:
+                        cs = unlinked_cs[0]
+                        cs.watcher_shift = shift
+                        cs.save(update_fields=['watcher_shift'])
+                    return Response(self.get_serializer(shift).data, status=status.HTTP_201_CREATED)
+            except _ConcurrentTeamChange:
+                if attempt == max_attempts - 1:
+                    return Response(
+                        {'error': 'Deployment team changed concurrently while starting shift; please retry.'},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+            except IntegrityError:
+                return Response(
+                    {'error': 'You already have an active WatcherShift for today (concurrent start conflict).'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+    @action(detail=True, methods=['post'], url_path='end')
+    def end_shift(self, request, pk=None):
+        from .models import CrewShift
+        shift = self.get_object()
+        with transaction.atomic():
+            locked_shift = WatcherShift.objects.select_for_update().filter(pk=shift.pk).first()
+            if not locked_shift:
+                return Response({'error': 'WatcherShift not found.'}, status=status.HTTP_404_NOT_FOUND)
+            has_active_linked = (
+                CrewShift.objects.filter(watcher_shift=locked_shift)
+                .filter(Q(is_active=True) | Q(driver_shift__is_active=True))
+                .exists()
+            )
+            if has_active_linked:
+                return Response(
+                    {
+                        'error': (
+                            'Cannot end a WatcherShift while its linked DriverShift or CrewShift is still active. '
+                            'Conclude the shift through the coordinated shift-conclusion flow.'
+                        )
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+            if locked_shift.is_active:
+                locked_shift.is_active = False
+                locked_shift.ended_at = timezone.now()
+                locked_shift.end_reason = 'watcher_ended'
+                locked_shift.save(update_fields=['is_active', 'ended_at', 'end_reason'])
+            return Response(self.get_serializer(locked_shift).data, status=status.HTTP_200_OK)
+
+
+class UnfinishedStopReviewViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    D-12 Admin-authorized resolution workflow for UnfinishedStopReview records.
+    """
+    from .models import UnfinishedStopReview
+    from .serializers import UnfinishedStopReviewSerializer
+
+    queryset = UnfinishedStopReview.objects.select_related(
+        'shift', 'stop_validation', 'pickup_status', 'reviewed_by'
+    ).order_by('-created_at', 'stop_order')
+    serializer_class = UnfinishedStopReviewSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminRole]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        shift_id = self.request.query_params.get('shift_id')
+        if shift_id:
+            qs = qs.filter(shift_id=shift_id)
+        res_status = self.request.query_params.get('resolution_status')
+        if res_status:
+            qs = qs.filter(resolution_status=res_status.upper())
+        return qs
+
+    @action(detail=True, methods=['post'], url_path='resolve', permission_classes=[IsAdminRole])
+    def resolve(self, request, pk=None):
+        if not is_admin_user(request.user):
+            return Response({'error': 'Admin authorization required.'}, status=status.HTTP_403_FORBIDDEN)
+        review = self.get_object()
+        target_status = (request.data.get('resolution_status') or 'RESOLVED').upper().strip()
+        if target_status not in ('RESOLVED', 'DISMISSED'):
+            return Response(
+                {'error': 'resolution_status must be RESOLVED or DISMISSED.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        notes = (request.data.get('resolution_notes') or '').strip()
+        review.resolution_status = target_status
+        review.resolution_notes = notes
+        review.reviewed_by = request.user
+        review.reviewed_at = timezone.now()
+        review.save(update_fields=['resolution_status', 'resolution_notes', 'reviewed_by', 'reviewed_at'])
+        return Response(self.get_serializer(review).data, status=status.HTTP_200_OK)
+
+
+class TruckReplacementRequestViewSet(viewsets.ReadOnlyModelViewSet):
+    from .serializers import TruckReplacementRequestSerializer
+
+    queryset = TruckReplacementRequest.objects.select_related(
+        'driver_shift', 'schedule', 'schedule__dumpsite', 'truck', 'requested_by', 'resolved_by'
+    ).order_by('-created_at')
+    serializer_class = TruckReplacementRequestSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if is_admin_user(user):
+            pass
+        elif getattr(user, 'role', None) == UserRole.DUMPSITE:
+            from .truck_service import TruckService
+            fac_id = TruckService.get_operator_dumpsite_id(user)
+            if not fac_id:
+                return qs.none()
+            facility_trucks = Truck.objects.filter(TruckService.facility_trucks_q(fac_id))
+            qs = qs.filter(
+                Q(schedule__dumpsite_id=fac_id)
+                | Q(schedule__isnull=True, truck__in=facility_trucks)
+            ).distinct()
+        elif getattr(user, 'role', None) == UserRole.DRIVER:
+            qs = qs.filter(requested_by=user)
+        else:
+            return qs.none()
+
+        params = self.request.query_params
+        status_param = params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param.strip().upper())
+        truck_id = params.get('truck_id')
+        if truck_id:
+            qs = qs.filter(truck_id=truck_id)
+        schedule_id = params.get('schedule_id')
+        if schedule_id:
+            qs = qs.filter(schedule_id=schedule_id)
+        dumpsite_id = params.get('dumpsite_id')
+        if dumpsite_id:
+            qs = qs.filter(schedule__dumpsite_id=dumpsite_id)
+        search = (params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(
+                Q(truck__plate_number__icontains=search)
+                | Q(reason__icontains=search)
+                | Q(requested_by__full_name__icontains=search)
+                | Q(requested_by__username__icontains=search)
+            )
+        return qs
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='approve',
+        permission_classes=[permissions.IsAuthenticated, IsAdminOrAssignedDumpsiteOperator],
+    )
+    def approve(self, request, pk=None):
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from .truck_service import TruckLifecycleConflictError, TruckService
+
+        replacement_truck_id = request.data.get('replacement_truck_id')
+        if not replacement_truck_id:
+            return Response(
+                {'replacement_truck_id': 'replacement_truck_id is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            replacement_truck_int = int(replacement_truck_id)
+        except (TypeError, ValueError):
+            return Response(
+                {'replacement_truck_id': 'Invalid replacement_truck_id.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        resolution_notes = (request.data.get('resolution_notes') or '').strip()
+        transfer_drivers = bool(request.data.get('transfer_drivers', True))
+
+        req_meta = (
+            TruckReplacementRequest.objects
+            .select_related('schedule', 'truck', 'driver_shift__allocation')
+            .filter(pk=pk)
+            .first()
+        )
+        if not req_meta:
+            return Response({'error': 'Replacement request not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            if req_meta.schedule is not None:
+                TruckService.require_admin_or_facility_operator(request.user, schedule=req_meta.schedule)
+            else:
+                TruckService.require_admin_or_facility_operator(request.user, truck=req_meta.truck)
+        except DjangoPermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+
+        if req_meta.status != 'PENDING':
+            return Response(
+                {'error': f'Replacement request #{req_meta.id} is already {req_meta.status}.', 'code': 'already_resolved'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if not req_meta.schedule_id:
+            return Response(
+                {'error': 'Replacement request has no associated schedule.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        effective_date = None
+        if req_meta.driver_shift_id and req_meta.driver_shift and req_meta.driver_shift.allocation_id:
+            effective_date = req_meta.driver_shift.allocation.allocation_date
+
+        try:
+            # Canonical lock order inside replace_truck_assignment:
+            # CollectionSchedule -> SanitationTeam -> ScheduleTruckAllocation -> Truck -> TruckReplacementRequest (of=('self',))
+            res = TruckService.replace_truck_assignment(
+                req_meta.truck,
+                replacement_truck_id=replacement_truck_int,
+                schedule_id=req_meta.schedule_id,
+                user=request.user,
+                effective_date=effective_date,
+                reason=resolution_notes or req_meta.reason,
+                transfer_drivers=transfer_drivers,
+                replacement_request_id=req_meta.id,
+            )
+        except DjangoPermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TruckLifecycleConflictError as e:
+            return Response(
+                {'error': str(e.message if hasattr(e, 'message') else e), 'code': e.error_code},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        req_meta.refresh_from_db()
+        return Response(
+            {
+                **self.get_serializer(req_meta).data,
+                'replacement_truck': TruckSerializer(
+                    res['replacement_truck'], context=self.get_serializer_context()
+                ).data,
+                'allocation': ScheduleTruckAllocationSerializer(res['allocation']).data,
+                'transferred_driver_ids': res['transferred_driver_ids'],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='reject',
+        permission_classes=[permissions.IsAuthenticated, IsAdminOrAssignedDumpsiteOperator],
+    )
+    def reject(self, request, pk=None):
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from .truck_service import TruckService, _record_truck_audit_log
+
+        resolution_notes = (request.data.get('resolution_notes') or '').strip()
+        with transaction.atomic():
+            req = (
+                TruckReplacementRequest.objects.select_for_update(of=('self',))
+                .select_related('schedule', 'truck')
+                .filter(pk=pk)
+                .first()
+            )
+            if not req:
+                return Response({'error': 'Replacement request not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+            try:
+                if req.schedule is not None:
+                    TruckService.require_admin_or_facility_operator(request.user, schedule=req.schedule)
+                else:
+                    TruckService.require_admin_or_facility_operator(request.user, truck=req.truck)
+            except DjangoPermissionDenied as e:
+                return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+
+            if req.status != 'PENDING':
+                return Response(
+                    {'error': f'Replacement request #{req.id} is already {req.status}.', 'code': 'already_resolved'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            req.status = 'REJECTED'
+            req.resolved_by = request.user
+            req.resolved_at = timezone.now()
+            req.resolution_notes = resolution_notes
+            req.save(update_fields=['status', 'resolved_by', 'resolved_at', 'resolution_notes'])
+
+            _record_truck_audit_log(
+                actor=request.user,
+                action_code='TRUCK_REPLACEMENT_REJECTED',
+                target_object_id=str(req.truck_id),
+                details={
+                    'request_id': req.id,
+                    'plate_number': req.truck.plate_number,
+                    'schedule_id': req.schedule_id,
+                    'resolution_notes': resolution_notes,
+                },
+            )
+            return Response(self.get_serializer(req).data, status=status.HTTP_200_OK)
+
+
+class TruckOperationalHoldLogViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = TruckOperationalHoldLog.objects.select_related(
+        'truck', 'dumpsite', 'inspection', 'placed_by', 'cleared_by'
+    ).order_by('-placed_at', '-id')
+    serializer_class = TruckOperationalHoldLogSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrAssignedDumpsiteOperator]
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        from .truck_service import TruckService
+
+        qs = super().get_queryset()
+        user = self.request.user
+        if not is_admin_user(user):
+            fac_id = TruckService.get_operator_dumpsite_id(user)
+            if not fac_id:
+                return qs.none()
+            qs = qs.filter(dumpsite_id=fac_id)
+
+        params = self.request.query_params
+        truck_id = params.get('truck_id')
+        if truck_id:
+            qs = qs.filter(truck_id=truck_id)
+        dumpsite_id = params.get('dumpsite_id')
+        if dumpsite_id:
+            qs = qs.filter(dumpsite_id=dumpsite_id)
+        is_active_raw = params.get('is_active')
+        if is_active_raw is not None and str(is_active_raw).strip() != '':
+            val = str(is_active_raw).strip().lower()
+            if val in ('true', '1'):
+                qs = qs.filter(is_active=True)
+            elif val in ('false', '0'):
+                qs = qs.filter(is_active=False)
+        search = (params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(
+                Q(truck__plate_number__icontains=search)
+                | Q(truck__model__icontains=search)
+                | Q(reason__icontains=search)
+                | Q(resolution_notes__icontains=search)
+                | Q(placed_by__full_name__icontains=search)
+                | Q(cleared_by__full_name__icontains=search)
+            )
+        return qs
+
+
+class TruckMaintenanceRecordViewSet(viewsets.ModelViewSet):
+    queryset = TruckMaintenanceRecord.objects.select_related(
+        'truck', 'dumpsite', 'created_by', 'started_by', 'completed_by'
+    ).order_by('-created_at', '-id')
+    serializer_class = TruckMaintenanceRecordSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrAssignedDumpsiteOperator]
+    pagination_class = StandardResultsSetPagination
+    http_method_names = ['get', 'post', 'patch', 'head', 'options']
+
+    def get_queryset(self):
+        from .truck_service import TruckService
+
+        qs = super().get_queryset()
+        user = self.request.user
+        if not is_admin_user(user):
+            fac_id = TruckService.get_operator_dumpsite_id(user)
+            if not fac_id:
+                return qs.none()
+            facility_truck_ids = Truck.objects.filter(TruckService.facility_trucks_q(fac_id)).values_list('id', flat=True)
+            qs = qs.filter(Q(dumpsite_id=fac_id) | Q(dumpsite__isnull=True, truck_id__in=facility_truck_ids))
+
+        params = self.request.query_params
+        truck_id = params.get('truck_id')
+        if truck_id:
+            qs = qs.filter(truck_id=truck_id)
+        dumpsite_id = params.get('dumpsite_id')
+        if dumpsite_id:
+            qs = qs.filter(dumpsite_id=dumpsite_id)
+        status_param = params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param.strip().upper())
+        mtype = params.get('maintenance_type')
+        if mtype:
+            qs = qs.filter(maintenance_type=mtype.strip().upper())
+        search = (params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(
+                Q(truck__plate_number__icontains=search)
+                | Q(truck__model__icontains=search)
+                | Q(title__icontains=search)
+                | Q(notes__icontains=search)
+                | Q(completion_notes__icontains=search)
+            )
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from .truck_service import TruckLifecycleConflictError, TruckService
+
+        raw_truck_id = request.data.get('truck_id')
+        if raw_truck_id is None:
+            raw_truck_id = request.data.get('truck')
+        if not raw_truck_id:
+            return Response({'truck_id': 'truck_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            truck_obj = Truck.objects.get(pk=int(raw_truck_id))
+        except (Truck.DoesNotExist, TypeError, ValueError):
+            return Response({'truck_id': f'Truck #{raw_truck_id} not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        scheduled_for_raw = request.data.get('scheduled_for')
+        scheduled_for = parse_date(str(scheduled_for_raw)) if scheduled_for_raw else None
+        if scheduled_for_raw and not scheduled_for:
+            return Response({'scheduled_for': 'Invalid scheduled_for date format.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        dumpsite_id_raw = request.data.get('dumpsite_id') or request.data.get('dumpsite')
+        dumpsite_id = None
+        if dumpsite_id_raw not in (None, ''):
+            try:
+                dumpsite_id = int(dumpsite_id_raw)
+            except (TypeError, ValueError):
+                return Response({'dumpsite_id': 'Invalid dumpsite_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            rec = TruckService.create_maintenance_record(
+                truck_obj,
+                user=request.user,
+                maintenance_type=request.data.get('maintenance_type', 'CORRECTIVE'),
+                title=request.data.get('title', ''),
+                notes=request.data.get('notes', '') or request.data.get('reason', ''),
+                scheduled_for=scheduled_for,
+                cost=request.data.get('cost'),
+                odometer_km=request.data.get('odometer_km'),
+                start_immediately=bool(request.data.get('start_immediately', False)),
+                dumpsite_id=dumpsite_id,
+                maintenance_status=request.data.get('maintenance_status', 'under_repair'),
+            )
+            return Response(self.get_serializer(rec).data, status=status.HTTP_201_CREATED)
+        except DjangoPermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TruckLifecycleConflictError as e:
+            return Response(
+                {'error': str(e.message if hasattr(e, 'message') else e), 'code': e.error_code},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    def partial_update(self, request, *args, **kwargs):
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from .truck_service import TruckLifecycleConflictError, TruckService
+
+        rec = self.get_object()
+        data = dict(request.data)
+        if 'scheduled_for' in data and data['scheduled_for']:
+            parsed = parse_date(str(data['scheduled_for']))
+            if not parsed:
+                return Response({'scheduled_for': 'Invalid scheduled_for date format.'}, status=status.HTTP_400_BAD_REQUEST)
+            data['scheduled_for'] = parsed
+        try:
+            updated = TruckService.update_maintenance_record(rec, user=request.user, data=data)
+            return Response(self.get_serializer(updated).data, status=status.HTTP_200_OK)
+        except DjangoPermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TruckLifecycleConflictError as e:
+            return Response(
+                {'error': str(e.message if hasattr(e, 'message') else e), 'code': e.error_code},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    def update(self, request, *args, **kwargs):
+        return self.partial_update(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post'], url_path='start')
+    def start(self, request, pk=None):
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from .truck_service import TruckLifecycleConflictError, TruckService
+
+        rec = self.get_object()
+        try:
+            updated = TruckService.start_maintenance_record(
+                rec,
+                user=request.user,
+                maintenance_status=request.data.get('maintenance_status', 'under_repair'),
+            )
+            return Response(self.get_serializer(updated).data, status=status.HTTP_200_OK)
+        except DjangoPermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TruckLifecycleConflictError as e:
+            return Response(
+                {'error': str(e.message if hasattr(e, 'message') else e), 'code': e.error_code},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    @action(detail=True, methods=['post'], url_path='complete')
+    def complete(self, request, pk=None):
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from .truck_service import TruckLifecycleConflictError, TruckService
+
+        rec = self.get_object()
+        try:
+            updated = TruckService.complete_maintenance_record(
+                rec,
+                user=request.user,
+                completion_notes=request.data.get('completion_notes', '') or request.data.get('notes', ''),
+                cost=request.data.get('cost'),
+                odometer_km=request.data.get('odometer_km'),
+            )
+            return Response(self.get_serializer(updated).data, status=status.HTTP_200_OK)
+        except DjangoPermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except TruckLifecycleConflictError as e:
+            return Response(
+                {'error': str(e.message if hasattr(e, 'message') else e), 'code': e.error_code},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+class IsFuelLogAuthorized(permissions.BasePermission):
+    def has_permission(self, request, view):
+        from .truck_service import TruckService
+
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated:
+            return False
+        if is_admin_user(user):
+            return True
+        role = getattr(user, 'role', None)
+        if role == UserRole.DRIVER:
+            return True
+        if role == UserRole.DUMPSITE:
+            return TruckService.get_operator_dumpsite_id(user) is not None
+        return False
+
+
+class FuelLogViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = FuelLog.objects.select_related(
+        'driver_shift', 'truck', 'dumpsite', 'driver', 'gauge_submitted_by', 'recorded_by'
+    ).order_by('-created_at', '-id')
+    serializer_class = FuelLogSerializer
+    permission_classes = [permissions.IsAuthenticated, IsFuelLogAuthorized]
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+        from .truck_service import TruckService
+
+        qs = super().get_queryset()
+        user = self.request.user
+        role = getattr(user, 'role', None)
+        if is_admin_user(user):
+            pass
+        elif role == UserRole.DUMPSITE:
+            fac_id = TruckService.get_operator_dumpsite_id(user)
+            if not fac_id:
+                return qs.none()
+            qs = qs.filter(dumpsite_id=fac_id)
+        elif role == UserRole.DRIVER:
+            qs = qs.filter(driver=user)
+        else:
+            return qs.none()
+
+        params = self.request.query_params
+        driver_shift_id = params.get('driver_shift_id')
+        if driver_shift_id not in (None, ''):
+            try:
+                qs = qs.filter(driver_shift_id=int(driver_shift_id))
+            except (TypeError, ValueError):
+                raise DRFValidationError({'driver_shift_id': 'Invalid driver_shift_id.'})
+        truck_id = params.get('truck_id')
+        if truck_id not in (None, ''):
+            try:
+                qs = qs.filter(truck_id=int(truck_id))
+            except (TypeError, ValueError):
+                raise DRFValidationError({'truck_id': 'Invalid truck_id.'})
+        dumpsite_id = params.get('dumpsite_id')
+        if dumpsite_id not in (None, ''):
+            try:
+                qs = qs.filter(dumpsite_id=int(dumpsite_id))
+            except (TypeError, ValueError):
+                raise DRFValidationError({'dumpsite_id': 'Invalid dumpsite_id.'})
+        status_param = params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param.strip().upper())
+        date_from = params.get('date_from')
+        if date_from not in (None, ''):
+            parsed_from = parse_date(str(date_from).strip())
+            if not parsed_from:
+                raise DRFValidationError({'date_from': 'Invalid date_from format. Use YYYY-MM-DD.'})
+            qs = qs.filter(created_at__date__gte=parsed_from)
+        date_to = params.get('date_to')
+        if date_to not in (None, ''):
+            parsed_to = parse_date(str(date_to).strip())
+            if not parsed_to:
+                raise DRFValidationError({'date_to': 'Invalid date_to format. Use YYYY-MM-DD.'})
+            qs = qs.filter(created_at__date__lte=parsed_to)
+        search = (params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(
+                Q(truck__plate_number__icontains=search)
+                | Q(driver__full_name__icontains=search)
+                | Q(driver__username__icontains=search)
+                | Q(notes__icontains=search)
+            )
+        return qs
+
+    @action(detail=False, methods=['post'], url_path='submit-gauge')
+    def submit_gauge(self, request):
+        from decimal import Decimal, InvalidOperation
+        from .truck_service import _record_truck_audit_log
+
+        user = request.user
+        if getattr(user, 'role', None) != UserRole.DRIVER:
+            return Response(
+                {'error': 'Only Drivers may submit fuel gauge percentages.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        raw_pct = request.data.get('gauge_percentage')
+        if raw_pct is None or str(raw_pct).strip() == '':
+            return Response({'gauge_percentage': 'gauge_percentage is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            gauge_pct = Decimal(str(raw_pct))
+        except (InvalidOperation, TypeError, ValueError):
+            return Response({'gauge_percentage': 'Invalid gauge_percentage value.'}, status=status.HTTP_400_BAD_REQUEST)
+        if gauge_pct < Decimal('0') or gauge_pct > Decimal('100'):
+            return Response(
+                {'gauge_percentage': 'gauge_percentage must be between 0 and 100.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        raw_shift_id = _pick_present_field(request.data, 'driver_shift_id', 'driver_shift')
+        raw_truck_id = _pick_present_field(request.data, 'truck_id', 'truck')
+        raw_dumpsite_id = _pick_present_field(request.data, 'dumpsite_id', 'dumpsite')
+        notes = (request.data.get('notes') or '').strip()
+
+        with transaction.atomic():
+            if raw_shift_id is not None:
+                if isinstance(raw_shift_id, bool):
+                    return Response({'driver_shift_id': 'Invalid driver_shift_id.'}, status=status.HTTP_400_BAD_REQUEST)
+                try:
+                    shift_id = int(raw_shift_id)
+                except (TypeError, ValueError):
+                    return Response({'driver_shift_id': 'Invalid driver_shift_id.'}, status=status.HTTP_400_BAD_REQUEST)
+                if shift_id <= 0:
+                    return Response(
+                        {'driver_shift_id': 'driver_shift_id must be a positive integer.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                shift = (
+                    DriverShift.objects.select_for_update(of=('self',))
+                    .select_related('truck', 'allocation__truck', 'schedule__dumpsite', 'allocation__schedule__dumpsite')
+                    .filter(pk=shift_id)
+                    .first()
+                )
+                if not shift:
+                    return Response({'driver_shift_id': f'DriverShift #{shift_id} not found.'}, status=status.HTTP_404_NOT_FOUND)
+                if shift.driver_id != user.id:
+                    return Response(
+                        {'error': 'You may only submit fuel gauge for your own DriverShift.'},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            else:
+                shift = (
+                    DriverShift.objects.select_for_update(of=('self',))
+                    .select_related('truck', 'allocation__truck', 'schedule__dumpsite', 'allocation__schedule__dumpsite')
+                    .filter(driver=user, is_active=True)
+                    .first()
+                )
+                if not shift:
+                    return Response(
+                        {'error': 'No active DriverShift found and driver_shift_id was not supplied.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            auth_truck = shift.effective_truck
+            auth_dumpsite = shift.effective_dumpsite
+            if not auth_truck or not auth_dumpsite:
+                return Response(
+                    {'error': 'DriverShift must have an authoritative Truck and Dumpsite.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if raw_truck_id not in (None, ''):
+                try:
+                    if int(raw_truck_id) != auth_truck.id:
+                        return Response(
+                            {'truck_id': 'Supplied truck_id does not match the authoritative DriverShift truck.'},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                except (TypeError, ValueError):
+                    return Response({'truck_id': 'Invalid truck_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            if raw_dumpsite_id not in (None, ''):
+                try:
+                    if int(raw_dumpsite_id) != auth_dumpsite.id:
+                        return Response(
+                            {'dumpsite_id': 'Supplied dumpsite_id does not match the authoritative DriverShift dumpsite.'},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                except (TypeError, ValueError):
+                    return Response({'dumpsite_id': 'Invalid dumpsite_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            now_ts = timezone.now()
+            fuel_log = FuelLog.objects.select_for_update().filter(driver_shift=shift).first()
+            created = fuel_log is None
+            if fuel_log is None:
+                fuel_log = FuelLog.objects.create(
+                    driver_shift=shift,
+                    truck=auth_truck,
+                    dumpsite=auth_dumpsite,
+                    driver=shift.driver,
+                    status='GAUGE_SUBMITTED',
+                    gauge_percentage=gauge_pct,
+                    gauge_submitted_by=user,
+                    gauge_submitted_at=now_ts,
+                    notes=notes,
+                )
+            else:
+                fuel_log.truck = auth_truck
+                fuel_log.dumpsite = auth_dumpsite
+                fuel_log.gauge_percentage = gauge_pct
+                fuel_log.gauge_submitted_by = user
+                fuel_log.gauge_submitted_at = now_ts
+                if notes:
+                    fuel_log.notes = notes
+                fuel_log.save(update_fields=[
+                    'truck', 'dumpsite', 'gauge_percentage', 'gauge_submitted_by',
+                    'gauge_submitted_at', 'notes', 'updated_at',
+                ])
+
+            _record_truck_audit_log(
+                actor=user,
+                action_code='FUEL_GAUGE_SUBMITTED',
+                target_object_id=str(auth_truck.id),
+                details={
+                    'fuel_log_id': fuel_log.id,
+                    'driver_shift_id': shift.id,
+                    'plate_number': auth_truck.plate_number,
+                    'dumpsite_id': auth_dumpsite.id,
+                    'gauge_percentage': str(gauge_pct),
+                },
+            )
+            return Response(
+                self.get_serializer(fuel_log).data,
+                status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+            )
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='record-refill',
+        permission_classes=[permissions.IsAuthenticated, IsAdminOrAssignedDumpsiteOperator],
+    )
+    def record_refill(self, request):
+        from decimal import Decimal, InvalidOperation
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from .truck_service import TruckService, _record_truck_audit_log
+
+        raw_shift_id = _pick_present_field(request.data, 'driver_shift_id', 'driver_shift')
+        if raw_shift_id is None:
+            return Response({'driver_shift_id': 'driver_shift_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if isinstance(raw_shift_id, bool):
+            return Response({'driver_shift_id': 'Invalid driver_shift_id.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            shift_id = int(raw_shift_id)
+        except (TypeError, ValueError):
+            return Response({'driver_shift_id': 'Invalid driver_shift_id.'}, status=status.HTTP_400_BAD_REQUEST)
+        if shift_id <= 0:
+            return Response(
+                {'driver_shift_id': 'driver_shift_id must be a positive integer.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        raw_liters = request.data.get('liters_added')
+        raw_cost = request.data.get('fuel_cost')
+        raw_odometer = request.data.get('odometer_km')
+        if raw_liters in (None, '') or raw_cost in (None, '') or raw_odometer in (None, ''):
+            return Response(
+                {'error': 'liters_added, fuel_cost, and odometer_km are required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            liters_added = Decimal(str(raw_liters))
+            fuel_cost = Decimal(str(raw_cost))
+            odometer_km = Decimal(str(raw_odometer))
+        except (InvalidOperation, TypeError, ValueError):
+            return Response(
+                {'error': 'liters_added, fuel_cost, and odometer_km must be valid numbers.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if liters_added <= Decimal('0'):
+            return Response({'liters_added': 'liters_added must be greater than 0.'}, status=status.HTTP_400_BAD_REQUEST)
+        if fuel_cost < Decimal('0'):
+            return Response({'fuel_cost': 'fuel_cost must be >= 0.'}, status=status.HTTP_400_BAD_REQUEST)
+        if odometer_km < Decimal('0'):
+            return Response({'odometer_km': 'odometer_km must be >= 0.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw_truck_id = _pick_present_field(request.data, 'truck_id', 'truck')
+        raw_dumpsite_id = _pick_present_field(request.data, 'dumpsite_id', 'dumpsite')
+        notes = (request.data.get('notes') or '').strip()
+
+        with transaction.atomic():
+            shift = (
+                DriverShift.objects.select_for_update(of=('self',))
+                .select_related('truck', 'allocation__truck', 'schedule__dumpsite', 'allocation__schedule__dumpsite', 'driver')
+                .filter(pk=shift_id)
+                .first()
+            )
+            if not shift:
+                return Response({'driver_shift_id': f'DriverShift #{shift_id} not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+            auth_truck = shift.effective_truck
+            auth_dumpsite = shift.effective_dumpsite
+            auth_schedule = shift.effective_schedule
+            if not auth_truck or not auth_dumpsite:
+                return Response(
+                    {'error': 'DriverShift must have an authoritative Truck and Dumpsite.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if raw_truck_id not in (None, ''):
+                try:
+                    if int(raw_truck_id) != auth_truck.id:
+                        return Response(
+                            {'truck_id': 'Supplied truck_id does not match the authoritative DriverShift truck.'},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                except (TypeError, ValueError):
+                    return Response({'truck_id': 'Invalid truck_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            if raw_dumpsite_id not in (None, ''):
+                try:
+                    if int(raw_dumpsite_id) != auth_dumpsite.id:
+                        return Response(
+                            {'dumpsite_id': 'Supplied dumpsite_id does not match the authoritative DriverShift dumpsite.'},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                except (TypeError, ValueError):
+                    return Response({'dumpsite_id': 'Invalid dumpsite_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                if auth_schedule is not None:
+                    TruckService.require_admin_or_facility_operator(request.user, schedule=auth_schedule)
+                else:
+                    fac_id = TruckService.get_operator_dumpsite_id(request.user)
+                    if not is_admin_user(request.user) and fac_id != auth_dumpsite.id:
+                        raise DjangoPermissionDenied("Cross-Dumpsite access denied.")
+            except DjangoPermissionDenied as e:
+                return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+
+            now_ts = timezone.now()
+            fuel_log = FuelLog.objects.select_for_update().filter(driver_shift=shift).first()
+            created = fuel_log is None
+            if fuel_log is None:
+                fuel_log = FuelLog.objects.create(
+                    driver_shift=shift,
+                    truck=auth_truck,
+                    dumpsite=auth_dumpsite,
+                    driver=shift.driver,
+                    status='REFILL_RECORDED',
+                    liters_added=liters_added,
+                    fuel_cost=fuel_cost,
+                    odometer_km=odometer_km,
+                    recorded_by=request.user,
+                    recorded_at=now_ts,
+                    notes=notes,
+                )
+            else:
+                fuel_log.truck = auth_truck
+                fuel_log.dumpsite = auth_dumpsite
+                fuel_log.status = 'REFILL_RECORDED'
+                fuel_log.liters_added = liters_added
+                fuel_log.fuel_cost = fuel_cost
+                fuel_log.odometer_km = odometer_km
+                fuel_log.recorded_by = request.user
+                fuel_log.recorded_at = now_ts
+                if notes:
+                    fuel_log.notes = notes
+                fuel_log.save(update_fields=[
+                    'truck', 'dumpsite', 'status', 'liters_added', 'fuel_cost',
+                    'odometer_km', 'recorded_by', 'recorded_at', 'notes', 'updated_at',
+                ])
+
+            _record_truck_audit_log(
+                actor=request.user,
+                action_code='FUEL_REFILL_RECORDED',
+                target_object_id=str(auth_truck.id),
+                details={
+                    'fuel_log_id': fuel_log.id,
+                    'driver_shift_id': shift.id,
+                    'plate_number': auth_truck.plate_number,
+                    'dumpsite_id': auth_dumpsite.id,
+                    'liters_added': str(liters_added),
+                    'fuel_cost': str(fuel_cost),
+                    'odometer_km': str(odometer_km),
+                },
+            )
+            return Response(
+                self.get_serializer(fuel_log).data,
+                status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+            )
+
+
+class CrewShiftViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Stage 5B Admin citywide oversight for CrewShift records (including pre-departure
+    CrewShifts where driver_shift is None). Supports viewing effective attendance,
+    roster snapshot, and submitting authorized append-only attendance corrections.
+    """
+    from .serializers import CrewShiftSerializer
+
+    queryset = CrewShift.objects.select_related(
+        'driver_shift',
+        'driver_shift__truck',
+        'watcher_shift',
+        'allocation',
+        'allocation__team',
+        'allocation__schedule',
+        'allocation__truck',
+        'schedule',
+        'team',
+        'team_leader',
+        'attendance_submitted_by',
+    ).order_by('-service_date', '-started_at', '-id')
+    serializer_class = CrewShiftSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminRole]
+    pagination_class = StandardResultsSetPagination
+    allow_unpaginated = True
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+        is_active = params.get('is_active')
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active.lower() in ('true', '1'))
+        team_id = params.get('team_id')
+        if team_id:
+            qs = qs.filter(Q(team_id=team_id) | Q(allocation__team_id=team_id))
+        schedule_id = params.get('schedule_id')
+        if schedule_id:
+            qs = qs.filter(Q(schedule_id=schedule_id) | Q(allocation__schedule_id=schedule_id))
+        service_date = params.get('service_date')
+        if service_date:
+            qs = qs.filter(service_date=service_date)
+        standalone_only = params.get('standalone_only')
+        if standalone_only and standalone_only.lower() in ('true', '1'):
+            qs = qs.filter(driver_shift__isnull=True)
+        return qs
+
+    @action(detail=True, methods=['get'], url_path='attendance')
+    def attendance(self, request, pk=None):
+        from .shift_service import ShiftService
+        cs = self.get_object()
+        effective = ShiftService.get_effective_shift_attendance(
+            driver_shift_id=cs.driver_shift_id,
+            crew_shift_id=cs.id,
+        )
+        return Response(effective, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='roster-snapshot')
+    def roster_snapshot(self, request, pk=None):
+        from .serializers import ShiftCrewRosterSnapshotSerializer
+        cs = self.get_object()
+        snap_q = Q(crew_shift=cs)
+        if cs.driver_shift_id:
+            snap_q |= Q(driver_shift_id=cs.driver_shift_id)
+        snapshot = (
+            ShiftCrewRosterSnapshot.objects.filter(snap_q)
+            .order_by('-snapshot_timestamp', '-id')
+            .first()
+        )
+        if not snapshot:
+            return Response(None, status=status.HTTP_200_OK)
+        return Response(ShiftCrewRosterSnapshotSerializer(snapshot).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='attendance-correction')
+    def attendance_correction(self, request, pk=None):
+        from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+        from .serializers import CrewAttendanceCorrectionSerializer
+        from .shift_service import ShiftService
+
+        cs = self.get_object()
+        record_id = request.data.get('record_id') or request.data.get('attendance_record_id')
+        corrected_status = request.data.get('corrected_status') or request.data.get('new_status')
+        reason = request.data.get('reason', '')
+        if not record_id or not corrected_status or not str(reason).strip():
+            return Response(
+                {'error': 'record_id, corrected_status, and reason are required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            correction = ShiftService.correct_attendance(
+                attendance_record_id=int(record_id),
+                corrected_status=corrected_status,
+                reason=reason,
+                corrected_by=request.user,
+                crew_shift_id=cs.id,
+            )
+            return Response(CrewAttendanceCorrectionSerializer(correction).data, status=status.HTTP_201_CREATED)
+        except DjangoPermissionDenied as e:
+            return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except (DjangoValidationError, ValueError) as e:
+            return Response(
+                e.message_dict if hasattr(e, 'message_dict') else {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+

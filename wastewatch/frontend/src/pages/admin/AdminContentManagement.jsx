@@ -97,8 +97,8 @@ export default function AdminContentManagement() {
         api.get('/api/news/items/?admin_mode=true'),
         api.get('/api/news/alerts/?include_inactive=true'),
       ])
-      setNewsItems(itemsRes.data || [])
-      setAlerts(alertsRes.data || [])
+      setNewsItems(Array.isArray(itemsRes.data) ? itemsRes.data : (itemsRes.data?.results || []))
+      setAlerts(Array.isArray(alertsRes.data) ? alertsRes.data : (alertsRes.data?.results || []))
       await fetchStats()
     } catch (err) {
       console.error('Failed to load content workspace items:', err)

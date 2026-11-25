@@ -201,7 +201,9 @@ export const buildStopValidationSnapshot = (validations = []) => {
   const detailsMap = new Map()
   let latestUpdatedAt = null
 
-  validations.forEach((row) => {
+  const list = Array.isArray(validations) ? validations : []
+  list.forEach((row) => {
+    if (!row) return
     const scheduleId = validationScheduleId(row)
     const stopOrder = Number(row.stop_order ?? row.stopOrder ?? row.stop_id)
     if (scheduleId == null || Number.isNaN(stopOrder)) return
@@ -213,25 +215,36 @@ export const buildStopValidationSnapshot = (validations = []) => {
 
     let collectedAt = ''
     try {
-      const raw = row.collection_timestamp || row.collected_at
+      const raw = row.collected_at || row.collection_timestamp
       if (raw) {
-        const d = new Date(raw)
-        if (!Number.isNaN(d.getTime())) {
-          collectedAt = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        if (typeof raw === 'string' && /^\d{1,2}:\d{2}$/.test(raw.trim())) {
+          collectedAt = raw.trim()
+        } else {
+          const d = new Date(raw)
+          if (!Number.isNaN(d.getTime())) {
+            collectedAt = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }
         }
       }
     } catch {
       collectedAt = ''
     }
 
+    const collectionDate = row.collection_date || null
+    const isToday = typeof row.is_today === 'boolean' ? row.is_today : null
+    const occurrenceKey = row.occurrence_key || (collectionDate ? `${scheduleKey}:${stopOrder}:${collectionDate}` : null)
+
     detailsMap.set(key, {
       collectedAt,
       truck: row.truck_plate || row.truck || '',
-      scheduleId: scheduleKey,
+      scheduleId: row.schedule_id != null ? row.schedule_id : scheduleKey,
       scheduledTime: row.scheduledTime || '',
       updatedAt: row.updated_at || row.updatedAt || null,
       label: row.label || '',
       currentStatus: visualStatus,
+      collectionDate,
+      isToday,
+      occurrenceKey,
     })
 
     const updatedAt = row.updated_at || row.updatedAt || null

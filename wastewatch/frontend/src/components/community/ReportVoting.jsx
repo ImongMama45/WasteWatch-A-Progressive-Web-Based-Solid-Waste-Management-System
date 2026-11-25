@@ -8,31 +8,26 @@
  *   - PublicMap (ReportSelectedPanel)
  *
  * Product Rules & Semantics:
- *   - Positive vote (+1): "Confirm Issue" ("Still uncollected")
- *   - Negative vote (-1): "Confirm Cleared" ("Already resolved")
+ *   - Positive vote (+1): "Confirm Issue" ("Still uncollected") -> Trash2 icon
+ *   - Negative vote (-1): "Confirm Cleared" ("Already resolved") -> CheckCircle2 icon
  *   - Consensus Indicators:
  *       * Still Present: authoritative positive count
  *       * Confirmed Cleared: authoritative negative count
  *       * Community Consensus: authoritative net score (+/-)
- *   - Strict Report Identity Safety:
- *       * Validates reportId using parsePositiveSafeInteger
- *       * Never falls back to hotspot IDs
- *       * Only renders for authoritative GarbageReports
- *   - Async Response & State Reliability:
- *       * Request sequence tracking and unmount guards discard stale responses
- *       * Dedicated initial-load error and retry states prevent fabricated zero counts
- *       * Existing votes on ineligible reports may be removed, but new votes are prevented
- *   - Zero emojis: Lucide SVG icons only.
+ *   - Compact Reddit-Inspired Interaction:
+ *       * Horizontal voting control bar replacing oversized card-in-card buttons
+ *       * Optimistic UI voting with automatic state rollback on server rejection
+ *       * Accessible aria-label, aria-pressed, and hover/focus tooltips
+ *       * Zero emojis: Lucide SVG icons only.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Flame,
+  Trash2,
   CheckCircle2,
   Users,
   Loader2,
-  Check,
   Info,
   AlertCircle,
   RotateCw,
@@ -68,6 +63,11 @@ export default function ReportVoting({
   const activeReportIdRef = useRef(validReportId)
   activeReportIdRef.current = validReportId
 
+  // Previous authoritative state backup for optimistic rollback
+  const previousStateRef = useRef(null)
+  // Last action for retry on temporary failure
+  const pendingActionRef = useRef(null)
+
   // State management
   const [upvotes, setUpvotes] = useState(
     initialUpvotes !== undefined ? Number(initialUpvotes) || 0 : 0
@@ -87,6 +87,7 @@ export default function ReportVoting({
   const [isLoading, setIsLoading] = useState(false)
   const [loadError, setLoadError] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [syncStatus, setSyncStatus] = useState('idle') // 'idle' | 'syncing' | 'failed'
 
   useEffect(() => {
     isMountedRef.current = true
@@ -121,6 +122,7 @@ export default function ReportVoting({
         setUserVote(d.user_vote ?? null)
         setIsLoaded(true)
         setLoadError(null)
+        setSyncStatus('idle')
       })
       .catch(err => {
         if (
@@ -152,6 +154,9 @@ export default function ReportVoting({
     activeReportIdRef.current = validReportId
     setLoadError(null)
     setIsSubmitting(false) // Always reset isSubmitting for the new report
+    setSyncStatus('idle')
+    pendingActionRef.current = null
+    previousStateRef.current = null
 
     if (!validReportId) {
       setUpvotes(0)
@@ -231,7 +236,6 @@ export default function ReportVoting({
   const normStatus = String(status).toLowerCase()
   const isEligibleStatus = !isArchived && ['approved', 'resolved'].includes(normStatus)
   const isDriver = user?.role === 'driver'
-  const isAdmin = user?.role === 'admin'
   const isRoleEligible = ['citizen', 'watcher', 'brgy_official'].includes(user?.role)
 
   const handleVoteClick = async (targetVote) => {
@@ -308,7 +312,50 @@ export default function ReportVoting({
     const submissionSeq = requestSeqRef.current
     const submissionReportId = validReportId
 
+    // Save previous state for rollback
+    previousStateRef.current = {
+      upvotes,
+      downvotes,
+      netVotes,
+      userVote,
+    }
+    pendingActionRef.current = { targetVote, isRemoving }
+
+    // Compute optimistic state update
+    let nextUpvotes = upvotes
+    let nextDownvotes = downvotes
+    let nextUserVote = null
+
+    if (isRemoving) {
+      nextUserVote = null
+      if (userVote === 1) {
+        nextUpvotes = Math.max(0, upvotes - 1)
+      } else if (userVote === -1) {
+        nextDownvotes = Math.max(0, downvotes - 1)
+      }
+    } else if (targetVote === 1) {
+      nextUserVote = 1
+      nextUpvotes = upvotes + 1
+      if (userVote === -1) {
+        nextDownvotes = Math.max(0, downvotes - 1)
+      }
+    } else if (targetVote === -1) {
+      nextUserVote = -1
+      nextDownvotes = downvotes + 1
+      if (userVote === 1) {
+        nextUpvotes = Math.max(0, upvotes - 1)
+      }
+    }
+
+    const nextNetVotes = nextUpvotes - nextDownvotes
+
+    // Apply optimistic updates immediately
+    setUpvotes(nextUpvotes)
+    setDownvotes(nextDownvotes)
+    setNetVotes(nextNetVotes)
+    setUserVote(nextUserVote)
     setIsSubmitting(true)
+    setSyncStatus('syncing')
 
     try {
       let res
@@ -331,14 +378,16 @@ export default function ReportVoting({
 
       const d = res.data || {}
       if (d.upvotes !== undefined && d.downvotes !== undefined) {
-        const newUp = Number(d.upvotes) || 0
-        const newDown = Number(d.downvotes) || 0
-        const newNet = d.net_votes !== undefined ? Number(d.net_votes) : (newUp - newDown)
-        setUpvotes(newUp)
-        setDownvotes(newDown)
-        setNetVotes(newNet)
+        const serverUp = Number(d.upvotes) || 0
+        const serverDown = Number(d.downvotes) || 0
+        const serverNet = d.net_votes !== undefined ? Number(d.net_votes) : (serverUp - serverDown)
+        setUpvotes(serverUp)
+        setDownvotes(serverDown)
+        setNetVotes(serverNet)
       }
-      setUserVote(d.user_vote ?? null)
+      setUserVote(d.user_vote ?? nextUserVote)
+      setSyncStatus('idle')
+      pendingActionRef.current = null
 
       if (onVoteChange) {
         onVoteChange(d)
@@ -360,11 +409,31 @@ export default function ReportVoting({
       ) {
         return
       }
-      console.error('[ReportVoting] Vote failed:', err)
-      notify({
-        variant: 'error-dark',
-        message: getApiErrorMessage(err, 'Failed to update community verification vote.'),
-      })
+      console.error('[ReportVoting] Vote request failed:', err)
+      const statusCode = err?.response?.status
+
+      // Rollback immediately on 4xx permission / eligibility errors
+      if (statusCode && statusCode >= 400 && statusCode < 500) {
+        if (previousStateRef.current) {
+          setUpvotes(previousStateRef.current.upvotes)
+          setDownvotes(previousStateRef.current.downvotes)
+          setNetVotes(previousStateRef.current.netVotes)
+          setUserVote(previousStateRef.current.userVote)
+        }
+        setSyncStatus('idle')
+        pendingActionRef.current = null
+        notify({
+          variant: 'error-dark',
+          message: getApiErrorMessage(err, 'Failed to update community verification vote.'),
+        })
+      } else {
+        // Mark as failed and allow manual retry without discarding optimistic state
+        setSyncStatus('failed')
+        notify({
+          variant: 'error-dark',
+          message: getApiErrorMessage(err, 'Unable to sync verification vote. Click Retry to synchronize.'),
+        })
+      }
     } finally {
       if (
         isMountedRef.current &&
@@ -376,56 +445,9 @@ export default function ReportVoting({
     }
   }
 
-  // Visual Palette
-  const styles = {
-    container: {
-      background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#f8fafc',
-      border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.08)' : '#e2e8f0'}`,
-      borderRadius: 12,
-      padding: '12px 14px',
-      margin: '6px 0',
-      fontFamily: 'inherit',
-    },
-    header: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginBottom: 10,
-    },
-    headerTitle: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 6,
-      fontSize: 12,
-      fontWeight: 700,
-      color: isDark ? '#94a3b8' : '#475569',
-      textTransform: 'uppercase',
-      letterSpacing: '0.04em',
-    },
-    consensusRow: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      flexWrap: 'wrap',
-      fontSize: 12,
-    },
-    badge: {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 5,
-      padding: '3px 8px',
-      borderRadius: 6,
-      fontSize: 12,
-      fontWeight: 600,
-    },
-    buttonGrid: {
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gap: 10,
-      marginTop: 4,
-    },
+  const handleRetryVote = () => {
+    if (!pendingActionRef.current || isSubmitting) return
+    handleVoteClick(pendingActionRef.current.targetVote)
   }
 
   const consensusColor =
@@ -441,22 +463,43 @@ export default function ReportVoting({
   let statusNotice = null
   if (!isEligibleStatus) {
     if (normStatus === 'rejected') {
-      statusNotice = 'Community voting is closed for rejected reports.'
+      statusNotice = 'Community voting closed: rejected report.'
     } else if (isArchived) {
-      statusNotice = 'Community voting is closed for archived reports.'
+      statusNotice = 'Community voting closed: archived report.'
     } else {
-      statusNotice = 'Community verification opens once an official report is verified and approved.'
+      statusNotice = 'Verification opens once verified & approved.'
     }
   }
 
   return (
-    <div style={styles.container}>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 8,
+        padding: '6px 10px',
+        borderRadius: 8,
+        background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#f8fafc',
+        border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.08)' : '#e2e8f0'}`,
+        margin: '4px 0',
+        fontFamily: 'inherit',
+      }}
+    >
       <style>{`
         @keyframes wwSpin {
           100% { transform: rotate(360deg); }
         }
         .ww-spin {
           animation: wwSpin 1.5s linear infinite;
+        }
+        .ww-vote-pill-btn:hover:not(:disabled) {
+          background: rgba(148, 163, 184, 0.15) !important;
+        }
+        .ww-vote-pill-btn:focus-visible {
+          outline: 2px solid #16a34a !important;
+          outline-offset: 1px !important;
         }
       `}</style>
 
@@ -468,16 +511,14 @@ export default function ReportVoting({
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 10,
-            padding: '10px 12px',
-            borderRadius: 8,
-            background: isDark ? 'rgba(239, 68, 68, 0.1)' : '#fef2f2',
-            border: `1px solid ${isDark ? 'rgba(239, 68, 68, 0.25)' : '#fecaca'}`,
+            width: '100%',
+            padding: '4px 6px',
             color: isDark ? '#fca5a5' : '#b91c1c',
             fontSize: 12,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <AlertCircle size={15} />
+            <AlertCircle size={14} />
             <span>{loadError}</span>
           </div>
           <button
@@ -488,17 +529,17 @@ export default function ReportVoting({
               display: 'inline-flex',
               alignItems: 'center',
               gap: 4,
-              padding: '4px 10px',
+              padding: '3px 8px',
               borderRadius: 6,
               background: isDark ? 'rgba(239, 68, 68, 0.2)' : '#ffffff',
               border: `1px solid ${isDark ? 'rgba(239, 68, 68, 0.4)' : '#f87171'}`,
               color: isDark ? '#fca5a5' : '#b91c1c',
-              fontSize: 11.5,
+              fontSize: 11,
               fontWeight: 700,
               cursor: 'pointer',
             }}
           >
-            {isLoading ? <Loader2 size={12} className="ww-spin" /> : <RotateCw size={12} />}
+            {isLoading ? <Loader2 size={11} className="ww-spin" /> : <RotateCw size={11} />}
             <span>Retry</span>
           </button>
         </div>
@@ -508,194 +549,210 @@ export default function ReportVoting({
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 8,
-            padding: '12px 8px',
+            gap: 6,
+            padding: '4px 6px',
             color: isDark ? '#94a3b8' : '#64748b',
             fontSize: 12,
           }}
         >
-          <Loader2 size={14} className="ww-spin" />
-          <span>Loading community consensus...</span>
+          <Loader2 size={13} className="ww-spin" />
+          <span>Loading consensus…</span>
         </div>
       ) : (
-        /* ── Loaded Authoritative Vote & Consensus Display ── */
+        /* ── Compact Reddit-Inspired Consensus Control Bar ── */
         <>
-          {/* Consensus Indicators Summary Bar */}
-          <div style={styles.header}>
-            <div style={styles.headerTitle}>
-              <Users size={14} />
-              <span>Community Consensus</span>
-            </div>
-
-            <div style={styles.consensusRow}>
-              {/* Still Present */}
-              <div
-                style={{
-                  ...styles.badge,
-                  background: isDark ? 'rgba(249, 115, 22, 0.12)' : '#fff7ed',
-                  color: isDark ? '#fb923c' : '#c2410c',
-                  border: `1px solid ${isDark ? 'rgba(249, 115, 22, 0.25)' : '#fed7aa'}`,
-                }}
-                title="Number of community members confirming the issue is still uncollected"
-              >
-                <span>Still Present:</span>
-                <b>{upvotes}</b>
-              </div>
-
-              {/* Confirmed Cleared */}
-              <div
-                style={{
-                  ...styles.badge,
-                  background: isDark ? 'rgba(34, 197, 94, 0.12)' : '#f0fdf4',
-                  color: isDark ? '#4ade80' : '#15803d',
-                  border: `1px solid ${isDark ? 'rgba(34, 197, 94, 0.25)' : '#bbf7d0'}`,
-                }}
-                title="Number of community members confirming the problem has been resolved"
-              >
-                <span>Confirmed Cleared:</span>
-                <b>{downvotes}</b>
-              </div>
-
-              {/* Net Consensus */}
-              <div
-                style={{
-                  ...styles.badge,
-                  background: isDark ? 'rgba(255, 255, 255, 0.05)' : '#ffffff',
-                  color: consensusColor,
-                  border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.12)' : '#cbd5e1'}`,
-                  fontWeight: 700,
-                }}
-                title="Community Net Consensus (Positive minus Negative votes)"
-              >
-                <span>Consensus:</span>
-                <span>{consensusSign}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Ineligible Status Notice (if not approved/resolved and no existing vote to remove) */}
-          {!isEligibleStatus && userVote === null ? (
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {/* Consensus Title */}
             <div
               style={{
-                padding: '8px 10px',
-                borderRadius: 8,
-                fontSize: 12,
-                display: 'flex',
+                display: 'inline-flex',
                 alignItems: 'center',
-                gap: 6,
-                background: isDark ? 'rgba(255, 255, 255, 0.03)' : '#f1f5f9',
-                color: isDark ? '#94a3b8' : '#64748b',
+                gap: 5,
+                fontSize: 11,
+                fontWeight: 700,
+                color: isDark ? '#94a3b8' : '#475569',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
               }}
             >
-              <Info size={14} />
-              <span>{statusNotice}</span>
+              <Users size={13} />
+              <span>Consensus</span>
             </div>
-          ) : (
-            /* Action Buttons (Enabled or displaying existing vote removal) */
-            <div style={styles.buttonGrid}>
-              {/* Positive Vote Action: Confirm Issue */}
-              <button
-                type="button"
-                onClick={() => handleVoteClick(1)}
-                disabled={isSubmitting || isLoading || (!isEligibleStatus && userVote !== 1)}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'flex-start',
-                  padding: '8px 12px',
-                  borderRadius: 8,
-                  border: userVote === 1
-                    ? '1px solid #f97316'
-                    : `1px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : '#e2e8f0'}`,
-                  background: userVote === 1
-                    ? (isDark ? 'rgba(249, 115, 22, 0.2)' : '#fff7ed')
-                    : (isDark ? 'rgba(255, 255, 255, 0.02)' : '#ffffff'),
-                  color: userVote === 1
-                    ? (isDark ? '#fb923c' : '#c2410c')
-                    : (isDark ? '#e2e8f0' : '#334155'),
-                  cursor: isSubmitting || (!isEligibleStatus && userVote !== 1) ? 'not-allowed' : 'pointer',
-                  opacity: (!isEligibleStatus && userVote !== 1) ? 0.5 : 1,
-                  transition: 'all 0.15s ease',
-                  outline: 'none',
-                  textAlign: 'left',
-                  width: '100%',
-                  boxShadow: userVote === 1 ? '0 0 0 1px #f97316' : 'none',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Flame size={15} color={userVote === 1 ? '#f97316' : (isDark ? '#fb923c' : '#ea580c')} />
-                    <span style={{ fontSize: 13, fontWeight: 700 }}>Confirm Issue</span>
-                  </div>
-                  {userVote === 1 && <Check size={14} color="#f97316" />}
-                  {isSubmitting && userVote !== 1 && <Loader2 size={13} className="ww-spin" />}
-                </div>
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: userVote === 1
-                      ? (isDark ? '#fdba74' : '#9a3412')
-                      : (isDark ? '#94a3b8' : '#64748b'),
-                    marginTop: 2,
-                    fontWeight: 500,
-                  }}
-                >
-                  Still uncollected
-                </span>
-              </button>
 
-              {/* Negative Vote Action: Confirm Cleared */}
-              <button
-                type="button"
-                onClick={() => handleVoteClick(-1)}
-                disabled={isSubmitting || isLoading || (!isEligibleStatus && userVote !== -1)}
+            {/* Voting Pill Group */}
+            {!isEligibleStatus && userVote === null ? (
+              <div
                 style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'flex-start',
-                  padding: '8px 12px',
-                  borderRadius: 8,
-                  border: userVote === -1
-                    ? '1px solid #22c55e'
-                    : `1px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : '#e2e8f0'}`,
-                  background: userVote === -1
-                    ? (isDark ? 'rgba(34, 197, 94, 0.2)' : '#f0fdf4')
-                    : (isDark ? 'rgba(255, 255, 255, 0.02)' : '#ffffff'),
-                  color: userVote === -1
-                    ? (isDark ? '#4ade80' : '#15803d')
-                    : (isDark ? '#e2e8f0' : '#334155'),
-                  cursor: isSubmitting || (!isEligibleStatus && userVote !== -1) ? 'not-allowed' : 'pointer',
-                  opacity: (!isEligibleStatus && userVote !== -1) ? 0.5 : 1,
-                  transition: 'all 0.15s ease',
-                  outline: 'none',
-                  textAlign: 'left',
-                  width: '100%',
-                  boxShadow: userVote === -1 ? '0 0 0 1px #22c55e' : 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  fontSize: 11.5,
+                  color: isDark ? '#94a3b8' : '#64748b',
+                  fontStyle: 'italic',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <CheckCircle2 size={15} color={userVote === -1 ? '#22c55e' : (isDark ? '#4ade80' : '#16a34a')} />
-                    <span style={{ fontSize: 13, fontWeight: 700 }}>Confirm Cleared</span>
-                  </div>
-                  {userVote === -1 && <Check size={14} color="#22c55e" />}
-                  {isSubmitting && userVote !== -1 && <Loader2 size={13} className="ww-spin" />}
-                </div>
-                <span
+                <Info size={12} />
+                <span>{statusNotice}</span>
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  background: isDark ? 'rgba(255, 255, 255, 0.05)' : '#ffffff',
+                  border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.12)' : '#cbd5e1'}`,
+                  borderRadius: 20,
+                  padding: '2px 4px',
+                  gap: 2,
+                }}
+              >
+                {/* Positive Vote Action: Confirm Issue (Still uncollected) */}
+                <button
+                  type="button"
+                  onClick={() => handleVoteClick(1)}
+                  disabled={isSubmitting || isLoading || (!isEligibleStatus && userVote !== 1)}
+                  aria-label="Confirm Issue (Still uncollected)"
+                  aria-pressed={userVote === 1}
+                  title="Confirm Issue (Still uncollected)"
+                  className="ww-vote-pill-btn"
                   style={{
-                    fontSize: 11,
-                    color: userVote === -1
-                  ? (isDark ? '#86efac' : '#166534')
-                  : (isDark ? '#94a3b8' : '#64748b'),
-                    marginTop: 2,
-                    fontWeight: 500,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '3px 8px',
+                    borderRadius: 14,
+                    border: 'none',
+                    background: userVote === 1
+                      ? (isDark ? 'rgba(249, 115, 22, 0.22)' : '#fff7ed')
+                      : 'transparent',
+                    color: userVote === 1
+                      ? (isDark ? '#fb923c' : '#ea580c')
+                      : (isDark ? '#cbd5e1' : '#475569'),
+                    fontWeight: userVote === 1 ? 700 : 600,
+                    fontSize: 12,
+                    cursor: isSubmitting || (!isEligibleStatus && userVote !== 1) ? 'not-allowed' : 'pointer',
+                    opacity: (!isEligibleStatus && userVote !== 1) ? 0.45 : 1,
+                    transition: 'all 0.15s ease',
+                    outline: 'none',
                   }}
                 >
-                  Already resolved
-                </span>
+                  <Trash2 size={13} strokeWidth={userVote === 1 ? 2.4 : 1.8} />
+                  <span>{upvotes}</span>
+                </button>
+
+                <span
+                  style={{
+                    width: 1,
+                    height: 14,
+                    background: isDark ? 'rgba(255, 255, 255, 0.12)' : '#e2e8f0',
+                  }}
+                />
+
+                {/* Negative Vote Action: Confirm Cleared (Already resolved) */}
+                <button
+                  type="button"
+                  onClick={() => handleVoteClick(-1)}
+                  disabled={isSubmitting || isLoading || (!isEligibleStatus && userVote !== -1)}
+                  aria-label="Confirm Cleared (Already resolved)"
+                  aria-pressed={userVote === -1}
+                  title="Confirm Cleared (Already resolved)"
+                  className="ww-vote-pill-btn"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '3px 8px',
+                    borderRadius: 14,
+                    border: 'none',
+                    background: userVote === -1
+                      ? (isDark ? 'rgba(34, 197, 94, 0.22)' : '#f0fdf4')
+                      : 'transparent',
+                    color: userVote === -1
+                      ? (isDark ? '#4ade80' : '#16a34a')
+                      : (isDark ? '#cbd5e1' : '#475569'),
+                    fontWeight: userVote === -1 ? 700 : 600,
+                    fontSize: 12,
+                    cursor: isSubmitting || (!isEligibleStatus && userVote !== -1) ? 'not-allowed' : 'pointer',
+                    opacity: (!isEligibleStatus && userVote !== -1) ? 0.45 : 1,
+                    transition: 'all 0.15s ease',
+                    outline: 'none',
+                  }}
+                >
+                  <CheckCircle2 size={13} strokeWidth={userVote === -1 ? 2.4 : 1.8} />
+                  <span>{downvotes}</span>
+                </button>
+              </div>
+            )}
+
+            {/* Syncing indicator */}
+            {syncStatus === 'syncing' && (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontSize: 11,
+                  color: isDark ? '#94a3b8' : '#64748b',
+                }}
+              >
+                <Loader2 size={11} className="ww-spin" />
+                <span>Syncing…</span>
+              </span>
+            )}
+
+            {/* Sync Failed Retry Button */}
+            {syncStatus === 'failed' && (
+              <button
+                type="button"
+                onClick={handleRetryVote}
+                title="Vote saved locally. Tap to retry sync with server."
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  padding: '2px 7px',
+                  borderRadius: 10,
+                  background: isDark ? 'rgba(239, 68, 68, 0.15)' : '#fef2f2',
+                  border: `1px solid ${isDark ? 'rgba(239, 68, 68, 0.3)' : '#fecaca'}`,
+                  color: isDark ? '#fca5a5' : '#dc2626',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                <RotateCw size={10} />
+                <span>Retry Sync</span>
               </button>
-            </div>
-          )}
+            )}
+          </div>
+
+          {/* Right side: Authoritative Net Consensus Badge */}
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 11.5,
+            }}
+          >
+            <span style={{ color: isDark ? '#94a3b8' : '#64748b', fontSize: 11 }}>Net:</span>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '2px 7px',
+                borderRadius: 8,
+                fontSize: 11.5,
+                fontWeight: 700,
+                background: isDark ? 'rgba(255, 255, 255, 0.05)' : '#ffffff',
+                color: consensusColor,
+                border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.12)' : '#cbd5e1'}`,
+              }}
+              title={`Community Net Score: ${consensusSign}`}
+            >
+              {consensusSign}
+            </span>
+          </div>
         </>
       )}
     </div>

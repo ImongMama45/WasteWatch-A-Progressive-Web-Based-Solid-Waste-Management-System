@@ -326,3 +326,8 @@ else:
 EMAIL_TIMEOUT = 10  # Seconds before SMTP timeout
 
 PASSWORD_RESET_TIMEOUT = 3600  # 1 hour
+
+# ---------------------------------------------------------------------------
+# Sanitation Team Architecture Feature Flag
+# ---------------------------------------------------------------------------
+ENABLE_SANITATION_TEAMS = os.environ.get('ENABLE_SANITATION_TEAMS', 'True').lower() in ('true', '1', 'yes')

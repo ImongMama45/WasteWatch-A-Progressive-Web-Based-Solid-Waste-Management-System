@@ -9,6 +9,8 @@
 
 ---
 
+> **Stage 2.3 note (2026-11-10).** The 26-feature schema described here is unchanged. Statements in item 5 below about artifact loading and rollback describe the earlier state; current validator, cache, and rollback behavior is documented in [`FORECASTING_STAGE_2_3_GOVERNANCE_REMEDIATION_REPORT.md`](file:///d:/Coding/Waste%20Watch/docs/FORECASTING_STAGE_2_3_GOVERNANCE_REMEDIATION_REPORT.md). `FORECAST_ML_ENABLED` is at `settings.py` line 293; earlier line anchors in this document may be stale.
+
 ## 0. Final Post-Fifth-Audit Corrections Addendum (2026-11-07)
 
 Following Claude's Fifth Independent Audit (`PARTIAL` -- accepting raw periodic ordinal removal and calendar mathematics while requiring targeted scope alignment on active model inputs, end-to-end estimator parity testing, and movable-holiday regression assertions), the following final corrections are now active in source code:
@@ -127,7 +129,7 @@ Verified against `wastewatch/backend/db.sqlite3` via [`scripts/validate_calendar
 All six configurations were evaluated via [`scripts/validate_calendar_features.py`](file:///d:/Coding/Waste%20Watch/wastewatch/backend/scripts/validate_calendar_features.py) under **strictly identical** chronological partitions, 7-day embargoes, prediction origins, target observations, series definitions (`1` City-Wide + `11` Barangays = `12` series), horizons ($h=1..7$), and inner chronological `alpha` selection (`[0.1, 1.0, 10.0, 50.0, 100.0, 500.0]`):
 
 - **A (`A_Baseline`):** Original approved baseline (`target_day_of_week` + `sin/cos_dow` + operational indicators; no month/week features).
-- **B (`B_Pure_Cyclical` -- Updated Production Code):** Pure cyclical DoW, Month, and ISO Week harmonics + operational indicators; **all raw periodic ordinals (`target_day_of_week`, `target_month`, `target_week_of_year`) removed**.
+- **B (`B_Pure_Cyclical` -- Historical Ablation Candidate, Not Active Production):** Pure cyclical DoW, Month, and ISO Week harmonics + operational indicators; **all raw periodic ordinals (`target_day_of_week`, `target_month`, `target_week_of_year`) removed**.
 - **B-DoW (`B_DoW_Only` -- Weekday Ablation):** Config A with raw `target_day_of_week` removed and **no** month/week harmonics (isolates pure cyclical weekday encoding from sub-annual harmonics on short <90-day windows).
 - **C1 (`C1_Raw_DoW_Retained`):** Config B + raw `target_day_of_week` (`0..6`) retained.
 - **C2 (`C2_All_Raw_Ordinals` -- Previous Report Config):** Config B + raw `target_day_of_week`, `target_month`, and `target_week_of_year` retained.
@@ -142,7 +144,7 @@ All six configurations were evaluated via [`scripts/validate_calendar_features.p
 | Configuration | Overall MAE (kg) | vs A (%) | City-Wide MAE (kg) | vs A (%) | City WAPE (%) | Barangay MAE (kg) | vs A (%) | Barangay WAPE (%) |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | **A. Original Baseline** | 1,802.43 | +0.00% | 5,460.14 | +0.00% | 49.83% | 1,469.91 | +0.00% | 147.55% |
-| **B. Pure Cyclical (Production Code)** | 1,660.47 | -7.88% | 5,788.86 | +6.02% | 52.83% | 1,285.16 | -12.57% | 129.00% |
+| **B. Pure Cyclical (Ablation Candidate)** | 1,660.47 | -7.88% | 5,788.86 | +6.02% | 52.83% | 1,285.16 | -12.57% | 129.00% |
 | **B-DoW. Weekday-Only Pure Cyclical** | 1,802.11 | -0.02% | 5,463.41 | +0.06% | 49.86% | 1,469.26 | -0.04% | 147.48% |
 | **C1. Cyclical + Raw DoW Retained** | 1,636.07 | -9.23% | 5,582.00 | +2.23% | 50.94% | 1,277.35 | -13.10% | 128.22% |
 | **C2. Previous Report (All Raw Ordinals)** | 1,579.51 | -12.37% | 5,780.97 | +5.88% | 52.75% | 1,197.56 | -18.53% | 120.21% |
@@ -180,7 +182,7 @@ All six configurations were evaluated via [`scripts/validate_calendar_features.p
 | Configuration | Overall MAE (kg) | vs A (%) | City-Wide MAE (kg) | vs A (%) | City WAPE (%) | Barangay MAE (kg) | vs A (%) |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | **A. Original Baseline** | 2,405.82 | +0.00% | 5,330.56 | +0.00% | 43.34% | 2,139.94 | +0.00% |
-| **B. Pure Cyclical (Production Code)** | 2,022.98 | -15.91% | 5,564.36 | +4.39% | 45.24% | 1,701.04 | -20.51% |
+| **B. Pure Cyclical (Ablation Candidate)** | 2,022.98 | -15.91% | 5,564.36 | +4.39% | 45.24% | 1,701.04 | -20.51% |
 | **B-DoW. Weekday-Only Pure Cyclical** | 2,477.96 | +3.00% | 6,076.93 | +14.00% | 49.40% | 2,150.78 | +0.51% |
 | **C1. Cyclical + Raw DoW Retained** | 1,989.80 | -17.29% | 5,690.57 | +6.75% | 46.26% | 1,653.37 | -22.74% |
 | **C2. Previous Report (All Raw Ordinals)** | 2,091.82 | -13.05% | 5,685.29 | +6.65% | 46.22% | 1,765.14 | -17.51% |
@@ -229,7 +231,7 @@ Because 11 barangay series represent $91.7\%$ of pooled rows (`132` of `144` tes
 Executed `.\venv\Scripts\python.exe manage.py test analytics.tests.test_forecasting -v 2` and `.\venv\Scripts\python.exe manage.py check`:
 
 - **Django System Check:** `System check identified no issues (0 silenced).`
-- **Regression Suite:** **49 / 49 tests PASSED (`OK`)**, including:
+- **Regression Suite:** **50 / 50 tests PASSED (`OK`)**, including:
   - `test_25_multi_horizon_distinct_calendar_alignment`: Verifies horizon-specific `target_sin_dow` and `target_cos_dow` alignment for $h=1..7$ and asserts `'target_day_of_week'` is absent from `X_h.columns`.
   - `test_27_fail_closed_artifact_governance`: Asserts fail-closed rejection across missing metadata files, missing or corrupted SHA-256 digests, subset/superset feature schemas, reordered schemas, and deserialized `feature_names` mismatches.
   - `test_33_atomic_manifest_rollback`: Verifies that `rollback_forecast_model` strictly validates target artifacts before modifying any files; unvalidated artifacts with missing `feature_schema` are rejected with `CommandError` while preserving active manifest and model files untouched, and rollback succeeds atomically upon target artifact validation.
@@ -242,4 +244,5 @@ Executed `.\venv\Scripts\python.exe manage.py test analytics.tests.test_forecast
   - `test_47_raw_ordinal_calendar_features_excluded`: Explicitly asserts `'target_day_of_week'`, `'target_month'`, `'target_week_of_year'`, and `'target_day_of_month'` as well as deferred harmonics (`sin/cos_month`, `sin/cos_week`) are excluded from `extract_calendar_features()`, `NUMERIC_FEATURES`, `CATEGORICAL_FEATURES`, and fitted `ColumnTransformer` feature outputs.
   - `test_48_calendar_holiday_and_weekday_operational_indicators`: Explicitly asserts movable holiday identification for Good Friday (`2026-04-03`) and National Heroes Day (`2026-08-31`), plus strict binary indicators for `target_is_weekend`, `target_is_monday`, and `target_is_sunday` across all seven weekdays.
   - `test_49_unified_artifact_governance_and_rollback_validation`: Validates the unified `validate_forecaster_artifact` implementation across rollback, candidate loading, and primary loading, covering 11 fail-closed scenarios: missing `feature_schema`, reordered `feature_schema`, stale pickle `feature_names`, stale fitted-pipeline columns, missing `synthetic_records`, boolean `synthetic_records=False`, candidate loader reordered schema, primary and candidate loader stale columns, successful valid rollback, and confirmation that failed rollback leaves active manifest and active files completely unchanged.
+  - `test_50_shared_artifact_governance_comprehensive_matrix`: Comprehensive fail-closed matrix for unified artifact governance across primary loader, candidate loader, and rollback command, asserting rejection of subset/superset schemas, nonzero synthetic records, missing/incompatible library versions (scikit-learn, Python, joblib, numpy), unvalidated or low-history models in production mode, corrupt model bytes, and SHA-256 integrity mismatches with atomic manifest preservation.
 

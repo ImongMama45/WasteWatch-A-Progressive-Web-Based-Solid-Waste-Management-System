@@ -80,6 +80,7 @@ def fetch_stop_validations_map(schedule_ids, dates):
 def select_collection_schedules(
     start_date,
     end_date,
+    user=None,
     barangay_id=None,
     include_admin_scopes=False,
     include_cancelled=False,
@@ -96,9 +97,14 @@ def select_collection_schedules(
       If the query window is purely in the future (start_date > ref_date), they are excluded.
     - Active recurring template capacity limit (100 templates) checks eligible active recurring templates.
       Completed and cancelled recurring templates do not consume the active template capacity.
+    - Barangay Official scope is derived from user.barangay_id (assigned barangay + citywide only).
+      Client-supplied barangay_id cannot override this scope. Unassigned officials receive citywide only.
+    - Admin (is_admin_user) can access all or filter by barangay_id.
+    - Public / Citizen queries filter by barangay_id when provided, or return all when omitted.
     """
     validate_date_window(start_date, end_date)
     ref_date = reference_date or timezone.localdate()
+    is_admin = is_admin_user(user)
 
     one_time_qs = CollectionSchedule.objects.filter(date__range=(start_date, end_date))
     recurring_qs = CollectionSchedule.objects.filter(date__isnull=True)
@@ -111,7 +117,24 @@ def select_collection_schedules(
             one_time_qs = one_time_qs.exclude(status='COMPLETED')
             recurring_qs = recurring_qs.exclude(status='COMPLETED')
 
-    if barangay_id is not None:
+    # Scoping boundary:
+    # 1. Non-admin Barangay Officials are strictly locked to their assigned barangay and citywide schedules.
+    if not is_admin and getattr(user, 'role', None) == UserRole.BRGY_OFFICIAL:
+        user_brgy = getattr(user, 'barangay_id', None)
+        if user_brgy:
+            scope_filter = (
+                Q(barangays__id=user_brgy) |
+                (Q(barangays__isnull=True) & (Q(area__iexact='citywide') | Q(area__iexact='city-wide')))
+            )
+        else:
+            # Unassigned Barangay Official receives citywide only at the backend boundary
+            scope_filter = (
+                Q(barangays__isnull=True) & (Q(area__iexact='citywide') | Q(area__iexact='city-wide'))
+            )
+        one_time_qs = one_time_qs.filter(scope_filter).distinct()
+        recurring_qs = recurring_qs.filter(scope_filter).distinct()
+    # 2. Admin, Citizen, Watcher, Driver, and Anonymous callers use barangay_id if provided
+    elif barangay_id is not None:
         if include_admin_scopes:
             scope_filter = Q(barangays__id=barangay_id) | Q(barangays__isnull=True)
         else:
@@ -159,6 +182,7 @@ def select_collection_schedules(
 def get_normalized_collection_schedules(
     start_date,
     end_date,
+    user=None,
     barangay_id=None,
     include_admin_scopes=False,
     include_cancelled=False,
@@ -167,7 +191,7 @@ def get_normalized_collection_schedules(
     """
     High-level read-only pipeline:
     1. Validates bounds.
-    2. Selects relevant schedules.
+    2. Selects relevant schedules (with role-aware user scoping).
     3. Expands occurrence dates.
     4. Batch queries StopValidation evidence in 1 single query.
     5. Normalizes occurrences into sanitized CalendarEntry dictionaries.
@@ -177,6 +201,7 @@ def get_normalized_collection_schedules(
     schedules = select_collection_schedules(
         start_date=start_date,
         end_date=end_date,
+        user=user,
         barangay_id=barangay_id,
         include_admin_scopes=include_admin_scopes,
         include_cancelled=include_cancelled,

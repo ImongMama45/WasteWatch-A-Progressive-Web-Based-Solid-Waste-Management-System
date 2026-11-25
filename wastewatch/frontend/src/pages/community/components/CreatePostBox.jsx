@@ -2,16 +2,17 @@
  * CreatePostBox.jsx
  * -----------------
  * Civic Discussion Composer for the WasteWatch Community Forum.
+ * Reddit-inspired input bar entry point that expands smoothly into a clean composer.
+ *
  * Supports two distinct user intentions:
- * 1. Civic Discussion (Option A, Default Mode): Neighborhood cleanliness discussions,
- *    collection concerns, and community initiatives with mandatory category selection.
- * 2. Report A Problem (Option B): Visually distinguishable entry point for official
- *    waste problem reports (routed to Barangay Officials and CENRO Lucena).
+ * 1. Civic Discussion (Default): Neighborhood cleanliness discussions with required category selection.
+ * 2. Report A Problem: Opens official waste problem report workflow.
  *
  * Strict Iconography Rule: Zero emojis. Lucide SVG icons only.
  */
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   MessageSquare,
   AlertTriangle,
@@ -34,48 +35,34 @@ export const CIVIC_CATEGORIES = [
   {
     key: 'schedule',
     label: 'Collection Schedule',
-    description: 'Questions or discussions about collection schedules, missed pickups, and collection changes.',
+    description: 'Collection schedules, route delays, or pickup inquiries.',
     icon: Calendar,
-    accent: '#0284c7',
-    bg: '#f0f9ff',
-    border: '#bae6fd',
   },
   {
     key: 'cleanup',
     label: 'Cleanup Initiative',
-    description: 'Community cleanup activities and neighborhood cleanliness initiatives.',
+    description: 'Community cleanup activities and neighborhood drives.',
     icon: Sparkles,
-    accent: '#16a34a',
-    bg: '#f0fdf4',
-    border: '#bbf7d0',
   },
   {
     key: 'general',
     label: 'General Inquiry',
-    description: 'Questions and discussions about solid waste management.',
+    description: 'Questions and discussions about municipal waste management.',
     icon: HelpCircle,
-    accent: '#7c3aed',
-    bg: '#f5f3ff',
-    border: '#ddd6fe',
   },
   {
     key: 'advisory',
     label: 'Civic Advisory',
-    description: 'Community reminders and useful waste-management information.',
+    description: 'Helpful reminders and community cleanliness tips.',
     icon: Info,
-    accent: '#d97706',
-    bg: '#fffbeb',
-    border: '#fde68a',
   },
 ]
 
 export default function CreatePostBox({ onPostCreated, onAuthRequired, onReportProblemClick }) {
   const { user, barangays } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
 
-  // Mode: 'discussion' (Option A, default) or 'report' (Option B)
   const [composerMode, setComposerMode] = useState('discussion')
-
-  // Discussion state (Civic discussions are text-only)
   const [content, setContent] = useState('')
   const [category, setCategory] = useState('')
   const [selectedBarangay, setSelectedBarangay] = useState('')
@@ -84,10 +71,30 @@ export default function CreatePostBox({ onPostCreated, onAuthRequired, onReportP
   const [error, setError] = useState(null)
   const [successNotice, setSuccessNotice] = useState(false)
 
-  // Report entry point feedback state
-  const [reportFeedback, setReportFeedback] = useState(null)
-
   const categorySectionRef = useRef(null)
+
+  // Handle prefilled topics from map pages (?topic=...&brgy=...)
+  useEffect(() => {
+    const topic = searchParams.get('topic')
+    if (topic) {
+      setContent(prev => prev ? prev : `Regarding ${topic}:\n\n`)
+      setIsExpanded(true)
+      const cat = searchParams.get('category') || 'general'
+      setCategory(cat)
+      const brgy = searchParams.get('brgy')
+      if (brgy && barangays?.length) {
+        const found = barangays.find(b => String(b.id) === String(brgy) || b.name?.toLowerCase() === brgy.toLowerCase())
+        if (found) setSelectedBarangay(String(found.id))
+      }
+      setSearchParams(prev => {
+        const next = new URLSearchParams(prev)
+        next.delete('topic')
+        next.delete('category')
+        next.delete('brgy')
+        return next
+      }, { replace: true })
+    }
+  }, [searchParams, setSearchParams, barangays])
 
   const maxChars = 2500
   const charCount = content.length
@@ -98,6 +105,7 @@ export default function CreatePostBox({ onPostCreated, onAuthRequired, onReportP
     setSelectedBarangay('')
     setError(null)
     setIsExpanded(false)
+    setComposerMode('discussion')
   }
 
   const handleDiscussionSubmit = async (e) => {
@@ -123,7 +131,6 @@ export default function CreatePostBox({ onPostCreated, onAuthRequired, onReportP
       return
     }
 
-    // Required Category Validation
     if (!category) {
       setError('Please select a category for your civic discussion.')
       if (categorySectionRef.current) {
@@ -153,7 +160,6 @@ export default function CreatePostBox({ onPostCreated, onAuthRequired, onReportP
       setSuccessNotice(true)
       setTimeout(() => setSuccessNotice(false), 4000)
     } else {
-      // Preserve content and category on failure
       setError(res.error || 'Failed to submit discussion. Please try again.')
     }
   }
@@ -163,54 +169,34 @@ export default function CreatePostBox({ onPostCreated, onAuthRequired, onReportP
       if (onAuthRequired) onAuthRequired()
       return
     }
-
     if (onReportProblemClick) {
       onReportProblemClick()
     }
   }
 
-  // If user is unauthenticated, show an invitation box
+  // Unauthenticated: clean Reddit-style sign-in banner
   if (!user) {
     return (
       <div
         style={{
           background: '#ffffff',
-          borderRadius: 14,
-          padding: '22px 24px',
+          borderRadius: 8,
+          padding: '12px 16px',
           border: '1px solid #e2e8f0',
-          marginBottom: 22,
-          boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+          marginBottom: 16,
+          boxShadow: '0 1px 2px rgba(15, 23, 42, 0.03)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 16,
+          gap: 12,
           flexWrap: 'wrap',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 12,
-              background: '#f0fdf4',
-              color: '#16a34a',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
-            <Lock size={22} />
-          </div>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>
-              Join the Lucena City Civic Discussion
-            </div>
-            <div style={{ fontSize: 13, color: '#64748b', marginTop: 2 }}>
-              Sign in with your account to start discussions, share neighborhood updates, or request official assistance.
-            </div>
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Lock size={16} style={{ color: '#16a34a', flexShrink: 0 }} />
+          <span style={{ fontSize: 13.5, color: '#475569', fontWeight: 500 }}>
+            Sign in to start discussions, share neighborhood updates, or report civic issues.
+          </span>
         </div>
         <button
           type="button"
@@ -219,42 +205,129 @@ export default function CreatePostBox({ onPostCreated, onAuthRequired, onReportP
             background: '#16a34a',
             color: '#ffffff',
             border: 'none',
-            borderRadius: 8,
-            padding: '10px 20px',
-            fontSize: 13,
+            borderRadius: 6,
+            padding: '7px 14px',
+            fontSize: 12.5,
             fontWeight: 700,
             cursor: 'pointer',
-            transition: 'background 0.15s ease',
             whiteSpace: 'nowrap',
           }}
         >
-          Sign In to Participate
+          Sign In
         </button>
       </div>
     )
   }
 
+  // Authenticated Collapsed State (Reddit-style compact input bar)
+  if (!isExpanded && composerMode === 'discussion' && !content.trim()) {
+    return (
+      <div
+        style={{
+          background: '#ffffff',
+          borderRadius: 8,
+          border: '1px solid #e2e8f0',
+          padding: '8px 12px',
+          marginBottom: 16,
+          boxShadow: '0 1px 2px rgba(15, 23, 42, 0.03)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+        }}
+      >
+        {/* User avatar */}
+        <div
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: '50%',
+            background: '#16a34a',
+            color: '#ffffff',
+            fontSize: 13,
+            fontWeight: 700,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            overflow: 'hidden',
+          }}
+        >
+          {user.profile_pic ? (
+            <img src={user.profile_pic} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : (
+            (user.full_name || user.username || 'U').charAt(0).toUpperCase()
+          )}
+        </div>
+
+        {/* Input placeholder */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setIsExpanded(true)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsExpanded(true) }}
+          style={{
+            flex: 1,
+            background: '#f8fafc',
+            border: '1px solid #e2e8f0',
+            borderRadius: 6,
+            padding: '8px 12px',
+            color: '#64748b',
+            fontSize: 13,
+            cursor: 'text',
+            transition: 'border-color 0.15s, background 0.15s',
+          }}
+        >
+          Start a civic discussion or report a waste concern...
+        </div>
+
+        {/* Quick Report Issue Button */}
+        <button
+          type="button"
+          onClick={handleReportProblemTrigger}
+          title="File an official waste problem report"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '7px 12px',
+            borderRadius: 6,
+            border: '1px solid #e2e8f0',
+            background: '#ffffff',
+            color: '#475569',
+            fontSize: 12.5,
+            fontWeight: 600,
+            cursor: 'pointer',
+            flexShrink: 0,
+            transition: 'background 0.15s',
+          }}
+        >
+          <AlertTriangle size={14} style={{ color: '#d97706' }} />
+          <span>Report Problem</span>
+        </button>
+      </div>
+    )
+  }
+
+  // Expanded Composer
   return (
     <div
       style={{
         background: '#ffffff',
-        borderRadius: 14,
-        border: '1px solid #e2e8f0',
-        marginBottom: 24,
-        boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+        borderRadius: 8,
+        border: '1px solid #cbd5e1',
+        marginBottom: 16,
+        boxShadow: '0 2px 6px rgba(15, 23, 42, 0.04)',
         overflow: 'hidden',
       }}
     >
-      {/* Intention Selector Header */}
+      {/* Mode Selector Tabs */}
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
+          display: 'flex',
           borderBottom: '1px solid #e2e8f0',
           background: '#f8fafc',
         }}
       >
-        {/* Mode A: Civic Discussion */}
         <button
           type="button"
           onClick={() => {
@@ -262,38 +335,25 @@ export default function CreatePostBox({ onPostCreated, onAuthRequired, onReportP
             setError(null)
           }}
           style={{
+            flex: 1,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 8,
-            padding: '13px 16px',
+            gap: 6,
+            padding: '10px 14px',
             background: composerMode === 'discussion' ? '#ffffff' : 'transparent',
             border: 'none',
-            borderBottom: composerMode === 'discussion' ? '2.5px solid #16a34a' : '2.5px solid transparent',
-            color: composerMode === 'discussion' ? '#16a34a' : '#64748b',
-            fontSize: 13.5,
-            fontWeight: composerMode === 'discussion' ? 700 : 600,
+            borderBottom: composerMode === 'discussion' ? '2px solid #16a34a' : '2px solid transparent',
+            color: composerMode === 'discussion' ? '#15803d' : '#64748b',
+            fontSize: 13,
+            fontWeight: 700,
             cursor: 'pointer',
-            transition: 'all 0.15s ease',
           }}
         >
-          <MessageSquare size={16} />
+          <MessageSquare size={15} />
           <span>Civic Discussion</span>
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              padding: '2px 7px',
-              borderRadius: 10,
-              background: composerMode === 'discussion' ? '#dcfce7' : '#e2e8f0',
-              color: composerMode === 'discussion' ? '#15803d' : '#64748b',
-            }}
-          >
-            Forum
-          </span>
         </button>
 
-        {/* Mode B: Report A Problem */}
         <button
           type="button"
           onClick={() => {
@@ -301,61 +361,45 @@ export default function CreatePostBox({ onPostCreated, onAuthRequired, onReportP
             setError(null)
           }}
           style={{
+            flex: 1,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 8,
-            padding: '13px 16px',
+            gap: 6,
+            padding: '10px 14px',
             background: composerMode === 'report' ? '#ffffff' : 'transparent',
             border: 'none',
-            borderBottom: composerMode === 'report' ? '2.5px solid #f59e0b' : '2.5px solid transparent',
+            borderBottom: composerMode === 'report' ? '2px solid #d97706' : '2px solid transparent',
             color: composerMode === 'report' ? '#b45309' : '#64748b',
-            fontSize: 13.5,
-            fontWeight: composerMode === 'report' ? 700 : 600,
+            fontSize: 13,
+            fontWeight: 700,
             cursor: 'pointer',
-            transition: 'all 0.15s ease',
           }}
         >
-          <AlertTriangle size={16} style={{ color: composerMode === 'report' ? '#d97706' : '#94a3b8' }} />
+          <AlertTriangle size={15} style={{ color: composerMode === 'report' ? '#d97706' : '#94a3b8' }} />
           <span>Report A Problem</span>
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              padding: '2px 7px',
-              borderRadius: 10,
-              background: composerMode === 'report' ? '#fef3c7' : '#e2e8f0',
-              color: composerMode === 'report' ? '#92400e' : '#64748b',
-            }}
-          >
-            Official Action
-          </span>
         </button>
       </div>
 
-      {/* COMPOSER BODY */}
-      <div style={{ padding: '20px 22px' }}>
-        {/* ============================================================== */}
-        {/* OPTION A: CIVIC DISCUSSION FORM                                */}
-        {/* ============================================================== */}
+      <div style={{ padding: '14px 16px' }}>
+        {/* Mode A: Civic Discussion */}
         {composerMode === 'discussion' && (
           <div>
-            {/* Author Attribution Header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {/* Header: Author & Collapse */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div
                   style={{
-                    width: 36,
-                    height: 36,
+                    width: 28,
+                    height: 28,
                     borderRadius: '50%',
                     background: '#16a34a',
                     color: '#ffffff',
-                    fontSize: 14,
-                    fontWeight: 800,
+                    fontSize: 12,
+                    fontWeight: 700,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    flexShrink: 0,
                     overflow: 'hidden',
                   }}
                 >
@@ -365,54 +409,34 @@ export default function CreatePostBox({ onPostCreated, onAuthRequired, onReportP
                     (user.full_name || user.username || 'U').charAt(0).toUpperCase()
                   )}
                 </div>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>{user.full_name || user.username}</span>
-                    {user.role && user.role !== 'citizen' && (
-                      <span
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          padding: '1px 6px',
-                          borderRadius: 4,
-                          background: '#e0f2fe',
-                          color: '#0369a1',
-                          textTransform: 'uppercase',
-                        }}
-                      >
-                        {user.role.replace('_', ' ')}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 12, color: '#64748b', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <MapPin size={12} style={{ color: '#16a34a' }} />
-                    <span>{user.barangay_name || 'Lucena City Resident'}</span>
-                  </div>
-                </div>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+                  {user.full_name || user.username}
+                </span>
+                {user.barangay_name && (
+                  <span style={{ fontSize: 11.5, color: '#64748b' }}>
+                    · {user.barangay_name}
+                  </span>
+                )}
               </div>
 
-              {isExpanded && (
-                <button
-                  type="button"
-                  onClick={handleResetForm}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#94a3b8',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '4px 6px',
-                  }}
-                  title="Collapse and reset"
-                >
-                  <RotateCcw size={12} />
-                  <span>Collapse</span>
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleResetForm}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#64748b',
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 3,
+                }}
+              >
+                <RotateCcw size={11} />
+                <span>Cancel</span>
+              </button>
             </div>
 
             {/* Success Notice */}
@@ -421,18 +445,18 @@ export default function CreatePostBox({ onPostCreated, onAuthRequired, onReportP
                 style={{
                   background: '#f0fdf4',
                   border: '1px solid #bbf7d0',
-                  borderRadius: 8,
-                  padding: '10px 14px',
-                  marginBottom: 14,
-                  fontSize: 13,
+                  borderRadius: 6,
+                  padding: '8px 12px',
+                  marginBottom: 10,
+                  fontSize: 12.5,
                   color: '#15803d',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 8,
+                  gap: 6,
                 }}
               >
-                <Check size={16} />
-                <span>Your civic discussion has been published to the community feed.</span>
+                <Check size={14} />
+                <span>Your discussion has been published to the community feed.</span>
               </div>
             )}
 
@@ -442,391 +466,208 @@ export default function CreatePostBox({ onPostCreated, onAuthRequired, onReportP
                 style={{
                   background: '#fef2f2',
                   border: '1px solid #fecaca',
-                  borderRadius: 8,
-                  padding: '10px 14px',
-                  marginBottom: 14,
-                  fontSize: 13,
+                  borderRadius: 6,
+                  padding: '8px 12px',
+                  marginBottom: 10,
+                  fontSize: 12.5,
                   color: '#b91c1c',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 8,
+                  gap: 6,
                 }}
               >
-                <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                <AlertCircle size={14} style={{ flexShrink: 0 }} />
                 <span>{error}</span>
               </div>
             )}
 
             <form onSubmit={handleDiscussionSubmit}>
-              {/* Textarea */}
               <textarea
                 value={content}
-                onChange={(e) => {
-                  setContent(e.target.value)
-                  if (!isExpanded) setIsExpanded(true)
-                }}
-                onFocus={() => setIsExpanded(true)}
-                placeholder="What would you like to discuss with your neighbors or community coordinators about waste and cleanliness in Lucena City?"
-                rows={isExpanded ? 4 : 2}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder="What would you like to discuss about waste and cleanliness in Lucena City?"
+                rows={3}
                 maxLength={maxChars}
                 style={{
                   width: '100%',
-                  padding: '12px 14px',
-                  borderRadius: 10,
+                  padding: '10px 12px',
+                  borderRadius: 6,
                   border: '1px solid #cbd5e1',
-                  fontSize: 14,
+                  fontSize: 13.5,
                   fontFamily: 'inherit',
                   lineHeight: 1.5,
                   resize: 'vertical',
                   boxSizing: 'border-box',
                   outline: 'none',
-                  background: '#f8fafc',
+                  background: '#ffffff',
                   color: '#0f172a',
-                  transition: 'border 0.15s, background 0.15s',
                 }}
               />
 
-              {/* Collapsed expansion helper or full expanded controls */}
-              {isExpanded && (
-                <>
-                  {/* REQUIRED CIVIC CATEGORY SELECTOR */}
-                  <div
-                    ref={categorySectionRef}
-                    style={{
-                      marginTop: 16,
-                      padding: '14px 16px',
-                      background: '#f8fafc',
-                      borderRadius: 10,
-                      border: !category && error ? '1.5px solid #f87171' : '1px solid #e2e8f0',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
-                          Select Discussion Category
-                        </span>
-                        <span style={{ color: '#dc2626', fontSize: 13, fontWeight: 700 }}>*</span>
-                        <span style={{ fontSize: 11, color: '#64748b' }}>(Required)</span>
-                      </div>
-                      {category && (
-                        <span style={{ fontSize: 11, color: '#16a34a', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 3 }}>
-                          <Check size={12} />
-                          Selected
-                        </span>
-                      )}
-                    </div>
-
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
-                        gap: 10,
-                      }}
-                    >
-                      {CIVIC_CATEGORIES.map((cat) => {
-                        const IconComponent = cat.icon
-                        const isSelected = category === cat.key
-                        return (
-                          <div
-                            key={cat.key}
-                            onClick={() => {
-                              setCategory(cat.key)
-                              if (error && error.includes('category')) setError(null)
-                            }}
-                            role="button"
-                            tabIndex={0}
-                            style={{
-                              padding: '10px 12px',
-                              borderRadius: 8,
-                              border: isSelected ? '2px solid #16a34a' : '1px solid #cbd5e1',
-                              background: isSelected ? '#f0fdf4' : '#ffffff',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'flex-start',
-                              gap: 10,
-                              transition: 'all 0.15s ease',
-                              outline: 'none',
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: 28,
-                                height: 28,
-                                borderRadius: 6,
-                                background: isSelected ? '#dcfce7' : cat.bg,
-                                color: isSelected ? '#15803d' : cat.accent,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                flexShrink: 0,
-                                marginTop: 1,
-                              }}
-                            >
-                              <IconComponent size={15} />
-                            </div>
-                            <div style={{ flex: 1 }}>
-                              <div
-                                style={{
-                                  fontSize: 13,
-                                  fontWeight: 700,
-                                  color: isSelected ? '#15803d' : '#0f172a',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'space-between',
-                                }}
-                              >
-                                <span>{cat.label}</span>
-                                {isSelected && <Check size={14} style={{ color: '#16a34a' }} />}
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: 11,
-                                  color: '#64748b',
-                                  marginTop: 3,
-                                  lineHeight: 1.35,
-                                }}
-                              >
-                                {cat.description}
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Toolbar Row */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      marginTop: 14,
-                      flexWrap: 'wrap',
-                      gap: 10,
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                      {/* Optional Barangay Tag Selector */}
-                      {barangays && barangays.length > 0 && (
-                        <select
-                          value={selectedBarangay}
-                          onChange={(e) => setSelectedBarangay(e.target.value)}
-                          style={{
-                            padding: '7px 10px',
-                            borderRadius: 8,
-                            border: '1px solid #cbd5e1',
-                            background: '#ffffff',
-                            color: '#475569',
-                            fontSize: 12,
-                            fontFamily: 'inherit',
-                            outline: 'none',
-                          }}
-                        >
-                          <option value="">
-                            {user.barangay_name ? `Tag: ${user.barangay_name}` : 'Tag Barangay (Optional)'}
-                          </option>
-                          {barangays.map(b => (
-                            <option key={b.id} value={b.id}>
-                              {b.name}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-
-                    {/* Character Counter & Actions */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <span
-                        style={{
-                          fontSize: 12,
-                          color: charCount > 2400 ? '#dc2626' : '#94a3b8',
-                          fontWeight: charCount > 2400 ? 700 : 500,
-                        }}
-                      >
-                        {charCount} / {maxChars}
-                      </span>
-
+              {/* Category Selector Chips */}
+              <div ref={categorySectionRef} style={{ marginTop: 10, marginBottom: 10 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                  Select Category <span style={{ color: '#dc2626' }}>*</span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {CIVIC_CATEGORIES.map((cat) => {
+                    const isSelected = category === cat.key
+                    const IconComp = cat.icon
+                    return (
                       <button
+                        key={cat.key}
                         type="button"
-                        onClick={handleResetForm}
-                        style={{
-                          padding: '8px 14px',
-                          borderRadius: 8,
-                          border: '1px solid #cbd5e1',
-                          background: '#ffffff',
-                          color: '#64748b',
-                          fontSize: 13,
-                          fontWeight: 600,
-                          cursor: 'pointer',
+                        onClick={() => {
+                          setCategory(cat.key)
+                          if (error && error.includes('category')) setError(null)
                         }}
-                      >
-                        Cancel
-                      </button>
-
-                      <button
-                        type="submit"
-                        disabled={submitting || !content.trim()}
                         style={{
                           display: 'inline-flex',
                           alignItems: 'center',
-                          gap: 6,
-                          padding: '8px 18px',
-                          borderRadius: 8,
-                          border: 'none',
-                          background: '#16a34a',
-                          color: '#ffffff',
-                          fontSize: 13,
-                          fontWeight: 700,
-                          cursor: submitting || !content.trim() ? 'not-allowed' : 'pointer',
-                          opacity: submitting || !content.trim() ? 0.6 : 1,
-                          transition: 'background 0.15s ease',
+                          gap: 5,
+                          padding: '5px 10px',
+                          borderRadius: 20,
+                          border: isSelected ? '1px solid #16a34a' : '1px solid #e2e8f0',
+                          background: isSelected ? '#f0fdf4' : '#f8fafc',
+                          color: isSelected ? '#15803d' : '#475569',
+                          fontSize: 12,
+                          fontWeight: isSelected ? 700 : 500,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
                         }}
                       >
-                        <Send size={14} />
-                        <span>{submitting ? 'Publishing...' : 'Publish Discussion'}</span>
+                        <IconComp size={12} />
+                        <span>{cat.label}</span>
                       </button>
-                    </div>
-                  </div>
-                </>
-              )}
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Bottom Row: Tag Barangay, Chars & Submit */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingTop: 8,
+                  borderTop: '1px solid #f1f5f9',
+                  flexWrap: 'wrap',
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {barangays && barangays.length > 0 && (
+                    <select
+                      value={selectedBarangay}
+                      onChange={(e) => setSelectedBarangay(e.target.value)}
+                      style={{
+                        padding: '5px 8px',
+                        borderRadius: 6,
+                        border: '1px solid #cbd5e1',
+                        background: '#ffffff',
+                        color: '#475569',
+                        fontSize: 12,
+                        fontFamily: 'inherit',
+                        outline: 'none',
+                      }}
+                    >
+                      <option value="">
+                        {user.barangay_name ? `Tag: ${user.barangay_name}` : 'Tag Barangay (Optional)'}
+                      </option>
+                      {barangays.map(b => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 11.5, color: charCount > 2400 ? '#dc2626' : '#94a3b8' }}>
+                    {charCount} / {maxChars}
+                  </span>
+
+                  <button
+                    type="submit"
+                    disabled={submitting || !content.trim()}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '7px 14px',
+                      borderRadius: 6,
+                      border: 'none',
+                      background: '#16a34a',
+                      color: '#ffffff',
+                      fontSize: 12.5,
+                      fontWeight: 700,
+                      cursor: submitting || !content.trim() ? 'not-allowed' : 'pointer',
+                      opacity: submitting || !content.trim() ? 0.6 : 1,
+                    }}
+                  >
+                    <Send size={13} />
+                    <span>{submitting ? 'Publishing…' : 'Publish'}</span>
+                  </button>
+                </div>
+              </div>
             </form>
           </div>
         )}
 
-        {/* ============================================================== */}
-        {/* OPTION B: REPORT A PROBLEM ENTRY POINT                         */}
-        {/* ============================================================== */}
+        {/* Mode B: Report A Problem Entry Point */}
         {composerMode === 'report' && (
-          <div
-            style={{
-              padding: '18px 20px',
-              borderRadius: 10,
-              background: '#fffbeb',
-              border: '1.5px dashed #f59e0b',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
-              <div
-                style={{
-                  width: 42,
-                  height: 42,
-                  borderRadius: 10,
-                  background: '#fef3c7',
-                  color: '#b45309',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                <AlertTriangle size={22} />
-              </div>
-
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <h3 style={{ fontSize: 16, fontWeight: 800, color: '#92400e', margin: 0 }}>
-                    Official Waste Problem Report
-                  </h3>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      padding: '2px 8px',
-                      borderRadius: 12,
-                      background: '#fef3c7',
-                      color: '#b45309',
-                      border: '1px solid #fde68a',
-                    }}
-                  >
-                    CENRO Lucena & Barangay Inspection
-                  </span>
-                </div>
-
-                <p
-                  style={{
-                    fontSize: 13.5,
-                    color: '#78350f',
-                    lineHeight: 1.55,
-                    margin: '8px 0 14px',
-                  }}
-                >
+          <div style={{ padding: '4px 0' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+              <AlertTriangle size={18} style={{ color: '#d97706', flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <h3 style={{ fontSize: 14, fontWeight: 800, color: '#0f172a', margin: '0 0 4px' }}>
+                  Official Waste Problem Report
+                </h3>
+                <p style={{ fontSize: 12.5, color: '#475569', lineHeight: 1.5, margin: '0 0 12px' }}>
                   This option creates an authoritative waste report for illegal dumpsites, overflowing collection points,
-                  or hazardous waste. Official reports are verified by Barangay Officials, published to the city hotspot map,
-                  and scheduled for municipal truck collection dispatch.
+                  or hazardous waste. Reports are reviewed by Barangay Officials and CENRO Lucena for municipal collection dispatch.
                 </p>
 
-                <div
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.75)',
-                    borderRadius: 8,
-                    padding: '10px 12px',
-                    border: '1px solid #fde68a',
-                    fontSize: 12.5,
-                    color: '#92400e',
-                    marginBottom: 16,
-                    lineHeight: 1.45,
-                  }}
-                >
-                  <strong>Note:</strong> Civic Discussions in the community feed cannot be converted into official collection dispatches.
-                  To request official municipal waste collection or investigation, submit via the official report workflow.
-                </div>
-
-                {reportFeedback && (
-                  <div
-                    style={{
-                      background: '#eff6ff',
-                      border: '1px solid #bfdbfe',
-                      borderRadius: 8,
-                      padding: '9px 12px',
-                      fontSize: 12.5,
-                      color: '#1d4ed8',
-                      marginBottom: 14,
-                    }}
-                  >
-                    {reportFeedback}
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <button
                     type="button"
                     onClick={handleReportProblemTrigger}
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
-                      gap: 7,
-                      padding: '10px 18px',
-                      borderRadius: 8,
+                      gap: 5,
+                      padding: '7px 14px',
+                      borderRadius: 6,
                       border: 'none',
-                      background: '#d97706',
+                      background: '#16a34a',
                       color: '#ffffff',
-                      fontSize: 13,
+                      fontSize: 12.5,
                       fontWeight: 700,
                       cursor: 'pointer',
-                      transition: 'background 0.15s ease',
                     }}
                   >
-                    <FileText size={16} />
+                    <FileText size={14} />
                     <span>Open Official Report Form</span>
-                    <ArrowRight size={14} />
+                    <ArrowRight size={13} />
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setComposerMode('discussion')}
                     style={{
-                      padding: '10px 16px',
-                      borderRadius: 8,
-                      border: '1px solid #d1d5db',
+                      padding: '7px 12px',
+                      borderRadius: 6,
+                      border: '1px solid #cbd5e1',
                       background: '#ffffff',
-                      color: '#4b5563',
-                      fontSize: 13,
+                      color: '#475569',
+                      fontSize: 12.5,
                       fontWeight: 600,
                       cursor: 'pointer',
                     }}
                   >
-                    Return to Civic Discussion
+                    Back to Discussion
                   </button>
                 </div>
               </div>

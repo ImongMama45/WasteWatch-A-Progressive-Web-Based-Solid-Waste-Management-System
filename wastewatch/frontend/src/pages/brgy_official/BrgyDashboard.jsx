@@ -10,7 +10,7 @@
  *  - Status badges on schedule
  */
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
@@ -27,6 +27,172 @@ import { useBarangayTracker } from '../../hooks/useBarangayTracker'
 import LiveTrackerCard from '../../components/analytics/LiveTrackerCard'
 import { StatCardSkeleton, FeedCardSkeleton, SidebarWidgetSkeleton } from '../../components/ui/Skeleton'
 import Pagination from '../../components/ui/Pagination'
+import { useCalendarEntries } from '../../hooks/useCalendarEntries'
+import { formatToManilaDateString } from '../../api/calendarService'
+
+/**
+ * Resolves a positive integer barangay ID from authenticated user profiles.
+ * Rejects 0, negatives, decimals, booleans, and non-numeric identifiers.
+ */
+export function resolveBarangayId(user) {
+  if (!user || typeof user !== 'object') return null
+  const candidate = user.barangay_id ?? (typeof user.barangay === 'object' && user.barangay !== null ? user.barangay.id : user.barangay)
+  if (candidate === null || candidate === undefined || typeof candidate === 'boolean') return null
+
+  if (typeof candidate === 'string') {
+    const trimmed = candidate.trim()
+    if (!/^\d+$/.test(trimmed)) return null
+    const parsed = Number(trimmed)
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
+  }
+
+  if (typeof candidate === 'number') {
+    return Number.isSafeInteger(candidate) && candidate > 0 ? candidate : null
+  }
+
+  return null
+}
+
+/**
+ * Calculates a bounded 14-day upcoming collection schedule window
+ * anchored to Asia/Manila (today + 13 following calendar dates = exactly 14 inclusive days).
+ */
+export function calculateBrgyScheduleDateRange(referenceDate = new Date()) {
+  const now = referenceDate instanceof Date ? referenceDate : new Date(referenceDate)
+  const todayFormatted = formatToManilaDateString(now)
+  const [y, m, d] = todayFormatted.split('-').map(Number)
+  const anchorDate = new Date(Date.UTC(y, m - 1, d, 12, 0, 0))
+  const future = new Date(anchorDate.getTime() + 13 * 24 * 60 * 60 * 1000)
+  const futureFormatted = formatToManilaDateString(future)
+  return {
+    startDateStr: todayFormatted,
+    endDateStr: futureFormatted,
+    todayStr: todayFormatted,
+  }
+}
+
+/**
+ * Formats an ISO datetime string into Asia/Manila date components.
+ */
+export function formatOccurrenceDate(isoString, todayDateStr) {
+  if (!isoString) return { dayName: '', dateDisplay: '', isToday: false, isTomorrow: false, dateStr: '' }
+  const dateStr = isoString.slice(0, 10)
+  const isToday = dateStr === todayDateStr
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dateObj = new Date(y, m - 1, d)
+
+  let isTomorrow = false
+  if (todayDateStr) {
+    const [ty, tm, td] = todayDateStr.split('-').map(Number)
+    const todayObj = new Date(Date.UTC(ty, tm - 1, td, 12, 0, 0))
+    const tomorrowObj = new Date(todayObj.getTime() + 24 * 60 * 60 * 1000)
+    const tomorrowStr = formatToManilaDateString(tomorrowObj)
+    isTomorrow = dateStr === tomorrowStr
+  }
+
+  const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' })
+  const dateDisplay = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return { dateStr, dayName, dateDisplay, isToday, isTomorrow }
+}
+
+/**
+ * Formats start and end ISO timestamps into a 12-hour time window (e.g. '6:00 AM – 10:00 AM').
+ */
+export function formatOccurrenceTime(startIso, endIso) {
+  if (!startIso) return '—'
+  const extractTime = (iso) => {
+    if (!iso) return ''
+    const timePart = iso.slice(11, 16)
+    if (!timePart) return ''
+    const [hStr, mStr] = timePart.split(':')
+    const h = parseInt(hStr, 10), m = mStr || '00'
+    const ampm = h >= 12 ? 'PM' : 'AM'
+    const h12 = h % 12 || 12
+    return `${h12}:${m} ${ampm}`
+  }
+  const s = extractTime(startIso)
+  const e = extractTime(endIso)
+  if (s && e) return `${s} – ${e}`
+  return s || '—'
+}
+
+/**
+ * Returns accessible styling and labels for occurrence completion statuses.
+ * Preserves strict distinction between driver operational completion and watcher-verified collection.
+ */
+export function getOccurrenceStatusBadge(status, isToday) {
+  switch (status) {
+    case 'verified_collected':
+      return {
+        label: 'VERIFIED COLLECTED',
+        color: '#15803d',
+        bg: '#e7f5eb',
+        border: '#bbf7d0',
+      }
+    case 'operationally_completed':
+      return {
+        label: 'REPORTED COMPLETE',
+        color: '#0369a1',
+        bg: '#f0f9ff',
+        border: '#bae6fd',
+      }
+    case 'in_progress':
+      return {
+        label: isToday ? "TODAY'S PICKUP" : 'IN PROGRESS',
+        color: '#b45309',
+        bg: '#fffbeb',
+        border: '#fde68a',
+      }
+    case 'scheduled':
+    default:
+      if (isToday) {
+        return {
+          label: 'TODAY',
+          color: '#16a34a',
+          bg: '#f0fdf4',
+          border: '#bbf7d0',
+        }
+      }
+      return {
+        label: 'SCHEDULED',
+        color: '#475569',
+        bg: '#f1f5f9',
+        border: '#cbd5e1',
+      }
+  }
+}
+
+/**
+ * Selects the nearest relevant collection occurrence for a Barangay Official.
+ * Prioritizes active/scheduled collections today, then the earliest upcoming collection in the future.
+ */
+export function selectNextPickupOccurrence(entries = [], todayDateStr) {
+  if (!Array.isArray(entries) || entries.length === 0) return null
+
+  // 1. Look for today's active/upcoming collection first (scheduled or in_progress)
+  const todayActive = entries.find(e => {
+    const dStr = (e.start_datetime || e.start || '').slice(0, 10)
+    return dStr === todayDateStr && (e.status === 'scheduled' || e.status === 'in_progress')
+  })
+  if (todayActive) return todayActive
+
+  // 2. If no active collection today, look for earliest upcoming occurrence in the future (date > today)
+  const futureUpcoming = entries.find(e => {
+    const dStr = (e.start_datetime || e.start || '').slice(0, 10)
+    return dStr > todayDateStr && e.status !== 'cancelled'
+  })
+  if (futureUpcoming) return futureUpcoming
+
+  // 3. If today had a collection that was already completed/verified, and no future occurrence in window
+  const todayFinished = entries.find(e => {
+    const dStr = (e.start_datetime || e.start || '').slice(0, 10)
+    return dStr === todayDateStr
+  })
+  if (todayFinished) return todayFinished
+
+  // 4. Fallback to first entry in chronological list
+  return entries[0] || null
+}
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 
@@ -89,18 +255,43 @@ export default function BrgyDashboard() {
   const { items: escalations } = useEscalations()
   const { addReport } = useOfflineReports()
 
-  const userBrgyId = user?.barangay || user?.barangay_id
+  const userBrgyId = useMemo(() => resolveBarangayId(user), [user])
   const tracker = useBarangayTracker(userBrgyId)
+
+  // 14-day upcoming collection schedule window anchored to Asia/Manila (today through today + 13 days)
+  const { startDateStr, endDateStr, todayStr } = useMemo(() => {
+    return calculateBrgyScheduleDateRange()
+  }, [])
+
+  // Authoritative Calendar Service integration for Barangay Official
+  const {
+    entries: calendarEntries,
+    loading: calendarLoading,
+    error: calendarError,
+    refresh: refreshCalendar,
+    isRefreshing: isCalendarRefreshing,
+    isFromCache: isCalendarFromCache,
+    isStale: isCalendarStale,
+    isCapacityError: isCalendarCapacityError,
+    isNetworkError: isCalendarNetworkError,
+  } = useCalendarEntries({
+    startDate: startDateStr,
+    endDate: endDateStr,
+    barangayId: userBrgyId,
+    source: 'collection_schedule',
+    paginate: false,
+    autoFetch: Boolean(userBrgyId),
+  })
+
+  const nextPickup = useMemo(() => selectNextPickupOccurrence(calendarEntries, todayStr), [calendarEntries, todayStr])
 
   const [stats, setStats] = useState({ pending: 0, approved: 0, rejected: 0, resolved: 0 })
   const [loading, setLoading] = useState(true)
-  const [scheduleLoading, setScheduleLoading] = useState(true)
   const [allReports, setAllReports] = useState([])
   const [reportPage, setReportPage] = useState(1)
   const [reportTotalCount, setReportTotalCount] = useState(0)
   const [reportTotalPages, setReportTotalPages] = useState(1)
   const [trucks, setTrucks] = useState([])
-  const [schedule, setSchedule] = useState([])
   const [activeMainTab, setActiveMainTab] = useState('validation')
   const [reportFilter, setReportFilter] = useState('Pending')
   const [expandedTruck, setExpandedTruck] = useState(null)
@@ -111,7 +302,6 @@ export default function BrgyDashboard() {
   useEffect(() => {
     fetchStats()
     fetchReports()
-    fetchSchedule()
     async function fetchLiveDispatch() {
       try {
         const liveRes = await api.get('/api/public/live/')
@@ -144,24 +334,6 @@ export default function BrgyDashboard() {
     fetchLiveDispatch()
   }, [user?.barangay_name, user?.barangay?.name])
 
-  async function fetchSchedule() {
-    setScheduleLoading(true)
-    try {
-      const res = await api.get('/api/public/schedule/')
-      const userBrgy = user?.barangay_name || user?.barangay?.name
-      // Filter schedules where zone includes user's barangay, or show all if none
-      const brgySchedules = userBrgy
-        ? res.data.filter(s => s.zone && s.zone.includes(userBrgy))
-        : res.data
-
-      setSchedule(brgySchedules.length > 0 ? brgySchedules : res.data)
-    } catch (err) {
-      console.error('Failed to fetch schedule:', err)
-    } finally {
-      setScheduleLoading(false)
-    }
-  }
-
   async function fetchStats() {
     try {
       const res = await api.get('/api/watcher/reports/stats/')
@@ -170,21 +342,6 @@ export default function BrgyDashboard() {
       console.error('Failed to fetch stats:', err)
     }
   }
-
-  // In useEffect, alongside fetchStats() and fetchReports():
-  async function fetchAnnouncements() {
-    try {
-      const barangayId = user?.barangay_id
-      const url = barangayId
-        ? `/api/news/items/?barangay_id=${barangayId}`
-        : '/api/news/items/for-dashboard/'
-      const res = await api.get(url)
-      setAnnouncements(res.data.slice(0, 4))
-    } catch { /* silent */ }
-  }
-
-  // State:
-  const [announcements, setAnnouncements] = useState([])
 
   async function fetchReports() {
     setLoading(true)
@@ -793,50 +950,262 @@ export default function BrgyDashboard() {
                   }}>
                   View Brgy Collection Schedule
                 </button>
-                <div className="card" style={{ padding: 16, animation: 'slideDown .2s' }}>
-                  {scheduleLoading ? (
-                    <SidebarWidgetSkeleton rows={4} />
-                  ) : schedule.length === 0 ? (
-                    <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>No schedules found.</div>
-                  ) : schedule.map((s, i) => (
-                    <div key={i} style={{
-                      display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0',
-                      borderBottom: i < schedule.length - 1 ? '1px solid var(--border)' : 'none',
-                    }}>
-                      <div style={{
-                        width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-                        background: s.done ? 'rgba(46,204,113,0.12)' : 'var(--surface-2)',
-                        color: s.done ? 'var(--accent)' : 'var(--text-muted)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}>
-                        <div style={{ width: 16, height: 16 }}>{s.done ? ICONS.check : ICONS.schedule}</div>
+
+                {/* ── Unassigned Barangay Warning ── */}
+                {!userBrgyId && (
+                  <div style={{
+                    padding: '16px 20px',
+                    background: 'rgba(243, 156, 18, 0.08)',
+                    border: '1.5px solid rgba(243, 156, 18, 0.3)',
+                    borderRadius: 12,
+                    marginBottom: 16,
+                    fontSize: 13,
+                    color: 'var(--text)',
+                  }}>
+                    <strong style={{ color: 'var(--warning)', display: 'block', marginBottom: 4 }}>
+                      Barangay Assignment Required
+                    </strong>
+                    Please contact your system administrator to assign your official account to a barangay.
+                  </div>
+                )}
+
+                {/* ── Capacity Error Banner ── */}
+                {userBrgyId && isCalendarCapacityError && calendarEntries.length === 0 && (
+                  <div style={{
+                    padding: '16px 20px',
+                    background: 'rgba(239, 68, 68, 0.08)',
+                    border: '1.5px solid rgba(239, 68, 68, 0.3)',
+                    borderRadius: 12,
+                    marginBottom: 16,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    flexWrap: 'wrap',
+                  }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--danger)', marginBottom: 2 }}>
+                        Calendar Service Busy
                       </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600, fontSize: 14 }}>{s.day}</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                          {s.zone} · {user?.barangay_name || 'Barangay'}
-                        </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        The server is currently at capacity. Please try again shortly.
                       </div>
-                      <div style={{
-                        fontSize: 12, fontWeight: 600, textAlign: 'right', marginRight: 8,
-                        color: s.time === 'No Schedule' ? 'var(--text-muted)' : 'var(--text)'
-                      }}>
-                        {s.time}
-                      </div>
-                      <span style={{
-                        fontSize: 9, fontWeight: 800, padding: '3px 8px', borderRadius: 20,
-                        letterSpacing: '.05em', flexShrink: 0,
-                        background: s.done ? 'rgba(46,204,113,0.1)'
-                          : s.time === 'No Schedule' ? 'rgba(148,163,184,0.1)'
-                            : 'rgba(243,156,18,0.1)',
-                        color: s.done ? 'var(--accent)'
-                          : s.time === 'No Schedule' ? 'var(--text-muted)'
-                            : 'var(--warning)',
-                      }}>
-                        {s.done ? 'DONE' : s.time === 'No Schedule' ? 'N/A' : 'UPCOMING'}
-                      </span>
                     </div>
-                  ))}
+                    <button
+                      className="abtn"
+                      onClick={refreshCalendar}
+                      style={{
+                        background: 'var(--danger)',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 8,
+                        padding: '7px 14px',
+                        fontSize: 12,
+                        fontWeight: 700,
+                      }}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+
+                {/* ── Network Error Banner ── */}
+                {userBrgyId && isCalendarNetworkError && calendarEntries.length === 0 && (
+                  <div style={{
+                    padding: '16px 20px',
+                    background: 'rgba(239, 68, 68, 0.08)',
+                    border: '1.5px solid rgba(239, 68, 68, 0.3)',
+                    borderRadius: 12,
+                    marginBottom: 16,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    flexWrap: 'wrap',
+                  }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--danger)', marginBottom: 2 }}>
+                        Network Connection Issue
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        Unable to reach the calendar service. Please check your network connection.
+                      </div>
+                    </div>
+                    <button
+                      className="abtn"
+                      onClick={refreshCalendar}
+                      style={{
+                        background: 'var(--danger)',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 8,
+                        padding: '7px 14px',
+                        fontSize: 12,
+                        fontWeight: 700,
+                      }}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+
+                {/* ── Generic Error Banner ── */}
+                {userBrgyId && calendarError && !isCalendarCapacityError && !isCalendarNetworkError && calendarEntries.length === 0 && (
+                  <div style={{
+                    padding: '16px 20px',
+                    background: 'rgba(239, 68, 68, 0.08)',
+                    border: '1.5px solid rgba(239, 68, 68, 0.3)',
+                    borderRadius: 12,
+                    marginBottom: 16,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    flexWrap: 'wrap',
+                  }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--danger)', marginBottom: 2 }}>
+                        Failed to Load Schedule
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        An unexpected error occurred while loading the collection schedule.
+                      </div>
+                    </div>
+                    <button
+                      className="abtn"
+                      onClick={refreshCalendar}
+                      style={{
+                        background: 'var(--danger)',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 8,
+                        padding: '7px 14px',
+                        fontSize: 12,
+                        fontWeight: 700,
+                      }}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+
+                {/* ── Stale Cache Banner ── */}
+                {isCalendarStale && (
+                  <div style={{
+                    padding: '8px 14px',
+                    background: 'rgba(243, 156, 18, 0.1)',
+                    border: '1px solid rgba(243, 156, 18, 0.3)',
+                    borderRadius: 8,
+                    marginBottom: 14,
+                    fontSize: 12,
+                    color: 'var(--warning)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}>
+                    <span>Showing cached schedule data. Revalidation pending.</span>
+                    {isCalendarRefreshing && <span style={{ fontSize: 11, fontStyle: 'italic' }}>Refreshing...</span>}
+                  </div>
+                )}
+
+                {/* ── Next Pickup Hero Banner ── */}
+                {nextPickup && (() => {
+                  const { dayName, dateDisplay, isToday, isTomorrow } = formatOccurrenceDate(nextPickup.start_datetime || nextPickup.start, todayStr)
+                  const timeRange = formatOccurrenceTime(nextPickup.start_datetime || nextPickup.start, nextPickup.end_datetime || nextPickup.end)
+                  const statusBadge = getOccurrenceStatusBadge(nextPickup.status, isToday)
+                  const subtitle = nextPickup.raw_payload?.zone || nextPickup.raw_payload?.waste_type || user?.barangay_name || 'Assigned Zone'
+
+                  return (
+                    <div
+                      key={nextPickup.id}
+                      style={{
+                        background: 'linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(20,184,166,0.04) 100%)',
+                        border: '1.5px solid rgba(16,185,129,0.3)',
+                        borderRadius: 14,
+                        padding: '16px 20px',
+                        marginBottom: 16,
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, flexWrap: 'wrap', gap: 8 }}>
+                        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.06em', color: 'var(--accent)' }}>
+                          {isToday ? "TODAY'S COLLECTION" : isTomorrow ? "TOMORROW'S COLLECTION" : 'NEXT SCHEDULED PICKUP'}
+                        </span>
+                        <span style={{
+                          fontSize: 9, fontWeight: 800, padding: '3px 8px', borderRadius: 20, letterSpacing: '.05em',
+                          background: statusBadge.bg, color: statusBadge.color, border: `1px solid ${statusBadge.border}`
+                        }}>
+                          {statusBadge.label}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', marginBottom: 2 }}>
+                        {dayName}, {dateDisplay}
+                      </div>
+                      <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                        {timeRange} · {subtitle}
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* ── 14-Day Collection Occurrence List ── */}
+                <div className="card" style={{ padding: 16, animation: 'slideDown .2s' }}>
+                  {calendarLoading && calendarEntries.length === 0 ? (
+                    <SidebarWidgetSkeleton rows={4} />
+                  ) : calendarEntries.length === 0 ? (
+                    <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>
+                      No upcoming collection schedules found for the next 14 days.
+                    </div>
+                  ) : (
+                    calendarEntries.map((entry, i) => {
+                      const { dayName, dateDisplay, isToday } = formatOccurrenceDate(entry.start_datetime || entry.start, todayStr)
+                      const timeRange = formatOccurrenceTime(entry.start_datetime || entry.start, entry.end_datetime || entry.end)
+                      const badge = getOccurrenceStatusBadge(entry.status, isToday)
+                      const zone = entry.raw_payload?.zone || entry.raw_payload?.waste_type || user?.barangay_name || 'Barangay'
+
+                      return (
+                        <div key={entry.id} style={{
+                          display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0',
+                          borderBottom: i < calendarEntries.length - 1 ? '1px solid var(--border)' : 'none',
+                        }}>
+                          <div style={{
+                            width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+                            background: badge.bg,
+                            color: badge.color,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}>
+                            <div style={{ width: 16, height: 16 }}>
+                              {entry.status === 'verified_collected' || entry.status === 'operationally_completed'
+                                ? ICONS.check
+                                : ICONS.schedule}
+                            </div>
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, fontSize: 14 }}>
+                              {dayName}, {dateDisplay}
+                            </div>
+                            <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {zone} · {user?.barangay_name || 'Barangay'}
+                            </div>
+                          </div>
+                          <div style={{
+                            fontSize: 12, fontWeight: 600, textAlign: 'right', marginRight: 8,
+                            color: 'var(--text)', flexShrink: 0,
+                          }}>
+                            {timeRange}
+                          </div>
+                          <span style={{
+                            fontSize: 9, fontWeight: 800, padding: '3px 8px', borderRadius: 20,
+                            letterSpacing: '.05em', flexShrink: 0,
+                            background: badge.bg,
+                            color: badge.color,
+                            border: `1px solid ${badge.border}`,
+                          }}>
+                            {badge.label}
+                          </span>
+                        </div>
+                      )
+                    })
+                  )}
                 </div>
               </div>
             )}
@@ -896,23 +1265,50 @@ export default function BrgyDashboard() {
 
             <div className="card">
               <h3 className="section-title" style={{ marginBottom: 12, fontSize: 15 }}>Collection Schedule</h3>
-              {scheduleLoading ? (
+              {!userBrgyId ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>Barangay assignment required.</div>
+              ) : calendarLoading && calendarEntries.length === 0 ? (
                 <SidebarWidgetSkeleton rows={3} />
-              ) : schedule.length === 0 ? (
+              ) : calendarError && calendarEntries.length === 0 ? (
+                <div style={{ color: 'var(--danger)', fontSize: 12 }}>Unable to load schedule.</div>
+              ) : calendarEntries.length === 0 ? (
                 <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>No schedules available.</div>
-              ) : schedule.slice(0, 3).map((s, i) => (
-                <div key={i} style={{
-                  display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0',
-                  borderBottom: i < Math.min(schedule.length, 3) - 1 ? '1px solid var(--border)' : 'none',
-                }}>
-                  <div style={{ width: 14, height: 14, color: s.done ? 'var(--accent)' : 'var(--text-muted)' }}>{s.done ? ICONS.check : ICONS.schedule}</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{s.day}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.zone}</div>
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'right' }}>{s.time}</div>
-                </div>
-              ))}
+              ) : (
+                calendarEntries.slice(0, 3).map((entry, i) => {
+                  const { dayName, dateDisplay, isToday, isTomorrow } = formatOccurrenceDate(entry.start_datetime || entry.start, todayStr)
+                  const timeRange = formatOccurrenceTime(entry.start_datetime || entry.start, entry.end_datetime || entry.end)
+                  const badge = getOccurrenceStatusBadge(entry.status, isToday)
+                  const zone = entry.raw_payload?.zone || entry.raw_payload?.waste_type || user?.barangay_name || 'Assigned Zone'
+                  const relativeLabel = isToday ? 'Today' : isTomorrow ? 'Tomorrow' : dayName
+
+                  return (
+                    <div key={entry.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0',
+                      borderBottom: i < Math.min(calendarEntries.length, 3) - 1 ? '1px solid var(--border)' : 'none',
+                    }}>
+                      <div style={{
+                        width: 14, height: 14, flexShrink: 0,
+                        color: badge.color
+                      }}>
+                        {entry.status === 'verified_collected' || entry.status === 'operationally_completed'
+                          ? ICONS.check
+                          : ICONS.schedule}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>
+                          {relativeLabel} <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>({dateDisplay})</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {zone}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'right', flexShrink: 0 }}>
+                        {timeRange}
+                      </div>
+                    </div>
+                  )
+                })
+              )}
             </div>
 
             <div className="card">

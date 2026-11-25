@@ -4,11 +4,11 @@
  * Route progress + schedule pulled from /api/driver/collection-schedules/.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Hand, AlertTriangle, Ban, Calendar, Clock, Truck, Play, CheckCircle2,
-  Map as MapIcon, ClipboardList
+  Map as MapIcon, ClipboardList, Users
 } from 'lucide-react'
 import MiniMap from '../../components/MiniMap'
 import { useAuth } from '../../context/AuthContext'
@@ -17,6 +17,7 @@ import api from '../../api/client'
 import useShiftTimer, { clearDriverSessionData } from '../../hooks/useShiftTimer'
 import { useOptionalDriverGps } from '../../context/DriverGpsContext'
 import IssueReporter from '../driver/components/IssueReporter'
+import CrewAttendanceModal from '../driver/components/CrewAttendanceModal'
 import HomeCarousel from '../../components/carousel/HomeCarousel'
 import { isCompletedStopStatus, normalizeStopStatus } from '../../utils/pickupStatusSync'
 import {
@@ -25,6 +26,15 @@ import {
   evaluateScheduleShiftTiming,
   formatTime12h,
 } from '../../utils/driverSchedule'
+import { getPreallocatedTruck, getCollectionSchedules, getTeamRoster } from '../../api/driverWorkflowApi'
+import { getApiErrorMessage } from '../../utils/notificationHelpers'
+import { resolveAttendanceOwnership } from '../../utils/crewAttendanceHelpers'
+import {
+  buildClosedLoopWaypoints,
+  formatReadinessErrorLabel,
+  resolveScheduleDumpsiteOrigin,
+  resolveScheduleStops,
+} from '../../utils/routeBaseHelpers'
 import {
   Skeleton,
   SkeletonPill,
@@ -109,9 +119,13 @@ export default function DriverDashboard() {
 
   // Real schedule from the same endpoint ShiftRouteModule uses
   const [schedule, setSchedule] = useState(null)
+  const [allocation, setAllocation] = useState(null)
+  const [allocationLoading, setAllocationLoading] = useState(false)
+  const [allocationError, setAllocationError] = useState(null)
   const [scheduleRows, setScheduleRows] = useState([])
   const [driverAnalytics, setDriverAnalytics] = useState(null)
   const [carouselLoading, setCarouselLoading] = useState({ route: false })
+  const [starting, setStarting] = useState(false)
 
   // Derived route progress from schedule waypoints + sessionStorage stop index
   const [routeStats, setRouteStats] = useState({
@@ -126,6 +140,8 @@ export default function DriverDashboard() {
   const [status, setStatus] = useState('on_route')
   const [loading, setLoading] = useState(true)
   const [issueOpen, setIssueOpen] = useState(false)
+  const [showAttendanceModal, setShowAttendanceModal] = useState(false)
+  const [teamRoster, setTeamRoster] = useState(null)
   
   const [blockingEscalation, setBlockingEscalation] = useState(null)
   const [ackLoading, setAckLoading] = useState(false)
@@ -194,6 +210,68 @@ export default function DriverDashboard() {
   const isShiftEndedIncomplete = schedule?.truck_status === 'returning_unfinished'
   const isShiftDone = isRouteDone || isShiftEndedIncomplete
 
+  const applyScheduleMatch = useCallback((schedulesData, targetActiveScheduleId) => {
+    if (!user?.id) return
+    const match = resolveDriverSchedule(schedulesData, user.id, targetActiveScheduleId)
+    setSchedule(match || null)
+
+    if (match) {
+      const origin = resolveScheduleDumpsiteOrigin(match)
+      const stops = resolveScheduleStops(match)
+      const totalStops = match.total_stops !== undefined ? match.total_stops : stops.length
+
+      // Prefer snapshot-based count (counts only genuinely collected/empty stops).
+      // Falls back to index-based estimate if no snapshot exists yet.
+      let localCompleted = 0
+      try {
+        const raw = sessionStorage.getItem('ww_stop_statuses_snapshot')
+        if (raw) {
+          const entries = new Map(JSON.parse(raw))
+          localCompleted = [...entries.values()]
+            .filter(s => isCompletedStopStatus(normalizeStopStatus(s)) || normalizeStopStatus(s) === 'EMPTY_STOP').length
+        } else {
+          const savedIndex = parseInt(sessionStorage.getItem('ww_current_stop_index') || '1', 10)
+          localCompleted = Math.max(0, savedIndex - 1)
+        }
+      } catch {
+        const savedIndex = parseInt(sessionStorage.getItem('ww_current_stop_index') || '1', 10)
+        localCompleted = Math.max(0, savedIndex - 1)
+      }
+      const backendCompleted = match.completed_stops || 0
+      const completedStops = Math.max(localCompleted, backendCompleted)
+
+      // Closed-loop distance: prefer persisted route_distance_m, else sum [Dumpsite -> Stops -> Dumpsite]
+      let totalDistKm = 0
+      if (match.route_distance_m != null && Number.isFinite(Number(match.route_distance_m))) {
+        totalDistKm = Number(match.route_distance_m) / 1000
+      } else {
+        const { closedLoopPoints } = buildClosedLoopWaypoints({
+          dumpsite: origin ? { ...origin, latitude: origin.lat, longitude: origin.lng } : null,
+          stops,
+        })
+        for (let i = 1; i < closedLoopPoints.length; i++) {
+          totalDistKm += haversinKm(
+            closedLoopPoints[i - 1].lat, closedLoopPoints[i - 1].lng,
+            closedLoopPoints[i].lat, closedLoopPoints[i].lng
+          )
+        }
+      }
+
+      const backendMissed = match.missed_stops_collected || 0
+      const localMissed = parseInt(sessionStorage.getItem('ww_missed_stops_collected') || '0', 10)
+      const missedStopsCollected = Math.max(localMissed, backendMissed)
+
+      setRouteStats({
+        totalStops,
+        completedStops,
+        missedStopsCollected,
+        distanceKm: Math.round(totalDistKm),
+        startTime: match.start_time || '—',
+        estEnd: match.end_time || '—',
+      })
+    }
+  }, [user?.id])
+
   // ── Data fetch ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!user?.id) return
@@ -201,9 +279,9 @@ export default function DriverDashboard() {
     Promise.all([
       api.get('/api/driver/shift/profile/').catch(() => ({ data: null })),
       api.get('/api/driver/shift/status/').catch(() => ({ data: null })),
-      api.get('/api/driver/collection-schedules/?paginate=false').catch(() => ({ data: [] })),
+      getCollectionSchedules({ paginate: false }).catch(() => []),
       api.get('/api/driver/shift/analytics/').catch(() => ({ data: null })),
-    ]).then(([profileRes, _shiftRes, schedulesRes, analyticsRes]) => {
+    ]).then(([profileRes, _shiftRes, schedulesData, analyticsRes]) => {
 
       // ── Profile ──
       if (profileRes.data) {
@@ -227,59 +305,126 @@ export default function DriverDashboard() {
       }
 
       // ── Schedule ──
-      const match = resolveDriverSchedule(schedulesRes.data, user.id, activeScheduleId)
-      setSchedule(match || null)
-
-      if (match) {
-        // Derive route progress from waypoints + persisted stop index
-
-        const waypoints = match.waypoints || []
-        const totalStops = match.total_stops !== undefined ? match.total_stops : Math.max(waypoints.length - 1, 0) // exclude depot/start (index 0)
-
-        // Prefer snapshot-based count (counts only genuinely collected/empty stops).
-        // Falls back to index-based estimate if no snapshot exists yet.
-        let localCompleted = 0
-        try {
-          const raw = sessionStorage.getItem('ww_stop_statuses_snapshot')
-          if (raw) {
-            const entries = new Map(JSON.parse(raw))
-            localCompleted = [...entries.values()]
-              .filter(s => isCompletedStopStatus(normalizeStopStatus(s)) || normalizeStopStatus(s) === 'EMPTY_STOP').length
-          } else {
-            const savedIndex = parseInt(sessionStorage.getItem('ww_current_stop_index') || '1', 10)
-            localCompleted = Math.max(0, savedIndex - 1)
-          }
-        } catch {
-          const savedIndex = parseInt(sessionStorage.getItem('ww_current_stop_index') || '1', 10)
-          localCompleted = Math.max(0, savedIndex - 1)
-        }
-        const backendCompleted = match.completed_stops || 0
-        const completedStops = Math.max(localCompleted, backendCompleted)
-
-        // Rough distance: sum haversine between consecutive waypoints
-        let totalDistKm = 0
-        for (let i = 1; i < waypoints.length; i++) {
-          totalDistKm += haversinKm(
-            waypoints[i - 1].lat, waypoints[i - 1].lng,
-            waypoints[i].lat, waypoints[i].lng
-          )
-        }
-
-        const backendMissed = match.missed_stops_collected || 0
-        const localMissed = parseInt(sessionStorage.getItem('ww_missed_stops_collected') || '0', 10)
-        const missedStopsCollected = Math.max(localMissed, backendMissed)
-
-        setRouteStats({
-          totalStops,
-          completedStops,
-          missedStopsCollected,
-          distanceKm: Math.round(totalDistKm),
-          startTime: match.start_time || '—',
-          estEnd: match.end_time || '—',
-        })
-      }
+      applyScheduleMatch(schedulesData, activeScheduleId)
     }).finally(() => setLoading(false))
-  }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.id, activeScheduleId, applyScheduleMatch])
+
+  const loadAllocationForSchedule = useCallback((schedId) => {
+    if (!user?.id || !schedId) {
+      setAllocation(null)
+      setAllocationError(null)
+      setAllocationLoading(false)
+      return Promise.resolve(null)
+    }
+    setAllocationLoading(true)
+    setAllocationError(null)
+    return getPreallocatedTruck(schedId)
+      .then((data) => {
+        if (data?.has_allocation && data.allocation?.id && data.allocation.schedule === schedId) {
+          setAllocation(data.allocation)
+          setAllocationError(null)
+          return data.allocation
+        }
+        setAllocation(null)
+        setAllocationError('No truck allocation is assigned for this route today.')
+        return null
+      })
+      .catch((err) => {
+        setAllocation(null)
+        setAllocationError(getApiErrorMessage(err, 'Unable to verify truck allocation for this route.'))
+        return null
+      })
+      .finally(() => {
+        setAllocationLoading(false)
+      })
+  }, [user?.id])
+
+  // Fetch schedule-aware pre-allocated truck & team whenever the selected schedule changes (D-11)
+  useEffect(() => {
+    if (!user?.id || !schedule?.id) {
+      setAllocation(null)
+      setAllocationError(null)
+      setAllocationLoading(false)
+      return
+    }
+    let cancelled = false
+    setAllocationLoading(true)
+    setAllocationError(null)
+    getPreallocatedTruck(schedule.id)
+      .then((data) => {
+        if (cancelled) return
+        if (data?.has_allocation && data.allocation?.id && data.allocation.schedule === schedule.id) {
+          setAllocation(data.allocation)
+          setAllocationError(null)
+        } else {
+          setAllocation(null)
+          setAllocationError('No truck allocation is assigned for this route today.')
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setAllocation(null)
+        setAllocationError(getApiErrorMessage(err, 'Unable to verify truck allocation for this route.'))
+      })
+      .finally(() => {
+        if (!cancelled) setAllocationLoading(false)
+      })
+    getTeamRoster({ scheduleId: schedule.id })
+      .then((res) => {
+        if (!cancelled) setTeamRoster(res)
+      })
+      .catch(() => {
+        if (!cancelled) setTeamRoster(null)
+      })
+    return () => { cancelled = true }
+  }, [user?.id, schedule?.id])
+
+  const attendanceOwnership = resolveAttendanceOwnership(teamRoster, user)
+  const canOpenCrewModal = Boolean(
+    shiftActive &&
+      teamRoster?.has_team &&
+      (attendanceOwnership.isDriverLed || teamRoster?.attendance_submitted)
+  )
+  const scheduleReadinessErrors = Array.isArray(schedule?.readiness_errors)
+    ? schedule.readiness_errors
+    : (schedule && !resolveScheduleDumpsiteOrigin(schedule) ? ['missing_dumpsite'] : [])
+  const isScheduleReady = Boolean(
+    schedule &&
+      schedule.is_operationally_ready !== false &&
+      resolveScheduleDumpsiteOrigin(schedule) &&
+      scheduleReadinessErrors.length === 0
+  )
+  const isStartBlocked = Boolean(
+    !shiftActive && (
+      user?.is_suspended ||
+      !hasScheduleToday ||
+      isShiftDone ||
+      !isScheduleReady ||
+      allocationLoading ||
+      Boolean(allocationError) ||
+      !allocation?.id
+    )
+  )
+  const isCtaDisabled = Boolean(starting || loading || isStartBlocked)
+  const ctaLabel = starting
+    ? 'Starting Shift…'
+    : !shiftActive && user?.is_suspended
+      ? 'Account Suspended'
+      : !shiftActive && !hasScheduleToday
+        ? 'No Collection Today'
+        : !shiftActive && isRouteDone
+          ? 'Route Completed'
+          : !shiftActive && isShiftEndedIncomplete
+            ? 'Shift Ended Early'
+            : !shiftActive && !isScheduleReady
+              ? 'Schedule Not Ready'
+              : !shiftActive && allocationLoading
+                ? 'Checking Allocation…'
+                : !shiftActive && (allocationError || !allocation?.id)
+                  ? 'Allocation Required'
+                  : shiftActive
+                    ? 'Resume Route'
+                    : timing.ctaLabel
 
   // Re-derive completedStops when navigation updates sessionStorage
   // (ShiftRouteModule updates ww_current_stop_index on each stop advance)
@@ -321,8 +466,19 @@ export default function DriverDashboard() {
     }
   }, [schedule, isShiftDone])
 
+  const refreshScheduleAndAllocation = useCallback(async (schedId) => {
+    try {
+      const latestSchedules = await getCollectionSchedules({ paginate: false })
+      applyScheduleMatch(latestSchedules, activeScheduleId)
+    } catch { /* keep existing */ }
+    if (schedId) {
+      await loadAllocationForSchedule(schedId)
+    }
+  }, [activeScheduleId, applyScheduleMatch, loadAllocationForSchedule])
+
   // ── Shift toggle ─────────────────────────────────────────────────────────────
   async function handleShiftToggle() {
+    if (starting || carouselLoading.route) return
     if (user?.is_suspended) {
       notify({ variant: 'error-dark', message: 'Your account is suspended. You cannot start a shift.' })
       return
@@ -332,16 +488,38 @@ export default function DriverDashboard() {
         notify({ variant: 'warning-dark', message: 'There is no active route scheduled for today.' })
         return
       }
+      if (!isScheduleReady) {
+        notify({
+          variant: 'warning-dark',
+          message: scheduleReadinessErrors.map(formatReadinessErrorLabel).join(' ') || 'Assigned schedule is not operationally ready.',
+        })
+        return
+      }
+      if (allocationLoading) {
+        notify({ variant: 'warning-dark', message: 'Checking truck allocation. Please wait.' })
+        return
+      }
+      if (allocationError || !allocation?.id || allocation.schedule !== schedule.id) {
+        notify({
+          variant: 'warning-dark',
+          message: allocationError || 'No truck allocation is assigned for this route today.',
+        })
+        return
+      }
+      setStarting(true)
       try {
         clearDriverSessionData()
-        await startShift({ scheduleId: schedule.id })
+        await startShift({ scheduleId: schedule.id, allocationId: allocation.id })
         navigate('/driver/flow')
       } catch (err) {
         console.error('[DriverDashboard] Failed to start shift:', err)
         notify({
           variant: 'error-dark',
-          message: err?.response?.data?.error || 'Failed to start your shift. Please try again.',
+          message: getApiErrorMessage(err, 'Failed to start your shift. Please try again.'),
         })
+        await refreshScheduleAndAllocation(schedule.id)
+      } finally {
+        setStarting(false)
       }
       return
     }
@@ -368,7 +546,7 @@ export default function DriverDashboard() {
 
   // ── Carousel: Start/Continue Route ──────────────────────────────────────────
   async function handleCarouselStartRoute() {
-    if (carouselLoading.route) return
+    if (carouselLoading.route || starting) return
     
     if (user?.is_suspended) {
       notify({ variant: 'error-dark', message: 'Your account is suspended. You cannot start a shift.' })
@@ -384,19 +562,40 @@ export default function DriverDashboard() {
       notify({ variant: 'warning-dark', message: 'There is no route scheduled for today.' })
       return
     }
+    if (!isScheduleReady) {
+      notify({
+        variant: 'warning-dark',
+        message: scheduleReadinessErrors.map(formatReadinessErrorLabel).join(' ') || 'Assigned schedule is not operationally ready.',
+      })
+      return
+    }
+    if (allocationLoading) {
+      notify({ variant: 'warning-dark', message: 'Checking truck allocation. Please wait.' })
+      return
+    }
+    if (allocationError || !allocation?.id || allocation.schedule !== schedule.id) {
+      notify({
+        variant: 'warning-dark',
+        message: allocationError || 'No truck allocation is assigned for this route today.',
+      })
+      return
+    }
 
+    setStarting(true)
     setCarouselLoading(prev => ({ ...prev, route: true }))
     try {
       clearDriverSessionData()
-      await startShift({ scheduleId: schedule.id })
+      await startShift({ scheduleId: schedule.id, allocationId: allocation.id })
       navigate('/driver/flow')
     } catch (err) {
       console.error('[DriverDashboard] Failed to start shift:', err)
       notify({
         variant: 'error-dark',
-        message: err?.response?.data?.error || 'Failed to start your shift. Please try again.',
+        message: getApiErrorMessage(err, 'Failed to start your shift. Please try again.'),
       })
+      await refreshScheduleAndAllocation(schedule.id)
     } finally {
+      setStarting(false)
       setCarouselLoading(prev => ({ ...prev, route: false }))
     }
   }
@@ -733,6 +932,25 @@ export default function DriverDashboard() {
               </div>
             )}
 
+            {/* ── READINESS / MISSING DUMPSITE BANNER ── */}
+            {!loading && !shiftActive && !user?.is_suspended && schedule && !isScheduleReady && (
+              <div style={{
+                marginBottom: 20,
+                borderRadius: 14, overflow: 'hidden',
+                border: '1.5px solid rgba(220,38,38,0.35)',
+                background: 'rgba(254,242,242,0.9)',
+                padding: '14px 18px',
+                display: 'flex', alignItems: 'flex-start', gap: 12,
+                color: '#991b1b',
+              }}>
+                <AlertTriangle size={20} color="#dc2626" style={{ flexShrink: 0, marginTop: 2 }} />
+                <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>
+                  <strong style={{ display: 'block', marginBottom: 2 }}>Schedule Not Ready</strong>
+                  {scheduleReadinessErrors.map(formatReadinessErrorLabel).join(' ')}
+                </div>
+              </div>
+            )}
+
             {/* ── OFF-SCHEDULE / LATE BANNER ── */}
             {!loading && !shiftActive && !user?.is_suspended && hasScheduleToday && !isShiftDone && timing.isOffSchedule && (
               <div style={{
@@ -890,6 +1108,77 @@ export default function DriverDashboard() {
               )}
             </div>
 
+            {/* ── PRE-ALLOCATED TRUCK & TEAM (D-11, visible on desktop and mobile) ── */}
+            {allocation && (
+              <div id="driver-allocation-summary" style={{
+                marginBottom: 16,
+                padding: '12px 16px',
+                borderRadius: 8,
+                background: '#f0fdf4',
+                border: '1px solid #bbf7d0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 8,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: '50%',
+                    background: '#dcfce7',
+                    color: '#16a34a',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                    <Truck size={20} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#166534' }}>
+                      Assigned Truck: {allocation.truck_plate} ({allocation.truck_model})
+                    </div>
+                    <div style={{ fontSize: 12, color: '#15803d' }}>
+                      Sanitation Team: <strong>{allocation.team_name}</strong> ({allocation.team_code})
+                    </div>
+                  </div>
+                </div>
+                <span style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                  padding: '3px 8px',
+                  borderRadius: 4,
+                  background: '#dcfce7',
+                  color: '#15803d',
+                  border: '1px solid #86efac',
+                }}>
+                  Pre-Allocated
+                </span>
+              </div>
+            )}
+
+            {!shiftActive && !allocationLoading && schedule && hasScheduleToday && !isShiftDone && allocationError && (
+              <div id="driver-allocation-error" role="alert" style={{
+                marginBottom: 12,
+                padding: '10px 14px',
+                borderRadius: 8,
+                background: '#fef2f2',
+                border: '1px solid #fecaca',
+                color: '#991b1b',
+                fontSize: 12.5,
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}>
+                <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+                <span>{allocationError}</span>
+              </div>
+            )}
+
             {/* ── STATUS TOGGLE + CTA ── */}
             <div className="status-card-mobile-only">
               <div style={{ marginBottom: 20 }}>
@@ -924,42 +1213,47 @@ export default function DriverDashboard() {
               <div style={{ display: 'flex', gap: 10, marginBottom: 24 }}>
                 <button id="driver-main-cta" className="abtn btn"
                   onClick={() => shiftActive ? navigate('/driver/flow') : handleShiftToggle()}
-                  disabled={(!shiftActive && user?.is_suspended) || (!shiftActive && !hasScheduleToday) || (!shiftActive && isShiftDone)}
+                  disabled={isCtaDisabled}
                   style={{
                     flex: 2, padding: '12px 18px', borderRadius: 6,
                     fontSize: 14, fontWeight: 700,
-                    background: (!shiftActive && (user?.is_suspended || !hasScheduleToday || isShiftDone))
+                    background: isCtaDisabled
                       ? '#e4e6eb'
                       : (!shiftActive && timing.isOffSchedule)
                         ? '#d97706'
                         : '#16a34a',
-                    color: (!shiftActive && (user?.is_suspended || !hasScheduleToday || isShiftDone)) ? '#8a8d91' : '#ffffff',
+                    color: isCtaDisabled ? '#8a8d91' : '#ffffff',
                     border: 'none',
-                    cursor: (!shiftActive && (user?.is_suspended || !hasScheduleToday || isShiftDone)) ? 'not-allowed' : 'pointer',
+                    cursor: isCtaDisabled ? 'not-allowed' : 'pointer',
                     boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
                   }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, textAlign: 'center' }}>
                     {!shiftActive && user?.is_suspended && <Ban size={18} />}
                     {!shiftActive && !user?.is_suspended && !hasScheduleToday && <Ban size={18} />}
                     {!shiftActive && hasScheduleToday && isShiftDone && <CheckCircle2 size={18} />}
+                    {!shiftActive && !user?.is_suspended && hasScheduleToday && !isShiftDone && (!isScheduleReady || allocationError || (!allocationLoading && !allocation?.id)) && <AlertTriangle size={18} />}
                     {shiftActive && <Truck size={18} />}
-                    {!shiftActive && !user?.is_suspended && hasScheduleToday && !isShiftDone && timing.isOffSchedule && <Clock size={18} />}
-                    {!shiftActive && !user?.is_suspended && hasScheduleToday && !isShiftDone && !timing.isOffSchedule && <Play size={18} fill="currentColor" />}
-                    <span>
-                      {!shiftActive && user?.is_suspended
-                        ? 'Account Suspended'
-                        : !shiftActive && !hasScheduleToday
-                          ? 'No Collection Today'
-                          : !shiftActive && isRouteDone
-                            ? 'Route Completed'
-                            : !shiftActive && isShiftEndedIncomplete
-                              ? 'Shift Ended Early'
-                              : shiftActive
-                                ? 'Resume Route'
-                                : timing.ctaLabel}
-                    </span>
+                    {!shiftActive && !user?.is_suspended && hasScheduleToday && !isShiftDone && isScheduleReady && !allocationLoading && !allocationError && allocation?.id && timing.isOffSchedule && <Clock size={18} />}
+                    {!shiftActive && !user?.is_suspended && hasScheduleToday && !isShiftDone && isScheduleReady && !allocationLoading && !allocationError && allocation?.id && !timing.isOffSchedule && <Play size={18} fill="currentColor" />}
+                    <span>{ctaLabel}</span>
                   </div>
                 </button>
+                {canOpenCrewModal && (
+                  <button
+                    onClick={() => setShowAttendanceModal(true)}
+                    className="abtn btn"
+                    style={{
+                      padding: '12px 14px', borderRadius: 6,
+                      fontSize: 13, fontWeight: 600,
+                      background: '#f0fdf4', border: '1px solid #bbf7d0',
+                      color: '#15803d', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 6,
+                    }}
+                  >
+                    <Users size={16} />
+                    {attendanceOwnership.isWatcherLed ? 'View Crew' : 'Crew'}
+                  </button>
+                )}
                 {shiftActive && (
                   <button id="driver-end-shift" className="abtn btn"
                     onClick={handleShiftToggle}
@@ -1092,15 +1386,15 @@ export default function DriverDashboard() {
                   id="driver-desktop-cta"
                   className="abtn btn btn-full"
                   onClick={() => shiftActive ? navigate('/driver/flow') : handleShiftToggle()}
-                  disabled={loading || (!shiftActive && user?.is_suspended) || (!shiftActive && !hasScheduleToday) || (!shiftActive && isShiftDone)}
+                  disabled={isCtaDisabled}
                   style={{
-                    background: (!shiftActive && (user?.is_suspended || !hasScheduleToday || isShiftDone))
+                    background: isCtaDisabled
                       ? '#e4e6eb'
                       : (!shiftActive && timing.isOffSchedule)
                         ? '#d97706'
                         : '#16a34a',
                     border: 'none',
-                    color: (!shiftActive && (user?.is_suspended || !hasScheduleToday || isShiftDone)) ? '#8a8d91' : '#ffffff',
+                    color: isCtaDisabled ? '#8a8d91' : '#ffffff',
                     fontWeight: 700,
                     borderRadius: 6,
                     padding: '10px 12px',
@@ -1112,28 +1406,17 @@ export default function DriverDashboard() {
                     fontSize: 13,
                     textAlign: 'center',
                     lineHeight: 1.3,
-                    cursor: (!shiftActive && (user?.is_suspended || !hasScheduleToday || isShiftDone)) ? 'not-allowed' : 'pointer',
+                    cursor: isCtaDisabled ? 'not-allowed' : 'pointer',
                   }}
                 >
                   {!shiftActive && user?.is_suspended && <Ban size={15} style={{ flexShrink: 0 }} />}
                   {!shiftActive && !user?.is_suspended && !hasScheduleToday && <Ban size={15} style={{ flexShrink: 0 }} />}
                   {!shiftActive && hasScheduleToday && isShiftDone && <CheckCircle2 size={15} style={{ flexShrink: 0 }} />}
+                  {!shiftActive && !user?.is_suspended && hasScheduleToday && !isShiftDone && (!isScheduleReady || allocationError || (!allocationLoading && !allocation?.id)) && <AlertTriangle size={15} style={{ flexShrink: 0 }} />}
                   {shiftActive && <Truck size={15} style={{ flexShrink: 0 }} />}
-                  {!shiftActive && !user?.is_suspended && hasScheduleToday && !isShiftDone && timing.isOffSchedule && <Clock size={15} style={{ flexShrink: 0 }} />}
-                  {!shiftActive && !user?.is_suspended && hasScheduleToday && !isShiftDone && !timing.isOffSchedule && <Play size={15} fill="currentColor" style={{ flexShrink: 0 }} />}
-                  <span>
-                    {!shiftActive && user?.is_suspended
-                      ? 'Account Suspended'
-                      : !shiftActive && !hasScheduleToday
-                        ? 'No Collection Today'
-                        : !shiftActive && isRouteDone
-                          ? 'Route Completed'
-                          : !shiftActive && isShiftEndedIncomplete
-                            ? 'Shift Ended Early'
-                            : shiftActive
-                              ? 'Resume Route'
-                              : timing.ctaLabel}
-                  </span>
+                  {!shiftActive && !user?.is_suspended && hasScheduleToday && !isShiftDone && isScheduleReady && !allocationLoading && !allocationError && allocation?.id && timing.isOffSchedule && <Clock size={15} style={{ flexShrink: 0 }} />}
+                  {!shiftActive && !user?.is_suspended && hasScheduleToday && !isShiftDone && isScheduleReady && !allocationLoading && !allocationError && allocation?.id && !timing.isOffSchedule && <Play size={15} fill="currentColor" style={{ flexShrink: 0 }} />}
+                  <span>{ctaLabel}</span>
                 </button>
                 <button className="abtn btn btn-full" onClick={() => navigate('/driver/route')}
                   style={{
@@ -1254,6 +1537,24 @@ export default function DriverDashboard() {
                     {user?.points !== undefined ? user.points : '—'}
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => navigate('/profile')}
+                  style={{
+                    marginTop: 6,
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    border: '1px solid #d1d5db',
+                    background: '#f8fafc',
+                    color: '#1e293b',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    width: '100%',
+                  }}
+                >
+                  View Shift & Attendance History
+                </button>
               </div>
             </div>
 
@@ -1342,6 +1643,14 @@ export default function DriverDashboard() {
             </div>
           </div>
         </div>
+      )}
+
+      {showAttendanceModal && shiftId && (
+        <CrewAttendanceModal
+          shiftId={shiftId}
+          scheduleId={schedule?.id ?? activeScheduleId}
+          onClose={() => setShowAttendanceModal(false)}
+        />
       )}
     </>
   )
